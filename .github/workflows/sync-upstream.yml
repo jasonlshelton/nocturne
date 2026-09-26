@@ -1,8 +1,9 @@
-# Keeps this fork's main = upstream nightscout/nocturne main + my feature branch.
-# Pushing main starts "Build and Publish with Aspire", which publishes
-# ghcr.io/<owner>/nocturne/nocturne-{api,web}:latest.
+# Keeps this fork's main = upstream nightscout/nocturne main + every in-flight branch of mine
+# (anything under feat/ or fix/). Pushing main starts "Build and Publish with Aspire", which
+# publishes ghcr.io/<owner>/nocturne/nocturne-{api,web}:latest.
 #
-# Lives only on the fork's main branch (never on the PR branch).
+# Lives only on the fork's main branch (never on a PR branch). Delete a branch once its PR is
+# merged upstream and it drops out of the next sync.
 #
 # Needs a repository secret SYNC_TOKEN: a fine-grained personal access token for this
 # repository with Contents: Read and write and Workflows: Read and write. The built-in
@@ -25,7 +26,7 @@ concurrency:
 
 env:
   UPSTREAM: https://github.com/nightscout/nocturne.git
-  FEATURE_BRANCH: feat/dexcom-aligned-polling
+  BRANCH_PREFIXES: "feat/ fix/"
 
 jobs:
   sync:
@@ -37,7 +38,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.SYNC_TOKEN }}
 
-      - name: Merge upstream main and the feature branch
+      - name: Merge upstream main and my branches
         id: merge
         run: |
           set -euo pipefail
@@ -49,10 +50,12 @@ jobs:
           git fetch --no-tags "$UPSTREAM" main
           git merge --no-edit FETCH_HEAD
 
-          # Once the PR is merged upstream (or the branch is deleted) this is a no-op.
-          if git rev-parse --verify --quiet "origin/$FEATURE_BRANCH" >/dev/null; then
-            git merge --no-edit "origin/$FEATURE_BRANCH"
-          fi
+          for prefix in $BRANCH_PREFIXES; do
+            for ref in $(git for-each-ref --format='%(refname:short)' "refs/remotes/origin/$prefix"); do
+              echo "Merging $ref"
+              git merge --no-edit "$ref"
+            done
+          done
 
           after=$(git rev-parse HEAD)
           if [ "$before" != "$after" ]; then
@@ -62,20 +65,18 @@ jobs:
           fi
 
       # A merge git reports as clean can still leave code that does not compile when upstream
-      # changes the same methods the feature touches. Build it and run the feature's tests before
-      # anything is pushed, so a bad merge fails here instead of shipping in the images.
+      # changes the same methods a branch touches. Compile the API and its tests before anything
+      # is pushed, so a bad merge fails here instead of shipping in the images. The full test
+      # suite runs in the Tests workflow after the push.
       - name: Set up .NET
         if: steps.merge.outputs.changed == 'true'
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
-      - name: Build and test the merge
+      - name: Compile the merge
         if: steps.merge.outputs.changed == 'true'
-        run: >-
-          dotnet test tests/Unit/Nocturne.API.Tests/Nocturne.API.Tests.csproj
-          -p:GenerateNSwagClient=false
-          --filter "FullyQualifiedName~ConnectorBackgroundService|FullyQualifiedName~SensorSyncAlignment|FullyQualifiedName~SensorAlignedPoller|FullyQualifiedName~ConnectorPollingRegistration"
+        run: dotnet build tests/Unit/Nocturne.API.Tests/Nocturne.API.Tests.csproj -p:GenerateNSwagClient=false
 
       # Pushed with SYNC_TOKEN, so this push starts the image build on its own.
       - name: Push main
