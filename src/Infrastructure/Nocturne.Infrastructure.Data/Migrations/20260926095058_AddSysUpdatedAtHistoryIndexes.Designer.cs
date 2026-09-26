@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Nocturne.Infrastructure.Data;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Nocturne.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(NocturneDbContext))]
-    partial class NocturneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260926095058_AddSysUpdatedAtHistoryIndexes")]
+    partial class AddSysUpdatedAtHistoryIndexes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -253,44 +256,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasDatabaseName("ix_alert_excursions_tenant_ended_at");
 
                     b.ToTable("alert_excursions", (string)null);
-                });
-
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertExcursionMuteEntity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("AlertExcursionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("alert_excursion_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AlertExcursionId");
-
-                    b.HasIndex("SubjectId");
-
-                    b.HasIndex("TenantId", "SubjectId", "AlertExcursionId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_alert_excursion_mutes_tenant_subject_excursion");
-
-                    b.ToTable("alert_excursion_mutes");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertInstanceEntity", b =>
@@ -8691,31 +8656,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AlertRule");
-                });
-
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertExcursionMuteEntity", b =>
-                {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.AlertExcursionEntity", "AlertExcursion")
-                        .WithMany()
-                        .HasForeignKey("AlertExcursionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SubjectEntity", "Subject")
-                        .WithMany()
-                        .HasForeignKey("SubjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AlertExcursion");
-
-                    b.Navigation("Subject");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertInstanceEntity", b =>
