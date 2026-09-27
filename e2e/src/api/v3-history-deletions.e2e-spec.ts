@@ -17,7 +17,7 @@ interface V3Document {
   srvModified: number;
   isValid?: boolean;
   insulin?: number;
-  carbs?: number;
+  carbs?: number | null;
   eventType?: string;
   sgv?: number;
   device?: string;
@@ -131,7 +131,9 @@ describe("v3 history after a delete", () => {
     const survivor = next.docs.find((t) => idOf(t) === meal);
     expect(survivor).toMatchObject({ eventType: "Correction Bolus", insulin: 3.3 });
     expect(survivor!.isValid).toBeUndefined();
-    expect(survivor!.carbs).toBeUndefined();
+    // Nocturne's treatments always carry `carbs` (null when absent), live ones too; AAPS reads it
+    // as a nullable Double, so null and missing are the same to it.
+    expect(survivor!.carbs ?? null).toBeNull();
   });
 
   it("tombstones a meal whose bolus was deleted in v4 and re-sends its carbs under their own id", async () => {
