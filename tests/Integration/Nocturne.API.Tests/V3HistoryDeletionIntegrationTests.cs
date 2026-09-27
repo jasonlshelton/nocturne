@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
@@ -30,13 +29,12 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     [Fact]
     public async Task DeletedEntry_IsServedWithIsValidFalse()
     {
-        var id = ObjectId();
         await CreateAsync("entries", new
         {
-            _id = id, type = "sgv", sgv = 187, date = Date, device = "it-v3", app = "it", utcOffset = 0,
+            type = "sgv", sgv = 187, date = Date, device = "it-v3", app = "it", utcOffset = 0,
         });
 
-        var tombstone = await DeleteAfterSyncAsync("entries", doc => IdOf(doc) == id);
+        var tombstone = await DeleteAfterSyncAsync("entries", doc => Number(doc, "sgv") == 187);
 
         tombstone.GetProperty("sgv").GetInt32().Should().Be(187);
     }
@@ -57,10 +55,9 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     [Fact]
     public async Task DeletedDeviceStatus_IsServedWithIsValidFalse()
     {
-        var id = ObjectId();
         await CreateAsync("devicestatus", new
         {
-            _id = id, date = Date, created_at = Iso, device = "openaps://it-v3", app = "it", utcOffset = 0,
+            date = Date, created_at = Iso, device = "openaps://it-v3", app = "it", utcOffset = 0,
             openaps = new
             {
                 iob = new { iob = 0.4, time = Iso },
@@ -68,7 +65,8 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
             },
         });
 
-        var tombstone = await DeleteAfterSyncAsync("devicestatus", doc => IdOf(doc) == id);
+        var tombstone = await DeleteAfterSyncAsync(
+            "devicestatus", doc => doc.TryGetProperty("device", out var device) && device.GetString() == "openaps://it-v3");
 
         tombstone.GetProperty("device").GetString().Should().Be("openaps://it-v3");
     }
@@ -76,13 +74,13 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     [Fact]
     public async Task DeletedFood_IsServedWithIsValidFalse()
     {
-        var id = ObjectId();
         await CreateAsync("food", new
         {
-            _id = id, type = "food", name = "it-v3 apple", carbs = 14, portion = 100, unit = "g", date = Date, created_at = Iso,
+            type = "food", name = "it-v3 apple", carbs = 14, portion = 100, unit = "g", date = Date, created_at = Iso,
         });
 
-        var tombstone = await DeleteAfterSyncAsync("food", doc => IdOf(doc) == id);
+        var tombstone = await DeleteAfterSyncAsync(
+            "food", doc => doc.TryGetProperty("name", out var name) && name.GetString() == "it-v3 apple");
 
         tombstone.GetProperty("name").GetString().Should().Be("it-v3 apple");
     }
@@ -90,11 +88,9 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     [Fact]
     public async Task DeletedProfile_IsServedWithIsValidFalse()
     {
-        var id = ObjectId();
         ScheduleEntry[] schedule = [new("00:00", 1.0, 0)];
         await CreateAsync("profile", new
         {
-            _id = id,
             defaultProfile = "Default",
             startDate = Iso,
             created_at = Iso,
@@ -111,7 +107,7 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
             },
         });
 
-        var tombstone = await DeleteAfterSyncAsync("profile", doc => IdOf(doc) == id);
+        var tombstone = await DeleteAfterSyncAsync("profile", doc => doc.GetProperty("defaultProfile").GetString() == "Default");
 
         tombstone.GetProperty("defaultProfile").GetString().Should().Be("Default");
     }
@@ -241,8 +237,6 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
 
     private static double? Number(JsonElement doc, string property) =>
         doc.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : null;
-
-    private static string ObjectId() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(12));
 
     [GeneratedRegex("\"(\\d+)\"")]
     private static partial Regex CursorPattern();

@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { seedTenant, type Tenant } from "../helpers/tenant.ts";
 
@@ -28,7 +27,6 @@ interface LastModified {
   result: { collections: Record<string, number> };
 }
 
-const objectId = () => randomBytes(12).toString("hex");
 const idOf = (doc: V3Document) => doc.identifier ?? doc._id;
 const cursorOf = (etag: string | null) => Number(etag!.match(/"(\d+)"/)![1]);
 
@@ -65,11 +63,8 @@ describe("v3 history after a delete", () => {
   });
 
   it("serves a deleted entry with isValid false, stamped after the client's cursor", async () => {
-    // workaround: #1798 - an entry uploaded without an id is stored under one its v3 DELETE cannot
-    // reach, so this upload names its own ObjectId.
-    const id = objectId();
     const created = await tenant.api.request("POST", "/api/v3/entries", {
-      _id: id, type: "sgv", sgv: 187, date, direction: "Flat", device: "AAPS-e2e-delete", app: "AAPS", utcOffset: 0,
+      type: "sgv", sgv: 187, date, direction: "Flat", device: "AAPS-e2e-delete", app: "AAPS", utcOffset: 0,
     });
     expect(created.status).toBeLessThan(300);
 
@@ -95,19 +90,14 @@ describe("v3 history after a delete", () => {
   });
 
   it("serves a deleted devicestatus with isValid false, stamped after the client's cursor", async () => {
-    // workaround: #1798 - a devicestatus uploaded without an id is stored under one its v3 DELETE
-    // cannot reach, so this upload names its own ObjectId.
-    const id = objectId();
     const created = await tenant.api.request("POST", "/api/v3/devicestatus", {
-      _id: id, date, created_at: iso, device: "openaps://AAPS-e2e-delete", app: "AAPS", utcOffset: 0,
+      date, created_at: iso, device: "openaps://AAPS-e2e-delete", app: "AAPS", utcOffset: 0,
       openaps: { iob: { iob: 0.4, time: iso }, suggested: { bg: 125, eventualBG: 118, reason: "e2e delete", timestamp: iso } },
     });
     expect(created.status).toBeLessThan(300);
 
     const { live, cursor, next } = await deleteAfterSync(tenant, "devicestatus", (d) => d.device === "openaps://AAPS-e2e-delete");
-    expect(idOf(live)).toBe(id);
-
-    const tombstone = next.docs.find((d) => idOf(d) === id);
+    const tombstone = next.docs.find((d) => idOf(d) === idOf(live));
     expect(tombstone).toMatchObject({ isValid: false });
     expect(tombstone!.srvModified).toBeGreaterThan(cursor);
   });
