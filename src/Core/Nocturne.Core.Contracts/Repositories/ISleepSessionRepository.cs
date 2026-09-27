@@ -67,6 +67,9 @@ public interface ISleepSessionRepository
     /// <param name="session">The <see cref="SleepSession"/> to upsert.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The persisted <see cref="SleepSession"/>.</returns>
+    /// <exception cref="V4.Repositories.RecreationBlockedException">
+    /// The session matches one the user deleted, which a re-upload never brings back.
+    /// </exception>
     Task<SleepSession> UpsertSessionAsync(
         SleepSession session,
         CancellationToken cancellationToken = default);

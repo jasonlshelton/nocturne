@@ -58,8 +58,11 @@ public class ActivityDecomposerTombstoneTests : IDisposable
     {
         await SeedTombstoneAsync("a0000000000000000000000a", byUser: true);
 
-        await _decomposer.DecomposeAsync(HeartRate("a0000000000000000000000a"), WriteOrigin.Live);
+        var result = await _decomposer.DecomposeAsync(HeartRate("a0000000000000000000000a"), WriteOrigin.Live);
 
+        result.SkippedDeleted.Should().Be(1);
+        result.CreatedRecords.Should().BeEmpty();
+        result.UpdatedRecords.Should().BeEmpty();
         _context.ChangeTracker.Clear();
         _context.HeartRates.Should().BeEmpty();
         _context.HeartRates.IgnoreQueryFilters().Should().ContainSingle();
@@ -89,9 +92,12 @@ public class ActivityDecomposerTombstoneTests : IDisposable
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
 
-        await _decomposer.DecomposeBatchAsync(
+        var result = await _decomposer.DecomposeBatchAsync(
             [HeartRate("a0000000000000000000000b"), HeartRate("a0000000000000000000000c"), StepCount("a0000000000000000000000d"), StepCount("a0000000000000000000000e")],
             WriteOrigin.Live);
+
+        result.SkippedDeleted.Should().Be(2);
+        result.CreatedRecords.Should().HaveCount(2);
 
         _context.ChangeTracker.Clear();
         _context.HeartRates.Select(h => h.OriginalId).Should().Equal("a0000000000000000000000c");

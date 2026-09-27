@@ -1,3 +1,5 @@
+using Nocturne.Core.Models.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -1205,6 +1207,63 @@ public class ActivityServiceTests
             x => x.BroadcastStorageUpdateAsync("activity", It.IsAny<object>()),
             Times.Once
         );
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateActivityAsync_SleepSessionTheUserDeleted_IsRefusedAndNotBroadcast()
+    {
+        var activity = new Activity { Id = "60a1b2c3d4e5f67890123456", Type = "sleep", Duration = 480, Mills = 1234567890000 };
+        _mockSleepService
+            .Setup(s => s.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RecreationBlockedException("sleep session", "original id '60a1b2c3d4e5f67890123456'"));
+
+        var update = () => _activityService.UpdateActivityAsync(activity.Id!, activity, CancellationToken.None);
+
+        await update.Should().ThrowAsync<RecreationBlockedException>();
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageUpdateAsync(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_SleepSessionTheUserDeleted_IsNotReturnedOrBroadcast()
+    {
+        var activity = new Activity { Id = "60a1b2c3d4e5f67890123456", Type = "sleep", Duration = 480, Mills = 1234567890000 };
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns(new List<Activity> { activity });
+        _mockSleepService
+            .Setup(s => s.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RecreationBlockedException("sleep session", "original id '60a1b2c3d4e5f67890123456'"));
+
+        var result = await _activityService.CreateActivitiesAsync([activity], CancellationToken.None);
+
+        result.Should().BeEmpty();
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_HeartRateTheUserDeleted_IsNotReturnedOrBroadcast()
+    {
+        var skipped = new Activity { Id = "60a1b2c3d4e5f67890123456", Mills = 1234567890000 };
+        var written = new Activity { Id = "60a1b2c3d4e5f67890123457", Mills = 1234567890000 };
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns(new List<Activity> { skipped, written });
+        _mockActivityDecomposer.Setup(d => d.IsSensorData(It.IsAny<Activity>())).Returns(true);
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(skipped, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DecompositionResult { SkippedDeleted = 1 });
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(written, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DecompositionResult());
+
+        var result = await _activityService.CreateActivitiesAsync([skipped, written], CancellationToken.None);
+
+        result.Select(a => a.Id).Should().Equal(written.Id);
     }
 
     [Fact]

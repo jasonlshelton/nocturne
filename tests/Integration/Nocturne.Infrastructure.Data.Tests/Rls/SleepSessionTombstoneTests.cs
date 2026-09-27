@@ -1,3 +1,4 @@
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Tests.Shared.Infrastructure;
 using Npgsql;
@@ -14,12 +15,14 @@ namespace Nocturne.Infrastructure.Data.Tests.Rls;
 public class SleepSessionTombstoneTests(RlsCompletenessFixture fx)
 {
     [Fact]
-    public async Task UserTombstone_KeepsTheSessionDeleted()
+    public async Task UserTombstone_RefusesTheUpsertAndKeepsTheSessionDeleted()
     {
         await using var conn = await OpenForNewTenantAsync();
         var repository = await SeedTombstoneAsync(conn, "sleep-user-deleted", byUser: true);
 
-        await repository.UpsertSessionAsync(Session("sleep-user-deleted"));
+        var upsert = () => repository.UpsertSessionAsync(Session("sleep-user-deleted"));
+
+        await upsert.Should().ThrowAsync<RecreationBlockedException>();
 
         (await repository.CountSessionsAsync()).Should().Be(0);
         (await CountRowsAsync(conn, "sleep-user-deleted")).Should().Be(1);

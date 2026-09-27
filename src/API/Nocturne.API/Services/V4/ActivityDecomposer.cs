@@ -354,6 +354,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
             var (rows, userDeleted) = await ResolveByOriginalIdAsync(set, [model.Id], ct);
             if (userDeleted.Count > 0)
             {
+                result.SkippedDeleted++;
                 _logger.LogDebug("Skipped {RecordType} from legacy activity {LegacyId}: the user deleted it", recordType, model.Id);
                 return;
             }
@@ -447,6 +448,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
         var originalIds = models.Where(m => m.Id != null).Select(m => m.Id!).ToHashSet();
         var (stored, userDeleted) = await ResolveByOriginalIdAsync(set, originalIds, ct);
+        result.SkippedDeleted += models.Count(m => m.Id != null && userDeleted.Contains(m.Id));
         models = models.Where(m => m.Id == null || !userDeleted.Contains(m.Id)).ToList();
 
         var updated = new List<TEntity>();

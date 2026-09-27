@@ -1,3 +1,4 @@
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Legacy;
@@ -278,8 +279,9 @@ public class ActivityService : IActivityService
             {
                 try
                 {
-                    await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
-                    results.Add(sensorActivity);
+                    var decomposed = await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
+                    if (decomposed.SkippedDeleted == 0)
+                        results.Add(sensorActivity);
                 }
                 catch (Exception ex)
                 {
@@ -299,6 +301,10 @@ public class ActivityService : IActivityService
                     var session = ActivityStateSpanMapper.ToSleepSession(sleepActivity);
                     var created = await _sleepService.UpsertSessionAsync(session, cancellationToken);
                     results.Add(ActivityStateSpanMapper.SleepSessionToActivity(created));
+                }
+                catch (RecreationBlockedException)
+                {
+                    _logger.LogDebug("Skipped sleep activity {Id}: the user deleted it", sleepActivity.Id);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)

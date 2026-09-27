@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using FluentAssertions;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -610,7 +611,7 @@ public class SleepSessionRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task UpsertSessionAsync_does_not_recreate_a_session_the_user_deleted()
+    public async Task UpsertSessionAsync_refuses_a_session_the_user_deleted()
     {
         var deleted = CreateEntity(TenantA,
             new DateTime(2026, 1, 1, 22, 0, 0, DateTimeKind.Utc),
@@ -622,8 +623,9 @@ public class SleepSessionRepositoryTests : IDisposable
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
 
-        await _repository.UpsertSessionAsync(Session("fitbit-deleted"));
+        var upsert = () => _repository.UpsertSessionAsync(Session("fitbit-deleted"));
 
+        await upsert.Should().ThrowAsync<RecreationBlockedException>();
         (await _repository.CountSessionsAsync()).Should().Be(0);
         _context.ChangeTracker.Clear();
         _context.SleepSessions.IgnoreQueryFilters().Where(s => s.OriginalId == "fitbit-deleted")

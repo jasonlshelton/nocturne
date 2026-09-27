@@ -45,6 +45,9 @@ public interface ISleepService
     /// <summary>
     /// Creates or updates a sleep session, matched by its identifier or original ID.
     /// </summary>
+    /// <exception cref="V4.Repositories.RecreationBlockedException">
+    /// The session matches one the user deleted, which a re-upload never brings back.
+    /// </exception>
     Task<SleepSession> UpsertSessionAsync(SleepSession session, CancellationToken cancellationToken = default);
 
     /// <summary>

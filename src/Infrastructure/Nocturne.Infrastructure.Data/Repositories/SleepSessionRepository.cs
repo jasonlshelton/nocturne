@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Contracts.Repositories;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
@@ -92,7 +93,10 @@ public class SleepSessionRepository : ISleepSessionRepository
             existing ??= await WithSoftDeleted(ctx).FirstOrDefaultAsync(s => s.Id == entity.Id, token);
 
             if (existing is { DeletedAt: not null } && ctx.Entry(existing).Property<bool>("DeletedByUser").CurrentValue)
-                return SleepSessionMapper.ToDomainModel(existing, includeChildren: true);
+            {
+                throw new RecreationBlockedException(
+                    "sleep session", $"original id '{existing.OriginalId}' from '{existing.Source}', which the user deleted");
+            }
 
             if (existing is not null)
             {

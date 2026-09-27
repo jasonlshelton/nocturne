@@ -1377,6 +1377,22 @@ public class StateSpanRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateActivitiesAsStateSpansAsync_DoesNotReturnASpanTheUserDeleted()
+    {
+        await _repository.UpsertStateSpanAsync(Span(StateSpanCategory.Exercise, "Running", 8, "act-deleted"));
+        (await _repository.DeleteStateSpanAsync("act-deleted")).Should().BeTrue();
+
+        var created = (await _repository.CreateActivitiesAsStateSpansAsync(
+        [
+            Span(StateSpanCategory.Exercise, "Running", 8, "act-deleted"),
+            Span(StateSpanCategory.Illness, "Flu", 10, "act-fresh"),
+        ])).ToList();
+
+        created.Select(s => s.OriginalId).Should().Equal("act-fresh");
+        (await RowsForAsync("act-deleted")).Should().ContainSingle().Which.DeletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task CreateActivitiesAsStateSpansAsync_SavesOnceAndReturnsEverySpanInInputOrder()
     {
         await _repository.UpsertStateSpanAsync(Span(StateSpanCategory.Exercise, "Running", 8, "act-stored"));
