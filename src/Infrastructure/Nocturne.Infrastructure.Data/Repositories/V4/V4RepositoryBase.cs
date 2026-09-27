@@ -5,6 +5,7 @@ using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Queries;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
@@ -538,14 +539,15 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     /// <remarks>
     /// Pages on <c>sys_updated_at</c>, the column <see cref="ToDomain"/> reports as
     /// <see cref="IV4Record.ModifiedAt"/>, through <see cref="HistoryPage"/>, under the same
-    /// <see cref="ApplyReadVisibility"/> every other read of this type observes.
+    /// <see cref="ApplyReadVisibility"/> every other read of this type observes, with the soft-delete
+    /// filter lifted.
     /// </remarks>
-    public async Task<IReadOnlyList<TModel>> GetModifiedSinceAsync(
+    public async Task<IReadOnlyList<HistoryRecord<TModel>>> GetModifiedSinceAsync(
         long cursorMills, int limit, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entities = await HistoryPage.GetAsync(
-            ApplyReadVisibility(ctx.Set<TEntity>().AsNoTracking(), ctx),
+            ApplyReadVisibility(ctx.Set<TEntity>().IncludingDeleted().AsNoTracking(), ctx),
             e => e.SysUpdatedAt,
             e => e.Id,
             cursorMills,
@@ -554,7 +556,7 @@ public abstract class V4RepositoryBase<TModel, TEntity>
             typeof(TModel).Name,
             ct);
 
-        return entities.Select(ToDomain).ToList();
+        return entities.Select(e => new HistoryRecord<TModel>(ToDomain(e), e.DeletedAt is not null)).ToList();
     }
 
     /// <summary>Latest stored record timestamp, optionally scoped to a data source (connector watermark).</summary>

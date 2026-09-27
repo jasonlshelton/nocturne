@@ -532,6 +532,77 @@ public class V4ToLegacyProjectionServiceTests
     }
 
     [Fact]
+    public async Task GetProjectedTreatmentsModifiedSince_DeletedRecords_AreProjectedWithIsValidFalse()
+    {
+        // Nightscout's v3 history returns a deleted document with isValid: false and its delete as
+        // srvModified; without it a history-syncing client keeps what was deleted elsewhere.
+        var deletedAt = Cursor.AddMinutes(2);
+        var deletedNote = new NoteEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Text = "removed", DeletedAt = deletedAt,
+        };
+        var liveNote = new NoteEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Text = "kept",
+        };
+        await AddModifiedAsync((deletedNote, deletedAt), (liveNote, Cursor.AddMinutes(1)));
+
+        var result = (await _service.GetProjectedTreatmentsModifiedSinceAsync(CursorMills, 100)).ToList();
+
+        result.Select(t => (t.Id, t.IsValid, t.SrvModified)).Should().Equal(
+            (liveNote.Id.ToString(), (bool?)null, new DateTimeOffset(Cursor.AddMinutes(1), TimeSpan.Zero).ToUnixTimeMilliseconds()),
+            (deletedNote.Id.ToString(), (bool?)false, new DateTimeOffset(deletedAt, TimeSpan.Zero).ToUnixTimeMilliseconds()));
+    }
+
+    [Fact]
+    public async Task GetProjectedTreatmentsModifiedSince_DeletedMeal_IsOneDeletedMealBolus()
+    {
+        var correlationId = Guid.CreateVersion7();
+        var deletedAt = Cursor.AddMinutes(3);
+        var bolus = new BolusEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Insulin = 4.0,
+            CorrelationId = correlationId, DeletedAt = deletedAt,
+        };
+        var carb = new CarbIntakeEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Carbs = 40.0,
+            CorrelationId = correlationId, DeletedAt = deletedAt,
+        };
+        await AddModifiedAsync((bolus, deletedAt), (carb, deletedAt));
+
+        var result = (await _service.GetProjectedTreatmentsModifiedSinceAsync(CursorMills, 100)).ToList();
+
+        var meal = result.Should().ContainSingle().Subject;
+        meal.EventType.Should().Be(TreatmentTypes.MealBolus);
+        meal.Id.Should().Be(bolus.Id.ToString());
+        meal.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetProjectedTreatmentsModifiedSince_DeletedAndLiveConstituents_DoNotPair()
+    {
+        var correlationId = Guid.CreateVersion7();
+        var bolus = new BolusEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Insulin = 4.0,
+            CorrelationId = correlationId, DeletedAt = Cursor.AddMinutes(2),
+        };
+        var carb = new CarbIntakeEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Cursor, Carbs = 40.0,
+            CorrelationId = correlationId,
+        };
+        await AddModifiedAsync((bolus, Cursor.AddMinutes(2)), (carb, Cursor.AddMinutes(1)));
+
+        var result = (await _service.GetProjectedTreatmentsModifiedSinceAsync(CursorMills, 100)).ToList();
+
+        result.Select(t => (t.EventType, t.IsValid)).Should().Equal(
+            (TreatmentTypes.CarbCorrection, (bool?)null),
+            (TreatmentTypes.CorrectionBolus, (bool?)false));
+    }
+
+    [Fact]
     public async Task GetProjectedTreatmentsModifiedSince_LegacyOriginatedRecord_IsProjected()
     {
         // A treatment uploaded through v1/v2/v3 is stored as a V4 record with LegacyId set, and

@@ -88,7 +88,9 @@ public class ProfileProjectionService : IProfileProjectionService
     /// to the settings it can be assembled into (<see cref="OwnersAsync"/>). Past the horizon — the
     /// earliest last millisecond among the tables whose page filled — a table holds rows not yet
     /// read, so only profiles stamped at or before it are known to be complete. When none are, no
-    /// profile is stamped in (cursor, horizon] and the read resumes from the horizon.
+    /// profile is stamped in (cursor, horizon] and the read resumes from the horizon. A deleted
+    /// settings row is a deleted profile, delivered with <c>isValid: false</c>; a schedule row, live
+    /// or deleted, only leads to the live settings that own it.
     /// </remarks>
     public async Task<ModifiedSincePage<Profile>> GetProfilesModifiedSinceAsync(
         long cursorMills, int limit, CancellationToken ct = default)
@@ -103,17 +105,30 @@ public class ProfileProjectionService : IProfileProjectionService
             var sensitivity = await _sensitivityRepo.GetModifiedSinceAsync(cursor, limit, ct);
             var targetRange = await _targetRangeRepo.GetModifiedSinceAsync(cursor, limit, ct);
 
-            var horizon = Horizon(limit, settingsPage, basal, carbRatio, sensitivity, targetRange);
-            List<IV4Record> schedules = [.. basal, .. carbRatio, .. sensitivity, .. targetRange];
+            var horizon = Horizon(
+                limit,
+                Records(settingsPage),
+                Records(basal),
+                Records(carbRatio),
+                Records(sensitivity),
+                Records(targetRange));
+            List<IV4Record> schedules =
+            [
+                .. Records(basal), .. Records(carbRatio), .. Records(sensitivity), .. Records(targetRange),
+            ];
 
-            var candidates = new Dictionary<Guid, TherapySettings>();
-            foreach (var settings in settingsPage.Concat(await OwnersAsync(schedules, ct)))
-                candidates.TryAdd(settings.Id, settings);
+            var candidates = new Dictionary<Guid, HistoryRecord<TherapySettings>>();
+            foreach (var settings in settingsPage)
+                candidates.TryAdd(settings.Record.Id, settings);
+            foreach (var settings in await OwnersAsync(schedules, ct))
+                candidates.TryAdd(settings.Id, new HistoryRecord<TherapySettings>(settings, Deleted: false));
 
             var stamped = new List<(Profile Profile, Guid SettingsId)>();
-            foreach (var settings in candidates.Values)
+            foreach (var (settings, deleted) in candidates.Values)
             {
                 var profile = await AssembleProfileAsync(settings, ct);
+                if (deleted)
+                    profile.IsValid = false;
                 if (profile.SrvModified > cursor && (horizon is null || profile.SrvModified <= horizon))
                     stamped.Add((profile, settings.Id));
             }
@@ -145,6 +160,10 @@ public class ProfileProjectionService : IProfileProjectionService
     /// The earliest last millisecond among the <paramref name="pages"/> that came back full, or
     /// <c>null</c> when every table was read to its end.
     /// </summary>
+    private static IReadOnlyList<IV4Record> Records<T>(IReadOnlyList<HistoryRecord<T>> page)
+        where T : IV4Record =>
+        page.Select(r => (IV4Record)r.Record).ToList();
+
     private static long? Horizon(int limit, params IReadOnlyList<IV4Record>[] pages) =>
         pages
             .Where(page => page.Count >= limit)

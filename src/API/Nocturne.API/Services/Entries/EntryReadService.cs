@@ -339,16 +339,16 @@ public class EntryReadService : IEntryStore
         while (true)
         {
             // Sequential to avoid DbContext thread-safety issues with scoped lifetime
-            var fetched = new List<IV4Record>();
-            fetched.AddRange(await _sgRepo.GetModifiedSinceAsync(cursor, limit, ct));
-            fetched.AddRange(await _mgRepo.GetModifiedSinceAsync(cursor, limit, ct));
-            fetched.AddRange(await _calRepo.GetModifiedSinceAsync(cursor, limit, ct));
+            var fetched = new List<HistoryRecord<IV4Record>>();
+            fetched.AddRange(Widen(await _sgRepo.GetModifiedSinceAsync(cursor, limit, ct)));
+            fetched.AddRange(Widen(await _mgRepo.GetModifiedSinceAsync(cursor, limit, ct)));
+            fetched.AddRange(Widen(await _calRepo.GetModifiedSinceAsync(cursor, limit, ct)));
 
             var page = CutHistoryPage(fetched, limit);
             if (page.Count == 0)
                 return new ModifiedSincePage<Entry>([], pageCursor);
 
-            pageCursor = HistoryPage.ToMilliseconds(page[^1].ModifiedAt);
+            pageCursor = HistoryPage.ToMilliseconds(page[^1].Record.ModifiedAt);
 
             var delivered = await VisibleHistoryEntriesAsync(page, source, excludeDemo, ct);
             if (delivered.Count > 0 || page.Count < limit)
@@ -363,22 +363,27 @@ public class EntryReadService : IEntryStore
     /// last row's millisecond. Every type's own page ends on a millisecond boundary at or after the
     /// cut, so the rows already fetched complete it.
     /// </summary>
-    private static List<IV4Record> CutHistoryPage(IReadOnlyList<IV4Record> fetched, int limit)
+    private static List<HistoryRecord<IV4Record>> CutHistoryPage(
+        IReadOnlyList<HistoryRecord<IV4Record>> fetched, int limit)
     {
         var ordered = fetched
-            .OrderBy(r => r.ModifiedAt)
-            .ThenBy(HistoryTypeOrder)
-            .ThenBy(r => r.Id)
+            .OrderBy(r => r.Record.ModifiedAt)
+            .ThenBy(r => HistoryTypeOrder(r.Record))
+            .ThenBy(r => r.Record.Id)
             .ToList();
 
         if (ordered.Count <= limit)
             return ordered;
 
-        var lastMills = HistoryPage.ToMilliseconds(ordered[limit - 1].ModifiedAt);
+        var lastMills = HistoryPage.ToMilliseconds(ordered[limit - 1].Record.ModifiedAt);
         return ordered
-            .TakeWhile((r, i) => i < limit || HistoryPage.ToMilliseconds(r.ModifiedAt) == lastMills)
+            .TakeWhile((r, i) => i < limit || HistoryPage.ToMilliseconds(r.Record.ModifiedAt) == lastMills)
             .ToList();
     }
+
+    private static IEnumerable<HistoryRecord<IV4Record>> Widen<T>(IEnumerable<HistoryRecord<T>> rows)
+        where T : IV4Record =>
+        rows.Select(r => new HistoryRecord<IV4Record>(r.Record, r.Deleted));
 
     private static int HistoryTypeOrder(IV4Record record) => record switch
     {
@@ -389,24 +394,38 @@ public class EntryReadService : IEntryStore
 
     /// <summary>
     /// Projects the page rows a regular entries read would return, in page order: demo filtering as
-    /// <see cref="ResolveDemoFilter"/> sets it, and only the canonical stream's sgv readings.
+    /// <see cref="ResolveDemoFilter"/> sets it, and only the canonical stream's sgv readings. A deleted
+    /// row is delivered whatever the canonical selection, with <c>isValid: false</c>: the reading it
+    /// was may have been delivered while it won, and a client that never saw it ignores the delete.
     /// </summary>
     private async Task<List<Entry>> VisibleHistoryEntriesAsync(
-        IReadOnlyList<IV4Record> page, string? source, bool excludeDemo, CancellationToken ct)
+        IReadOnlyList<HistoryRecord<IV4Record>> page, string? source, bool excludeDemo, CancellationToken ct)
     {
         var visible = page
-            .Where(r => source is not null ? r.DataSource == source : !excludeDemo || !DataSources.IsEphemeral(r.DataSource))
+            .Where(r => source is not null
+                ? r.Record.DataSource == source
+                : !excludeDemo || !DataSources.IsEphemeral(r.Record.DataSource))
             .ToList();
 
-        var canonical = await CanonicalIdsAsync(visible.OfType<SensorGlucose>().ToList(), source, excludeDemo, ct);
+        var canonical = await CanonicalIdsAsync(
+            visible.Where(r => !r.Deleted).Select(r => r.Record).OfType<SensorGlucose>().ToList(),
+            source,
+            excludeDemo,
+            ct);
 
         return visible
-            .Where(r => r is not SensorGlucose sg || canonical.Contains(sg.Id))
-            .Select(r => r switch
+            .Where(r => r.Deleted || r.Record is not SensorGlucose sg || canonical.Contains(sg.Id))
+            .Select(r =>
             {
-                SensorGlucose sg => EntryProjection.FromSensorGlucose(sg),
-                MeterGlucose mg => EntryProjection.FromMeterGlucose(mg),
-                _ => EntryProjection.FromCalibration((Calibration)r),
+                var entry = r.Record switch
+                {
+                    SensorGlucose sg => EntryProjection.FromSensorGlucose(sg),
+                    MeterGlucose mg => EntryProjection.FromMeterGlucose(mg),
+                    _ => EntryProjection.FromCalibration((Calibration)r.Record),
+                };
+                if (r.Deleted)
+                    entry.IsValid = false;
+                return entry;
             })
             .ToList();
     }

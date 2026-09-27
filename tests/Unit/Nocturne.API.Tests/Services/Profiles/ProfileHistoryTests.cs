@@ -2,6 +2,7 @@ using FluentAssertions;
 using Moq;
 using Nocturne.API.Services.Profiles;
 using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Models.Queries;
 using Nocturne.Core.Models.V4;
 using Xunit;
 
@@ -56,7 +57,7 @@ public class ProfileHistoryTests
         var settings = Settings(correlationId, modified: Created);
         var basal = Basal(correlationId, modified: Cursor.AddMinutes(3));
         _basalRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 10, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([basal]);
+            .ReturnsAsync([Live(basal)]);
         SetupProfile(settings, basal);
 
         var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 10);
@@ -89,17 +90,51 @@ public class ProfileHistoryTests
         var settings = Settings(correlationId, modified: t1);
         var basal = Basal(correlationId, modified: t2);
         _therapyRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 1, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([settings]);
+            .ReturnsAsync([Live(settings)]);
         _basalRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 1, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([basal]);
+            .ReturnsAsync([Live(basal)]);
         _basalRepo.Setup(r => r.GetModifiedSinceAsync(Mills(t1), 1, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([basal]);
+            .ReturnsAsync([Live(basal)]);
         SetupProfile(settings, basal);
 
         var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 1);
 
         page.Records.Should().ContainSingle().Which.SrvModified.Should().Be(Mills(t2));
         page.CursorMills.Should().Be(Mills(t2));
+    }
+
+    [Fact]
+    public async Task DeletedProfile_IsDeliveredWithIsValidFalse_StampedByItsDelete()
+    {
+        var correlationId = Guid.CreateVersion7();
+        var deletedAt = Cursor.AddMinutes(2);
+        var settings = Settings(correlationId, modified: deletedAt);
+        settings.LegacyId = "65f000000000000000000abc:Default";
+        var basal = Basal(correlationId, modified: deletedAt);
+        _therapyRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new HistoryRecord<TherapySettings>(settings, Deleted: true)]);
+        _basalRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new HistoryRecord<BasalSchedule>(basal, Deleted: true)]);
+        _therapyRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _therapyRepo.Setup(r => r.GetByLegacyIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((TherapySettings?)null);
+        _basalRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _carbRatioRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _sensitivityRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _targetRangeRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 10);
+
+        var profile = page.Records.Should().ContainSingle().Subject;
+        profile.Id.Should().Be("65f000000000000000000abc");
+        profile.IsValid.Should().BeFalse();
+        profile.SrvModified.Should().Be(Mills(deletedAt));
+        page.CursorMills.Should().Be(Mills(deletedAt));
     }
 
     private void SetupProfile(TherapySettings settings, BasalSchedule basal)
@@ -116,6 +151,8 @@ public class ProfileHistoryTests
         _targetRangeRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
     }
+
+    private static HistoryRecord<T> Live<T>(T record) => new(record, Deleted: false);
 
     private static long Mills(DateTime value) => new DateTimeOffset(value, TimeSpan.Zero).ToUnixTimeMilliseconds();
 

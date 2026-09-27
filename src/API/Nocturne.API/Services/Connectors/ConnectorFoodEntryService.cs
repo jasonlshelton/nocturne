@@ -87,8 +87,8 @@ public class ConnectorFoodEntryService : IConnectorFoodEntryService
                 }
                 else
                 {
-                    // Check database
-                    foodEntity = await _context.Foods.FirstOrDefaultAsync(
+                    // A deleted food still holds its external key, so a re-import restores it.
+                    foodEntity = await _context.Foods.IncludingDeleted().FirstOrDefaultAsync(
                         f => f.ExternalSource == connectorSource && f.ExternalId == foodExternalId,
                         cancellationToken
                     );
@@ -102,6 +102,7 @@ public class ConnectorFoodEntryService : IConnectorFoodEntryService
                     else
                     {
                         UpdateFoodEntity(foodEntity, import.Food);
+                        foodEntity.DeletedAt = null;
                     }
                 }
 

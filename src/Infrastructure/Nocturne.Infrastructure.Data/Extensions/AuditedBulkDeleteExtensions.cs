@@ -238,11 +238,17 @@ public static class AuditedBulkDeleteExtensions
     }
 
     /// <summary>
-    /// Stamps <c>DeletedAt</c> and the dedup attribution flag in one update: a user-initiated delete
-    /// blocks resync re-creation, a system sweep leaves the row re-creatable
-    /// (<see cref="SoftDeleteDedupExtensions"/>). Runs whether or not an audit row is written.
+    /// Stamps <c>DeletedAt</c> and the dedup attribution flag: a user-initiated delete blocks resync
+    /// re-creation, a system sweep leaves the row re-creatable (<see cref="SoftDeleteDedupExtensions"/>).
+    /// Runs whether or not an audit row is written.
     /// </summary>
-    private static Task<int> SoftDeleteRowsAsync<T>(
+    /// <remarks>
+    /// A delete is a write a v3 history client has to be told of, so on an
+    /// <see cref="ISystemTimestamped"/> row it moves <c>SysUpdatedAt</c> as a tracked save would,
+    /// and like one it spreads the rows over successive milliseconds,
+    /// <see cref="NocturneDbContext.SystemTimestampGroupSize"/> to each (see <see cref="HistoryPage"/>).
+    /// </remarks>
+    private static async Task<int> SoftDeleteRowsAsync<T>(
         IQueryable<T> query,
         IAuditContext? auditContext,
         DateTime deletedAt,
@@ -250,10 +256,39 @@ public static class AuditedBulkDeleteExtensions
     {
         var isUserDelete = !auditContext.IsSystemMutation();
 
-        return query.ExecuteUpdateAsync(
-            s => s
-                .SetProperty(e => e.DeletedAt, deletedAt)
-                .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete), ct);
+        if (!typeof(ISystemTimestamped).IsAssignableFrom(typeof(T)))
+        {
+            return await query.ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(e => e.DeletedAt, deletedAt)
+                    .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete), ct);
+        }
+
+        var live = query.Where(e => e.DeletedAt == null);
+        var total = 0;
+        for (var group = 0; ; group++)
+        {
+            var ids = await live
+                .Select(e => EF.Property<Guid>(e, "Id"))
+                .OrderBy(id => id)
+                .Take(NocturneDbContext.SystemTimestampGroupSize)
+                .ToListAsync(ct);
+            if (ids.Count == 0)
+                return total;
+
+            var stamp = deletedAt.AddMilliseconds(group);
+            total += await live
+                .Where(e => ids.Contains(EF.Property<Guid>(e, "Id")))
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(e => e.DeletedAt, deletedAt)
+                        .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete)
+                        .SetProperty(e => EF.Property<DateTime>(e, nameof(ISystemTimestamped.SysUpdatedAt)), stamp),
+                    ct);
+
+            if (ids.Count < NocturneDbContext.SystemTimestampGroupSize)
+                return total;
+        }
     }
 
     /// <summary>

@@ -38,14 +38,16 @@ internal readonly record struct LegacyTreatmentRange(
 );
 
 /// <summary>
-/// One record fetched for projection, carrying the table that owns it and the <c>SysCreatedAt</c> and
-/// <c>SysUpdatedAt</c> of the row it came from.
+/// One record fetched for projection, carrying the table that owns it, the <c>SysCreatedAt</c> and
+/// <c>SysUpdatedAt</c> of the row it came from, and whether that row is soft-deleted, which only a
+/// modified-since read returns.
 /// </summary>
 internal readonly record struct FetchedRecord(
     ILegacyTreatmentTable Table,
     object Record,
     DateTime Created,
-    DateTime Modified
+    DateTime Modified,
+    bool Deleted = false
 );
 
 /// <summary>Food breakdown rows for the carb intakes of one projected page, keyed by carb intake.</summary>
@@ -91,7 +93,7 @@ internal interface ILegacyTreatmentTable
 
     /// <summary>
     /// A page of records changed at or after <paramref name="cursorMills"/>, oldest first, ending on
-    /// a millisecond boundary.
+    /// a millisecond boundary, soft-deleted rows included.
     /// </summary>
     /// <remarks>The boundary rule is <see cref="HistoryPage"/>'s.</remarks>
     Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
@@ -120,7 +122,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     Func<TRecord, CarbFoodIndex, Treatment> project
 ) : ILegacyTreatmentTable
     where TRecord : class
-    where TEntity : class, ISystemTimestamped, IIdentified
+    where TEntity : class, ISystemTimestamped, IIdentified, ISoftDeletable
 {
     /// <inheritdoc />
     public string RecordType { get; } = typeof(TRecord).Name;
@@ -150,7 +152,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     )
     {
         var entities = await HistoryPage.GetAsync(
-            table(context).AsNoTracking(),
+            table(context).IncludingDeleted().AsNoTracking(),
             e => e.SysUpdatedAt,
             e => e.Id,
             cursorMills,
@@ -160,8 +162,8 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
             ct);
 
         return entities
-            .Select(e => (Record: toRecord(e), e.SysUpdatedAt))
-            .Select(x => new FetchedRecord(this, x.Record, CreatedAt(x.Record), x.SysUpdatedAt))
+            .Select(e => (Record: toRecord(e), e.SysUpdatedAt, Deleted: e.DeletedAt is not null))
+            .Select(x => new FetchedRecord(this, x.Record, CreatedAt(x.Record), x.SysUpdatedAt, x.Deleted))
             .ToList();
     }
 
@@ -274,7 +276,7 @@ internal static class LegacyTreatmentTables
             if (paired.Contains(row.Record))
                 continue;
 
-            treatments.Add(Stamp(row.Table.Project(row.Record, foods), row.Created, row.Modified));
+            treatments.Add(Stamp(row.Table.Project(row.Record, foods), row.Created, row.Modified, row.Deleted));
         }
 
         return treatments;
@@ -287,6 +289,8 @@ internal static class LegacyTreatmentTables
     /// Correction Bolus / Carb Correction treatments. Ordering by descending Insulin/Carbs picks the
     /// record a human would recognise as the main one; ThenBy(Id) is a deterministic tiebreaker so
     /// same-timestamp, same-dose records don't produce non-deterministic output across requests.
+    /// A deleted and a live record never pair: the meal a client knows is deleted only when both
+    /// constituents are.
     /// </summary>
     private static HashSet<object> PairMeals(
         IReadOnlyList<FetchedRecord> records,
@@ -299,13 +303,13 @@ internal static class LegacyTreatmentTables
         var boluses = Correlated<Bolus>(records);
         var carbs = Correlated<CarbIntake>(records);
 
-        foreach (var correlationId in boluses.Select(g => g.Key).Union(carbs.Select(g => g.Key)))
+        foreach (var key in boluses.Select(g => g.Key).Union(carbs.Select(g => g.Key)))
         {
-            var bolus = boluses[correlationId]
+            var bolus = boluses[key]
                 .OrderByDescending(b => b.Record.Insulin)
                 .ThenBy(b => b.Record.Id)
                 .FirstOrDefault();
-            var carb = carbs[correlationId]
+            var carb = carbs[key]
                 .OrderByDescending(c => c.Record.Carbs)
                 .ThenBy(c => c.Record.Id)
                 .FirstOrDefault();
@@ -322,29 +326,32 @@ internal static class LegacyTreatmentTables
             treatments.Add(Stamp(
                 ProjectMealBolus(bolus.Record, carb.Record, foods.For(carb.Record.Id)),
                 Oldest(bolus.Record.CreatedAt, carb.Record.CreatedAt),
-                Newest(bolus.Modified, carb.Modified)));
+                Newest(bolus.Modified, carb.Modified),
+                key.Deleted));
         }
 
         return paired;
     }
 
-    private static ILookup<Guid, (T Record, DateTime Modified)> Correlated<T>(
+    private static ILookup<(Guid CorrelationId, bool Deleted), (T Record, DateTime Modified)> Correlated<T>(
         IReadOnlyList<FetchedRecord> records
     )
         where T : class, IV4Record =>
         records
-            .Select(r => (Record: r.Record as T, r.Modified))
+            .Select(r => (Record: r.Record as T, r.Modified, r.Deleted))
             .Where(r => r.Record?.CorrelationId is not null)
-            .ToLookup(r => r.Record!.CorrelationId!.Value, r => (r.Record!, r.Modified));
+            .ToLookup(r => (r.Record!.CorrelationId!.Value, r.Deleted), r => (r.Record!, r.Modified));
 
     private static DateTime Newest(DateTime left, DateTime right) => left > right ? left : right;
 
     private static DateTime Oldest(DateTime left, DateTime right) => left < right ? left : right;
 
-    private static Treatment Stamp(Treatment treatment, DateTime createdAt, DateTime modifiedAt)
+    private static Treatment Stamp(Treatment treatment, DateTime createdAt, DateTime modifiedAt, bool deleted)
     {
         treatment.SrvCreated = new DateTimeOffset(createdAt, TimeSpan.Zero).ToUnixTimeMilliseconds();
         treatment.SrvModified = new DateTimeOffset(modifiedAt, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        if (deleted)
+            treatment.IsValid = false;
         return treatment;
     }
 

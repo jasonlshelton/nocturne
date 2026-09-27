@@ -61,6 +61,34 @@ public class ConnectorFoodEntryServiceTests
         };
 
     [Fact]
+    public async Task ImportAsync_FoodTheUserDeleted_IsRestoredOnItsOwnRow()
+    {
+        var withFood = Import();
+        withFood.Food = new ConnectorFoodImport { ExternalId = "food-1", Name = "Oats", Carbs = 30 };
+
+        await using (var context = NewContext())
+        {
+            await NewService(context).ImportAsync(UserId, [withFood]);
+        }
+
+        await using (var context = NewContext())
+        {
+            (await context.Foods.SingleAsync()).DeletedAt = DateTime.UtcNow;
+            await context.SaveChangesAsync();
+        }
+
+        await using (var context = NewContext())
+        {
+            await NewService(context).ImportAsync(UserId, [withFood]);
+        }
+
+        await using var assertContext = NewContext();
+        var food = await assertContext.Foods.IgnoreQueryFilters().SingleAsync();
+        food.DeletedAt.Should().BeNull();
+        food.Name.Should().Be("Oats");
+    }
+
+    [Fact]
     public async Task ImportAsync_DoesNotReplaceANamedMealWithAnUnnamedGuess()
     {
         var breakfast = new DateTimeOffset(2026, 7, 20, 8, 0, 0, TimeSpan.Zero);

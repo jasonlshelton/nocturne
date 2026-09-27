@@ -9,7 +9,7 @@ namespace Nocturne.Infrastructure.Data.Entities;
 /// Maps to Nocturne.Core.Models.Food
 /// </summary>
 [Table("foods")]
-public class FoodEntity : ITenantScoped, ISystemTimestamped
+public class FoodEntity : ITenantScoped, ISystemTimestamped, ISoftDeletable
 {
     /// <summary>
     /// Identifier of the tenant this food belongs to
@@ -150,6 +150,13 @@ public class FoodEntity : ITenantScoped, ISystemTimestamped
     /// </summary>
     [Column("sys_updated_at")]
     public DateTime SysUpdatedAt { get; set; }
+
+    /// <summary>
+    /// When the food was deleted. The row is kept, as Nightscout keeps a deleted v3 document, so the
+    /// v3 food history can tell a syncing client of the delete.
+    /// </summary>
+    [Column("deleted_at")]
+    public DateTime? DeletedAt { get; set; }
 
     /// <summary>
     /// Additional properties from import (stored as JSON)
