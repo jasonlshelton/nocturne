@@ -1,6 +1,9 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Nocturne.Core.Contracts.Audit;
+using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Tests.Shared.Infrastructure;
@@ -25,8 +28,10 @@ public class FoodHistoryTests : IDisposable
 
     public FoodHistoryTests()
     {
-        _db = TestDbContextFactory.CreateSqliteWithTenant(TenantId);
+        _db = TestDbContextFactory.CreateSqliteWithTenant(
+            TenantId, "test", new MutationAuditInterceptor(Mock.Of<IHttpContextAccessor>()));
         _context = _db.CreateContext();
+        _context.AuditContext = new UserAuditContext();
         _foods = new FoodRepository(_context, NullLogger<FoodRepository>.Instance);
     }
 
@@ -84,7 +89,12 @@ public class FoodHistoryTests : IDisposable
         var tombstone = next.Records.Should().ContainSingle().Subject;
         tombstone.Name.Should().Be("apple");
         tombstone.IsValid.Should().BeFalse();
+        tombstone.SrvModified.Should().BeGreaterThan(cursor).And.Be(next.CursorMills);
         next.CursorMills.Should().BeGreaterThan(cursor);
+
+        (await _context.Foods.IgnoreQueryFilters().Select(f => EF.Property<bool>(f, "DeletedByUser")).SingleAsync())
+            .Should().BeTrue("a user's delete is attributed, so a connector re-import leaves it deleted");
+        (await _context.Set<MutationAuditLogEntity>().Where(l => l.Action == "delete").CountAsync()).Should().Be(1);
 
         (await _foods.GetFoodByIdAsync(apple.ToString())).Should().BeNull();
         (await _foods.GetFoodAsync()).Should().BeEmpty();
@@ -104,6 +114,11 @@ public class FoodHistoryTests : IDisposable
         {
             Id = Guid.CreateVersion7(), TenantId = TenantId, CarbIntakeId = carbIntakeId, FoodId = apple, Carbs = 20,
         });
+        _context.ConnectorFoodEntries.Add(new ConnectorFoodEntryEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, ConnectorSource = "test-connector",
+            ExternalEntryId = "entry-1", ExternalFoodId = "food-1", FoodId = apple,
+        });
         _context.UserFoodFavorites.Add(new UserFoodFavoriteEntity
         {
             Id = Guid.CreateVersion7(), TenantId = TenantId, UserId = "user-1", FoodId = apple,
@@ -114,6 +129,7 @@ public class FoodHistoryTests : IDisposable
         await _foods.BulkDeleteFoodAsync("apple");
 
         (await _context.TreatmentFoods.SingleAsync()).FoodId.Should().BeNull();
+        (await _context.ConnectorFoodEntries.SingleAsync()).FoodId.Should().BeNull();
         (await _context.UserFoodFavorites.CountAsync()).Should().Be(0);
     }
 
@@ -130,6 +146,18 @@ public class FoodHistoryTests : IDisposable
         food.Carbs.Should().Be(12);
         food.IsValid.Should().BeNull();
         (await _context.Foods.IgnoreQueryFilters().CountAsync()).Should().Be(1);
+    }
+
+    private sealed class UserAuditContext : IAuditContext
+    {
+        public Guid? SubjectId => Guid.Empty;
+        public string? SubjectName => "tester";
+        public string? AuthType => "SessionCookie";
+        public string? IpAddress => "127.0.0.1";
+        public Guid? TokenId => null;
+        public string? TraceId => null;
+        public string? Endpoint => "DELETE /api/v3/food";
+        public bool IsSystem => false;
     }
 
     /// <summary>

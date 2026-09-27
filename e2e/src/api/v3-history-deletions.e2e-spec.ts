@@ -18,6 +18,8 @@ interface V3Document {
   srvModified: number;
   isValid?: boolean;
   insulin?: number;
+  carbs?: number;
+  eventType?: string;
   sgv?: number;
   device?: string;
 }
@@ -108,6 +110,50 @@ describe("v3 history after a delete", () => {
     const tombstone = next.docs.find((d) => idOf(d) === id);
     expect(tombstone).toMatchObject({ isValid: false });
     expect(tombstone!.srvModified).toBeGreaterThan(cursor);
+  });
+
+  /** Creates a meal through v3, syncs history, and returns its history id, the cursor and its V4 halves. */
+  async function syncMeal(insulin: number, carbs: number) {
+    const created = await tenant.api.request("POST", "/api/v3/treatments", {
+      eventType: "Meal Bolus", insulin, carbs, date, app: "AAPS", device: "AAPS-e2e-delete", utcOffset: 0,
+    });
+    expect(created.status).toBe(201);
+
+    const synced = await history(tenant, "treatments", 0);
+    const meal = synced.docs.find((t) => t.insulin === insulin);
+    expect(meal).toMatchObject({ carbs });
+
+    const boluses = await tenant.api.ok<{ data: { id: string; insulin: number }[] }>("GET", "/api/v4/insulin/boluses?limit=100");
+    const intakes = await tenant.api.ok<{ data: { id: string; carbs: number }[] }>("GET", "/api/v4/nutrition/carbs?limit=100");
+    return {
+      meal: idOf(meal!)!,
+      cursor: synced.cursor,
+      bolusId: boluses.data.find((b) => b.insulin === insulin)!.id,
+      carbId: intakes.data.find((c) => c.carbs === carbs)!.id,
+    };
+  }
+
+  it("re-sends a meal whose carbs were deleted in v4 under its id, without the carbs", async () => {
+    const { meal, cursor, carbId } = await syncMeal(3.3, 33);
+    expect((await tenant.api.delete(`/api/v4/nutrition/carbs/${carbId}`)).status).toBeLessThan(300);
+
+    const next = await history(tenant, "treatments", cursor);
+    const survivor = next.docs.find((t) => idOf(t) === meal);
+    expect(survivor).toMatchObject({ eventType: "Correction Bolus", insulin: 3.3 });
+    expect(survivor!.isValid).toBeUndefined();
+    expect(survivor!.carbs).toBeUndefined();
+  });
+
+  it("tombstones a meal whose bolus was deleted in v4 and re-sends its carbs under their own id", async () => {
+    const { meal, cursor, bolusId } = await syncMeal(4.4, 44);
+    expect((await tenant.api.delete(`/api/v4/insulin/boluses/${bolusId}`)).status).toBeLessThan(300);
+
+    const next = await history(tenant, "treatments", cursor);
+    expect(next.docs.find((t) => idOf(t) === meal)).toMatchObject({ isValid: false });
+    const carbs = next.docs.find((t) => t.carbs === 44);
+    expect(carbs).toMatchObject({ eventType: "Carb Correction" });
+    expect(carbs!.isValid).toBeUndefined();
+    expect(idOf(carbs!)).not.toBe(meal);
   });
 
   it("moves each collection's lastModified to the delete, so a client knows to read the history", async () => {

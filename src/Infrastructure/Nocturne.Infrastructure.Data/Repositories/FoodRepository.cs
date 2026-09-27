@@ -4,6 +4,7 @@ using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Queries;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Mappers;
 
 namespace Nocturne.Infrastructure.Data.Repositories;
@@ -360,24 +361,32 @@ public class FoodRepository : IFoodRepository
 
     /// <summary>
     /// Soft-deletes <paramref name="entities"/>, and does to the rows referencing them what the
-    /// foreign keys do on a hard delete: meal attributions keep their portion as "Other", favorites go.
+    /// foreign keys do on a hard delete: meal attributions keep their portion as "Other", connector
+    /// food entries lose the link, favorites go. <c>MutationAuditInterceptor</c> attributes the
+    /// delete, which decides whether a connector re-import may restore the food.
     /// </summary>
-    private async Task SoftDeleteAsync(List<FoodEntity> entities, CancellationToken cancellationToken)
+    private Task SoftDeleteAsync(List<FoodEntity> entities, CancellationToken cancellationToken)
     {
         var ids = entities.Select(f => f.Id).ToList();
 
-        await _context.TreatmentFoods
-            .Where(tf => tf.FoodId != null && ids.Contains(tf.FoodId.Value))
-            .ExecuteUpdateAsync(s => s.SetProperty(tf => tf.FoodId, (Guid?)null), cancellationToken);
-        await _context.UserFoodFavorites
-            .Where(f => ids.Contains(f.FoodId))
-            .ExecuteDeleteAsync(cancellationToken);
+        return _context.ExecuteInTransactionAsync(async ct =>
+        {
+            await _context.TreatmentFoods
+                .Where(tf => tf.FoodId != null && ids.Contains(tf.FoodId.Value))
+                .ExecuteUpdateAsync(s => s.SetProperty(tf => tf.FoodId, (Guid?)null), ct);
+            await _context.ConnectorFoodEntries
+                .Where(e => e.FoodId != null && ids.Contains(e.FoodId.Value))
+                .ExecuteUpdateAsync(s => s.SetProperty(e => e.FoodId, (Guid?)null), ct);
+            await _context.UserFoodFavorites
+                .Where(f => ids.Contains(f.FoodId))
+                .ExecuteDeleteAsync(ct);
 
-        var deletedAt = DateTime.UtcNow;
-        foreach (var entity in entities)
-            entity.DeletedAt = deletedAt;
+            var deletedAt = DateTime.UtcNow;
+            foreach (var entity in entities)
+                entity.DeletedAt = deletedAt;
 
-        await _context.SaveChangesAsync(cancellationToken);
+            return await _context.SaveChangesAsync(ct);
+        }, ct: cancellationToken);
     }
 
     /// <summary>

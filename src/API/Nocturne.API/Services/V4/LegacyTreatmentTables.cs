@@ -104,6 +104,13 @@ internal interface ILegacyTreatmentTable
         CancellationToken ct
     );
 
+    /// <summary>The live records carrying one of <paramref name="correlationIds"/>.</summary>
+    Task<IReadOnlyList<FetchedRecord>> LiveByCorrelationAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<Guid> correlationIds,
+        CancellationToken ct
+    );
+
     /// <summary>Projects a record this table owns that is not part of a meal pairing.</summary>
     Treatment Project(object record, CarbFoodIndex foods);
 }
@@ -164,6 +171,25 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
         return entities
             .Select(e => (Record: toRecord(e), e.SysUpdatedAt, Deleted: e.DeletedAt is not null))
             .Select(x => new FetchedRecord(this, x.Record, CreatedAt(x.Record), x.SysUpdatedAt, x.Deleted))
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FetchedRecord>> LiveByCorrelationAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<Guid> correlationIds,
+        CancellationToken ct
+    )
+    {
+        var ids = correlationIds.Select(id => (Guid?)id).ToList();
+        var entities = await table(context)
+            .AsNoTracking()
+            .Where(e => ids.Contains(EF.Property<Guid?>(e, nameof(IV4Record.CorrelationId))))
+            .ToListAsync(ct);
+
+        return entities
+            .Select(e => (Record: toRecord(e), e.SysUpdatedAt))
+            .Select(x => new FetchedRecord(this, x.Record, CreatedAt(x.Record), x.SysUpdatedAt))
             .ToList();
     }
 
@@ -253,6 +279,10 @@ internal static class LegacyTreatmentTables
             c => c.BolusCalculations, BolusCalculationMapper.ToDomainModel,
             (r, _) => ProjectBolusCalculation(r)),
     ];
+
+    /// <summary>The tables whose records pair into a Meal Bolus.</summary>
+    internal static readonly IReadOnlyList<ILegacyTreatmentTable> MealTables =
+        [.. All.Where(t => t.RecordType is nameof(Bolus) or nameof(CarbIntake))];
 
     private static readonly Dictionary<ILegacyTreatmentTable, int> Order =
         All.Select((table, index) => (table, index)).ToDictionary(x => x.table, x => x.index);

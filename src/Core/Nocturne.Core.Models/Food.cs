@@ -122,6 +122,19 @@ public class Food
     public string? CreatedAt { get; set; }
 
     /// <summary>
+    /// The server write stamp (Unix milliseconds) a v3 history read pages on, moved by every edit and
+    /// by the delete.
+    /// </summary>
+    [JsonPropertyName("srvModified")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? SrvModified { get; set; }
+
+    /// <summary>The server creation stamp (Unix milliseconds).</summary>
+    [JsonPropertyName("srvCreated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? SrvCreated { get; set; }
+
+    /// <summary>
     /// <c>false</c> on a deleted document, which a v3 history read still returns so a syncing client
     /// learns of the delete; unset on a live one, as Nightscout leaves it.
     /// </summary>

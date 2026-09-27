@@ -9,7 +9,7 @@ namespace Nocturne.Infrastructure.Data.Entities;
 /// Maps to Nocturne.Core.Models.Food
 /// </summary>
 [Table("foods")]
-public class FoodEntity : ITenantScoped, ISystemTimestamped, ISoftDeletable
+public class FoodEntity : ITenantScoped, IAuditable, ISystemTimestamped, ISoftDeletable
 {
     /// <summary>
     /// Identifier of the tenant this food belongs to
@@ -142,12 +142,14 @@ public class FoodEntity : ITenantScoped, ISystemTimestamped, ISoftDeletable
     /// <summary>
     /// System-generated creation timestamp for audit tracking
     /// </summary>
+    [AuditIgnored]
     [Column("sys_created_at")]
     public DateTime SysCreatedAt { get; set; }
 
     /// <summary>
     /// System-generated update timestamp for audit tracking
     /// </summary>
+    [AuditIgnored]
     [Column("sys_updated_at")]
     public DateTime SysUpdatedAt { get; set; }
 
@@ -155,6 +157,7 @@ public class FoodEntity : ITenantScoped, ISystemTimestamped, ISoftDeletable
     /// When the food was deleted. The row is kept, as Nightscout keeps a deleted v3 document, so the
     /// v3 food history can tell a syncing client of the delete.
     /// </summary>
+    [AuditIgnored]
     [Column("deleted_at")]
     public DateTime? DeletedAt { get; set; }
 

@@ -117,6 +117,62 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
+    public async Task MealWhoseCarbsAreDeleted_IsResentUnderItsIdWithoutThem()
+    {
+        var (meal, cursor, _, carbId) = await SyncMealAsync(insulin: 3.3, carbs: 33);
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/nutrition/carbs/{carbId}")).IsSuccessStatusCode.Should().BeTrue();
+
+        var (next, _) = await HistoryAsync("treatments", cursor);
+        var survivor = next.Should().ContainSingle(doc => IdOf(doc) == meal).Subject;
+        survivor.TryGetProperty("isValid", out _).Should().BeFalse();
+        survivor.GetProperty("eventType").GetString().Should().Be("Correction Bolus");
+        Number(survivor, "carbs").Should().BeNull();
+        Number(survivor, "insulin").Should().Be(3.3);
+    }
+
+    [Fact]
+    public async Task MealWhoseBolusIsDeleted_IsTombstoned_AndItsCarbsAreResentUnderTheirOwnId()
+    {
+        var (meal, cursor, bolusId, _) = await SyncMealAsync(insulin: 4.4, carbs: 44);
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/insulin/boluses/{bolusId}")).IsSuccessStatusCode.Should().BeTrue();
+
+        var (next, _) = await HistoryAsync("treatments", cursor);
+        next.Should().ContainSingle(doc => IdOf(doc) == meal)
+            .Which.GetProperty("isValid").GetBoolean().Should().BeFalse();
+        var carbs = next.Should().ContainSingle(doc => Number(doc, "carbs") == 44).Subject;
+        IdOf(carbs).Should().NotBe(meal);
+        carbs.GetProperty("eventType").GetString().Should().Be("Carb Correction");
+        carbs.TryGetProperty("isValid", out _).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Creates a meal through v3, syncs the treatment history, and returns the meal's history id,
+    /// the cursor the sync ended on, and the V4 ids of its bolus and carb intake.
+    /// </summary>
+    private async Task<(string Meal, long Cursor, Guid BolusId, Guid CarbId)> SyncMealAsync(double insulin, double carbs)
+    {
+        await CreateAsync("treatments", new
+        {
+            eventType = "Meal Bolus", insulin, carbs, date = Date, app = "it", device = "it-v3", utcOffset = 0,
+        });
+
+        var (synced, cursor) = await HistoryAsync("treatments", 0);
+        var meal = synced.Should().ContainSingle(doc => Number(doc, "insulin") == insulin).Subject;
+        Number(meal, "carbs").Should().Be(carbs);
+
+        var boluses = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/insulin/boluses?limit=100");
+        var intakes = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/nutrition/carbs?limit=100");
+        var bolusId = boluses.GetProperty("data").EnumerateArray()
+            .Single(b => b.GetProperty("insulin").GetDouble() == insulin).GetProperty("id").GetGuid();
+        var carbId = intakes.GetProperty("data").EnumerateArray()
+            .Single(c => c.GetProperty("carbs").GetDouble() == carbs).GetProperty("id").GetGuid();
+
+        return (IdOf(meal)!, cursor, bolusId, carbId);
+    }
+
+    [Fact]
     public async Task Delete_MovesTheCollectionLastModified_ToTheTombstone()
     {
         await CreateAsync("treatments", new
@@ -149,13 +205,8 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
         var (next, nextCursor) = await HistoryAsync(collection, cursor);
         var tombstone = next.Should().ContainSingle(doc => IdOf(doc) == IdOf(live)).Subject;
         tombstone.GetProperty("isValid").GetBoolean().Should().BeFalse();
-        nextCursor.Should().BeGreaterThan(cursor);
-        // Nocturne's food documents carry no srvModified, deleted or not; the cursor above covers them.
-        if (tombstone.TryGetProperty("srvModified", out var srvModified))
-        {
-            srvModified.GetInt64().Should().BeGreaterThan(cursor);
-            nextCursor.Should().BeGreaterThanOrEqualTo(srvModified.GetInt64());
-        }
+        tombstone.GetProperty("srvModified").GetInt64().Should().BeGreaterThan(cursor);
+        nextCursor.Should().BeGreaterThanOrEqualTo(tombstone.GetProperty("srvModified").GetInt64());
 
         var (drained, _) = await HistoryAsync(collection, nextCursor);
         drained.Should().NotContain(doc => IdOf(doc) == IdOf(live));
