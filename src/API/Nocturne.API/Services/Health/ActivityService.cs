@@ -453,9 +453,10 @@ public class ActivityService : IActivityService
             _logger.LogDebug("Deleting activity record with ID: {Id}", id);
 
             // Attempt to delete decomposed records (heart rate / step count)
+            var decomposedDeleted = 0;
             try
             {
-                await _activityDecomposer.DeleteByLegacyIdAsync(id, WriteOrigin.Live, cancellationToken);
+                decomposedDeleted = await _activityDecomposer.DeleteByLegacyIdAsync(id, WriteOrigin.Live, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -482,7 +483,8 @@ public class ActivityService : IActivityService
                 }
             }
 
-            var deleted = await _stateSpanService.DeleteActivityAsync(id, cancellationToken);
+            var deleted = await _stateSpanService.DeleteActivityAsync(id, cancellationToken)
+                          || decomposedDeleted > 0;
 
             if (deleted)
             {

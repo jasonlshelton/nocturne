@@ -214,8 +214,7 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
     /// <inheritdoc />
     /// <remarks>
     /// An activity is stored as a state span, heart rate, step count or sleep session, each carrying
-    /// the activity's id as its <c>OriginalId</c>. Sleep sessions are hard-deleted, so a sleep
-    /// session the user deleted leaves nothing to hold its id.
+    /// the activity's id as its <c>OriginalId</c>.
     /// </remarks>
     public Task<int?> PublishRecentActivityAsync(
         IEnumerable<Activity> activities,
@@ -228,19 +227,7 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
             ids => _db.GetHeldOriginalIdsAsync<StateSpanEntity>(ids, cancellationToken),
             ids => _db.GetHeldOriginalIdsAsync<HeartRateEntity>(ids, cancellationToken),
             ids => _db.GetHeldOriginalIdsAsync<StepCountEntity>(ids, cancellationToken),
-            ids => HeldSleepSessionIdsAsync(ids, cancellationToken));
-
-    private async Task<IReadOnlySet<string>> HeldSleepSessionIdsAsync(
-        IReadOnlyCollection<string> originalIds, CancellationToken cancellationToken)
-    {
-        var ids = originalIds.ToList();
-        var held = await _db.SleepSessions.AsNoTracking()
-            .Where(s => s.OriginalId != null && ids.Contains(s.OriginalId))
-            .Select(s => s.OriginalId!)
-            .ToListAsync(cancellationToken);
-
-        return held.ToHashSet(StringComparer.Ordinal);
-    }
+            ids => _db.GetHeldOriginalIdsAsync<SleepSessionEntity>(ids, cancellationToken));
 
     public async Task<bool> PublishStateSpansAsync(
         IEnumerable<StateSpan> stateSpans,

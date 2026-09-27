@@ -543,6 +543,27 @@ public class ActivityServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task DeleteActivityAsync_OfAHeartRateOrStepCountOnly_ReturnsTrueAndBroadcasts()
+    {
+        var activityId = "60a1b2c3d4e5f67890123456";
+        _mockActivityDecomposer
+            .Setup(x => x.DeleteByLegacyIdAsync(activityId, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockStateSpanService
+            .Setup(x => x.DeleteActivityAsync(activityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _activityService.DeleteActivityAsync(activityId, CancellationToken.None);
+
+        Assert.True(result);
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageDeleteAsync("activity", It.IsAny<object>()),
+            Times.Once
+        );
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     [Trait("Category", "Parity")]
     public async Task DeleteActivityAsync_WithInvalidId_ReturnsFalseAndDoesNotBroadcast()
     {

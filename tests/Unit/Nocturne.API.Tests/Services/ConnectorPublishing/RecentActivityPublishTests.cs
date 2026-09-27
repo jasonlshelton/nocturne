@@ -68,13 +68,19 @@ public class RecentActivityPublishTests : IDisposable
             Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep", Source = "synthetic",
             StartTime = now.AddHours(-8), EndTime = now, Type = "sleep", DetectionMethod = "manual",
         });
+        _context.SleepSessions.Add(new SleepSessionEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep-deleted", Source = "synthetic",
+            StartTime = now.AddHours(-8), EndTime = now, Type = "sleep", DetectionMethod = "manual", DeletedAt = now,
+        });
         await _context.SaveChangesAsync();
-        MarkDeletedByUser("act-user-deleted");
+        MarkDeletedByUser(_context.StateSpans.IgnoreQueryFilters().Single(s => s.OriginalId == "act-user-deleted"));
+        MarkDeletedByUser(_context.SleepSessions.IgnoreQueryFilters().Single(s => s.OriginalId == "act-sleep-deleted"));
 
         var written = await Publisher().PublishRecentActivityAsync(
             [
                 Activity("act-span"), Activity("act-user-deleted"), Activity("act-swept"),
-                Activity("act-hr"), Activity("act-steps"), Activity("act-sleep"),
+                Activity("act-hr"), Activity("act-steps"), Activity("act-sleep"), Activity("act-sleep-deleted"),
                 Activity("act-late"), Activity(null),
             ],
             Source, WriteOrigin.Live);
@@ -135,9 +141,8 @@ public class RecentActivityPublishTests : IDisposable
         written.Should().BeNull();
     }
 
-    private void MarkDeletedByUser(string originalId)
+    private void MarkDeletedByUser(object row)
     {
-        var row = _context.StateSpans.IgnoreQueryFilters().Single(s => s.OriginalId == originalId);
         _context.Entry(row).Property("DeletedByUser").CurrentValue = true;
         _context.SaveChanges();
         _context.ChangeTracker.Clear();

@@ -74,25 +74,25 @@ public class SleepSessionRepository : ISleepSessionRepository
             // Dedup by Source + OriginalId. When a prior sync of the same source
             // record exists, replace its contents in place: keep its primary key
             // so re-syncs don't churn the session id (and any reference to it).
+            // Soft-deleted rows are read too: a user tombstone forbids re-creating
+            // the session, and a system-swept one is replaced like a live row. The
+            // unique (tenant, source, original_id) index counts soft-deleted rows,
+            // so inserting beside a tombstone would violate it.
             SleepSessionEntity? existing = null;
             if (!string.IsNullOrEmpty(entity.OriginalId))
             {
-                existing = await ctx.SleepSessions
-                    .Include(s => s.Stages)
-                    .Include(s => s.BiometricSamples)
-                    .FirstOrDefaultAsync(
-                        s => s.Source == entity.Source && s.OriginalId == entity.OriginalId,
-                        token);
+                existing = await WithSoftDeleted(ctx)
+                    .FirstOrDefaultAsync(s => s.Source == entity.Source && s.OriginalId == entity.OriginalId, token);
             }
 
             // Dedup by primary key. The mapper derives a deterministic entity Id
             // from an incoming session Id, so an upsert carrying an existing
             // session's Id (with a null or different OriginalId) must replace
             // that row rather than insert a duplicate key.
-            existing ??= await ctx.SleepSessions
-                .Include(s => s.Stages)
-                .Include(s => s.BiometricSamples)
-                .FirstOrDefaultAsync(s => s.Id == entity.Id, token);
+            existing ??= await WithSoftDeleted(ctx).FirstOrDefaultAsync(s => s.Id == entity.Id, token);
+
+            if (existing is { DeletedAt: not null } && ctx.Entry(existing).Property<bool>("DeletedByUser").CurrentValue)
+                return SleepSessionMapper.ToDomainModel(existing, includeChildren: true);
 
             if (existing is not null)
             {
@@ -138,23 +138,32 @@ public class SleepSessionRepository : ISleepSessionRepository
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Soft-deletes, keeping the stages and samples until the retention purge removes the session.
+    /// A user's delete leaves a tombstone that keeps a resync from bringing the session back.
+    /// </remarks>
     public async Task<bool> DeleteSessionAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var ctx = await _contextFactory.CreateAsync(cancellationToken);
-        var existing = await ctx.SleepSessions
-            .Include(s => s.Stages)
-            .Include(s => s.BiometricSamples)
-            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        var existing = await ctx.SleepSessions.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
 
         if (existing is null)
             return false;
 
-        ctx.SleepBiometricSamples.RemoveRange(existing.BiometricSamples);
-        ctx.SleepStages.RemoveRange(existing.Stages);
-        ctx.SleepSessions.Remove(existing);
+        existing.DeletedAt = DateTime.UtcNow;
         await ctx.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    /// <summary>
+    /// This tenant's sessions, soft-deleted ones included, with their stages and samples.
+    /// </summary>
+    private static IQueryable<SleepSessionEntity> WithSoftDeleted(NocturneDbContext ctx) =>
+        ctx.SleepSessions
+            .IgnoreQueryFilters()
+            .Where(s => s.TenantId == ctx.TenantId)
+            .Include(s => s.Stages)
+            .Include(s => s.BiometricSamples);
 
     private static IQueryable<Entities.SleepSessionEntity> BuildFilteredQuery(
         NocturneDbContext ctx, DateTime? from, DateTime? to,

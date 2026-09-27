@@ -8,6 +8,7 @@ using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Mappers;
 
 namespace Nocturne.API.Services.V4;
@@ -225,14 +226,14 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Deliberately HARD-deletes (unlike the soft-delete in
-    /// <c>SimpleEntityService.DeleteOneAsync</c>): this is the v1 activity
-    /// re-migration path, where the legacy row is being replaced wholesale, so a
-    /// soft-delete tombstone would only block re-creation by the same legacy id.
+    /// Soft-deletes, as <c>SimpleEntityService.DeleteOneAsync</c> does: the tombstone a user's delete
+    /// leaves is what keeps a connector resync from bringing the record back
+    /// (<see cref="SoftDeleteDedupExtensions.WhereBlocksRecreation{TEntity}"/>).
     /// </remarks>
     public async Task<int> DeleteByLegacyIdAsync(string legacyId, WriteOrigin origin, CancellationToken ct = default)
     {
         var deleted = 0;
+        var now = DateTime.UtcNow;
 
         var heartRateEntity = await _dbContext.HeartRates.FirstOrDefaultAsync(
             h => h.OriginalId == legacyId,
@@ -240,7 +241,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         );
         if (heartRateEntity != null)
         {
-            _dbContext.HeartRates.Remove(heartRateEntity);
+            heartRateEntity.DeletedAt = now;
             deleted++;
         }
 
@@ -250,7 +251,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         );
         if (stepCountEntity != null)
         {
-            _dbContext.StepCounts.Remove(stepCountEntity);
+            stepCountEntity.DeletedAt = now;
             deleted++;
         }
 
@@ -331,7 +332,8 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
     /// Create-or-update keyed on the legacy <c>OriginalId</c>, or, for a record with no id, on its
     /// sync key when <see cref="MapToStepCount"/> gave it one. Heart rates and step counts have no
     /// V4 repository, so unlike its <see cref="DecomposerBase.UpsertByLegacyIdAsync"/> siblings this
-    /// writes the entity through the context.
+    /// writes the entity through the context. The <c>OriginalId</c> resolves as
+    /// <see cref="ResolveByOriginalIdAsync{TEntity}"/> describes.
     /// </summary>
     private async Task UpsertByOriginalIdAsync<TModel, TEntity>(
         DbSet<TEntity> set,
@@ -342,17 +344,31 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         DecompositionResult result,
         CancellationToken ct)
         where TModel : ProcessableDocumentBase
-        where TEntity : class, IOriginalIdentified, ISyncDedupable
+        where TEntity : class, ITenantScoped, ISoftDeletable, IOriginalIdentified, ISyncDedupable
     {
         var recordType = typeof(TModel).Name;
         var entity = toEntity(model);
-        var existing = model.Id != null
-            ? await set.FirstOrDefaultAsync(e => e.OriginalId == model.Id, ct)
-            : await FindBySyncKeyAsync(set, entity.DataSource, entity.SyncIdentifier, ct);
+        TEntity? existing;
+        if (model.Id != null)
+        {
+            var (rows, userDeleted) = await ResolveByOriginalIdAsync(set, [model.Id], ct);
+            if (userDeleted.Count > 0)
+            {
+                _logger.LogDebug("Skipped {RecordType} from legacy activity {LegacyId}: the user deleted it", recordType, model.Id);
+                return;
+            }
+
+            existing = rows.GetValueOrDefault(model.Id);
+        }
+        else
+        {
+            existing = await FindBySyncKeyAsync(set, entity.DataSource, entity.SyncIdentifier, ct);
+        }
 
         if (existing != null)
         {
             applyUpdate(existing, model);
+            existing.DeletedAt = null;
             await _dbContext.SaveChangesAsync(ct);
             result.UpdatedRecords.Add(toDomain(existing));
             _logger.LogDebug(
@@ -367,6 +383,40 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         _logger.LogDebug("Created {RecordType} from legacy activity {LegacyId}", recordType, model.Id);
     }
 
+    /// <summary>
+    /// The row each of <paramref name="originalIds"/> is written to, soft-deleted rows included: the
+    /// live row, or else a system-swept tombstone, which the write revives in place because the primary
+    /// key is derived from the id (<see cref="MapperHelpers.ParseIdToGuid"/>) and a fresh insert would
+    /// collide with it. An id only a user tombstone holds is returned in <c>UserDeleted</c> and must
+    /// not be written (<see cref="SoftDeleteDedupExtensions.WhereBlocksRecreation{TEntity}"/>).
+    /// </summary>
+    private async Task<(Dictionary<string, TEntity> Rows, HashSet<string> UserDeleted)> ResolveByOriginalIdAsync<TEntity>(
+        DbSet<TEntity> set, IReadOnlyCollection<string> originalIds, CancellationToken ct)
+        where TEntity : class, ITenantScoped, ISoftDeletable, IOriginalIdentified
+    {
+        var rows = new Dictionary<string, TEntity>(StringComparer.Ordinal);
+        var userDeleted = new HashSet<string>(StringComparer.Ordinal);
+        if (originalIds.Count == 0)
+            return (rows, userDeleted);
+
+        var ids = originalIds.ToList();
+        var candidates = await set.IgnoreQueryFilters()
+            .Where(e => e.TenantId == _dbContext.TenantId && e.OriginalId != null && ids.Contains(e.OriginalId))
+            .ToListAsync(ct);
+
+        foreach (var group in candidates.GroupBy(e => e.OriginalId!, StringComparer.Ordinal))
+        {
+            if (group.FirstOrDefault(e => e.DeletedAt == null) is { } live)
+                rows[group.Key] = live;
+            else if (group.Any(e => _dbContext.Entry(e).Property<bool>("DeletedByUser").CurrentValue))
+                userDeleted.Add(group.Key);
+            else
+                rows[group.Key] = group.First();
+        }
+
+        return (rows, userDeleted);
+    }
+
     private static Task<TEntity?> FindBySyncKeyAsync<TEntity>(
         DbSet<TEntity> set, string? dataSource, string? syncIdentifier, CancellationToken ct)
         where TEntity : class, ISyncDedupable =>
@@ -376,7 +426,8 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
     /// <summary>
     /// The batch twin of <see cref="UpsertByOriginalIdAsync{TModel,TEntity}"/>: a record whose
-    /// <c>OriginalId</c> is already stored updates that row, and the rest are inserted. A record with
+    /// <c>OriginalId</c> resolves to a row (<see cref="ResolveByOriginalIdAsync{TEntity}"/>) updates
+    /// it, one only a user tombstone holds is skipped, and the rest are inserted. A record with
     /// a sync key instead updates the stored row with that key. Of several in the batch with one
     /// key, either kind, the last wins.
     /// </summary>
@@ -389,19 +440,14 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         DecompositionResult result,
         CancellationToken ct)
         where TModel : ProcessableDocumentBase
-        where TEntity : class, IOriginalIdentified, ISyncDedupable
+        where TEntity : class, ITenantScoped, ISoftDeletable, IOriginalIdentified, ISyncDedupable
     {
         if (models.Count == 0)
             return;
 
         var originalIds = models.Where(m => m.Id != null).Select(m => m.Id!).ToHashSet();
-        var stored = originalIds.Count > 0
-            ? (await set
-                .Where(e => e.OriginalId != null && originalIds.Contains(e.OriginalId))
-                .ToListAsync(ct))
-                .GroupBy(e => e.OriginalId!)
-                .ToDictionary(g => g.Key, g => g.First())
-            : new Dictionary<string, TEntity>();
+        var (stored, userDeleted) = await ResolveByOriginalIdAsync(set, originalIds, ct);
+        models = models.Where(m => m.Id == null || !userDeleted.Contains(m.Id)).ToList();
 
         var updated = new List<TEntity>();
         foreach (var model in models
@@ -411,6 +457,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         {
             var existing = stored[model.Id!];
             applyUpdate(existing, model);
+            existing.DeletedAt = null;
             updated.Add(existing);
         }
 

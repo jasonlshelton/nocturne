@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../helpers/env.ts";
 import { seedTenant, type Tenant } from "../helpers/tenant.ts";
-import { ACTIVITY_ID, BACKFILLED_ACTIVITY_ID } from "../../mocks/vendors/nightscout.ts";
+import { ACTIVITY_ID, BACKFILLED_ACTIVITY_ID, BACKFILLED_HEART_RATE_ID } from "../../mocks/vendors/nightscout.ts";
 
 // Mirrors e2e/mocks/vendors/nightscout.ts.
 const FAKE_SECRET = "e2e-fake-nightscout-secret";
@@ -57,6 +57,7 @@ describe("Nightscout connector: activity uploaded behind the cursor", () => {
     const ids = await activityIds(tenant);
     expect(ids).toContain(ACTIVITY_ID);
     expect(ids).not.toContain(BACKFILLED_ACTIVITY_ID);
+    expect(ids).not.toContain(BACKFILLED_HEART_RATE_ID);
   });
 
   it("fetches an activity uploaded later but dated behind the cursor", async () => {
@@ -64,17 +65,23 @@ describe("Nightscout connector: activity uploaded behind the cursor", () => {
 
     await sync(tenant);
 
-    expect(await activityIds(tenant)).toEqual(expect.arrayContaining([ACTIVITY_ID, BACKFILLED_ACTIVITY_ID]));
+    expect(await activityIds(tenant)).toEqual(
+      expect.arrayContaining([ACTIVITY_ID, BACKFILLED_ACTIVITY_ID, BACKFILLED_HEART_RATE_ID]),
+    );
   });
 
-  it("does not bring back a backfilled activity the user deleted", async () => {
+  it("does not bring back a backfilled activity or heart rate the user deleted", async () => {
     await tenant.api.ok("DELETE", `/api/v1/activity/${BACKFILLED_ACTIVITY_ID}`);
-    expect(await activityIds(tenant)).not.toContain(BACKFILLED_ACTIVITY_ID);
+    await tenant.api.ok("DELETE", `/api/v1/activity/${BACKFILLED_HEART_RATE_ID}`);
+    const afterDelete = await activityIds(tenant);
+    expect(afterDelete).not.toContain(BACKFILLED_ACTIVITY_ID);
+    expect(afterDelete).not.toContain(BACKFILLED_HEART_RATE_ID);
 
     await sync(tenant);
 
     const ids = await activityIds(tenant);
     expect(ids).toContain(ACTIVITY_ID);
     expect(ids).not.toContain(BACKFILLED_ACTIVITY_ID);
+    expect(ids).not.toContain(BACKFILLED_HEART_RATE_ID);
   });
 });

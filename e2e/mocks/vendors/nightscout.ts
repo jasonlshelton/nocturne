@@ -6,8 +6,8 @@
 // Queries honour what the Nightscout connector sends: `count`, `find[date][$gte|$lte]` on
 // entries and `find[created_at][$gte|$lte]` (string comparison, as Mongo does) elsewhere.
 //
-// `POST /nightscout/__activity-backfill` makes the instance also serve an activity dated three
-// hours back, as a health app syncing late would upload it; `DELETE` withdraws it again.
+// `POST /nightscout/__activity-backfill` makes the instance also serve an exercise and a heart-rate
+// reading dated hours back, as a health app syncing late would upload them; `DELETE` withdraws them.
 
 import type { Vendor, VendorReply, VendorRequest } from "./vendor.ts";
 
@@ -67,14 +67,18 @@ export function treatments(now = Date.now()) {
 
 export const ACTIVITY_ID = "e2e0a0000000000000000001";
 export const BACKFILLED_ACTIVITY_ID = "e2e0a0000000000000000002";
+export const BACKFILLED_HEART_RATE_ID = "e2e0a0000000000000000003";
 let activityBackfilled = false;
 
 export function activity(now = Date.now()) {
   const minute = 60 * 1000;
   const base = Math.floor(now / minute) * minute;
   const at = (minutesAgo: number) => new Date(base - minutesAgo * minute).toISOString();
-  const rows = [{ _id: ACTIVITY_ID, type: "exercise", duration: 30, notes: "e2e walk", created_at: at(20), enteredBy: DEVICE }];
+  const rows: { _id: string; created_at: string; [field: string]: unknown }[] = [
+    { _id: ACTIVITY_ID, type: "exercise", duration: 30, notes: "e2e walk", created_at: at(20), enteredBy: DEVICE },
+  ];
   if (activityBackfilled) {
+    rows.push({ _id: BACKFILLED_HEART_RATE_ID, bpm: 64, accuracy: 2, created_at: at(150), enteredBy: DEVICE });
     rows.push({ _id: BACKFILLED_ACTIVITY_ID, type: "exercise", duration: 45, notes: "e2e late upload", created_at: at(180), enteredBy: DEVICE });
   }
   return rows;

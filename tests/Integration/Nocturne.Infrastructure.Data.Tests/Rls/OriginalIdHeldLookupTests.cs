@@ -6,6 +6,7 @@ namespace Nocturne.Infrastructure.Data.Tests.Rls;
 /// <see cref="SoftDeleteDedupExtensions.GetHeldOriginalIdsAsync{TEntity}"/> lifts the soft-delete
 /// filter to see user tombstones, so the tenant predicate it re-applies and row level security are all
 /// that keep another tenant's rows out. Run as <c>nocturne_app</c> against the migrated schema.
+/// Activity is stored across these four tables under its id.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("RLS completeness")]
@@ -33,6 +34,14 @@ public class OriginalIdHeldLookupTests(RlsCompletenessFixture fx)
         AssertHeldAsync(id => new StepCountEntity
         {
             Id = Guid.CreateVersion7(), Timestamp = DateTime.UtcNow.AddHours(-3), Metric = 800, OriginalId = id,
+        });
+
+    [Fact]
+    public Task SleepSessions_HoldLiveRowsAndUserTombstones() =>
+        AssertHeldAsync(id => new SleepSessionEntity
+        {
+            Id = Guid.CreateVersion7(), StartTime = DateTime.UtcNow.AddHours(-9), EndTime = DateTime.UtcNow.AddHours(-1),
+            Source = "Synthetic", Type = "Overnight", DetectionMethod = "Auto", OriginalId = id,
         });
 
     private async Task AssertHeldAsync<TEntity>(Func<string, TEntity> row)
