@@ -273,22 +273,12 @@ public class ActivityService : IActivityService
 
             var results = new List<Activity>();
 
-            // Process sensor data through decomposer (NOT stored as StateSpans)
+            // No catch here: the outer handler logs the failure and rethrows it, so the uploader
+            // gets an error and does not advance its sync marker past a record never stored.
             foreach (var sensorActivity in sensorDataActivities)
             {
-                try
-                {
-                    await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
-                    results.Add(sensorActivity);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(
-                        ex,
-                        "Failed to decompose sensor data activity {Id}",
-                        sensorActivity.Id
-                    );
-                }
+                await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
+                results.Add(sensorActivity);
             }
 
             // Route sleep-type activities to the dedicated sleep_sessions table
@@ -303,9 +293,9 @@ public class ActivityService : IActivityService
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    // Mirror the sensor-data branch: log and skip the failed record
-                    // rather than failing the whole batch. Covers the rare upsert
-                    // unique-constraint conflict (concurrent sync of the same record).
+                    // Log and skip the failed record rather than failing the whole batch.
+                    // Covers the rare upsert unique-constraint conflict (concurrent sync of
+                    // the same record).
                     _logger.LogError(
                         ex,
                         "Failed to create sleep session from activity {Id}",

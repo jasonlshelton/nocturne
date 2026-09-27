@@ -280,6 +280,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         var activity = new Activity
         {
             Id = heartRate.Id,
+            Type = heartRate.Type,
             Mills = heartRate.Mills,
             CreatedAt = heartRate.CreatedAt,
             UtcOffset = heartRate.UtcOffset,
@@ -308,6 +309,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         var activity = new Activity
         {
             Id = stepCount.Id,
+            Type = stepCount.Type,
             Mills = stepCount.Mills,
             CreatedAt = stepCount.CreatedAt,
             UtcOffset = stepCount.UtcOffset,
@@ -329,7 +331,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
     /// <summary>
     /// Create-or-update keyed on the legacy <c>OriginalId</c>, or, for a record with no id, on its
-    /// sync key when <see cref="MapToStepCount"/> gave it one. Heart rates and step counts have no
+    /// sync key when <see cref="MapToHeartRate"/> or <see cref="MapToStepCount"/> gave it one. Heart rates and step counts have no
     /// V4 repository, so unlike its <see cref="DecomposerBase.UpsertByLegacyIdAsync"/> siblings this
     /// writes the entity through the context.
     /// </summary>
@@ -459,13 +461,19 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
     // --- Mapping helpers ---
 
+    /// <summary>
+    /// Maps a heart-rate activity. An xDrip <c>hr-bpm</c> record without an id gets a sync key built
+    /// from its time: xDrip keeps one reading per timestamp and resends the newest reading of each
+    /// sync cycle, so a resend updates the stored row.
+    /// </summary>
     internal static HeartRate MapToHeartRate(Activity activity)
     {
         var props = activity.AdditionalProperties ?? new Dictionary<string, object>();
 
-        return new HeartRate
+        var heartRate = new HeartRate
         {
             Id = activity.Id,
+            Type = activity.Type,
             Mills = activity.Mills,
             Bpm = GetIntValue(props, "bpm"),
             Accuracy = GetIntValue(props, "accuracy"),
@@ -475,6 +483,15 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
             UtcOffset = activity.UtcOffset,
             DataSource = activity.DataSource,
         };
+
+        if (activity.Id is null && activity.Mills > 0
+            && string.Equals(activity.Type, XDripHeartRateType, StringComparison.OrdinalIgnoreCase))
+        {
+            heartRate.DataSource ??= DataSources.XDrip;
+            heartRate.SyncIdentifier = $"{XDripHeartRateType}:{activity.Mills}";
+        }
+
+        return heartRate;
     }
 
     /// <summary>
@@ -493,6 +510,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         var stepCount = new StepCount
         {
             Id = activity.Id,
+            Type = activity.Type,
             Mills = activity.Mills,
             Metric = hasMetric ? GetIntValue(props, "metric") : GetIntValue(props, "steps"),
             // StepCount.Source is the absolute/delta bitmask, not provenance — that is DataSource.
@@ -512,6 +530,8 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
         return stepCount;
     }
+
+    private const string XDripHeartRateType = "hr-bpm";
 
     private static int GetIntValue(Dictionary<string, object> props, string key) =>
         GetLongValue(props, key) is var l and >= int.MinValue and <= int.MaxValue ? (int)l : 0;
