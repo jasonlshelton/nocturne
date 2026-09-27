@@ -5,6 +5,9 @@
 //
 // Queries honour what the Nightscout connector sends: `count`, `find[date][$gte|$lte]` on
 // entries and `find[created_at][$gte|$lte]` (string comparison, as Mongo does) elsewhere.
+//
+// `POST /nightscout/__activity-backfill` makes the instance also serve an activity dated three
+// hours back, as a health app syncing late would upload it; `DELETE` withdraws it again.
 
 import type { Vendor, VendorReply, VendorRequest } from "./vendor.ts";
 
@@ -60,6 +63,21 @@ export function treatments(now = Date.now()) {
     { _id: "e2e-t-temp", identifier: "e2e-t-temp", eventType: "Temp Basal", duration: 30, absolute: 1.2, rate: 1.2, temp: "absolute", ...at(12), enteredBy: DEVICE },
     { _id: "e2e-t-site", identifier: "e2e-t-site", eventType: "Site Change", ...at(20), enteredBy: DEVICE },
   ].sort((a, b) => b.mills - a.mills);
+}
+
+export const ACTIVITY_ID = "e2e0a0000000000000000001";
+export const BACKFILLED_ACTIVITY_ID = "e2e0a0000000000000000002";
+let activityBackfilled = false;
+
+export function activity(now = Date.now()) {
+  const minute = 60 * 1000;
+  const base = Math.floor(now / minute) * minute;
+  const at = (minutesAgo: number) => new Date(base - minutesAgo * minute).toISOString();
+  const rows = [{ _id: ACTIVITY_ID, type: "exercise", duration: 30, notes: "e2e walk", created_at: at(20), enteredBy: DEVICE }];
+  if (activityBackfilled) {
+    rows.push({ _id: BACKFILLED_ACTIVITY_ID, type: "exercise", duration: 45, notes: "e2e late upload", created_at: at(180), enteredBy: DEVICE });
+  }
+  return rows;
 }
 
 const profile = [
@@ -125,6 +143,10 @@ const ok = (body: unknown): VendorReply => ({ status: 200, body });
 export const nightscout: Vendor = {
   handle(request: VendorRequest): VendorReply {
     if (request.path === "/api/v1/status.json") return ok(status());
+    if (request.path === "/__activity-backfill") {
+      activityBackfilled = request.method === "POST";
+      return { status: 204, body: "" };
+    }
     if (request.headers["api-secret"]?.toLowerCase() !== NIGHTSCOUT_API_SECRET_HEADER) {
       return { status: 401, body: { status: 401, message: "Unauthorized" } };
     }
@@ -135,9 +157,10 @@ export const nightscout: Vendor = {
         return ok(limit(entries().filter(byDate(request.query)), request.query));
       case "/api/v1/treatments.json":
         return ok(limit(treatments().filter(byCreatedAt(request.query)), request.query));
+      case "/api/v1/activity.json":
+        return request.method === "GET" ? ok(limit(activity().filter(byCreatedAt(request.query)), request.query)) : ok([]);
       case "/api/v1/devicestatus.json":
       case "/api/v1/food.json":
-      case "/api/v1/activity.json":
         return ok([]);
       case "/api/v1/profile.json":
         return ok(profile);

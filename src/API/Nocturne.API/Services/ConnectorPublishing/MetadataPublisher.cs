@@ -4,6 +4,7 @@ using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Connectors;
@@ -208,6 +209,37 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
             Logger.LogError(ex, "Failed to publish activities for {Source}", source);
             return false;
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// An activity is stored as a state span, heart rate, step count or sleep session, each carrying
+    /// the activity's id as its <c>OriginalId</c>. Sleep sessions are hard-deleted, so a sleep
+    /// session the user deleted leaves nothing to hold its id.
+    /// </remarks>
+    public Task<int?> PublishRecentActivityAsync(
+        IEnumerable<Activity> activities,
+        string source,
+        WriteOrigin origin, CancellationToken cancellationToken = default)
+        => PublishUnheldAsync(
+            activities, a => a.Id,
+            unheld => PublishActivityAsync(unheld, source, origin, cancellationToken),
+            source,
+            ids => _db.GetHeldOriginalIdsAsync<StateSpanEntity>(ids, cancellationToken),
+            ids => _db.GetHeldOriginalIdsAsync<HeartRateEntity>(ids, cancellationToken),
+            ids => _db.GetHeldOriginalIdsAsync<StepCountEntity>(ids, cancellationToken),
+            ids => HeldSleepSessionIdsAsync(ids, cancellationToken));
+
+    private async Task<IReadOnlySet<string>> HeldSleepSessionIdsAsync(
+        IReadOnlyCollection<string> originalIds, CancellationToken cancellationToken)
+    {
+        var ids = originalIds.ToList();
+        var held = await _db.SleepSessions.AsNoTracking()
+            .Where(s => s.OriginalId != null && ids.Contains(s.OriginalId))
+            .Select(s => s.OriginalId!)
+            .ToListAsync(cancellationToken);
+
+        return held.ToHashSet(StringComparer.Ordinal);
     }
 
     public async Task<bool> PublishStateSpansAsync(

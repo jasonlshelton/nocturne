@@ -81,6 +81,32 @@ public static class SoftDeleteDedupExtensions
     }
 
     /// <summary>
+    /// The ids among <paramref name="originalIds"/> a re-upload would find held, per
+    /// <see cref="WhereBlocksRecreation{TEntity}"/>, on a table keyed by <c>OriginalId</c> rather than
+    /// <c>LegacyId</c>.
+    /// </summary>
+    public static async Task<IReadOnlySet<string>> GetHeldOriginalIdsAsync<TEntity>(
+        this NocturneDbContext ctx,
+        IReadOnlyCollection<string> originalIds,
+        CancellationToken ct = default)
+        where TEntity : class, ITenantScoped, ISoftDeletable, IOriginalIdentified
+    {
+        if (originalIds.Count == 0)
+            return RecreationBlocks<string>.None.Held;
+
+        var ids = originalIds.ToList();
+        var held = await ctx.Set<TEntity>().IgnoreQueryFilters().AsNoTracking()
+            .Where(e => e.TenantId == ctx.TenantId
+                     && e.OriginalId != null
+                     && ids.Contains(e.OriginalId))
+            .WhereBlocksRecreation()
+            .Select(e => e.OriginalId!)
+            .ToListAsync(ct);
+
+        return held.ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// The legacy ids among <paramref name="incoming"/> that must not be inserted: as the id-set
     /// overload, except that a user tombstone does not hold a legacy id against a row that
     /// <see cref="TreatmentClientId.IsDifferentRecord"/> says is another client record. The unique
