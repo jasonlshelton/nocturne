@@ -70,34 +70,31 @@ public class SleepSessionRepository : ISleepSessionRepository
         return await ctx.ExecuteInTransactionAsync(async token =>
         {
             var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
-            await LockUpsertKeyAsync(ctx, entity, token);
 
-            // Dedup by Source + OriginalId. When a prior sync of the same source
-            // record exists, replace its contents in place: keep its primary key
-            // so re-syncs don't churn the session id (and any reference to it).
-            SleepSessionEntity? existing = null;
+            // Dedup by Source + OriginalId first: a re-sync of the same source record replaces
+            // that row and keeps its primary key, so the session id (and any reference to it)
+            // does not churn. Otherwise dedup by the primary key, which the mapper derives from
+            // an incoming session Id, so an upsert carrying an existing session's Id (with a null
+            // or different OriginalId) replaces that row rather than inserting a duplicate key.
             if (!string.IsNullOrEmpty(entity.OriginalId))
             {
-                existing = await ctx.SleepSessions
-                    .Include(s => s.Stages)
-                    .Include(s => s.BiometricSamples)
-                    .FirstOrDefaultAsync(
-                        s => s.Source == entity.Source && s.OriginalId == entity.OriginalId,
-                        token);
+                await LockAsync(ctx, $"{ctx.TenantId}|{entity.Source}|{entity.OriginalId}", token);
+                var bySourceRecord = await ctx.SleepSessions
+                    .AsNoTracking()
+                    .Where(s => s.Source == entity.Source && s.OriginalId == entity.OriginalId)
+                    .Select(s => (Guid?)s.Id)
+                    .FirstOrDefaultAsync(token);
+                entity.Id = bySourceRecord ?? entity.Id;
             }
 
-            // Dedup by primary key. The mapper derives a deterministic entity Id
-            // from an incoming session Id, so an upsert carrying an existing
-            // session's Id (with a null or different OriginalId) must replace
-            // that row rather than insert a duplicate key.
-            existing ??= await ctx.SleepSessions
+            await LockIdAsync(ctx, entity.Id, token);
+            var existing = await ctx.SleepSessions
                 .Include(s => s.Stages)
                 .Include(s => s.BiometricSamples)
                 .FirstOrDefaultAsync(s => s.Id == entity.Id, token);
 
             if (existing is not null)
             {
-                entity.Id = existing.Id;
                 ctx.SleepBiometricSamples.RemoveRange(existing.BiometricSamples);
                 ctx.SleepStages.RemoveRange(existing.Stages);
                 ctx.SleepSessions.Remove(existing);
@@ -116,22 +113,24 @@ public class SleepSessionRepository : ISleepSessionRepository
     private const int UpsertLockClass = 0x534C_5550;
 
     /// <summary>
-    /// Serialises upserts of one dedup key, so a concurrent duplicate waits for the first to commit
-    /// and then replaces its row rather than failing the unique index or deleting a row already
-    /// gone. A PostgreSQL transaction-scoped advisory lock; other providers take nothing. Two keys
-    /// whose hashes collide only wait for each other.
+    /// Serialises writers of one sleep-session key, so a concurrent duplicate waits for the first
+    /// to commit and then replaces its row rather than failing a unique index or deleting a row
+    /// already gone. A PostgreSQL transaction-scoped advisory lock; other providers take nothing.
+    /// Two keys whose hashes collide only wait for each other. A writer takes the source-record key
+    /// before the primary-key key and never the reverse, so two writers cannot deadlock.
     /// </summary>
-    private static async Task LockUpsertKeyAsync(NocturneDbContext ctx, SleepSessionEntity entity, CancellationToken ct)
+    private static async Task LockAsync(NocturneDbContext ctx, string key, CancellationToken ct)
     {
         if (!ctx.Database.IsNpgsql())
             return;
 
-        var key = string.IsNullOrEmpty(entity.OriginalId)
-            ? $"{entity.TenantId}|id|{entity.Id}"
-            : $"{entity.TenantId}|{entity.Source}|{entity.OriginalId}";
         await ctx.Database.ExecuteSqlAsync(
             $"SELECT pg_advisory_xact_lock({UpsertLockClass}, hashtext({key}))", ct);
     }
+
+    /// <summary>The primary-key half of <see cref="LockAsync"/>, taken last.</summary>
+    private static Task LockIdAsync(NocturneDbContext ctx, Guid id, CancellationToken ct) =>
+        LockAsync(ctx, $"{ctx.TenantId}|id|{id}", ct);
 
     /// <inheritdoc />
     public async Task<SleepSession?> UpdateSessionAsync(Guid id, SleepSession session, CancellationToken cancellationToken = default)
@@ -139,6 +138,7 @@ public class SleepSessionRepository : ISleepSessionRepository
         await using var ctx = await _contextFactory.CreateAsync(cancellationToken);
         return await ctx.ExecuteInTransactionAsync<SleepSession?>(async token =>
         {
+            await LockIdAsync(ctx, id, token);
             var existing = await ctx.SleepSessions
                 .Include(s => s.Stages)
                 .Include(s => s.BiometricSamples)

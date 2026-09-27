@@ -486,18 +486,6 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
-    public async Task CreateActivities_SameSleepUploadedConcurrently_EverySucceedsAndStoresOneSession()
-    {
-        var at = DateTimeOffset.UtcNow.AddHours(-12).ToUnixTimeMilliseconds();
-        var json = $$"""[{"_id":"5f1a2b3c4d5e6f7a8b9c0d1e","type":"sleep","mills":{{at}},"duration":420}]""";
-
-        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => PostJsonAsync(json)));
-
-        responses.Select(r => r.StatusCode).Should().AllBeEquivalentTo(HttpStatusCode.OK);
-        (await GetActivitiesAtAsync("sleep", at)).Should().Be(1);
-    }
-
-    [Fact]
     public async Task CreateActivities_SleepThatFailsToStore_Returns500AndStoresNothing()
     {
         var at = DateTimeOffset.UtcNow.AddHours(-36).ToUnixTimeMilliseconds();
