@@ -78,7 +78,7 @@ public class SleepSessionRepository : ISleepSessionRepository
             // or different OriginalId) replaces that row rather than inserting a duplicate key.
             if (!string.IsNullOrEmpty(entity.OriginalId))
             {
-                await LockAsync(ctx, $"{ctx.TenantId}|{entity.Source}|{entity.OriginalId}", token);
+                await LockSourceRecordAsync(ctx, entity, token);
                 var bySourceRecord = await ctx.SleepSessions
                     .AsNoTracking()
                     .Where(s => s.Source == entity.Source && s.OriginalId == entity.OriginalId)
@@ -128,6 +128,10 @@ public class SleepSessionRepository : ISleepSessionRepository
             $"SELECT pg_advisory_xact_lock({UpsertLockClass}, hashtext({key}))", ct);
     }
 
+    /// <summary>The source-record half of <see cref="LockAsync"/>, taken first.</summary>
+    private static Task LockSourceRecordAsync(NocturneDbContext ctx, SleepSessionEntity entity, CancellationToken ct) =>
+        LockAsync(ctx, $"{ctx.TenantId}|{entity.Source}|{entity.OriginalId}", ct);
+
     /// <summary>The primary-key half of <see cref="LockAsync"/>, taken last.</summary>
     private static Task LockIdAsync(NocturneDbContext ctx, Guid id, CancellationToken ct) =>
         LockAsync(ctx, $"{ctx.TenantId}|id|{id}", ct);
@@ -138,6 +142,10 @@ public class SleepSessionRepository : ISleepSessionRepository
         await using var ctx = await _contextFactory.CreateAsync(cancellationToken);
         return await ctx.ExecuteInTransactionAsync<SleepSession?>(async token =>
         {
+            var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
+            entity.Id = id;
+            if (!string.IsNullOrEmpty(entity.OriginalId))
+                await LockSourceRecordAsync(ctx, entity, token);
             await LockIdAsync(ctx, id, token);
             var existing = await ctx.SleepSessions
                 .Include(s => s.Stages)
@@ -153,8 +161,6 @@ public class SleepSessionRepository : ISleepSessionRepository
             ctx.SleepSessions.Remove(existing);
             await ctx.SaveChangesAsync(token);
 
-            var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
-            entity.Id = id;
             ctx.SleepSessions.Add(entity);
             await ctx.SaveChangesAsync(token);
             return SleepSessionMapper.ToDomainModel(entity, includeChildren: true);

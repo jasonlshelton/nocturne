@@ -12,9 +12,9 @@ using Xunit.Abstractions;
 namespace Nocturne.API.Tests.Integration;
 
 /// <summary>
-/// Two upserts of one sleep session, the first held uncommitted until the second is blocked. The
-/// second must wait on the first and then replace its row; without the upsert lock it misses the
-/// uncommitted row, inserts, and fails the unique index once the first commits.
+/// Two writes of one sleep session, the first held uncommitted until the second is blocked. The
+/// second must wait on the first and then replace its row; without the session locks it misses the
+/// uncommitted row, inserts, and fails a unique index once the first commits.
 /// </summary>
 [Trait("Category", "Integration")]
 public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
@@ -26,10 +26,10 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
     public async Task UpsertSessionAsync_SameSourceRecordWhileFirstUncommitted_WaitsAndReplacesIt()
     {
         var (first, second) = await RaceAsync(
-            Session(id: null, originalId: "sleep-race-source", score: 70),
-            Session(id: null, originalId: "sleep-race-source", score: 90));
+            repo => repo.UpsertSessionAsync(Session(id: null, originalId: "sleep-race-source", score: 70)),
+            repo => repo.UpsertSessionAsync(Session(id: null, originalId: "sleep-race-source", score: 90)));
 
-        second.Id.Should().Be(first.Id);
+        second.Id.Should().Be(first!.Id);
         (await StoredAsync()).Should().ContainSingle()
             .Which.Should().Be((Guid.Parse(first.Id!), (string?)"sleep-race-source", (short?)90));
     }
@@ -40,31 +40,58 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
         var id = Guid.CreateVersion7();
 
         var (first, second) = await RaceAsync(
-            Session(id: id, originalId: "sleep-race-by-id", score: 70),
-            Session(id: id, originalId: null, score: 90));
+            repo => repo.UpsertSessionAsync(Session(id: id, originalId: "sleep-race-by-id", score: 70)),
+            repo => repo.UpsertSessionAsync(Session(id: id, originalId: null, score: 90)));
 
-        first.Id.Should().Be(id.ToString());
+        first!.Id.Should().Be(id.ToString());
         second.Id.Should().Be(id.ToString());
         (await StoredAsync()).Should().ContainSingle().Which.Should().Be((id, (string?)null, (short?)90));
     }
 
-    private async Task<(SleepSession First, SleepSession Second)> RaceAsync(SleepSession first, SleepSession second)
+    [Fact]
+    public async Task UpsertSessionAsync_SourceRecordAnUncommittedUpdateIsMovingOntoARow_WaitsAndReplacesThatRow()
+    {
+        SleepSession stored;
+        await using (var seed = Fixture.CreateDbContext(Fixture.TenantId))
+        {
+            stored = await Repository(new TestTenantDbContextFactory(seed))
+                .UpsertSessionAsync(Session(id: null, originalId: "sleep-race-before-update", score: 60));
+        }
+        var storedId = Guid.Parse(stored.Id!);
+
+        var (_, upserted) = await RaceAsync(
+            repo => repo.UpdateSessionAsync(storedId, Session(id: null, originalId: "sleep-race-after-update", score: 70)),
+            repo => repo.UpsertSessionAsync(Session(id: null, originalId: "sleep-race-after-update", score: 90)));
+
+        upserted.Id.Should().Be(stored.Id);
+        (await StoredAsync()).Should().ContainSingle()
+            .Which.Should().Be((storedId, (string?)"sleep-race-after-update", (short?)90));
+    }
+
+    private async Task<(TFirst First, SleepSession Second)> RaceAsync<TFirst>(
+        Func<SleepSessionRepository, Task<TFirst>> first,
+        Func<SleepSessionRepository, Task<SleepSession>> second)
     {
         TestTenantDbContextFactory contexts;
         await using (var seed = Fixture.CreateDbContext(Fixture.TenantId))
             contexts = new TestTenantDbContextFactory(seed);
         var held = await contexts.CreateAsync();
         var racer = await contexts.CreateAsync();
+        Task<SleepSession>? secondTask = null;
         try
         {
-            Task<SleepSession>? secondTask = null;
+            await racer.Database.OpenConnectionAsync();
+            var racerPid = await racer.Database
+                .SqlQuery<int>($"""SELECT pg_backend_pid() AS "Value" """)
+                .SingleAsync();
+
             var firstResult = await held.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
             {
                 await using var transaction = await held.Database.BeginTransactionAsync();
-                var result = await new SleepSessionRepository(new Pinned(held)).UpsertSessionAsync(first);
+                var result = await first(Repository(new Pinned(held)));
 
-                secondTask = new SleepSessionRepository(new Pinned(racer)).UpsertSessionAsync(second);
-                await WaitUntilABackendWaitsOnALockAsync(secondTask);
+                secondTask = second(Repository(new Pinned(racer)));
+                await WaitUntilBlockedOnALockAsync(racerPid, secondTask);
 
                 await transaction.CommitAsync();
                 return result;
@@ -73,33 +100,43 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
         }
         finally
         {
+            if (secondTask is not null)
+            {
+                try
+                {
+                    await secondTask.WaitAsync(TimeSpan.FromSeconds(30));
+                }
+                catch
+                {
+                    // Already reported by the await above, or superseded by the failure in flight.
+                }
+            }
             await held.Database.CloseConnectionAsync();
             await racer.Database.CloseConnectionAsync();
         }
     }
 
-    private async Task WaitUntilABackendWaitsOnALockAsync(Task racing)
+    private async Task WaitUntilBlockedOnALockAsync(int pid, Task racing)
     {
         await using var probe = Fixture.CreateDbContext(Fixture.TenantId);
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
             if (racing.IsCompleted)
-                throw new InvalidOperationException("The second upsert finished while the first was uncommitted", racing.Exception);
+                throw new InvalidOperationException("The second write finished while the first was uncommitted", racing.Exception);
 
-            var waiting = await probe.Database
-                .SqlQuery<int>($"""
-                    SELECT count(*)::int AS "Value" FROM pg_stat_activity
-                    WHERE datname = current_database() AND wait_event_type = 'Lock'
+            var blocked = await probe.Database
+                .SqlQuery<bool>($"""
+                    SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = {pid} AND wait_event_type = 'Lock') AS "Value"
                     """)
                 .SingleAsync();
-            if (waiting > 0)
+            if (blocked)
                 return;
 
             await Task.Delay(20);
         }
 
-        throw new TimeoutException("The second upsert never blocked on the first");
+        throw new TimeoutException("The second write never blocked on the first");
     }
 
     private async Task<List<(Guid Id, string? OriginalId, short? SleepScore)>> StoredAsync()
@@ -109,6 +146,8 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
             .Select(s => (s.Id, s.OriginalId, s.SleepScore))
             .ToList();
     }
+
+    private static SleepSessionRepository Repository(ITenantDbContextFactory contexts) => new(contexts);
 
     private static SleepSession Session(Guid? id, string? originalId, short score) => new()
     {
