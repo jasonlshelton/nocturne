@@ -146,6 +146,8 @@ public class FoodHistoryTests : IDisposable
         food.Carbs.Should().Be(12);
         food.IsValid.Should().BeNull();
         (await _context.Foods.IgnoreQueryFilters().CountAsync()).Should().Be(1);
+        (await _context.Foods.Select(f => EF.Property<bool>(f, "DeletedByUser")).SingleAsync())
+            .Should().BeFalse("a restored food is live again, and its next delete is judged afresh");
     }
 
     private sealed class UserAuditContext : IAuditContext

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Events;
+using Nocturne.Core.Contracts.Infrastructure;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
@@ -442,6 +443,7 @@ public abstract class V4RepositoryBase<TModel, TEntity>
             ?? throw new KeyNotFoundException($"{typeof(TModel).Name} {id} not found");
         entity.DeletedAt = DateTime.UtcNow;
         await ctx.SaveChangesAsync(ct);
+        await RepointPrimariesAwayFromAsync([id], ct);
         var model = ToDomain(entity);
         await RaiseBroadcastAsync([], [], [model], origin, ct);
     }
@@ -487,6 +489,44 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     protected internal virtual RecordType? DedupRecordType => null;
 
     /// <summary>
+    /// The deduplication service of a type that takes part in deduplication
+    /// (<see cref="DedupRecordType"/>), or null.
+    /// </summary>
+    protected virtual IDeduplicationService? Deduplication => null;
+
+    /// <summary>
+    /// Moves the primary of every duplicate group one of <paramref name="deletedIds"/> belonged to
+    /// onto a live member, and moves that member's <c>SysUpdatedAt</c>. Reads show a group through
+    /// its primary, so a deleted primary would hide the other sources' copies from every read; and
+    /// the promoted copy's own row did not change, so a v3 history client would never be sent it.
+    /// </summary>
+    private async Task RepointPrimariesAwayFromAsync(IReadOnlyCollection<Guid> deletedIds, CancellationToken ct)
+    {
+        if (DedupRecordType is not { } recordType || Deduplication is not { } deduplication || deletedIds.Count == 0)
+            return;
+
+        await deduplication.RepointPrimariesAwayFromAsync(recordType, deletedIds, ct);
+
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var key = RecordTypeKeys.Key(recordType);
+        var ids = deletedIds.ToList();
+        var groups = ctx.LinkedRecords
+            .Where(lr => lr.RecordType == key && ids.Contains(lr.RecordId))
+            .Select(lr => lr.CanonicalId);
+        var primaries = ctx.LinkedRecords
+            .Where(lr => lr.RecordType == key && lr.IsPrimary && groups.Contains(lr.CanonicalId))
+            .Select(lr => lr.RecordId);
+        var promoted = await ctx.Set<TEntity>().Where(e => primaries.Contains(e.Id)).ToListAsync(ct);
+        if (promoted.Count == 0)
+            return;
+
+        var stamp = NocturneDbContext.UtcNowAtStoredPrecision();
+        foreach (var entity in promoted)
+            entity.SysUpdatedAt = stamp;
+        await ctx.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
     /// Applies <see cref="ReadVisibilityFilter.ExcludeNonPrimary{TEntity}"/> for
     /// <see cref="DedupRecordType"/>. Every read path of a dedup participant routes through this so
     /// its counts and its rows agree.
@@ -527,6 +567,14 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     {
         var result = await ctx.AuditedSoftDeleteWithEntitiesAsync(rows, AuditContext, scope, ct);
 
+        if (Deduplication is not null && result.Count > 0)
+        {
+            var ids = result.Collapsed
+                ? await rows.IncludingDeleted().Where(e => e.DeletedAt != null).Select(e => e.Id).ToListAsync(ct)
+                : result.Entities.Select(e => e.Id).ToList();
+            await RepointPrimariesAwayFromAsync(ids, ct);
+        }
+
         if (result.Collapsed)
             await RaiseBulkDeleteBroadcastAsync(result.Count, origin, ct);
         else
@@ -538,16 +586,18 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     /// <inheritdoc cref="ILegacyKeyedRepository{TRecord}.GetModifiedSinceAsync" />
     /// <remarks>
     /// Pages on <c>sys_updated_at</c>, the column <see cref="ToDomain"/> reports as
-    /// <see cref="IV4Record.ModifiedAt"/>, through <see cref="HistoryPage"/>, under the same
-    /// <see cref="ApplyReadVisibility"/> every other read of this type observes, with the soft-delete
-    /// filter lifted.
+    /// <see cref="IV4Record.ModifiedAt"/>, through <see cref="HistoryPage"/>, with the soft-delete
+    /// filter lifted. Live rows observe the same <see cref="ApplyReadVisibility"/> every other read
+    /// of this type does; deleted rows are all delivered.
     /// </remarks>
     public async Task<IReadOnlyList<HistoryRecord<TModel>>> GetModifiedSinceAsync(
         long cursorMills, int limit, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entities = await HistoryPage.GetAsync(
-            ApplyReadVisibility(ctx.Set<TEntity>().IncludingDeleted().AsNoTracking(), ctx),
+            DedupRecordType is { } recordType
+                ? ctx.Set<TEntity>().IncludingDeleted().AsNoTracking().ExcludeNonPrimaryKeepingDeleted(ctx, recordType)
+                : ctx.Set<TEntity>().IncludingDeleted().AsNoTracking(),
             e => e.SysUpdatedAt,
             e => e.Id,
             cursorMills,

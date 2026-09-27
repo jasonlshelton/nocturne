@@ -50,6 +50,9 @@ public class NoteRepository : SyncUpsertRepositoryBase<Note, NoteEntity>, INoteR
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.Note;
 
+    /// <inheritdoc />
+    protected override IDeduplicationService? Deduplication => _deduplicationService;
+
     /// <summary>
     /// Routes the base 7-arg form through the extended note query (non-primary LinkedRecords
     /// exclusion + ordering), preserving the pre-base default-interface bridge behaviour.

@@ -264,31 +264,25 @@ public static class AuditedBulkDeleteExtensions
                     .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete), ct);
         }
 
+        // The match set is read once and then updated by primary key a group at a time: re-running
+        // the filtered, ordered read for every group would rescan the remaining set each time.
         var live = query.Where(e => e.DeletedAt == null);
+        var ids = await live.Select(e => EF.Property<Guid>(e, "Id")).OrderBy(id => id).ToListAsync(ct);
         var total = 0;
-        for (var group = 0; ; group++)
+        foreach (var (group, index) in ids.Chunk(NocturneDbContext.SystemTimestampGroupSize).Select((g, i) => (g, i)))
         {
-            var ids = await live
-                .Select(e => EF.Property<Guid>(e, "Id"))
-                .OrderBy(id => id)
-                .Take(NocturneDbContext.SystemTimestampGroupSize)
-                .ToListAsync(ct);
-            if (ids.Count == 0)
-                return total;
-
-            var stamp = deletedAt.AddMilliseconds(group);
+            var stamp = deletedAt.AddMilliseconds(index);
             total += await live
-                .Where(e => ids.Contains(EF.Property<Guid>(e, "Id")))
+                .Where(e => group.Contains(EF.Property<Guid>(e, "Id")))
                 .ExecuteUpdateAsync(
                     s => s
                         .SetProperty(e => e.DeletedAt, deletedAt)
                         .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete)
                         .SetProperty(e => EF.Property<DateTime>(e, nameof(ISystemTimestamped.SysUpdatedAt)), stamp),
                     ct);
-
-            if (ids.Count < NocturneDbContext.SystemTimestampGroupSize)
-                return total;
         }
+
+        return total;
     }
 
     /// <summary>

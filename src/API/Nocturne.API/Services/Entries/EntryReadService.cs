@@ -397,6 +397,8 @@ public class EntryReadService : IEntryStore
     /// <see cref="ResolveDemoFilter"/> sets it, and only the canonical stream's sgv readings. A deleted
     /// row is delivered whatever the canonical selection, with <c>isValid: false</c>: the reading it
     /// was may have been delivered while it won, and a client that never saw it ignores the delete.
+    /// Each bucket a deleted reading leaves also sends its canonical reading again
+    /// (<see cref="CanonicalSuccessorsAsync"/>).
     /// </summary>
     private async Task<List<Entry>> VisibleHistoryEntriesAsync(
         IReadOnlyList<HistoryRecord<IV4Record>> page, string? source, bool excludeDemo, CancellationToken ct)
@@ -413,7 +415,7 @@ public class EntryReadService : IEntryStore
             excludeDemo,
             ct);
 
-        return visible
+        var entries = visible
             .Where(r => r.Deleted || r.Record is not SensorGlucose sg || canonical.Contains(sg.Id))
             .Select(r =>
             {
@@ -427,6 +429,54 @@ public class EntryReadService : IEntryStore
                     entry.IsValid = false;
                 return entry;
             })
+            .ToList();
+
+        var inPage = page.Select(r => r.Record.Id).ToHashSet();
+        var deleted = visible.Where(r => r.Deleted).Select(r => r.Record).OfType<SensorGlucose>().ToList();
+        foreach (var (reading, stamp) in await CanonicalSuccessorsAsync(deleted, source, excludeDemo, ct))
+        {
+            if (!inPage.Add(reading.Id))
+                continue;
+            var entry = EntryProjection.FromSensorGlucose(reading);
+            entry.SrvModified = stamp;
+            entries.Add(entry);
+        }
+
+        return entries.OrderBy(e => e.SrvModified).ToList();
+    }
+
+    /// <summary>
+    /// The live canonical reading of every bucket one of the <paramref name="deleted"/> readings
+    /// reported into, stamped with the newest delete in that bucket. When the deleted reading won its
+    /// bucket, another stream's reading wins it now, and its own row never moved, so the client would
+    /// otherwise be left with a gap. Stamped at or below the page's newest row, a re-sent reading
+    /// leaves the cursor where the page put it.
+    /// </summary>
+    private async Task<List<(SensorGlucose Reading, long Stamp)>> CanonicalSuccessorsAsync(
+        IReadOnlyList<SensorGlucose> deleted, string? source, bool excludeDemo, CancellationToken ct)
+    {
+        if (deleted.Count == 0)
+            return [];
+
+        var size = CanonicalGlucoseStream.BucketSize.Ticks;
+        var stamps = deleted
+            .GroupBy(r => r.Timestamp.Ticks / size)
+            .ToDictionary(g => g.Key, g => g.Max(r => HistoryPage.ToMilliseconds(r.ModifiedAt)));
+
+        var window = new Dictionary<Guid, SensorGlucose>();
+        foreach (var (from, to) in CanonicalBucketRuns(deleted))
+        {
+            var stored = await _sgRepo.GetAsync(from, to, device: null, source, MaxFilterFetch, 0, false, false, null, null, ct);
+            foreach (var reading in ExcludeDemoIfNeeded(stored, excludeDemo))
+                window.TryAdd(reading.Id, reading);
+        }
+
+        if (window.Count == 0)
+            return [];
+
+        return (await _canonicalGlucose.SelectAsync(window.Values.ToList(), ct))
+            .Where(r => stamps.ContainsKey(r.Timestamp.Ticks / size))
+            .Select(r => (r, stamps[r.Timestamp.Ticks / size]))
             .ToList();
     }
 

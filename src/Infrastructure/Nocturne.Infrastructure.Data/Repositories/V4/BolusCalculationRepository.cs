@@ -53,6 +53,9 @@ public class BolusCalculationRepository : V4RepositoryBase<BolusCalculation, Bol
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.BolusCalculation;
 
+    /// <inheritdoc />
+    protected override IDeduplicationService? Deduplication => _deduplicationService;
+
     /// <summary>
     /// Gets bolus calculation records based on filter criteria.
     /// Deduplicates records using the <see cref="IDeduplicationService"/>.

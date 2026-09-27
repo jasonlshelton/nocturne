@@ -241,6 +241,7 @@ public class FoodRepository : IFoodRepository
                 // OriginalId has its own primary key, and copying the derived one onto it throws.
                 FoodMapper.UpdateEntity(existingEntity, food);
                 existingEntity.DeletedAt = null;
+                _context.Entry(existingEntity).Property("DeletedByUser").CurrentValue = false;
                 resultEntities.Add(existingEntity);
             }
             else

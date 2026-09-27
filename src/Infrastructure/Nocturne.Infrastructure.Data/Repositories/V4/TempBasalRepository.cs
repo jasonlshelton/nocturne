@@ -55,6 +55,9 @@ public class TempBasalRepository : SyncUpsertRepositoryBase<TempBasal, TempBasal
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.TempBasal;
 
+    /// <inheritdoc />
+    protected override IDeduplicationService? Deduplication => _deduplicationService;
+
     /// <summary>
     /// The base query with the non-primary LinkedRecords exclusion, which
     /// <see cref="V4RepositoryBase{TModel,TEntity}.CountAsync"/> applies too.

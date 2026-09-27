@@ -52,6 +52,9 @@ public class CarbIntakeRepository : SyncUpsertRepositoryBase<CarbIntake, CarbInt
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.CarbIntake;
 
+    /// <inheritdoc />
+    protected override IDeduplicationService? Deduplication => _deduplicationService;
+
     /// <summary>
     /// Routes the base 7-arg form through the extended carb-intake query (non-primary LinkedRecords
     /// exclusion + ordering), preserving the pre-base default-interface bridge behaviour.

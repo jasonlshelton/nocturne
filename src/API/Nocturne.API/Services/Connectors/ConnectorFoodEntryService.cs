@@ -104,6 +104,7 @@ public class ConnectorFoodEntryService : IConnectorFoodEntryService
                         foodEntity = existing;
                         UpdateFoodEntity(foodEntity, import.Food);
                         foodEntity.DeletedAt = null;
+                        _context.Entry(foodEntity).Property("DeletedByUser").CurrentValue = false;
                     }
                     else
                     {

@@ -40,6 +40,27 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
+    public async Task DeletedCanonicalEntry_SendsTheBucketsOtherStreamAgain()
+    {
+        await CreateAsync("entries", new { type = "sgv", sgv = 150, date = Date, device = "it-cgm-a", app = "it", utcOffset = 0 });
+        await CreateAsync("entries", new { type = "sgv", sgv = 151, date = Date + 30_000, device = "it-cgm-b", app = "it", utcOffset = 0 });
+
+        var (synced, cursor) = await HistoryAsync("entries", 0);
+        var winner = synced.Should().ContainSingle(doc => Number(doc, "sgv") == 150 || Number(doc, "sgv") == 151,
+            "overlapping streams deliver one canonical reading per bucket").Subject;
+        var otherSgv = Number(winner, "sgv") == 150 ? 151 : 150;
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v3/entries/{IdOf(winner)}")).IsSuccessStatusCode.Should().BeTrue();
+
+        var (next, nextCursor) = await HistoryAsync("entries", cursor);
+        next.Should().ContainSingle(doc => IdOf(doc) == IdOf(winner))
+            .Which.GetProperty("isValid").GetBoolean().Should().BeFalse();
+        var successor = next.Should().ContainSingle(doc => Number(doc, "sgv") == otherSgv).Subject;
+        successor.GetProperty("isValid").GetBoolean().Should().BeTrue();
+        successor.GetProperty("srvModified").GetInt64().Should().BeGreaterThan(cursor).And.BeLessThanOrEqualTo(nextCursor);
+    }
+
+    [Fact]
     public async Task DeletedTreatment_IsServedWithIsValidFalse()
     {
         await CreateAsync("treatments", new

@@ -31,8 +31,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
             {
                 ConcurrentIndexBuilder.Build(
                     migrationBuilder,
-                    $"ix_{table}_tenant_sys_updated_at",
-                    $"ON {table} (tenant_id, sys_updated_at, id) WHERE deleted_at IS NULL");
+                    $"ix_{table}_tenant_history",
+                    $"ON {table} (tenant_id, sys_updated_at, id)");
             }
         }
 
@@ -41,7 +41,7 @@ namespace Nocturne.Infrastructure.Data.Migrations
         {
             foreach (var table in HistoryPagedTables)
             {
-                ConcurrentIndexBuilder.Drop(migrationBuilder, $"ix_{table}_tenant_sys_updated_at");
+                ConcurrentIndexBuilder.Drop(migrationBuilder, $"ix_{table}_tenant_history");
             }
         }
     }

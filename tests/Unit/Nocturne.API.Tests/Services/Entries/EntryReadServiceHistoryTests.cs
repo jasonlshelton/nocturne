@@ -100,6 +100,33 @@ public class EntryReadServiceHistoryTests
     }
 
     [Fact]
+    public async Task DeletedCanonicalReading_SendsItsBucketsNewCanonicalReadingAgain_StampedWithTheDelete()
+    {
+        // Two streams reported into one bucket; "a-cgm" won and was delivered, then the user deleted
+        // it. "b-cgm" wins the bucket now, but its row is older than the cursor.
+        var at = Cursor.AddHours(-3);
+        var deletedAt = Cursor.AddMinutes(2);
+        var winner = Sg(at, written: deletedAt, source: "a-cgm");
+        var successor = Sg(at.AddMinutes(1), written: Cursor.AddHours(-3), source: "b-cgm");
+        ServeHistory(_sgRepo, new[] { winner }, deleted: [winner.Id]);
+        _sgRepo.Setup(r => r.GetAsync(
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<bool>(),
+                It.IsAny<DateTime?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .ReturnsAsync((DateTime? from, DateTime? to, string? _, string? _, int _, int _, bool _, bool _,
+                DateTime? _, Guid? _, CancellationToken _, Guid? _) =>
+                new[] { successor }.Where(r => r.Timestamp >= from && r.Timestamp <= to).ToList());
+
+        var page = await CreateSut(TestDoubles.CanonicalGlucosePassThrough.Create())
+            .GetModifiedSinceAsync(CursorMills, 1000);
+
+        page.Records.Select(e => (e.Id, e.IsValid, e.SrvModified)).Should().Equal(
+            (winner.Id.ToString(), (bool?)false, Mills(deletedAt)),
+            (successor.Id.ToString(), (bool?)true, Mills(deletedAt)));
+        page.CursorMills.Should().Be(Mills(deletedAt));
+    }
+
+    [Fact]
     public async Task DeletedReadings_AreDeliveredWithIsValidFalse_WhateverTheCanonicalSelection()
     {
         var deletedSg = Sg(Cursor.AddHours(-3), written: Cursor.AddMinutes(1), source: "b-cgm");
