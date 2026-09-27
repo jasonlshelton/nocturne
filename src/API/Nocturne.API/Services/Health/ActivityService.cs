@@ -273,35 +273,20 @@ public class ActivityService : IActivityService
 
             var results = new List<Activity>();
 
-            // No catch here: the outer handler logs the failure and rethrows it, so the uploader
-            // gets an error and does not advance its sync marker past a record never stored.
+            // No catch around the sensor and sleep writes: the outer handler logs a failure and
+            // rethrows it, so the uploader gets an error and does not advance its sync marker past
+            // a record never stored.
             foreach (var sensorActivity in sensorDataActivities)
             {
                 await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
                 results.Add(sensorActivity);
             }
 
-            // Route sleep-type activities to the dedicated sleep_sessions table
             foreach (var sleepActivity in sleepActivities)
             {
-                try
-                {
-                    var session = ActivityStateSpanMapper.ToSleepSession(sleepActivity);
-                    var created = await _sleepService.UpsertSessionAsync(session, cancellationToken);
-                    results.Add(ActivityStateSpanMapper.SleepSessionToActivity(created));
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    // Log and skip the failed record rather than failing the whole batch.
-                    // Covers the rare upsert unique-constraint conflict (concurrent sync of
-                    // the same record).
-                    _logger.LogError(
-                        ex,
-                        "Failed to create sleep session from activity {Id}",
-                        sleepActivity.Id
-                    );
-                }
+                var session = ActivityStateSpanMapper.ToSleepSession(sleepActivity);
+                var created = await _sleepService.UpsertSessionAsync(session, cancellationToken);
+                results.Add(ActivityStateSpanMapper.SleepSessionToActivity(created));
             }
 
             // Process regular activities through existing StateSpan path

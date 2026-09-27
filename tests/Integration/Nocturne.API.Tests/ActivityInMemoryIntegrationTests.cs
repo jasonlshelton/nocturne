@@ -485,6 +485,40 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
         (await GetHeartRateActivitiesAsync([at])).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CreateActivities_SameSleepUploadedConcurrently_EverySucceedsAndStoresOneSession()
+    {
+        var at = DateTimeOffset.UtcNow.AddHours(-12).ToUnixTimeMilliseconds();
+        var json = $$"""[{"_id":"5f1a2b3c4d5e6f7a8b9c0d1e","type":"sleep","mills":{{at}},"duration":420}]""";
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => PostJsonAsync(json)));
+
+        responses.Select(r => r.StatusCode).Should().AllBeEquivalentTo(HttpStatusCode.OK);
+        (await GetActivitiesAtAsync("sleep", at)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateActivities_SleepThatFailsToStore_Returns500AndStoresNothing()
+    {
+        var at = DateTimeOffset.UtcNow.AddHours(-36).ToUnixTimeMilliseconds();
+
+        var response = await PostJsonAsync(
+            $$"""[{"_id":"5f1a2b3c4d5e6f7a8b9c0d1f","type":"sleep","mills":{{at}},"duration":1e12}]""");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await GetActivitiesAtAsync("sleep", at)).Should().Be(0);
+    }
+
+    private async Task<int> GetActivitiesAtAsync(string type, long mills)
+    {
+        var response = await AuthenticatedClient.GetAsync("/api/v1/activity?count=1000", CancellationToken.None);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(CancellationToken.None));
+        return doc.RootElement.EnumerateArray().Count(a =>
+            a.TryGetProperty("type", out var t) && t.GetString() == type
+            && a.GetProperty("mills").GetInt64() == mills);
+    }
+
     private static string XDripHeartRates(params (long At, int Bpm)[] readings) =>
         "[" + string.Join(",", readings.Select(r =>
             $$"""{"type":"hr-bpm","timeStamp":{{r.At}},"created_at":"{{DateTimeOffset.FromUnixTimeMilliseconds(r.At):yyyy-MM-dd'T'HH:mm:ss'Z'}}","bpm":{{r.Bpm}}}""")) + "]";

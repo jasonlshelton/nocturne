@@ -6,7 +6,7 @@ import { seedTenant, type Tenant } from "../helpers/tenant.ts";
 
 const MINUTE = 60_000;
 
-interface HeartRateActivity {
+interface V1Activity {
   _id: string;
   type?: string;
   mills: number;
@@ -29,8 +29,8 @@ describe("xDrip+ heart-rate upload", () => {
     tenant = await seedTenant();
   });
 
-  async function storedAt(times: number[]): Promise<HeartRateActivity[]> {
-    const all = await tenant.api.ok<HeartRateActivity[]>("GET", "/api/v1/activity?count=1000");
+  async function storedAt(times: number[]): Promise<V1Activity[]> {
+    const all = await tenant.api.ok<V1Activity[]>("GET", "/api/v1/activity?count=1000");
     return all.filter((a) => a.bpm !== undefined && times.includes(a.mills)).sort((a, b) => a.mills - b.mills);
   }
 
@@ -58,5 +58,24 @@ describe("xDrip+ heart-rate upload", () => {
 
     expect(res.status).toBe(500);
     expect(await storedAt([at])).toEqual([]);
+  });
+});
+
+describe("concurrent sleep upload", () => {
+  let tenant: Tenant;
+
+  beforeAll(async () => {
+    tenant = await seedTenant();
+  });
+
+  it("answers every duplicate with 200 and stores one session", async () => {
+    const at = Date.now() - 12 * 60 * MINUTE;
+    const body = [{ _id: "5f1a2b3c4d5e6f7a8b9c0d2a", type: "sleep", mills: at, duration: 420 }];
+
+    const responses = await Promise.all(Array.from({ length: 6 }, () => tenant.api.request("POST", "/api/v1/activity", body)));
+
+    expect(responses.map((r) => r.status)).toEqual(Array(6).fill(200));
+    const all = await tenant.api.ok<V1Activity[]>("GET", "/api/v1/activity?count=1000");
+    expect(all.filter((a) => a.type === "sleep" && a.mills === at)).toHaveLength(1);
   });
 });

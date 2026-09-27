@@ -23,6 +23,8 @@ namespace Nocturne.API.Services.V4;
 /// <seealso cref="IDecomposer{T}"/>
 public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 {
+    private const string XDripHeartRateType = "hr-bpm";
+
     private readonly NocturneDbContext _dbContext;
     private readonly IStateSpanRepository _stateSpanRepository;
     private readonly ILogger<ActivityDecomposer> _logger;
@@ -530,8 +532,6 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
         return stepCount;
     }
-
-    private const string XDripHeartRateType = "hr-bpm";
 
     private static int GetIntValue(Dictionary<string, object> props, string key) =>
         GetLongValue(props, key) is var l and >= int.MinValue and <= int.MaxValue ? (int)l : 0;

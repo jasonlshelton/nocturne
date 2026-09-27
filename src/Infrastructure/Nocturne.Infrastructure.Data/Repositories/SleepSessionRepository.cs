@@ -70,6 +70,7 @@ public class SleepSessionRepository : ISleepSessionRepository
         return await ctx.ExecuteInTransactionAsync(async token =>
         {
             var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
+            await LockUpsertKeyAsync(ctx, entity, token);
 
             // Dedup by Source + OriginalId. When a prior sync of the same source
             // record exists, replace its contents in place: keep its primary key
@@ -107,6 +108,29 @@ public class SleepSessionRepository : ISleepSessionRepository
             await ctx.SaveChangesAsync(token);
             return SleepSessionMapper.ToDomainModel(entity, includeChildren: true);
         }, ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// First key of the two-key advisory lock form, naming the sleep-session upsert lock.
+    /// </summary>
+    private const int UpsertLockClass = 0x534C_5550;
+
+    /// <summary>
+    /// Serialises upserts of one dedup key, so a concurrent duplicate waits for the first to commit
+    /// and then replaces its row rather than failing the unique index or deleting a row already
+    /// gone. A PostgreSQL transaction-scoped advisory lock; other providers take nothing. Two keys
+    /// whose hashes collide only wait for each other.
+    /// </summary>
+    private static async Task LockUpsertKeyAsync(NocturneDbContext ctx, SleepSessionEntity entity, CancellationToken ct)
+    {
+        if (!ctx.Database.IsNpgsql())
+            return;
+
+        var key = string.IsNullOrEmpty(entity.OriginalId)
+            ? $"{entity.TenantId}|id|{entity.Id}"
+            : $"{entity.TenantId}|{entity.Source}|{entity.OriginalId}";
+        await ctx.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({UpsertLockClass}, hashtext({key}))", ct);
     }
 
     /// <inheritdoc />
