@@ -53,6 +53,10 @@ public interface ISleepService
     /// <summary>
     /// Updates an existing sleep session by ID.
     /// </summary>
+    /// <exception cref="V4.Repositories.RecreationBlockedException">
+    /// The update moves the session onto a source and original ID that another live session, or one
+    /// the user deleted, holds.
+    /// </exception>
     Task<SleepSession?> UpdateSessionAsync(Guid id, SleepSession session, CancellationToken cancellationToken = default);
 
     /// <summary>

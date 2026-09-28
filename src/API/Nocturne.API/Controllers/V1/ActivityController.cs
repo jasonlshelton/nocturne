@@ -6,6 +6,7 @@ using Nocturne.API.Extensions;
 using Nocturne.API.Helpers;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 
@@ -278,6 +279,10 @@ public class ActivityController : ControllerBase
                 return NotFound(new { error = $"Activity with ID {id} not found" });
 
             return Ok(updatedActivity);
+        }
+        catch (RecreationBlockedException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

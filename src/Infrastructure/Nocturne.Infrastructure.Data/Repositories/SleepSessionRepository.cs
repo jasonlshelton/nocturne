@@ -127,14 +127,39 @@ public class SleepSessionRepository : ISleepSessionRepository
             if (existing is null)
                 return null;
 
+            var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
+            entity.Id = id;
+
+            // The unique (tenant, source, original_id) index counts soft-deleted rows, so a move onto
+            // a key another row holds must settle that row first. A live row or a user tombstone keeps
+            // its key (see SoftDeleteDedupExtensions.WhereBlocksRecreation); a system sweep is replaced.
+            if (!string.IsNullOrEmpty(entity.OriginalId))
+            {
+                var holder = await WithSoftDeleted(ctx)
+                    .FirstOrDefaultAsync(
+                        s => s.Id != id && s.Source == entity.Source && s.OriginalId == entity.OriginalId, token);
+                if (holder is not null)
+                {
+                    if (holder.DeletedAt is null || ctx.Entry(holder).Property<bool>("DeletedByUser").CurrentValue)
+                    {
+                        throw new RecreationBlockedException(
+                            "sleep session",
+                            $"original id '{holder.OriginalId}' from '{holder.Source}'"
+                            + (holder.DeletedAt is null ? string.Empty : ", which the user deleted"));
+                    }
+
+                    ctx.SleepBiometricSamples.RemoveRange(holder.BiometricSamples);
+                    ctx.SleepStages.RemoveRange(holder.Stages);
+                    ctx.SleepSessions.Remove(holder);
+                }
+            }
+
             // Remove old entity and children, then insert updated version preserving the original ID
             ctx.SleepBiometricSamples.RemoveRange(existing.BiometricSamples);
             ctx.SleepStages.RemoveRange(existing.Stages);
             ctx.SleepSessions.Remove(existing);
             await ctx.SaveChangesAsync(token);
 
-            var entity = SleepSessionMapper.ToEntity(session, ctx.TenantId);
-            entity.Id = id;
             ctx.SleepSessions.Add(entity);
             await ctx.SaveChangesAsync(token);
             return SleepSessionMapper.ToDomainModel(entity, includeChildren: true);

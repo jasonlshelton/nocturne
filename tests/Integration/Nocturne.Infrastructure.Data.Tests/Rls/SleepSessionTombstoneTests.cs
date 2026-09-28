@@ -41,6 +41,49 @@ public class SleepSessionTombstoneTests(RlsCompletenessFixture fx)
     }
 
     [Fact]
+    public async Task Update_OntoAKeyAUserTombstoneHolds_IsRefusedAndChangesNothing()
+    {
+        await using var conn = await OpenForNewTenantAsync();
+        var repository = await SeedTombstoneAsync(conn, "sleep-moved-onto-user-deleted", byUser: true);
+        var live = await repository.UpsertSessionAsync(Session("sleep-to-move"));
+
+        var update = () => repository.UpdateSessionAsync(Guid.Parse(live.Id!), Session("sleep-moved-onto-user-deleted"));
+
+        await update.Should().ThrowAsync<RecreationBlockedException>();
+        (await CountRowsAsync(conn, "sleep-to-move")).Should().Be(1);
+        (await CountRowsAsync(conn, "sleep-moved-onto-user-deleted")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Update_OntoAKeyALiveSessionHolds_IsRefused()
+    {
+        await using var conn = await OpenForNewTenantAsync();
+        var repository = new SleepSessionRepository(new TestTenantDbContextFactory(Context(conn)));
+        await repository.UpsertSessionAsync(Session("sleep-live-holder"));
+        var live = await repository.UpsertSessionAsync(Session("sleep-to-move"));
+
+        var update = () => repository.UpdateSessionAsync(Guid.Parse(live.Id!), Session("sleep-live-holder"));
+
+        await update.Should().ThrowAsync<RecreationBlockedException>();
+        (await repository.CountSessionsAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Update_OntoAKeyASystemTombstoneHolds_ReplacesTheTombstone()
+    {
+        await using var conn = await OpenForNewTenantAsync();
+        var repository = await SeedTombstoneAsync(conn, "sleep-moved-onto-swept", byUser: false);
+        var live = await repository.UpsertSessionAsync(Session("sleep-to-move"));
+
+        var updated = await repository.UpdateSessionAsync(Guid.Parse(live.Id!), Session("sleep-moved-onto-swept"));
+
+        updated!.Id.Should().Be(live.Id);
+        (await repository.CountSessionsAsync()).Should().Be(1);
+        (await CountRowsAsync(conn, "sleep-to-move")).Should().Be(0);
+        (await CountRowsAsync(conn, "sleep-moved-onto-swept")).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Delete_SoftDeletesTheSession()
     {
         await using var conn = await OpenForNewTenantAsync();

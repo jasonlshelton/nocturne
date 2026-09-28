@@ -130,6 +130,19 @@ public class RecentActivityPublishTests : IDisposable
     }
 
     [Fact]
+    public async Task Reports_what_the_write_stored_not_what_it_was_handed()
+    {
+        _activities
+            .Setup(s => s.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Activity> batch, CancellationToken _) => batch.Take(1).ToList());
+
+        var written = await Publisher().PublishRecentActivityAsync(
+            [Activity("act-late-1"), Activity("act-late-2"), Activity("act-late-3")], Source, WriteOrigin.Live);
+
+        written.Should().Be(1, "the other two were skipped by the write, e.g. as user-deleted");
+    }
+
+    [Fact]
     public async Task A_failed_write_reports_the_failure()
     {
         _activities

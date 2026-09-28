@@ -157,6 +157,7 @@ public class SleepController : ControllerBase
     [RequireScope(Scope.SleepReadWrite)]
     [ProducesResponseType(typeof(SleepSession), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<SleepSession>> UpdateSession(
         Guid id,
         [FromBody] SleepSession session,

@@ -81,6 +81,10 @@ public interface ISleepSessionRepository
     /// <param name="session">The updated <see cref="SleepSession"/> data.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated <see cref="SleepSession"/>, or <c>null</c> if not found.</returns>
+    /// <exception cref="V4.Repositories.RecreationBlockedException">
+    /// The update moves the session onto a source and original ID that another live session, or one
+    /// the user deleted, holds.
+    /// </exception>
     Task<SleepSession?> UpdateSessionAsync(
         Guid id,
         SleepSession session,

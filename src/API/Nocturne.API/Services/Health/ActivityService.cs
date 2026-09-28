@@ -424,6 +424,11 @@ public class ActivityService : IActivityService
 
             return updatedActivity;
         }
+        catch (RecreationBlockedException)
+        {
+            _logger.LogDebug("Refused update of activity {Id}: the user deleted it", id);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating activity record with ID: {Id}", id);

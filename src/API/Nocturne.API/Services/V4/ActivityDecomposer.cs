@@ -333,7 +333,8 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
     /// sync key when <see cref="MapToStepCount"/> gave it one. Heart rates and step counts have no
     /// V4 repository, so unlike its <see cref="DecomposerBase.UpsertByLegacyIdAsync"/> siblings this
     /// writes the entity through the context. The <c>OriginalId</c> resolves as
-    /// <see cref="ResolveByOriginalIdAsync{TEntity}"/> describes.
+    /// <see cref="ResolveByOriginalIdAsync{TEntity}"/> describes, the sync key as
+    /// <see cref="ResolveBySyncKeyAsync{TEntity}"/> does.
     /// </summary>
     private async Task UpsertByOriginalIdAsync<TModel, TEntity>(
         DbSet<TEntity> set,
@@ -361,9 +362,22 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
             existing = rows.GetValueOrDefault(model.Id);
         }
+        else if (entity.SyncIdentifier != null)
+        {
+            var key = (entity.DataSource, entity.SyncIdentifier);
+            var (rows, userDeleted) = await ResolveBySyncKeyAsync(set, [entity.SyncIdentifier], ct);
+            if (userDeleted.Contains(key))
+            {
+                result.SkippedDeleted++;
+                _logger.LogDebug("Skipped {RecordType} with sync key {SyncIdentifier}: the user deleted it", recordType, entity.SyncIdentifier);
+                return;
+            }
+
+            existing = rows.GetValueOrDefault(key);
+        }
         else
         {
-            existing = await FindBySyncKeyAsync(set, entity.DataSource, entity.SyncIdentifier, ct);
+            existing = null;
         }
 
         if (existing != null)
@@ -418,18 +432,47 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         return (rows, userDeleted);
     }
 
-    private static Task<TEntity?> FindBySyncKeyAsync<TEntity>(
-        DbSet<TEntity> set, string? dataSource, string? syncIdentifier, CancellationToken ct)
-        where TEntity : class, ISyncDedupable =>
-        syncIdentifier is null
-            ? Task.FromResult<TEntity?>(null)
-            : set.FirstOrDefaultAsync(e => e.DataSource == dataSource && e.SyncIdentifier == syncIdentifier, ct);
+    /// <summary>
+    /// The live row holding each <c>(DataSource, SyncIdentifier)</c> key among
+    /// <paramref name="syncIdentifiers"/>, and the keys only a user tombstone holds, which must not be
+    /// written (<see cref="SoftDeleteDedupExtensions.WhereBlocksRecreation{TEntity}"/>). A key only a
+    /// system sweep holds is in neither: the record inserts beside the tombstone, since the primary
+    /// key of a record with no id is fresh and the sync-key unique index counts live rows only.
+    /// </summary>
+    private async Task<(Dictionary<(string? DataSource, string SyncIdentifier), TEntity> Rows,
+        HashSet<(string? DataSource, string SyncIdentifier)> UserDeleted)> ResolveBySyncKeyAsync<TEntity>(
+        DbSet<TEntity> set, IReadOnlyCollection<string> syncIdentifiers, CancellationToken ct)
+        where TEntity : class, ITenantScoped, ISoftDeletable, ISyncDedupable
+    {
+        var rows = new Dictionary<(string? DataSource, string SyncIdentifier), TEntity>();
+        var userDeleted = new HashSet<(string? DataSource, string SyncIdentifier)>();
+        if (syncIdentifiers.Count == 0)
+            return (rows, userDeleted);
+
+        var ids = syncIdentifiers.ToList();
+        var candidates = await set.IgnoreQueryFilters()
+            .Where(e => e.TenantId == _dbContext.TenantId && e.SyncIdentifier != null && ids.Contains(e.SyncIdentifier))
+            .WhereBlocksRecreation()
+            .ToListAsync(ct);
+
+        foreach (var group in candidates.GroupBy(e => (e.DataSource, SyncIdentifier: e.SyncIdentifier!)))
+        {
+            var governing = group.GoverningRow()!;
+            if (governing.DeletedAt == null)
+                rows[group.Key] = governing;
+            else
+                userDeleted.Add(group.Key);
+        }
+
+        return (rows, userDeleted);
+    }
 
     /// <summary>
     /// The batch twin of <see cref="UpsertByOriginalIdAsync{TModel,TEntity}"/>: a record whose
     /// <c>OriginalId</c> resolves to a row (<see cref="ResolveByOriginalIdAsync{TEntity}"/>) updates
     /// it, one only a user tombstone holds is skipped, and the rest are inserted. A record with
-    /// a sync key instead updates the stored row with that key. Of several in the batch with one
+    /// a sync key instead resolves by that key (<see cref="ResolveBySyncKeyAsync{TEntity}"/>) the
+    /// same way. Of several in the batch with one
     /// key, either kind, the last wins.
     /// </summary>
     private async Task BulkUpsertByOriginalIdAsync<TModel, TEntity>(
@@ -476,16 +519,17 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
         if (keyed.Count > 0)
         {
-            var syncIds = keyed.Select(p => p.Entity.SyncIdentifier!).ToHashSet();
-            var storedByKey = (await set
-                    .Where(e => e.SyncIdentifier != null && syncIds.Contains(e.SyncIdentifier))
-                    .ToListAsync(ct))
-                .GroupBy(e => (e.DataSource, e.SyncIdentifier))
-                .ToDictionary(g => g.Key, g => g.First());
+            var syncIds = keyed.Select(p => p.Entity.SyncIdentifier!).ToHashSet(StringComparer.Ordinal);
+            var (storedByKey, userDeletedKeys) = await ResolveBySyncKeyAsync(set, syncIds, ct);
 
             foreach (var (model, entity) in keyed)
             {
-                if (storedByKey.TryGetValue((entity.DataSource, entity.SyncIdentifier), out var existing))
+                var key = (entity.DataSource, entity.SyncIdentifier!);
+                if (userDeletedKeys.Contains(key))
+                {
+                    result.SkippedDeleted++;
+                }
+                else if (storedByKey.TryGetValue(key, out var existing))
                 {
                     applyUpdate(existing, model);
                     updated.Add(existing);

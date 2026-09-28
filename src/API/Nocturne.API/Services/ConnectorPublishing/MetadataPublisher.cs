@@ -191,6 +191,13 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
         IEnumerable<Activity> activities,
         string source,
         WriteOrigin origin, CancellationToken cancellationToken = default)
+        => await WriteActivityAsync(activities, source, cancellationToken) is not null;
+
+    /// <returns>How many activities were written, or null when the write failed.</returns>
+    private async Task<int?> WriteActivityAsync(
+        IEnumerable<Activity> activities,
+        string source,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -200,14 +207,14 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
             foreach (var activity in activityList)
                 activity.DataSource = source;
 
-            await _activityService.CreateActivitiesAsync(activityList, cancellationToken);
-            return true;
+            var written = await _activityService.CreateActivitiesAsync(activityList, cancellationToken);
+            return written.Count();
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to publish activities for {Source}", source);
-            return false;
+            return null;
         }
     }
 
@@ -222,7 +229,7 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
         WriteOrigin origin, CancellationToken cancellationToken = default)
         => PublishUnheldAsync(
             activities, a => a.Id,
-            unheld => PublishActivityAsync(unheld, source, origin, cancellationToken),
+            unheld => WriteActivityAsync(unheld, source, cancellationToken),
             source,
             ids => _db.GetHeldOriginalIdsAsync<StateSpanEntity>(ids, cancellationToken),
             ids => _db.GetHeldOriginalIdsAsync<HeartRateEntity>(ids, cancellationToken),
