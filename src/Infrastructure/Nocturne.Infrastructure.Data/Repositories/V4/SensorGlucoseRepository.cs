@@ -118,9 +118,6 @@ public class SensorGlucoseRepository : SyncUpsertRepositoryBase<SensorGlucose, S
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.SensorGlucose;
 
-    /// <inheritdoc />
-    protected override IDeduplicationService? Deduplication => _deduplicationService;
-
     /// <summary>
     /// Routes the base 7-arg form through the extended sensor-glucose query (non-primary LinkedRecords
     /// exclusion + ordering), preserving the pre-base default-interface bridge behaviour.

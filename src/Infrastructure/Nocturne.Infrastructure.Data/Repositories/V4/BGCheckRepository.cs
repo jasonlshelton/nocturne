@@ -51,9 +51,6 @@ public class BGCheckRepository : SyncUpsertRepositoryBase<BGCheck, BGCheckEntity
     /// <inheritdoc />
     protected internal override RecordType? DedupRecordType => RecordType.BGCheck;
 
-    /// <inheritdoc />
-    protected override IDeduplicationService? Deduplication => _deduplicationService;
-
     /// <summary>
     /// Routes the base 7-arg form through the extended BG-check query (non-primary LinkedRecords
     /// exclusion + ordering), preserving the pre-base default-interface bridge behaviour.

@@ -6,6 +6,7 @@ using Nocturne.Core.Contracts.V4;
 using Nocturne.Infrastructure.Data.Entities.V4;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Repositories.V4;
+using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
@@ -106,19 +107,9 @@ public class SoftDeleteHistoryStampTests : IDisposable
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
 
-        var deduplication = new Mock<Core.Contracts.Infrastructure.IDeduplicationService>();
-        deduplication
-            .Setup(d => d.RepointPrimariesAwayFromAsync(RecordType.Note, It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                await using var ctx = _db.CreateContext();
-                foreach (var link in await ctx.LinkedRecords.ToListAsync())
-                    link.IsPrimary = link.RecordId == copy.Id;
-                await ctx.SaveChangesAsync();
-            });
         var repository = new NoteRepository(
-            new TestTenantDbContextFactory(_context), deduplication.Object, new SystemAuditContext(),
-            NullLogger<NoteRepository>.Instance);
+            new TestTenantDbContextFactory(_context), Mock.Of<Core.Contracts.Infrastructure.IDeduplicationService>(),
+            new SystemAuditContext(), NullLogger<NoteRepository>.Instance);
         var cursor = new DateTimeOffset(Written, TimeSpan.Zero).ToUnixTimeMilliseconds();
 
         await repository.DeleteAsync(primary.Id, WriteOrigin.Live);
@@ -128,10 +119,79 @@ public class SoftDeleteHistoryStampTests : IDisposable
         (await repository.GetByIdAsync(copy.Id)).Should().NotBeNull();
     }
 
-    private static LinkedRecordEntity Link(Guid canonical, Guid recordId, bool isPrimary, string source) => new()
+    [Fact]
+    public async Task DeletingASource_RepointsOnlyTheGroupsItLed_AndStampsThePromotedCopiesAfterTheDeletes()
+    {
+        // Group one is led by source A, group two by source B. Deleting everything A wrote must hand
+        // group one to B's copy and leave group two, whose primary A never was, untouched.
+        var ledByA = (A: Glucose("source-a", 120), B: Glucose("source-b", 121));
+        var ledByB = (A: Glucose("source-a", 140, Written.AddMinutes(5)), B: Glucose("source-b", 141, Written.AddMinutes(5)));
+        _context.SensorGlucose.AddRange(ledByA.A, ledByA.B, ledByB.A, ledByB.B);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        _context.LinkedRecords.AddRange(
+            Link(first, ledByA.A.Id, isPrimary: true, "source-a", RecordType.SensorGlucose),
+            Link(first, ledByA.B.Id, isPrimary: false, "source-b", RecordType.SensorGlucose),
+            Link(second, ledByB.A.Id, isPrimary: false, "source-a", RecordType.SensorGlucose),
+            Link(second, ledByB.B.Id, isPrimary: true, "source-b", RecordType.SensorGlucose));
+        await _context.SaveChangesAsync();
+        foreach (var row in new[] { ledByA.A, ledByA.B, ledByB.A, ledByB.B })
+            row.SysUpdatedAt = Written;
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        await using var context = _db.CreateContext();
+        var deleted = await context.AuditedSoftDeleteAsync(
+            context.SensorGlucose.FromSource("source-a"), SystemAuditContext.ForService("test"), "data_source=source-a");
+
+        deleted.Should().Be(2);
+        await using var verify = _db.CreateContext();
+        (await verify.LinkedRecords.Where(l => l.IsPrimary).Select(l => l.RecordId).ToListAsync())
+            .Should().BeEquivalentTo([ledByA.B.Id, ledByB.B.Id]);
+        var rows = await verify.SensorGlucose.IgnoreQueryFilters().ToDictionaryAsync(g => g.Id);
+        var deletedAt = rows[ledByA.A.Id].DeletedAt!.Value;
+        rows[ledByA.B.Id].SysUpdatedAt.Should().Be(deletedAt.AddMilliseconds(1), "the promoted copy is stamped after the delete");
+        rows[ledByB.B.Id].SysUpdatedAt.Should().Be(Written, "a group the deleted source did not lead is not touched");
+    }
+
+    [Fact]
+    public async Task RepointingOnASharedContext_KeepsTheCallersPendingChanges()
+    {
+        var primary = Glucose("source-a", 120);
+        var copy = Glucose("source-b", 121);
+        _context.SensorGlucose.AddRange(primary, copy);
+        var canonical = Guid.CreateVersion7();
+        _context.LinkedRecords.AddRange(
+            Link(canonical, primary.Id, isPrimary: true, "source-a", RecordType.SensorGlucose),
+            Link(canonical, copy.Id, isPrimary: false, "source-b", RecordType.SensorGlucose));
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        await _context.SensorGlucose.Where(g => g.Id == primary.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.DeletedAt, Written));
+
+        var pending = Glucose("source-c", 150);
+        _context.SensorGlucose.Add(pending);
+        var deduplication = new DeduplicationService(
+            _context, Mock.Of<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            NullLogger<DeduplicationService>.Instance);
+
+        await deduplication.RepointPrimariesAwayFromAsync(RecordType.SensorGlucose, [primary.Id]);
+
+        _context.Entry(pending).State.Should().Be(EntityState.Added);
+        await using var verify = _db.CreateContext();
+        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(copy.Id);
+    }
+
+    private static SensorGlucoseEntity Glucose(string source, double mgdl, DateTime? at = null) => new()
+    {
+        Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = at ?? Written, Mgdl = mgdl, DataSource = source,
+    };
+
+    private static LinkedRecordEntity Link(
+        Guid canonical, Guid recordId, bool isPrimary, string source, RecordType type = RecordType.Note) => new()
     {
         Id = Guid.CreateVersion7(), TenantId = TenantId, CanonicalId = canonical,
-        RecordType = RecordTypeKeys.Key(RecordType.Note), RecordId = recordId, DataSource = source, IsPrimary = isPrimary,
+        RecordType = RecordTypeKeys.Key(type), RecordId = recordId, DataSource = source, IsPrimary = isPrimary,
     };
 
     /// <summary>Counts the statements the connection runs, by leading keyword.</summary>

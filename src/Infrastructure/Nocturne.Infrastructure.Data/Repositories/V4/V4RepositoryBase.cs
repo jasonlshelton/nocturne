@@ -441,11 +441,17 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entity = await ctx.Set<TEntity>().FindAsync([id], ct)
             ?? throw new KeyNotFoundException($"{typeof(TModel).Name} {id} not found");
-        entity.DeletedAt = DateTime.UtcNow;
-        await ctx.SaveChangesAsync(ct);
-        await RepointPrimariesAwayFromAsync([id], ct);
+        var promoted = await ctx.ExecuteInTransactionAsync(async token =>
+        {
+            entity.DeletedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync(token);
+            return DedupRecordType is { } recordType
+                ? await DuplicateGroupPrimaries.RepointAwayFromAsync(
+                    ctx, recordType, [id], NocturneDbContext.UtcNowAtStoredPrecision(), token)
+                : [];
+        }, ct: ct);
         var model = ToDomain(entity);
-        await RaiseBroadcastAsync([], [], [model], origin, ct);
+        await RaiseBroadcastAsync([], await LoadAsync(ctx, promoted, ct), [model], origin, ct);
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.RestoreAsync" />
@@ -488,43 +494,13 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     /// </summary>
     protected internal virtual RecordType? DedupRecordType => null;
 
-    /// <summary>
-    /// The deduplication service of a type that takes part in deduplication
-    /// (<see cref="DedupRecordType"/>), or null.
-    /// </summary>
-    protected virtual IDeduplicationService? Deduplication => null;
-
-    /// <summary>
-    /// Moves the primary of every duplicate group one of <paramref name="deletedIds"/> belonged to
-    /// onto a live member, and moves that member's <c>SysUpdatedAt</c>. Reads show a group through
-    /// its primary, so a deleted primary would hide the other sources' copies from every read; and
-    /// the promoted copy's own row did not change, so a v3 history client would never be sent it.
-    /// </summary>
-    private async Task RepointPrimariesAwayFromAsync(IReadOnlyCollection<Guid> deletedIds, CancellationToken ct)
-    {
-        if (DedupRecordType is not { } recordType || Deduplication is not { } deduplication || deletedIds.Count == 0)
-            return;
-
-        await deduplication.RepointPrimariesAwayFromAsync(recordType, deletedIds, ct);
-
-        await using var ctx = await ContextFactory.CreateAsync(ct);
-        var key = RecordTypeKeys.Key(recordType);
-        var ids = deletedIds.ToList();
-        var groups = ctx.LinkedRecords
-            .Where(lr => lr.RecordType == key && ids.Contains(lr.RecordId))
-            .Select(lr => lr.CanonicalId);
-        var primaries = ctx.LinkedRecords
-            .Where(lr => lr.RecordType == key && lr.IsPrimary && groups.Contains(lr.CanonicalId))
-            .Select(lr => lr.RecordId);
-        var promoted = await ctx.Set<TEntity>().Where(e => primaries.Contains(e.Id)).ToListAsync(ct);
-        if (promoted.Count == 0)
-            return;
-
-        var stamp = NocturneDbContext.UtcNowAtStoredPrecision();
-        foreach (var entity in promoted)
-            entity.SysUpdatedAt = stamp;
-        await ctx.SaveChangesAsync(ct);
-    }
+    /// <summary>The live records of <paramref name="ids"/>, for a broadcast.</summary>
+    private async Task<IReadOnlyList<TModel>> LoadAsync(
+        NocturneDbContext ctx, IReadOnlyList<Guid> ids, CancellationToken ct) =>
+        ids.Count == 0
+            ? []
+            : (await ctx.Set<TEntity>().AsNoTracking().Where(e => ids.Contains(e.Id)).ToListAsync(ct))
+                .Select(ToDomain).ToList();
 
     /// <summary>
     /// Applies <see cref="ReadVisibilityFilter.ExcludeNonPrimary{TEntity}"/> for
@@ -567,18 +543,11 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     {
         var result = await ctx.AuditedSoftDeleteWithEntitiesAsync(rows, AuditContext, scope, ct);
 
-        if (Deduplication is not null && result.Count > 0)
-        {
-            var ids = result.Collapsed
-                ? await rows.IncludingDeleted().Where(e => e.DeletedAt != null).Select(e => e.Id).ToListAsync(ct)
-                : result.Entities.Select(e => e.Id).ToList();
-            await RepointPrimariesAwayFromAsync(ids, ct);
-        }
-
         if (result.Collapsed)
             await RaiseBulkDeleteBroadcastAsync(result.Count, origin, ct);
         else
-            await RaiseBroadcastAsync([], [], result.Entities.Select(ToDomain).ToList(), origin, ct);
+            await RaiseBroadcastAsync(
+                [], await LoadAsync(ctx, result.Promoted, ct), result.Entities.Select(ToDomain).ToList(), origin, ct);
 
         return result.Count;
     }

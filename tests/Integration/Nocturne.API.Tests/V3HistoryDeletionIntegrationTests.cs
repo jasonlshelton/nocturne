@@ -61,6 +61,44 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
+    public async Task DeletingTheWinningSource_TombstonesItsReadings_AndSendsTheOtherSourcesCopiesLive()
+    {
+        // Two CGM sources report the same two readings; deduplication links each pair under the
+        // first source's copy. Deleting that source must hand every pair to the other source.
+        foreach (var (device, offset) in new[] { ("it-src-a", 0), ("it-src-b", 10_000) })
+        {
+            await CreateAsync("entries", new { type = "sgv", sgv = 170, date = Date + offset, device, app = "it", utcOffset = 0 });
+            await CreateAsync("entries", new { type = "sgv", sgv = 210, date = Date + 300_000 + offset, device, app = "it", utcOffset = 0 });
+        }
+
+        (await SensorDevicesAsync()).Should().BeEquivalentTo(["it-src-a", "it-src-a"], "the first source leads each pair");
+        var (_, cursor) = await HistoryAsync("entries", 0);
+
+        var deleted = await AuthenticatedClient.DeleteAsync("/api/v4/services/data-sources/it-src-a");
+        deleted.IsSuccessStatusCode.Should().BeTrue(await deleted.Content.ReadAsStringAsync());
+
+        var (next, nextCursor) = await HistoryAsync("entries", cursor);
+        var sent = next.Select(doc => (Device: doc.GetProperty("device").GetString(), Sgv: Number(doc, "sgv"),
+            Valid: doc.GetProperty("isValid").GetBoolean())).ToList();
+        sent.Should().Contain([("it-src-a", 170, false), ("it-src-a", 210, false), ("it-src-b", 170, true), ("it-src-b", 210, true)]);
+        next.Where(doc => doc.GetProperty("device").GetString() == "it-src-b")
+            .Should().OnlyContain(doc => doc.GetProperty("srvModified").GetInt64() > cursor
+                && doc.GetProperty("srvModified").GetInt64() <= nextCursor);
+
+        (await SensorDevicesAsync()).Should().BeEquivalentTo(["it-src-b", "it-src-b"]);
+    }
+
+    /// <summary>The devices of the sensor readings a normal v4 read shows.</summary>
+    private async Task<List<string?>> SensorDevicesAsync()
+    {
+        var page = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/glucose/sensor?limit=100");
+        return page.GetProperty("data").EnumerateArray()
+            .Select(g => g.GetProperty("device").GetString())
+            .Where(d => d is "it-src-a" or "it-src-b")
+            .ToList();
+    }
+
+    [Fact]
     public async Task DeletedTreatment_IsServedWithIsValidFalse()
     {
         await CreateAsync("treatments", new

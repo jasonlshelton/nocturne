@@ -57,7 +57,6 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     private readonly IActiveProfileResolver _activeProfileResolver;
     private readonly IPatientInsulinRepository _insulinRepo;
     private readonly IAuditContext _auditContext;
-    private readonly IDeduplicationService _deduplicationService;
 
     /// <summary>
     /// Event types that indicate a temp basal treatment (case-insensitive comparison)
@@ -86,7 +85,6 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         IActiveProfileResolver activeProfileResolver,
         IPatientInsulinRepository insulinRepo,
         IAuditContext auditContext,
-        IDeduplicationService deduplicationService,
         ILogger<TreatmentDecomposer> logger)
         : base(logger)
     {
@@ -106,7 +104,6 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         _activeProfileResolver = activeProfileResolver;
         _insulinRepo = insulinRepo;
         _auditContext = auditContext;
-        _deduplicationService = deduplicationService;
     }
 
     /// <summary>
@@ -1412,10 +1409,6 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// The repoint joins the delete's transaction only because the deduplication service shares this
-    /// scope's <see cref="NocturneDbContext"/>, so a failed repoint rolls the delete back with it.
-    /// </remarks>
     public async Task<int> DeleteFromSourceAsync(
         string source, IReadOnlySet<string> legacyIds, CancellationToken ct = default)
     {
@@ -1431,11 +1424,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
 
             var deleted = 0;
             foreach (var table in DecomposedTables)
-            {
-                var result = await table.SoftDeleteAsync(ids, source, scope, ct);
-                deleted += result.Count;
-                await _deduplicationService.RepointPrimariesAwayFromAsync(table.RecordType, result.Entities, ct);
-            }
+                deleted += (await table.SoftDeleteAsync(ids, source, scope, ct)).Count;
 
             await transaction.CommitAsync(ct);
             return deleted;

@@ -23,8 +23,9 @@ public interface IDeduplicationService
 
     /// <summary>
     /// Moves the primary flag of every group whose primary is among <paramref name="recordIds"/>
-    /// onto a surviving member. Reads show only a group's primary, so a soft-deleted primary
-    /// otherwise hides every other source's copy of the event with it.
+    /// onto a surviving member, and moves that member's update stamp so a v3 history client is sent
+    /// it. Reads show only a group's primary, so a soft-deleted primary otherwise hides every other
+    /// source's copy of the event with it.
     /// </summary>
     Task RepointPrimariesAwayFromAsync(
         RecordType recordType,
