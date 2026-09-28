@@ -51,6 +51,14 @@ public interface ITherapySettingsRepository : IProfileScopedRepository<TherapySe
     Task<TherapySettings?> GetNewestDocumentRowAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// The live rows whose legacy id starts with <paramref name="prefix"/>, newest first: for
+    /// <c>"{profileId}:"</c>, the stores of one profile document still standing.
+    /// </summary>
+    /// <param name="prefix">Legacy id prefix to match.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IEnumerable<TherapySettings>> GetByLegacyIdPrefixAsync(string prefix, CancellationToken ct = default);
+
+    /// <summary>
     /// Makes the row <paramref name="id"/> the tenant's only <see cref="TherapySettings.IsDefault"/> row,
     /// or clears the flag on every row when <paramref name="id"/> is <c>null</c>.
     /// </summary>

@@ -41,6 +41,8 @@ public class ProfileHistoryTests
             .ReturnsAsync([]);
         _therapyRepo.Setup(r => r.GetByProfileNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        _therapyRepo.Setup(r => r.GetByLegacyIdPrefixAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
 
         _sut = new ProfileProjectionService(
             _therapyRepo.Object,
@@ -135,6 +137,57 @@ public class ProfileHistoryTests
         profile.IsValid.Should().BeFalse();
         profile.SrvModified.Should().Be(Mills(deletedAt));
         page.CursorMills.Should().Be(Mills(deletedAt));
+    }
+
+    [Fact]
+    public async Task OneStoreOfATwoStoreDocumentDeleted_ReSendsTheLiveStoreAtTheDeleteStamp()
+    {
+        const string documentId = "65f000000000000000000abd";
+        var deletedAt = Cursor.AddMinutes(2);
+        var deletedCorrelation = Guid.CreateVersion7();
+        var deleted = Settings(deletedCorrelation, modified: deletedAt);
+        deleted.LegacyId = $"{documentId}:Default";
+        var liveCorrelation = Guid.CreateVersion7();
+        var live = Settings(liveCorrelation, modified: Created);
+        live.ProfileName = "Night";
+        live.LegacyId = $"{documentId}:Night";
+        var liveBasal = Basal(liveCorrelation, modified: Created);
+        liveBasal.ProfileName = "Night";
+        _therapyRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new HistoryRecord<TherapySettings>(deleted, Deleted: true)]);
+        _therapyRepo.Setup(r => r.GetByLegacyIdPrefixAsync($"{documentId}:", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([live]);
+        SetupProfile(deleted, Basal(deletedCorrelation, modified: deletedAt));
+        SetupProfile(live, liveBasal);
+
+        var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 10);
+
+        var profile = page.Records.Should().ContainSingle().Subject;
+        profile.Id.Should().Be(documentId);
+        profile.IsValid.Should().BeNull();
+        profile.Store.Keys.Should().Equal("Night");
+        profile.SrvModified.Should().Be(Mills(deletedAt));
+        page.CursorMills.Should().Be(Mills(deletedAt));
+    }
+
+    [Fact]
+    public async Task EveryStoreOfADocumentDeleted_IsDeliveredAsATombstone()
+    {
+        const string documentId = "65f000000000000000000abe";
+        var deletedAt = Cursor.AddMinutes(2);
+        var correlation = Guid.CreateVersion7();
+        var deleted = Settings(correlation, modified: deletedAt);
+        deleted.LegacyId = $"{documentId}:Default";
+        _therapyRepo.Setup(r => r.GetModifiedSinceAsync(Mills(Cursor), 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new HistoryRecord<TherapySettings>(deleted, Deleted: true)]);
+        SetupProfile(deleted, Basal(correlation, modified: deletedAt));
+
+        var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 10);
+
+        var profile = page.Records.Should().ContainSingle().Subject;
+        profile.Id.Should().Be(documentId);
+        profile.IsValid.Should().BeFalse();
+        _therapyRepo.Verify(r => r.GetByLegacyIdPrefixAsync($"{documentId}:", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private void SetupProfile(TherapySettings settings, BasalSchedule basal)

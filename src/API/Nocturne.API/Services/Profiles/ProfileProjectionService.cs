@@ -89,8 +89,10 @@ public class ProfileProjectionService : IProfileProjectionService
     /// earliest last millisecond among the tables whose page filled — a table holds rows not yet
     /// read, so only profiles stamped at or before it are known to be complete. When none are, no
     /// profile is stamped in (cursor, horizon] and the read resumes from the horizon. A deleted
-    /// settings row is a deleted profile, delivered with <c>isValid: false</c>; a schedule row, live
-    /// or deleted, only leads to the live settings that own it.
+    /// settings row is a deleted profile, delivered with <c>isValid: false</c>, unless another store
+    /// of the same document is still live (<see cref="LiveSiblingAsync"/>): the client knows the
+    /// document by one identifier, so that store is re-sent live at the delete's stamp instead. A
+    /// schedule row, live or deleted, only leads to the live settings that own it.
     /// </remarks>
     public async Task<ModifiedSincePage<Profile>> GetProfilesModifiedSinceAsync(
         long cursorMills, int limit, CancellationToken ct = default)
@@ -123,14 +125,32 @@ public class ProfileProjectionService : IProfileProjectionService
             foreach (var settings in await OwnersAsync(schedules, ct))
                 candidates.TryAdd(settings.Id, new HistoryRecord<TherapySettings>(settings, Deleted: false));
 
-            var stamped = new List<(Profile Profile, Guid SettingsId)>();
+            var stamped = new Dictionary<Guid, Profile>();
             foreach (var (settings, deleted) in candidates.Values)
             {
                 var profile = await AssembleProfileAsync(settings, ct);
+                var settingsId = settings.Id;
                 if (deleted)
-                    profile.IsValid = false;
-                if (profile.SrvModified > cursor && (horizon is null || profile.SrvModified <= horizon))
-                    stamped.Add((profile, settings.Id));
+                {
+                    if (await LiveSiblingAsync(settings, ct) is { } sibling)
+                    {
+                        var deletedAt = profile.SrvModified;
+                        profile = await AssembleProfileAsync(sibling, ct);
+                        profile.SrvModified = Math.Max(profile.SrvModified ?? 0, deletedAt ?? 0);
+                        settingsId = sibling.Id;
+                    }
+                    else
+                    {
+                        profile.IsValid = false;
+                    }
+                }
+
+                if (profile.SrvModified > cursor
+                    && (horizon is null || profile.SrvModified <= horizon)
+                    && (!stamped.TryGetValue(settingsId, out var held) || held.SrvModified < profile.SrvModified))
+                {
+                    stamped[settingsId] = profile;
+                }
             }
 
             if (stamped.Count == 0)
@@ -143,9 +163,9 @@ public class ProfileProjectionService : IProfileProjectionService
             }
 
             var ordered = stamped
-                .OrderBy(p => p.Profile.SrvModified)
-                .ThenBy(p => p.SettingsId)
-                .Select(p => p.Profile)
+                .OrderBy(p => p.Value.SrvModified)
+                .ThenBy(p => p.Key)
+                .Select(p => p.Value)
                 .ToList();
 
             var page = ordered.Count <= limit
@@ -208,6 +228,26 @@ public class ProfileProjectionService : IProfileProjectionService
         return owners;
     }
 
+    /// <summary>
+    /// The newest live row stored from the same profile document as the deleted
+    /// <paramref name="settings"/>, which decomposition keys <c>"{profileId}:{storeName}"</c>, or
+    /// <c>null</c> when the whole document is gone.
+    /// </summary>
+    private async Task<TherapySettings?> LiveSiblingAsync(TherapySettings settings, CancellationToken ct)
+    {
+        if (settings.LegacyId?.Contains(':') != true)
+            return null;
+
+        return (await _therapyRepo.GetByLegacyIdPrefixAsync($"{DocumentId(settings)}:", ct))
+            .FirstOrDefault(s => s.Id != settings.Id);
+    }
+
+    /// <summary>The profile document's identifier: the legacy id up to its first colon.</summary>
+    private static string DocumentId(TherapySettings settings) =>
+        settings.LegacyId?.Contains(':') == true
+            ? settings.LegacyId.Split(':')[0]
+            : settings.LegacyId ?? settings.Id.ToString();
+
     /// <inheritdoc />
     public async Task<long> CountProfilesAsync(string? find = null, CancellationToken ct = default)
     {
@@ -248,14 +288,9 @@ public class ProfileProjectionService : IProfileProjectionService
             TargetHigh = MapTargetHigh(targetRange.Result?.Entries),
         };
 
-        // Extract the profile record-level ID from the legacy ID prefix (before the colon)
-        var profileId = settings.LegacyId?.Contains(':') == true
-            ? settings.LegacyId.Split(':')[0]
-            : settings.LegacyId ?? settings.Id.ToString();
-
         return new Profile
         {
-            Id = profileId,
+            Id = DocumentId(settings),
             DefaultProfile = settings.ProfileName,
             StartDate = settings.StartDate ?? settings.Timestamp.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             Mills = settings.Mills,
