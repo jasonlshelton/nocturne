@@ -42,13 +42,15 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     [Fact]
     public async Task DeletedCanonicalEntry_SendsTheBucketsOtherStreamAgain()
     {
+        // Far enough apart in value that deduplication does not link them: the other stream's
+        // reading is its own record, so deleting the canonical one leaves it standing.
         await CreateAsync("entries", new { type = "sgv", sgv = 150, date = Date, device = "it-cgm-a", app = "it", utcOffset = 0 });
-        await CreateAsync("entries", new { type = "sgv", sgv = 151, date = Date + 30_000, device = "it-cgm-b", app = "it", utcOffset = 0 });
+        await CreateAsync("entries", new { type = "sgv", sgv = 158, date = Date + 30_000, device = "it-cgm-b", app = "it", utcOffset = 0 });
 
         var (synced, cursor) = await HistoryAsync("entries", 0);
-        var winner = synced.Should().ContainSingle(doc => Number(doc, "sgv") == 150 || Number(doc, "sgv") == 151,
+        var winner = synced.Should().ContainSingle(doc => Number(doc, "sgv") == 150 || Number(doc, "sgv") == 158,
             "overlapping streams deliver one canonical reading per bucket").Subject;
-        var otherSgv = Number(winner, "sgv") == 150 ? 151 : 150;
+        var otherSgv = Number(winner, "sgv") == 150 ? 158 : 150;
 
         (await AuthenticatedClient.DeleteAsync($"/api/v3/entries/{IdOf(winner)}")).IsSuccessStatusCode.Should().BeTrue();
 
@@ -58,6 +60,60 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
         var successor = next.Should().ContainSingle(doc => Number(doc, "sgv") == otherSgv).Subject;
         successor.GetProperty("isValid").GetBoolean().Should().BeTrue();
         successor.GetProperty("srvModified").GetInt64().Should().BeGreaterThan(cursor).And.BeLessThanOrEqualTo(nextCursor);
+    }
+
+    [Fact]
+    public async Task DeletingOneCopyOfADuplicatedReading_TombstonesEveryCopy()
+    {
+        // A user deleting a reading deletes it whichever source reported it; only a whole-source
+        // delete hands the group to the other source's copy.
+        await CreateAsync("entries", new { type = "sgv", sgv = 230, date = Date - 600_000, device = "it-dup-a", app = "it", utcOffset = 0 });
+        await CreateAsync("entries", new { type = "sgv", sgv = 230, date = Date - 590_000, device = "it-dup-b", app = "it", utcOffset = 0 });
+
+        var (synced, cursor) = await HistoryAsync("entries", 0);
+        var winner = synced.Should().ContainSingle(doc => Number(doc, "sgv") == 230).Subject;
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v3/entries/{IdOf(winner)}")).IsSuccessStatusCode.Should().BeTrue();
+
+        var (next, _) = await HistoryAsync("entries", cursor);
+        var copies = next.Where(doc => Number(doc, "sgv") == 230).ToList();
+        copies.Select(doc => doc.GetProperty("device").GetString())
+            .Should().BeEquivalentTo(["it-dup-a", "it-dup-b"]);
+        copies.Should().OnlyContain(doc => !doc.GetProperty("isValid").GetBoolean());
+        (await SensorDevicesAsync("it-dup-a", "it-dup-b")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeletingOneCopyOfADuplicatedBolusInV4_DeletesEveryCopy()
+    {
+        foreach (var (device, offset) in new[] { ("it-pump", 0), ("it-aaps", 10_000) })
+        {
+            await CreateAsync("treatments", new
+            {
+                eventType = "Correction Bolus", insulin = 2.7, date = Date - 1_200_000 + offset, app = "it", device, utcOffset = 0,
+                data_source = device,
+            });
+        }
+
+        var (_, cursor) = await HistoryAsync("treatments", 0);
+        var boluses = await BolusIdsAsync(2.7);
+        boluses.Should().ContainSingle("deduplication shows the pair through its primary");
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/insulin/boluses/{boluses[0]}")).IsSuccessStatusCode.Should().BeTrue();
+
+        (await BolusIdsAsync(2.7)).Should().BeEmpty("no copy may keep counting in IOB");
+        var (next, _) = await HistoryAsync("treatments", cursor);
+        next.Where(doc => Number(doc, "insulin") == 2.7).Should().HaveCount(2)
+            .And.OnlyContain(doc => !doc.GetProperty("isValid").GetBoolean());
+    }
+
+    private async Task<List<string?>> BolusIdsAsync(double insulin)
+    {
+        var page = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/insulin/boluses?limit=100");
+        return page.GetProperty("data").EnumerateArray()
+            .Where(b => b.GetProperty("insulin").GetDouble() == insulin)
+            .Select(b => b.GetProperty("id").GetString())
+            .ToList();
     }
 
     [Fact]
@@ -88,13 +144,15 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
         (await SensorDevicesAsync()).Should().BeEquivalentTo(["it-src-b", "it-src-b"]);
     }
 
-    /// <summary>The devices of the sensor readings a normal v4 read shows.</summary>
-    private async Task<List<string?>> SensorDevicesAsync()
+    /// <summary>The devices among <paramref name="devices"/> of the sensor readings a normal v4 read shows.</summary>
+    private async Task<List<string?>> SensorDevicesAsync(params string[] devices)
     {
+        if (devices.Length == 0)
+            devices = ["it-src-a", "it-src-b"];
         var page = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/glucose/sensor?limit=100");
         return page.GetProperty("data").EnumerateArray()
             .Select(g => g.GetProperty("device").GetString())
-            .Where(d => d is "it-src-a" or "it-src-b")
+            .Where(d => devices.Contains(d))
             .ToList();
     }
 
@@ -169,6 +227,56 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
         var tombstone = await DeleteAfterSyncAsync("profile", doc => doc.GetProperty("defaultProfile").GetString() == "Default");
 
         tombstone.GetProperty("defaultProfile").GetString().Should().Be("Default");
+    }
+
+    [Fact]
+    public async Task OneStoreOfATwoStoreProfileDeleted_ResendsTheDocumentLive_UntilItsLastStoreGoes()
+    {
+        ScheduleEntry[] schedule = [new("00:00", 1.0, 0)];
+        object Store() => new
+        {
+            dia = 4, units = "mg/dl", timezone = "UTC",
+            basal = schedule, carbratio = schedule, sens = schedule,
+            target_low = schedule, target_high = schedule,
+        };
+        await CreateAsync("profile", new
+        {
+            defaultProfile = "it-day",
+            startDate = Iso,
+            created_at = Iso,
+            mills = Date,
+            units = "mg/dl",
+            store = new Dictionary<string, object> { ["it-day"] = Store(), ["it-night"] = Store() },
+        });
+
+        var (synced, cursor) = await HistoryAsync("profile", 0);
+        var documentId = IdOf(synced.Should().Contain(doc => HasStore(doc, "it-day")).Which);
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/profile/settings/{await SettingsIdAsync("it-day")}"))
+            .IsSuccessStatusCode.Should().BeTrue();
+
+        var (next, nextCursor) = await HistoryAsync("profile", cursor);
+        var resent = next.Should().ContainSingle(doc => IdOf(doc) == documentId).Subject;
+        resent.TryGetProperty("isValid", out _).Should().BeFalse("another store of the document is live");
+        HasStore(resent, "it-night").Should().BeTrue();
+        HasStore(resent, "it-day").Should().BeFalse();
+        resent.GetProperty("srvModified").GetInt64().Should().BeGreaterThan(cursor).And.BeLessThanOrEqualTo(nextCursor);
+
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/profile/settings/{await SettingsIdAsync("it-night")}"))
+            .IsSuccessStatusCode.Should().BeTrue();
+
+        var (last, _) = await HistoryAsync("profile", nextCursor);
+        last.Should().ContainSingle(doc => IdOf(doc) == documentId)
+            .Which.GetProperty("isValid").GetBoolean().Should().BeFalse();
+    }
+
+    private static bool HasStore(JsonElement doc, string name) =>
+        doc.TryGetProperty("store", out var store) && store.TryGetProperty(name, out _);
+
+    private async Task<Guid> SettingsIdAsync(string profileName)
+    {
+        var rows = await AuthenticatedClient.GetFromJsonAsync<JsonElement>($"/api/v4/profile/settings/by-name/{profileName}");
+        return rows.EnumerateArray().Single().GetProperty("id").GetGuid();
     }
 
     [Fact]

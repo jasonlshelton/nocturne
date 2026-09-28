@@ -21,6 +21,7 @@ interface V3Document {
   eventType?: string;
   sgv?: number;
   device?: string;
+  store?: Record<string, unknown>;
 }
 
 interface LastModified {
@@ -76,9 +77,10 @@ describe("v3 history after a delete", () => {
     expect(next.cursor).toBeGreaterThanOrEqual(tombstone!.srvModified);
   });
 
-  it("re-sends the other source's reading when the winning source's copy is deleted", async () => {
-    // Two CGM sources upload the same reading; one copy is delivered, the other is its duplicate.
-    for (const [sgv, offset, device] of [[163, 0, "e2e-cgm-a"], [164, 30_000, "e2e-cgm-b"]] as const) {
+  it("re-sends the other stream's reading when the bucket's canonical reading is deleted", async () => {
+    // Two CGM streams report into one bucket, one reading each, far enough apart in value that
+    // deduplication does not link them: only the canonical one is delivered.
+    for (const [sgv, offset, device] of [[163, 0, "e2e-cgm-a"], [171, 30_000, "e2e-cgm-b"]] as const) {
       const created = await tenant.api.request("POST", "/api/v3/entries", {
         type: "sgv", sgv, date: date - 60 * MINUTE + offset, direction: "Flat", device, app: "e2e", utcOffset: 0,
       });
@@ -86,10 +88,10 @@ describe("v3 history after a delete", () => {
     }
 
     const synced = await history(tenant, "entries", 0);
-    const delivered = synced.docs.filter((e) => e.sgv === 163 || e.sgv === 164);
+    const delivered = synced.docs.filter((e) => e.sgv === 163 || e.sgv === 171);
     expect(delivered).toHaveLength(1);
     const winner = delivered[0]!;
-    const otherSgv = winner.sgv === 163 ? 164 : 163;
+    const otherSgv = winner.sgv === 163 ? 171 : 163;
 
     expect((await tenant.api.delete(`/api/v3/entries/${idOf(winner)}`)).status).toBeLessThan(300);
 
@@ -99,6 +101,54 @@ describe("v3 history after a delete", () => {
     expect(successor).toBeDefined();
     expect(successor!.isValid).not.toBe(false);
     expect(successor!.srvModified).toBeGreaterThan(synced.cursor);
+  });
+
+  it("tombstones every copy when the user deletes one copy of a duplicated reading", async () => {
+    // Two sources report the same reading and deduplication links them. A user delete removes the
+    // reading, not one source's report of it, so no copy comes back live.
+    for (const [offset, device] of [[0, "e2e-dup-a"], [10_000, "e2e-dup-b"]] as const) {
+      const created = await tenant.api.request("POST", "/api/v3/entries", {
+        type: "sgv", sgv: 233, date: date - 90 * MINUTE + offset, direction: "Flat", device, app: "e2e", utcOffset: 0,
+      });
+      expect(created.status).toBeLessThan(300);
+    }
+
+    const synced = await history(tenant, "entries", 0);
+    const delivered = synced.docs.filter((e) => e.sgv === 233);
+    expect(delivered).toHaveLength(1);
+
+    expect((await tenant.api.delete(`/api/v3/entries/${idOf(delivered[0]!)}`)).status).toBeLessThan(300);
+
+    const next = await history(tenant, "entries", synced.cursor);
+    const copies = next.docs.filter((e) => e.sgv === 233);
+    expect(copies.map((e) => e.device).sort()).toEqual(["e2e-dup-a", "e2e-dup-b"]);
+    expect(copies.every((e) => e.isValid === false)).toBe(true);
+  });
+
+  it("deletes every copy of a duplicated bolus deleted in v4, so it stops counting", async () => {
+    for (const [offset, device] of [[0, "e2e-pump"], [10_000, "e2e-aaps"]] as const) {
+      const created = await tenant.api.request("POST", "/api/v3/treatments", {
+        eventType: "Correction Bolus", insulin: 2.7, date: date - 20 * MINUTE + offset, app: "e2e", device, utcOffset: 0, type: "NORMAL",
+        data_source: device,
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const bolusIds = async () =>
+      (await tenant.api.ok<{ data: { id: string; insulin: number }[] }>("GET", "/api/v4/insulin/boluses?limit=100"))
+        .data.filter((b) => b.insulin === 2.7).map((b) => b.id);
+
+    const synced = await history(tenant, "treatments", 0);
+    const shown = await bolusIds();
+    expect(shown).toHaveLength(1);
+
+    expect((await tenant.api.delete(`/api/v4/insulin/boluses/${shown[0]}`)).status).toBeLessThan(300);
+
+    expect(await bolusIds()).toEqual([]);
+    const next = await history(tenant, "treatments", synced.cursor);
+    const copies = next.docs.filter((t) => t.insulin === 2.7);
+    expect(copies).toHaveLength(2);
+    expect(copies.every((t) => t.isValid === false)).toBe(true);
   });
 
   it("serves a deleted treatment with isValid false, stamped after the client's cursor", async () => {
@@ -173,6 +223,42 @@ describe("v3 history after a delete", () => {
     expect(idOf(carbs!)).not.toBe(meal);
   });
 
+  it("re-sends a two-store profile live when one store is deleted, and tombstones it with the last", async () => {
+    const schedule = [{ time: "00:00", value: 1, timeAsSeconds: 0 }];
+    const store = () => ({
+      dia: 4, units: "mg/dl", timezone: "UTC",
+      basal: schedule, carbratio: schedule, sens: schedule, target_low: schedule, target_high: schedule,
+    });
+    const created = await tenant.api.request("POST", "/api/v3/profile", {
+      defaultProfile: "e2e-day", startDate: iso, created_at: iso, mills: date, units: "mg/dl",
+      store: { "e2e-day": store(), "e2e-night": store() },
+    });
+    expect(created.status).toBeLessThan(300);
+
+    const hasStore = (doc: V3Document, name: string) => Object.hasOwn(doc.store ?? {}, name);
+    const settingsId = async (name: string) =>
+      (await tenant.api.ok<{ id: string }[]>("GET", `/api/v4/profile/settings/by-name/${name}`))[0]!.id;
+
+    const synced = await history(tenant, "profile", 0);
+    const documentId = idOf(synced.docs.find((p) => hasStore(p, "e2e-day"))!);
+    expect(documentId).toBeDefined();
+
+    expect((await tenant.api.delete(`/api/v4/profile/settings/${await settingsId("e2e-day")}`)).status).toBeLessThan(300);
+
+    const next = await history(tenant, "profile", synced.cursor);
+    const resent = next.docs.filter((p) => idOf(p) === documentId);
+    expect(resent).toHaveLength(1);
+    expect(resent[0]!.isValid).toBeUndefined();
+    expect(hasStore(resent[0]!, "e2e-night")).toBe(true);
+    expect(hasStore(resent[0]!, "e2e-day")).toBe(false);
+    expect(resent[0]!.srvModified).toBeGreaterThan(synced.cursor);
+
+    expect((await tenant.api.delete(`/api/v4/profile/settings/${await settingsId("e2e-night")}`)).status).toBeLessThan(300);
+
+    const last = await history(tenant, "profile", next.cursor);
+    expect(last.docs.find((p) => idOf(p) === documentId)).toMatchObject({ isValid: false });
+  });
+
   it("moves each collection's lastModified to the delete, so a client knows to read the history", async () => {
     const before = await tenant.api.ok<LastModified>("GET", "/api/v3/lastModified");
     const created = await tenant.api.request("POST", "/api/v3/treatments", {
@@ -184,8 +270,8 @@ describe("v3 history after a delete", () => {
     const tombstone = next.docs.find((t) => t.insulin === 2.15 && t.isValid === false);
     expect(tombstone).toBeDefined();
 
+    expect(tombstone!.srvModified).toBeGreaterThan(before.result.collections.treatments ?? 0);
     const after = await tenant.api.ok<LastModified>("GET", "/api/v3/lastModified");
     expect(after.result.collections.treatments).toBeGreaterThanOrEqual(tombstone!.srvModified);
-    expect(after.result.collections.treatments).toBeGreaterThan(before.result.collections.treatments ?? 0);
   });
 });
