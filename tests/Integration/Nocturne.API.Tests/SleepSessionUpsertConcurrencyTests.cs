@@ -68,16 +68,51 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
             .Which.Should().Be((storedId, (string?)"sleep-race-after-update", (short?)90));
     }
 
-    private async Task<(TFirst First, SleepSession Second)> RaceAsync<TFirst>(
+    [Fact]
+    public async Task DeleteSessionAsync_WhileAnUpsertOfThatIdIsUncommitted_WaitsAndDeletesTheReplacement()
+    {
+        var storedId = await SeedAsync("sleep-race-delete-after-upsert");
+
+        var (_, deleted) = await RaceAsync(
+            repo => repo.UpsertSessionAsync(Session(id: storedId, originalId: "sleep-race-delete-after-upsert", score: 90)),
+            repo => repo.DeleteSessionAsync(storedId));
+
+        deleted.Should().BeTrue();
+        (await StoredAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpsertSessionAsync_WhileADeleteOfThatIdIsUncommitted_WaitsAndInsertsIt()
+    {
+        var storedId = await SeedAsync("sleep-race-upsert-after-delete");
+
+        var (deleted, upserted) = await RaceAsync(
+            repo => repo.DeleteSessionAsync(storedId),
+            repo => repo.UpsertSessionAsync(Session(id: storedId, originalId: null, score: 90)));
+
+        deleted.Should().BeTrue();
+        upserted.Id.Should().Be(storedId.ToString());
+        (await StoredAsync()).Should().ContainSingle().Which.Should().Be((storedId, (string?)null, (short?)90));
+    }
+
+    private async Task<Guid> SeedAsync(string originalId)
+    {
+        await using var seed = Fixture.CreateDbContext(Fixture.TenantId);
+        var stored = await Repository(new TestTenantDbContextFactory(seed))
+            .UpsertSessionAsync(Session(id: null, originalId: originalId, score: 60));
+        return Guid.Parse(stored.Id!);
+    }
+
+    private async Task<(TFirst First, TSecond Second)> RaceAsync<TFirst, TSecond>(
         Func<SleepSessionRepository, Task<TFirst>> first,
-        Func<SleepSessionRepository, Task<SleepSession>> second)
+        Func<SleepSessionRepository, Task<TSecond>> second)
     {
         TestTenantDbContextFactory contexts;
         await using (var seed = Fixture.CreateDbContext(Fixture.TenantId))
             contexts = new TestTenantDbContextFactory(seed);
         var held = await contexts.CreateAsync();
         var racer = await contexts.CreateAsync();
-        Task<SleepSession>? secondTask = null;
+        Task<TSecond>? secondTask = null;
         try
         {
             await racer.Database.OpenConnectionAsync();
@@ -106,9 +141,9 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
                 {
                     await secondTask.WaitAsync(TimeSpan.FromSeconds(30));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Already reported by the await above, or superseded by the failure in flight.
+                    Output.WriteLine($"Second write after the race: {ex}");
                 }
             }
             await held.Database.CloseConnectionAsync();

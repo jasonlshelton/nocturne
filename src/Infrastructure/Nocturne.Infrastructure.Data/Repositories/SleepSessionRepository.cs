@@ -108,33 +108,38 @@ public class SleepSessionRepository : ISleepSessionRepository
     }
 
     /// <summary>
-    /// First key of the two-key advisory lock form, naming the sleep-session upsert lock.
+    /// First key of the two-key advisory lock form for the source-record key. Each key kind has its
+    /// own class, so a source-record hash colliding with an id hash is not the same lock.
     /// </summary>
-    private const int UpsertLockClass = 0x534C_5550;
+    private const int SourceRecordLockClass = 0x534C_5352;
+
+    /// <summary>First key of the two-key advisory lock form for the primary-key key.</summary>
+    private const int IdLockClass = 0x534C_4944;
 
     /// <summary>
     /// Serialises writers of one sleep-session key, so a concurrent duplicate waits for the first
     /// to commit and then replaces its row rather than failing a unique index or deleting a row
     /// already gone. A PostgreSQL transaction-scoped advisory lock; other providers take nothing.
-    /// Two keys whose hashes collide only wait for each other. A writer takes the source-record key
-    /// before the primary-key key and never the reverse, so two writers cannot deadlock.
+    /// Two keys of one kind whose hashes collide only wait for each other. A writer takes the
+    /// source-record key before the primary-key key and never the reverse, so two writers cannot
+    /// deadlock.
     /// </summary>
-    private static async Task LockAsync(NocturneDbContext ctx, string key, CancellationToken ct)
+    private static async Task LockAsync(NocturneDbContext ctx, int lockClass, string key, CancellationToken ct)
     {
         if (!ctx.Database.IsNpgsql())
             return;
 
         await ctx.Database.ExecuteSqlAsync(
-            $"SELECT pg_advisory_xact_lock({UpsertLockClass}, hashtext({key}))", ct);
+            $"SELECT pg_advisory_xact_lock({lockClass}, hashtext({key}))", ct);
     }
 
     /// <summary>The source-record half of <see cref="LockAsync"/>, taken first.</summary>
     private static Task LockSourceRecordAsync(NocturneDbContext ctx, SleepSessionEntity entity, CancellationToken ct) =>
-        LockAsync(ctx, $"{ctx.TenantId}|{entity.Source}|{entity.OriginalId}", ct);
+        LockAsync(ctx, SourceRecordLockClass, $"{ctx.TenantId}|{entity.Source}|{entity.OriginalId}", ct);
 
     /// <summary>The primary-key half of <see cref="LockAsync"/>, taken last.</summary>
     private static Task LockIdAsync(NocturneDbContext ctx, Guid id, CancellationToken ct) =>
-        LockAsync(ctx, $"{ctx.TenantId}|id|{id}", ct);
+        LockAsync(ctx, IdLockClass, $"{ctx.TenantId}|{id}", ct);
 
     /// <inheritdoc />
     public async Task<SleepSession?> UpdateSessionAsync(Guid id, SleepSession session, CancellationToken cancellationToken = default)
@@ -171,19 +176,23 @@ public class SleepSessionRepository : ISleepSessionRepository
     public async Task<bool> DeleteSessionAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var ctx = await _contextFactory.CreateAsync(cancellationToken);
-        var existing = await ctx.SleepSessions
-            .Include(s => s.Stages)
-            .Include(s => s.BiometricSamples)
-            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        return await ctx.ExecuteInTransactionAsync(async token =>
+        {
+            await LockIdAsync(ctx, id, token);
+            var existing = await ctx.SleepSessions
+                .Include(s => s.Stages)
+                .Include(s => s.BiometricSamples)
+                .FirstOrDefaultAsync(s => s.Id == id, token);
 
-        if (existing is null)
-            return false;
+            if (existing is null)
+                return false;
 
-        ctx.SleepBiometricSamples.RemoveRange(existing.BiometricSamples);
-        ctx.SleepStages.RemoveRange(existing.Stages);
-        ctx.SleepSessions.Remove(existing);
-        await ctx.SaveChangesAsync(cancellationToken);
-        return true;
+            ctx.SleepBiometricSamples.RemoveRange(existing.BiometricSamples);
+            ctx.SleepStages.RemoveRange(existing.Stages);
+            ctx.SleepSessions.Remove(existing);
+            await ctx.SaveChangesAsync(token);
+            return true;
+        }, ct: cancellationToken);
     }
 
     private static IQueryable<Entities.SleepSessionEntity> BuildFilteredQuery(
