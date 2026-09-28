@@ -92,34 +92,52 @@ public class SoftDeleteHistoryStampTests : IDisposable
         row.Record.ModifiedAt.Should().BeAfter(Written);
     }
 
-    [Fact]
-    public async Task DeletingADuplicateGroupsPrimary_RepointsIt_AndMovesThePromotedCopysStamp()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_user_deleting_one_copy_of_a_duplicate_deletes_every_copy_and_history_tombstones_them_all(
+        bool deletePrimary)
     {
-        // Two sources' copies of one note, linked into a group led by the first. Once the primary
-        // is deleted the other copy leads the group, and a history client has to be sent it.
-        var canonical = Guid.CreateVersion7();
-        var primary = new NoteEntity { Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Written, Text = "a" };
-        var copy = new NoteEntity { Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = Written, Text = "b" };
-        _context.Notes.AddRange(primary, copy);
-        _context.LinkedRecords.AddRange(
-            Link(canonical, primary.Id, isPrimary: true, "source-a"),
-            Link(canonical, copy.Id, isPrimary: false, "source-b"));
-        await _context.SaveChangesAsync();
-        primary.SysUpdatedAt = Written;
-        copy.SysUpdatedAt = Written;
-        await _context.SaveChangesAsync();
-        _context.ChangeTracker.Clear();
-
-        var repository = new NoteRepository(
-            new TestTenantDbContextFactory(_context), Mock.Of<Core.Contracts.Infrastructure.IDeduplicationService>(),
-            new SystemAuditContext(), NullLogger<NoteRepository>.Instance);
+        // Two sources' copies of one note. The user deleted the event, so neither copy may be
+        // promoted to keep it visible, whichever one the delete named.
+        var (primary, copy) = await SeedNotesAsync();
+        var repository = NotesAs(new UserAuditContext());
         var cursor = new DateTimeOffset(Written, TimeSpan.Zero).ToUnixTimeMilliseconds();
 
-        await repository.DeleteAsync(primary.Id, WriteOrigin.Live);
+        await repository.DeleteAsync(deletePrimary ? primary : copy, WriteOrigin.Live);
 
         var page = await repository.GetModifiedSinceAsync(cursor, 1000);
-        page.Select(r => (r.Record.Id, r.Deleted)).Should().BeEquivalentTo(new[] { (primary.Id, true), (copy.Id, false) });
-        (await repository.GetByIdAsync(copy.Id)).Should().NotBeNull();
+        page.Select(r => (r.Record.Id, r.Deleted)).Should().BeEquivalentTo(new[] { (primary, true), (copy, true) });
+        (await repository.GetByIdAsync(primary)).Should().BeNull();
+        (await repository.GetByIdAsync(copy)).Should().BeNull();
+        await using var verify = _db.CreateContext();
+        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(primary, "nothing is promoted");
+        (await verify.Notes.IgnoreQueryFilters().Select(n => EF.Property<bool>(n, "DeletedByUser")).ToListAsync())
+            .Should().AllSatisfy(byUser => byUser.Should().BeTrue());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_user_delete_by_legacy_id_or_sync_identifier_deletes_every_copy(bool bySyncIdentifier)
+    {
+        var (primary, copy) = await SeedNotesAsync();
+        await _context.Notes.Where(n => n.Id == primary).ExecuteUpdateAsync(s => s
+            .SetProperty(n => n.LegacyId, "65f000000000000000000bbb")
+            .SetProperty(n => n.DataSource, "source-a")
+            .SetProperty(n => n.SyncIdentifier, "sync-a"));
+        var repository = NotesAs(new UserAuditContext());
+
+        var deleted = bySyncIdentifier
+            ? await repository.DeleteBySyncIdentifierAsync("source-a", "sync-a", WriteOrigin.Live)
+            : await repository.DeleteByLegacyIdAsync("65f000000000000000000bbb", WriteOrigin.Live);
+
+        deleted.Should().Be(2);
+        await using var verify = _db.CreateContext();
+        (await verify.Notes.CountAsync()).Should().Be(0);
+        (await verify.MutationAuditLog.Select(a => a.EntityId).ToListAsync())
+            .Should().BeEquivalentTo(new Guid?[] { primary, copy });
+        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(primary);
     }
 
     [Fact]
@@ -220,37 +238,32 @@ public class SoftDeleteHistoryStampTests : IDisposable
         await AssertUntouchedAsync<SensorGlucoseEntity>(primaries[0], copies[0]);
     }
 
-    [Fact]
-    public async Task A_failed_repoint_rolls_a_V4_single_delete_back()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_failed_write_rolls_a_whole_group_user_delete_back(bool bulk)
     {
         var (primary, copy) = await SeedNotesAsync();
+        await _context.Notes.Where(n => n.Id == primary)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.LegacyId, "65f000000000000000000ccc"));
         var repository = NotesAs(new UserAuditContext());
-        _statements.FailOnLinkPromote = true;
+        _statements.FailOn = bulk ? "UPDATE \"notes\"" : "INSERT INTO \"mutation_audit_log\"";
 
-        var act = () => repository.DeleteAsync(primary, WriteOrigin.Live);
+        Func<Task> act = bulk
+            ? () => repository.DeleteByLegacyIdAsync("65f000000000000000000ccc", WriteOrigin.Live)
+            : () => repository.DeleteAsync(primary, WriteOrigin.Live);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected*");
-        _statements.LinkUpdates.Should().Be(2, "the demote ran and the promote failed, inside the delete's transaction");
+        (await act.Should().ThrowAsync<Exception>())
+            .Which.ToString().Should().Contain("injected write failure");
         await AssertUntouchedAsync<NoteEntity>(primary, copy);
-    }
-
-    [Fact]
-    public async Task A_V4_single_delete_that_repoints_commits_its_audit_row()
-    {
-        var (primary, copy) = await SeedNotesAsync();
-
-        await NotesAs(new UserAuditContext()).DeleteAsync(primary, WriteOrigin.Live);
-
         await using var verify = _db.CreateContext();
-        var audit = await verify.MutationAuditLog.SingleAsync();
-        (audit.Action, audit.EntityId).Should().Be(("delete", primary));
-        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(copy);
+        (await verify.Notes.CountAsync()).Should().Be(2);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task DeletingAStateSpanThatLeadsItsGroup_RepointsIt(bool activity)
+    public async Task DeletingAStateSpan_DeletesEveryCopyInItsGroup(bool activity)
     {
         var category = (activity ? StateSpanCategory.Exercise : StateSpanCategory.Override).ToString();
         StateSpanEntity Span(string source) => new()
@@ -278,9 +291,9 @@ public class SoftDeleteHistoryStampTests : IDisposable
 
         deleted.Should().BeTrue();
         await using var verify = _db.CreateContext();
-        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(copy.Id);
-        (await verify.StateSpans.IgnoreQueryFilters().SingleAsync(s => s.Id == primary.Id))
-            .DeletedAt.Should().NotBeNull();
+        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(primary.Id);
+        (await verify.StateSpans.IgnoreQueryFilters().ToListAsync())
+            .Should().HaveCount(2).And.OnlyContain(s => s.DeletedAt != null);
     }
 
     /// <summary>
@@ -380,13 +393,15 @@ public class SoftDeleteHistoryStampTests : IDisposable
 
     /// <summary>
     /// Counts the statements the connection runs, by leading keyword. Armed, it fails the second
-    /// <c>UPDATE</c> of <c>linked_records</c>: a repoint's promote, after its demote.
+    /// <c>UPDATE</c> of <c>linked_records</c> (a repoint's promote, after its demote), or the first
+    /// statement starting with <see cref="FailOn"/>.
     /// </summary>
     private sealed class StatementRecorder : DbCommandInterceptor
     {
         private readonly List<string> _statements = [];
 
         public bool FailOnLinkPromote { get; set; }
+        public string? FailOn { get; set; }
         public int LinkUpdates { get; private set; }
 
         public void Clear() => _statements.Clear();
@@ -418,6 +433,8 @@ public class SoftDeleteHistoryStampTests : IDisposable
         {
             var text = command.CommandText.TrimStart();
             _statements.Add(text);
+            if (FailOn is { } prefix && text.Contains(prefix, StringComparison.Ordinal))
+                throw new InvalidOperationException("injected write failure");
             if (!text.StartsWith("UPDATE \"linked_records\"", StringComparison.Ordinal))
                 return;
             LinkUpdates++;

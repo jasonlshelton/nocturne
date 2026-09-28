@@ -43,9 +43,10 @@ public readonly record struct AuditedSoftDeleteResult<T>(int Count, List<T> Enti
 /// <see cref="BroadcastMaterializationCap"/>. A hard delete destroys the row, so its per-row snapshots
 /// are the only surviving copy and are kept.
 /// <para>
-/// A soft delete of a type that takes part in deduplication moves the primary of every group whose
-/// primary it deleted onto a live copy, in the same transaction (<see cref="DuplicateGroupPrimaries"/>),
-/// so no delete path can leave the other sources' copies hidden.
+/// A soft delete of a type that takes part in deduplication either moves the primary of every group
+/// whose primary it deleted onto a live copy, or deletes every copy in the groups it touches
+/// (<see cref="DuplicateDelete"/>), in the same transaction, so no delete path leaves the other
+/// sources' copies hidden behind a deleted primary.
 /// </para>
 /// </remarks>
 public static class AuditedBulkDeleteExtensions
@@ -140,19 +141,22 @@ public static class AuditedBulkDeleteExtensions
     /// the summary row — without it the row cannot say which records it covered.
     /// </param>
     /// <param name="ct">The cancellation token.</param>
+    /// <param name="duplicates">What happens to the other copies in the deleted rows' duplicate groups.</param>
     /// <returns>The number of records soft-deleted.</returns>
     public static async Task<int> AuditedSoftDeleteAsync<T>(
         this NocturneDbContext context,
         IQueryable<T> query,
         IAuditContext? auditContext,
         string scope,
-        CancellationToken ct = default) where T : class, IAuditable, ISoftDeletable
+        CancellationToken ct = default,
+        DuplicateDelete duplicates = DuplicateDelete.PromoteSurvivor) where T : class, IAuditable, ISoftDeletable
     {
         var (deleted, _) = await context.ExecuteInTransactionAsync(
             async token =>
             {
                 var deletedAt = NocturneDbContext.UtcNowAtStoredPrecision();
-                var deleted = await SoftDeleteRowsAsync(context, query, auditContext, deletedAt, token);
+                var rows = await ScopeAsync(context, query, duplicates, token);
+                var deleted = await SoftDeleteRowsAsync(context, rows, auditContext, deletedAt, duplicates, token);
                 await WriteBulkDeleteSummaryAsync<T>(context, deleted.Count, scope, auditContext, token);
                 return (count: deleted.Count, deletedAt);
             },
@@ -170,9 +174,10 @@ public static class AuditedBulkDeleteExtensions
         IQueryable<T> query,
         IAuditContext? auditContext,
         string scope,
-        CancellationToken ct = default) where T : class, IAuditable, ISoftDeletable
+        CancellationToken ct = default,
+        DuplicateDelete duplicates = DuplicateDelete.PromoteSurvivor) where T : class, IAuditable, ISoftDeletable
     {
-        var result = await context.AuditedSoftDeleteWithEntitiesAsync(query, auditContext, scope, ct);
+        var result = await context.AuditedSoftDeleteWithEntitiesAsync(query, auditContext, scope, ct, duplicates);
         return new AuditedSoftDeleteResult<Guid>(
             result.Count, result.Entities.Select(IdOf).ToList(), result.Promoted);
     }
@@ -192,13 +197,15 @@ public static class AuditedBulkDeleteExtensions
         IQueryable<T> query,
         IAuditContext? auditContext,
         string scope,
-        CancellationToken ct = default) where T : class, IAuditable, ISoftDeletable
+        CancellationToken ct = default,
+        DuplicateDelete duplicates = DuplicateDelete.PromoteSurvivor) where T : class, IAuditable, ISoftDeletable
     {
         var (result, _) = await context.ExecuteInTransactionAsync(async token =>
         {
             var deletedAt = NocturneDbContext.UtcNowAtStoredPrecision();
+            var rows = await ScopeAsync(context, query, duplicates, token);
             // One row past the cap is all it takes to know the match set exceeds it.
-            var records = await query.Take(BroadcastMaterializationCap + 1).ToListAsync(token);
+            var records = await rows.Take(BroadcastMaterializationCap + 1).ToListAsync(token);
             var collapsed = records.Count > BroadcastMaterializationCap;
 
             List<MutationAuditLogEntity> auditEntries =
@@ -217,7 +224,7 @@ public static class AuditedBulkDeleteExtensions
                 await context.SaveChangesAsync(token);
             }
 
-            var deleted = await SoftDeleteRowsAsync(context, query, auditContext, deletedAt, token);
+            var deleted = await SoftDeleteRowsAsync(context, rows, auditContext, deletedAt, duplicates, token);
 
             if (collapsed)
                 await WriteBulkDeleteSummaryAsync<T>(context, deleted.Count, scope, auditContext, token);
@@ -249,8 +256,9 @@ public static class AuditedBulkDeleteExtensions
     /// <summary>
     /// Stamps <c>DeletedAt</c> and the dedup attribution flag: a user-initiated delete blocks resync
     /// re-creation, a system sweep leaves the row re-creatable (<see cref="SoftDeleteDedupExtensions"/>).
-    /// Runs whether or not an audit row is written. Then repoints the duplicate groups whose primary
-    /// it deleted, stamping each promoted copy after the deletes.
+    /// Runs whether or not an audit row is written. Then, under
+    /// <see cref="DuplicateDelete.PromoteSurvivor"/>, repoints the duplicate groups whose primary it
+    /// deleted, stamping each promoted copy after the deletes.
     /// </summary>
     /// <remarks>
     /// A delete is a write a v3 history client has to be told of, so on an
@@ -263,6 +271,7 @@ public static class AuditedBulkDeleteExtensions
         IQueryable<T> query,
         IAuditContext? auditContext,
         DateTime deletedAt,
+        DuplicateDelete duplicates,
         CancellationToken ct) where T : class, ISoftDeletable
     {
         var isUserDelete = !auditContext.IsSystemMutation();
@@ -302,12 +311,23 @@ public static class AuditedBulkDeleteExtensions
                     ct);
         }
 
-        IReadOnlyList<Guid> promoted = recordType is { } type
+        IReadOnlyList<Guid> promoted = recordType is { } type && duplicates == DuplicateDelete.PromoteSurvivor
             ? await DuplicateGroupPrimaries.RepointAwayFromAsync(
                 context, type, ids, deletedAt.AddMilliseconds(groups.Count), ct)
             : [];
         return (total, promoted);
     }
+
+    /// <summary>
+    /// The rows a delete covers: <paramref name="query"/>, and under
+    /// <see cref="DuplicateDelete.EveryCopy"/> every other copy in the duplicate groups it matches.
+    /// </summary>
+    private static async Task<IQueryable<T>> ScopeAsync<T>(
+        NocturneDbContext context, IQueryable<T> query, DuplicateDelete duplicates, CancellationToken ct)
+        where T : class, ISoftDeletable =>
+        duplicates == DuplicateDelete.EveryCopy
+            ? await DuplicateGroupPrimaries.WithGroupMatesAsync(context, query, ct)
+            : query;
 
     /// <summary>
     /// Appends the one summary row a bulk soft delete records: the entity type, how many rows it

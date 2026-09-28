@@ -436,14 +436,14 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.DeleteAsync" />
+    /// <remarks>Deletes every copy in the record's duplicate group (<see cref="DuplicateDelete.EveryCopy"/>).</remarks>
     public async Task DeleteAsync(Guid id, WriteOrigin origin, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entity = await ctx.Set<TEntity>().FindAsync([id], ct)
             ?? throw new KeyNotFoundException($"{typeof(TModel).Name} {id} not found");
-        var (_, promoted) = await DuplicateGroupPrimaries.SoftDeleteAsync(ctx, entity, DedupRecordType, ct);
-        var model = ToDomain(entity);
-        await RaiseBroadcastAsync([], await LoadAsync(ctx, promoted, ct), [model], origin, ct);
+        var (_, copies) = await DuplicateGroupPrimaries.SoftDeleteAsync(ctx, entity, DedupRecordType, ct);
+        await RaiseBroadcastAsync([], [], [ToDomain(entity), .. copies.Select(ToDomain)], origin, ct);
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.RestoreAsync" />
@@ -512,7 +512,10 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         return await query.CountAsync(ct);
     }
 
-    /// <summary>Soft-deletes the record(s) with the given legacy id. Returns the number affected.</summary>
+    /// <summary>
+    /// Soft-deletes the record(s) with the given legacy id, and every other source's copy
+    /// deduplication linked them to. Returns the number affected.
+    /// </summary>
     /// <remarks>
     /// Routes through the audited soft-delete helper so every V4 type writes a mutation_audit_log row
     /// and carries the user-delete dedup discriminator. Virtual so types with a type-specific delete
@@ -522,7 +525,8 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
         return await AuditedSoftDeleteAndBroadcastAsync(
-            ctx, ctx.Set<TEntity>().Where(e => e.LegacyId == legacyId), $"legacy_id={legacyId}", origin, ct);
+            ctx, ctx.Set<TEntity>().Where(e => e.LegacyId == legacyId), $"legacy_id={legacyId}",
+            DuplicateDelete.EveryCopy, origin, ct);
     }
 
     /// <summary>
@@ -531,9 +535,10 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     /// </summary>
     /// <returns>The number of rows soft-deleted.</returns>
     protected async Task<int> AuditedSoftDeleteAndBroadcastAsync(
-        NocturneDbContext ctx, IQueryable<TEntity> rows, string scope, WriteOrigin origin, CancellationToken ct)
+        NocturneDbContext ctx, IQueryable<TEntity> rows, string scope, DuplicateDelete duplicates,
+        WriteOrigin origin, CancellationToken ct)
     {
-        var result = await ctx.AuditedSoftDeleteWithEntitiesAsync(rows, AuditContext, scope, ct);
+        var result = await ctx.AuditedSoftDeleteWithEntitiesAsync(rows, AuditContext, scope, ct, duplicates);
 
         if (result.Collapsed)
             await RaiseBulkDeleteBroadcastAsync(result.Count, origin, ct);

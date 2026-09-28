@@ -1400,7 +1400,8 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         // origin is accepted for interface uniformity; the v4-native delete broadcast is deferred to the glucose-unification follow-up (deletes here bypass the repository chokepoint).
         var deleted = 0;
         foreach (var table in DecomposedTables)
-            deleted += (await table.SoftDeleteAsync([legacyId], source: null, $"legacy_id={legacyId}", ct)).Count;
+            deleted += (await table.SoftDeleteAsync(
+                [legacyId], source: null, $"legacy_id={legacyId}", DuplicateDelete.EveryCopy, ct)).Count;
 
         if (deleted > 0)
             Logger.LogDebug("Soft-deleted {Count} v4 records for legacy treatment {LegacyId}", deleted, legacyId);
@@ -1424,7 +1425,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
 
             var deleted = 0;
             foreach (var table in DecomposedTables)
-                deleted += (await table.SoftDeleteAsync(ids, source, scope, ct)).Count;
+                deleted += (await table.SoftDeleteAsync(ids, source, scope, DuplicateDelete.PromoteSurvivor, ct)).Count;
 
             await transaction.CommitAsync(ct);
             return deleted;
@@ -1781,7 +1782,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         /// writes below its cap are the right shape for that.
         /// </remarks>
         Task<AuditedSoftDeleteResult<Guid>> SoftDeleteAsync(
-            string[] legacyIds, string? source, string scope, CancellationToken ct);
+            string[] legacyIds, string? source, string scope, DuplicateDelete duplicates, CancellationToken ct);
 
         Task<int> SoftDeleteInRangeAsync(DateTime? from, DateTime? to, string scope, CancellationToken ct);
 
@@ -1819,11 +1820,11 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         public RecordType RecordType => recordType;
 
         public Task<AuditedSoftDeleteResult<Guid>> SoftDeleteAsync(
-            string[] legacyIds, string? source, string scope, CancellationToken ct)
+            string[] legacyIds, string? source, string scope, DuplicateDelete duplicates, CancellationToken ct)
             => context.AuditedSoftDeleteWithIdsAsync(
                 rows.Where(e => e.LegacyId != null && legacyIds.Contains(e.LegacyId)
                              && (source == null || e.DataSource == source)),
-                auditContext, scope, ct);
+                auditContext, scope, ct, duplicates);
 
         public Task<int> SoftDeleteInRangeAsync(DateTime? from, DateTime? to, string scope, CancellationToken ct)
             => context.AuditedSoftDeleteAsync(inRange(rows, from, to), auditContext, scope, ct);

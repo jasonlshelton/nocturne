@@ -7,14 +7,33 @@ using Nocturne.Infrastructure.Data.Services;
 namespace Nocturne.Infrastructure.Data.Extensions;
 
 /// <summary>
+/// What a soft delete does to the other copies in the duplicate groups of the rows it deletes.
+/// </summary>
+public enum DuplicateDelete
+{
+    /// <summary>
+    /// A source going away (a connector or data source removed, a source's time range swept): the
+    /// other sources still reported the record, so a group whose primary went is repointed onto a
+    /// live copy (<see cref="DuplicateGroupPrimaries.RepointAwayFromAsync"/>).
+    /// </summary>
+    PromoteSurvivor,
+
+    /// <summary>
+    /// A user deleting one record: every copy goes with it, so a bolus reported by both the pump
+    /// and the AID app stops counting in IOB/COB.
+    /// </summary>
+    EveryCopy,
+}
+
+/// <summary>
 /// Keeps a duplicate group readable once its primary is soft-deleted. Reads show a group through
 /// its primary (<see cref="ReadVisibilityFilter.ExcludeNonPrimary{TEntity}"/>), so a deleted
 /// primary hides every other source's copy with it; and the promoted copy's own row did not
 /// change, so a v3 history client would never be sent it.
 /// </summary>
 /// <remarks>
-/// Writes by statement and tracks nothing, so the context may be the caller's scope context with
-/// changes of its own pending.
+/// The repoint writes by statement and tracks nothing, so the context may be the caller's scope
+/// context with changes of its own pending.
 /// </remarks>
 internal static class DuplicateGroupPrimaries
 {
@@ -68,27 +87,81 @@ internal static class DuplicateGroupPrimaries
     }
 
     /// <summary>
-    /// Soft-deletes <paramref name="entity"/>, a tracked row of <paramref name="ctx"/>, and repoints the
-    /// group it was the primary of, in one transaction, so a failed repoint leaves the row live.
+    /// Soft-deletes <paramref name="entity"/>, a tracked row of <paramref name="ctx"/>, together with
+    /// every other copy in its duplicate group, in one transaction, so a failure leaves them all live.
+    /// This is a user deleting one record: the dose or reading is gone whichever source reported it,
+    /// so no other copy may be promoted to keep counting (<see cref="DuplicateDelete"/>).
     /// </summary>
     /// <param name="ctx">The context tracking <paramref name="entity"/>.</param>
     /// <param name="entity">The row to delete.</param>
-    /// <param name="recordType">The record type its links are under; null repoints nothing.</param>
+    /// <param name="recordType">The record type its links are under; null deletes the row alone.</param>
     /// <param name="ct">The cancellation token.</param>
-    /// <returns>What the save wrote, and the ids of the promoted live copies.</returns>
-    public static Task<(int Saved, IReadOnlyList<Guid> Promoted)> SoftDeleteAsync<TEntity>(
+    /// <returns>What the save wrote, and the other copies deleted with the row.</returns>
+    public static Task<(int Saved, IReadOnlyList<TEntity> Copies)> SoftDeleteAsync<TEntity>(
         NocturneDbContext ctx, TEntity entity, RecordType? recordType, CancellationToken ct)
         where TEntity : class, IIdentified, ISoftDeletable =>
-        ctx.ExecuteInTransactionAsync<(int, IReadOnlyList<Guid>)>(async token =>
+        ctx.ExecuteInTransactionAsync<(int, IReadOnlyList<TEntity>)>(async token =>
         {
-            entity.DeletedAt = DateTime.UtcNow;
+            var deletedAt = DateTime.UtcNow;
+            entity.DeletedAt = deletedAt;
+            List<TEntity> copies = [];
+            if (recordType is { } type)
+            {
+                var copyIds = await GroupMatesAsync(ctx, type, [entity.Id], token);
+                if (copyIds.Length > 0)
+                    copies = await ctx.Set<TEntity>().Where(e => copyIds.Contains(e.Id)).ToListAsync(token);
+                foreach (var copy in copies)
+                    copy.DeletedAt = deletedAt;
+            }
+
             var saved = await ctx.SaveChangesAsync(token);
-            IReadOnlyList<Guid> promoted = recordType is { } type
-                ? await RepointAwayFromAsync(
-                    ctx, type, [entity.Id], NocturneDbContext.UtcNowAtStoredPrecision(), token)
-                : [];
-            return (saved, promoted);
+            return (saved, copies);
         }, ct: ct);
+
+    /// <summary>
+    /// <paramref name="query"/> widened to every live copy in the duplicate groups of the rows it
+    /// matches, for a bulk delete made with <see cref="DuplicateDelete.EveryCopy"/>. Unchanged when
+    /// <typeparamref name="T"/> takes no part in deduplication or no matched row is linked.
+    /// </summary>
+    public static async Task<IQueryable<T>> WithGroupMatesAsync<T>(
+        NocturneDbContext ctx, IQueryable<T> query, CancellationToken ct)
+        where T : class, ISoftDeletable
+    {
+        if (RecordTypeOf<T>() is not { } recordType)
+            return query;
+
+        var ids = await query.Where(e => e.DeletedAt == null)
+            .Select(e => EF.Property<Guid>(e, "Id")).ToArrayAsync(ct);
+        var mates = await GroupMatesAsync(ctx, recordType, ids, ct);
+        if (mates.Length == 0)
+            return query;
+
+        Guid[] all = [.. ids, .. mates];
+        return ctx.Set<T>().Where(e => all.Contains(EF.Property<Guid>(e, "Id")));
+    }
+
+    /// <summary>The other records linked into the duplicate groups of <paramref name="ids"/>.</summary>
+    private static async Task<Guid[]> GroupMatesAsync(
+        NocturneDbContext ctx, RecordType recordType, Guid[] ids, CancellationToken ct)
+    {
+        if (ids.Length == 0)
+            return [];
+
+        var key = RecordTypeKeys.Key(recordType);
+        var canonicals = await ctx.LinkedRecords.AsNoTracking()
+            .Where(lr => lr.RecordType == key && ids.Contains(lr.RecordId))
+            .Select(lr => lr.CanonicalId)
+            .Distinct()
+            .ToArrayAsync(ct);
+        if (canonicals.Length == 0)
+            return [];
+
+        return await ctx.LinkedRecords.AsNoTracking()
+            .Where(lr => lr.RecordType == key && canonicals.Contains(lr.CanonicalId) && !ids.Contains(lr.RecordId))
+            .Select(lr => lr.RecordId)
+            .Distinct()
+            .ToArrayAsync(ct);
+    }
 
     /// <summary>
     /// Canonical groups <see cref="RepickAsync"/> loads the links of at a time, so a delete of a
