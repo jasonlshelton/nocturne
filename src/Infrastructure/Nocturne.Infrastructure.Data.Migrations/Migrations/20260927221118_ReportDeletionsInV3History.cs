@@ -1,4 +1,3 @@
-using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,10 +5,11 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Nocturne.Infrastructure.Data.Migrations
 {
     /// <summary>
-    /// Lets the v3 history reads return soft-deleted rows: foods become soft-deletable, and the
-    /// history-page indexes lose their <c>deleted_at IS NULL</c> predicate. Each wide index is built
-    /// through <see cref="ConcurrentIndexBuilder"/> before the partial one it replaces is dropped, so
-    /// history reads stay indexed throughout.
+    /// Lets the v3 history reads return soft-deleted rows: the history-page indexes lose their
+    /// <c>deleted_at IS NULL</c> predicate. Each wide index is built through
+    /// <see cref="ConcurrentIndexBuilder"/> before the partial one it replaces is dropped, so history
+    /// reads stay indexed throughout. The migration holds only that concurrent, idempotent work, so an
+    /// interrupted run can be repeated; the transactional part is <see cref="AddFoodSoftDelete"/>.
     /// </summary>
     public partial class ReportDeletionsInV3History : Migration
     {
@@ -37,19 +37,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<DateTime>(
-                name: "deleted_at",
-                table: "foods",
-                type: "timestamp with time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<bool>(
-                name: "deleted_by_user",
-                table: "foods",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
-
             foreach (var table in HistoryPagedTables)
             {
                 ConcurrentIndexBuilder.Build(
@@ -71,14 +58,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     $"ON {table} (tenant_id, sys_updated_at, id) WHERE deleted_at IS NULL");
                 ConcurrentIndexBuilder.Drop(migrationBuilder, $"ix_{table}_tenant_history");
             }
-
-            migrationBuilder.DropColumn(
-                name: "deleted_at",
-                table: "foods");
-
-            migrationBuilder.DropColumn(
-                name: "deleted_by_user",
-                table: "foods");
         }
     }
 }
