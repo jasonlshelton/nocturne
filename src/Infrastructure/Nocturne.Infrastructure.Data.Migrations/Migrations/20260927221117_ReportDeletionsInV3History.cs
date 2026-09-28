@@ -7,12 +7,9 @@ namespace Nocturne.Infrastructure.Data.Migrations
 {
     /// <summary>
     /// Lets the v3 history reads return soft-deleted rows: foods become soft-deletable, and the
-    /// history-page indexes lose their <c>deleted_at IS NULL</c> predicate. The two unreleased
-    /// migrations that added those indexes now build the wide ones directly, so an upgrade from a
-    /// release builds each index once and the index steps here find nothing to do. A database that
-    /// ran their earlier, partial form gets the wide index built through
-    /// <see cref="ConcurrentIndexBuilder"/> before the partial one is dropped. The wide indexes belong
-    /// to those migrations, so <c>Down</c> leaves them to theirs.
+    /// history-page indexes lose their <c>deleted_at IS NULL</c> predicate. Each wide index is built
+    /// through <see cref="ConcurrentIndexBuilder"/> before the partial one it replaces is dropped, so
+    /// history reads stay indexed throughout.
     /// </summary>
     public partial class ReportDeletionsInV3History : Migration
     {
@@ -66,6 +63,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            foreach (var table in HistoryPagedTables)
+            {
+                ConcurrentIndexBuilder.Build(
+                    migrationBuilder,
+                    $"ix_{table}_tenant_sys_updated_at",
+                    $"ON {table} (tenant_id, sys_updated_at, id) WHERE deleted_at IS NULL");
+                ConcurrentIndexBuilder.Drop(migrationBuilder, $"ix_{table}_tenant_history");
+            }
+
             migrationBuilder.DropColumn(
                 name: "deleted_at",
                 table: "foods");

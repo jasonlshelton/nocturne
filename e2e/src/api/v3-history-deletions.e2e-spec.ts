@@ -76,6 +76,31 @@ describe("v3 history after a delete", () => {
     expect(next.cursor).toBeGreaterThanOrEqual(tombstone!.srvModified);
   });
 
+  it("re-sends the other source's reading when the winning source's copy is deleted", async () => {
+    // Two CGM sources upload the same reading; one copy is delivered, the other is its duplicate.
+    for (const [sgv, offset, device] of [[163, 0, "e2e-cgm-a"], [164, 30_000, "e2e-cgm-b"]] as const) {
+      const created = await tenant.api.request("POST", "/api/v3/entries", {
+        type: "sgv", sgv, date: date - 60 * MINUTE + offset, direction: "Flat", device, app: "e2e", utcOffset: 0,
+      });
+      expect(created.status).toBeLessThan(300);
+    }
+
+    const synced = await history(tenant, "entries", 0);
+    const delivered = synced.docs.filter((e) => e.sgv === 163 || e.sgv === 164);
+    expect(delivered).toHaveLength(1);
+    const winner = delivered[0]!;
+    const otherSgv = winner.sgv === 163 ? 164 : 163;
+
+    expect((await tenant.api.delete(`/api/v3/entries/${idOf(winner)}`)).status).toBeLessThan(300);
+
+    const next = await history(tenant, "entries", synced.cursor);
+    expect(next.docs.find((e) => idOf(e) === idOf(winner))).toMatchObject({ isValid: false });
+    const successor = next.docs.find((e) => e.sgv === otherSgv);
+    expect(successor).toBeDefined();
+    expect(successor!.isValid).not.toBe(false);
+    expect(successor!.srvModified).toBeGreaterThan(synced.cursor);
+  });
+
   it("serves a deleted treatment with isValid false, stamped after the client's cursor", async () => {
     const created = await tenant.api.request("POST", "/api/v3/treatments", {
       eventType: "Correction Bolus", insulin: 1.35, date, app: "AAPS", device: "AAPS-e2e-delete", utcOffset: 0, type: "NORMAL",
