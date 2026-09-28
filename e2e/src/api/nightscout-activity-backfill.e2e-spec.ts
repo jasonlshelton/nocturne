@@ -15,8 +15,11 @@ interface V1Activity {
   _id: string;
 }
 
-async function setActivityBackfilled(uploaded: boolean): Promise<void> {
-  const res = await fetch(`${env.mocksUrl}/nightscout/__activity-backfill`, { method: uploaded ? "POST" : "DELETE" });
+// The fake instance scopes its backfill to this base path, so parallel specs never see it.
+const scopePath = (tenant: Tenant) => `/nightscout/scope/${tenant.slug}`;
+
+async function setActivityBackfilled(tenant: Tenant, uploaded: boolean): Promise<void> {
+  const res = await fetch(`${env.mocksUrl}${scopePath(tenant)}/__activity-backfill`, { method: uploaded ? "POST" : "DELETE" });
   expect(res.status).toBe(204);
 }
 
@@ -38,17 +41,16 @@ describe("Nightscout connector: activity uploaded behind the cursor", () => {
   let tenant: Tenant;
 
   beforeAll(async () => {
-    await setActivityBackfilled(false);
     tenant = await seedTenant();
     await tenant.api.ok("PUT", "/api/v4/connectors/config/nightscout", {
-      url: `${env.mocksUrlFromApi}/nightscout`,
+      url: `${env.mocksUrlFromApi}${scopePath(tenant)}`,
       isActive: true,
     });
     await tenant.api.ok("PUT", "/api/v4/connectors/config/nightscout/secrets", { apiSecret: FAKE_SECRET });
   });
 
   afterAll(async () => {
-    await setActivityBackfilled(false);
+    if (tenant) await setActivityBackfilled(tenant, false);
   });
 
   it("imports the activity the source holds", async () => {
@@ -61,7 +63,7 @@ describe("Nightscout connector: activity uploaded behind the cursor", () => {
   });
 
   it("fetches an activity uploaded later but dated behind the cursor", async () => {
-    await setActivityBackfilled(true);
+    await setActivityBackfilled(tenant, true);
 
     await sync(tenant);
 
