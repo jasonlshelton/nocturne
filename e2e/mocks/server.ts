@@ -9,9 +9,10 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { nightscout } from "./vendors/nightscout.ts";
+import { nightscoutMigration } from "./vendors/nightscout-migration.ts";
 import type { Vendor, VendorRequest } from "./vendors/vendor.ts";
 
-const vendors: Record<string, Vendor> = { nightscout };
+const vendors: Record<string, Vendor> = { nightscout, "nightscout-migration": nightscoutMigration };
 const seen: Record<string, VendorRequest[]> = Object.fromEntries(Object.keys(vendors).map((k) => [k, []]));
 
 function send(res: ServerResponse, status: number, body: unknown) {
