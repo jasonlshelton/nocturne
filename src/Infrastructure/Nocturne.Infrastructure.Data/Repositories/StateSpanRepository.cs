@@ -537,9 +537,9 @@ public class StateSpanRepository : IStateSpanRepository
         if (entity == null)
             return false;
 
-        entity.DeletedAt = DateTime.UtcNow;
-        var result = await _context.SaveChangesAsync(cancellationToken);
-        return result > 0;
+        var (saved, _) = await DuplicateGroupPrimaries.SoftDeleteAsync(
+            _context, entity, RecordType.StateSpan, cancellationToken);
+        return saved > 0;
     }
 
     /// <summary>
@@ -875,9 +875,9 @@ public class StateSpanRepository : IStateSpanRepository
         if (entity == null)
             return false;
 
-        entity.DeletedAt = DateTime.UtcNow;
-        var result = await _context.SaveChangesAsync(cancellationToken);
-        return result > 0;
+        var (saved, _) = await DuplicateGroupPrimaries.SoftDeleteAsync(
+            _context, entity, RecordType.StateSpan, cancellationToken);
+        return saved > 0;
     }
 
     #endregion

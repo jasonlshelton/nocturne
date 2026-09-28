@@ -68,12 +68,51 @@ internal static class DuplicateGroupPrimaries
     }
 
     /// <summary>
+    /// Soft-deletes <paramref name="entity"/>, a tracked row of <paramref name="ctx"/>, and repoints the
+    /// group it was the primary of, in one transaction, so a failed repoint leaves the row live.
+    /// </summary>
+    /// <param name="ctx">The context tracking <paramref name="entity"/>.</param>
+    /// <param name="entity">The row to delete.</param>
+    /// <param name="recordType">The record type its links are under; null repoints nothing.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>What the save wrote, and the ids of the promoted live copies.</returns>
+    public static Task<(int Saved, IReadOnlyList<Guid> Promoted)> SoftDeleteAsync<TEntity>(
+        NocturneDbContext ctx, TEntity entity, RecordType? recordType, CancellationToken ct)
+        where TEntity : class, IIdentified, ISoftDeletable =>
+        ctx.ExecuteInTransactionAsync<(int, IReadOnlyList<Guid>)>(async token =>
+        {
+            entity.DeletedAt = DateTime.UtcNow;
+            var saved = await ctx.SaveChangesAsync(token);
+            IReadOnlyList<Guid> promoted = recordType is { } type
+                ? await RepointAwayFromAsync(
+                    ctx, type, [entity.Id], NocturneDbContext.UtcNowAtStoredPrecision(), token)
+                : [];
+            return (saved, promoted);
+        }, ct: ct);
+
+    /// <summary>
+    /// Canonical groups <see cref="RepickAsync"/> loads the links of at a time, so a delete of a
+    /// whole source holds one chunk's links in memory rather than every group's.
+    /// </summary>
+    internal const int RepickChunkSize = 1000;
+
+    /// <summary>
     /// Moves each group's <see cref="LinkedRecordEntity.IsPrimary"/> onto
-    /// <see cref="DeduplicationService.PickSurvivor(IEnumerable{LinkedRecordEntity}, Func{Guid, bool})"/>.
-    /// A group with no primary at all renders as nothing, so it is given one here too.
+    /// <see cref="DeduplicationService.PickSurvivor(IEnumerable{LinkedRecordEntity}, Func{Guid, bool})"/>,
+    /// <see cref="RepickChunkSize"/> groups at a time. A group with no primary at all renders as
+    /// nothing, so it is given one here too.
     /// </summary>
     /// <returns>The ids of the live records made primary.</returns>
     public static async Task<IReadOnlyList<Guid>> RepickAsync(
+        NocturneDbContext ctx, RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
+    {
+        var promotedLive = new List<Guid>();
+        foreach (var chunk in canonicalIds.Chunk(RepickChunkSize))
+            promotedLive.AddRange(await RepickChunkAsync(ctx, recordType, chunk, ct));
+        return promotedLive;
+    }
+
+    private static async Task<List<Guid>> RepickChunkAsync(
         NocturneDbContext ctx, RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
     {
         var key = RecordTypeKeys.Key(recordType);

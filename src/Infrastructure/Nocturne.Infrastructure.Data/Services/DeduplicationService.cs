@@ -689,16 +689,6 @@ public class DeduplicationService : IDeduplicationService
             DuplicateGroups: duplicateGroups);
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Writes by statement and tracks nothing (<see cref="DuplicateGroupPrimaries"/>), so a caller
-    /// sharing this scope's context keeps its pending changes.
-    /// </remarks>
-    public async Task RepointPrimariesAwayFromAsync(
-        RecordType recordType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
-        => await DuplicateGroupPrimaries.RepointAwayFromAsync(
-            _context, recordType, recordIds, NocturneDbContext.UtcNowAtStoredPrecision(), ct);
-
     /// <inheritdoc cref="DuplicateGroupPrimaries.RepickAsync"/>
     private Task RepickPrimariesAsync(RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
         => DuplicateGroupPrimaries.RepickAsync(_context, recordType, canonicalIds, ct);

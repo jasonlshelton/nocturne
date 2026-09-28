@@ -441,15 +441,7 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entity = await ctx.Set<TEntity>().FindAsync([id], ct)
             ?? throw new KeyNotFoundException($"{typeof(TModel).Name} {id} not found");
-        var promoted = await ctx.ExecuteInTransactionAsync(async token =>
-        {
-            entity.DeletedAt = DateTime.UtcNow;
-            await ctx.SaveChangesAsync(token);
-            return DedupRecordType is { } recordType
-                ? await DuplicateGroupPrimaries.RepointAwayFromAsync(
-                    ctx, recordType, [id], NocturneDbContext.UtcNowAtStoredPrecision(), token)
-                : [];
-        }, ct: ct);
+        var (_, promoted) = await DuplicateGroupPrimaries.SoftDeleteAsync(ctx, entity, DedupRecordType, ct);
         var model = ToDomain(entity);
         await RaiseBroadcastAsync([], await LoadAsync(ctx, promoted, ct), [model], origin, ct);
     }
