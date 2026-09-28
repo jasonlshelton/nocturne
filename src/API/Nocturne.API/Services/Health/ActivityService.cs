@@ -401,6 +401,10 @@ public class ActivityService : IActivityService
             {
                 var sleepSession = ActivityStateSpanMapper.ToSleepSession(activity);
                 sleepSession.OriginalId = id;
+                // A session Guid that missed the live lookup above may name a tombstone, which the
+                // upsert finds only by primary key.
+                if (Guid.TryParse(id, out _))
+                    sleepSession.Id = id;
 
                 var upsertedSession = await _sleepService.UpsertSessionAsync(sleepSession, cancellationToken);
                 var upsertedActivity = ActivityStateSpanMapper.SleepSessionToActivity(upsertedSession);
