@@ -5,6 +5,7 @@ using Nocturne.Connectors.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Connectors;
@@ -234,7 +235,8 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
             ids => _db.GetHeldOriginalIdsAsync<StateSpanEntity>(ids, cancellationToken),
             ids => _db.GetHeldOriginalIdsAsync<HeartRateEntity>(ids, cancellationToken),
             ids => _db.GetHeldOriginalIdsAsync<StepCountEntity>(ids, cancellationToken),
-            ids => _db.GetHeldOriginalIdsAsync<SleepSessionEntity>(ids, cancellationToken));
+            ids => _db.GetHeldOriginalIdsAsync<SleepSessionEntity>(
+                ids, s => s.Source == ActivityStateSpanMapper.SleepSessionSource, cancellationToken));
 
     public async Task<bool> PublishStateSpansAsync(
         IEnumerable<StateSpan> stateSpans,

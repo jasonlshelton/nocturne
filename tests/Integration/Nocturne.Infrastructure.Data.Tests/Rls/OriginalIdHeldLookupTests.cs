@@ -44,6 +44,32 @@ public class OriginalIdHeldLookupTests(RlsCompletenessFixture fx)
             Source = "Synthetic", Type = "Overnight", DetectionMethod = "Auto", OriginalId = id,
         });
 
+    [Fact]
+    public async Task SleepSessions_OfAnotherSource_DoNotHoldTheId()
+    {
+        var tenant = await CreateTenantAsync();
+        SleepSessionEntity Session(string source, string id) => new()
+        {
+            Id = Guid.CreateVersion7(), TenantId = tenant,
+            StartTime = DateTime.UtcNow.AddHours(-9), EndTime = DateTime.UtcNow.AddHours(-1),
+            Source = source, Type = "Overnight", DetectionMethod = "Auto", OriginalId = id,
+        };
+
+        await using (var ctx = await OpenAsAppAsync(tenant))
+        {
+            ctx.Add(Session("Manual", "same-source"));
+            ctx.Add(Session("Apple", "other-source"));
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var lookup = await OpenAsAppAsync(tenant);
+        var held = await lookup.GetHeldOriginalIdsAsync<SleepSessionEntity>(
+            ["same-source", "other-source"], s => s.Source == "Manual");
+
+        held.Should().BeEquivalentTo(["same-source"],
+            "a session is keyed by source and original id, so another source's session is a different record");
+    }
+
     private async Task AssertHeldAsync<TEntity>(Func<string, TEntity> row)
         where TEntity : class, ITenantScoped, ISoftDeletable, IOriginalIdentified
     {

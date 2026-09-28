@@ -18,6 +18,7 @@ using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
@@ -65,12 +66,12 @@ public class RecentActivityPublishTests : IDisposable
         _context.StepCounts.Add(new StepCountEntity { Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-steps", Timestamp = now, Metric = 500 });
         _context.SleepSessions.Add(new SleepSessionEntity
         {
-            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep", Source = "synthetic",
+            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep", Source = ActivityStateSpanMapper.SleepSessionSource,
             StartTime = now.AddHours(-8), EndTime = now, Type = "sleep", DetectionMethod = "manual",
         });
         _context.SleepSessions.Add(new SleepSessionEntity
         {
-            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep-deleted", Source = "synthetic",
+            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-sleep-deleted", Source = ActivityStateSpanMapper.SleepSessionSource,
             StartTime = now.AddHours(-8), EndTime = now, Type = "sleep", DetectionMethod = "manual", DeletedAt = now,
         });
         await _context.SaveChangesAsync();
@@ -103,6 +104,23 @@ public class RecentActivityPublishTests : IDisposable
 
         written.Should().Be(1);
         _created.Select(a => a.Id).Should().Equal("act-shared-id");
+    }
+
+    [Fact]
+    public async Task Another_sources_sleep_session_does_not_hold_the_id()
+    {
+        var now = DateTime.UtcNow;
+        _context.SleepSessions.Add(new SleepSessionEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, OriginalId = "act-shared-sleep-id", Source = "Apple",
+            StartTime = now.AddHours(-8), EndTime = now, Type = "sleep", DetectionMethod = "manual",
+        });
+        await _context.SaveChangesAsync();
+
+        var written = await Publisher().PublishRecentActivityAsync([Activity("act-shared-sleep-id")], Source, WriteOrigin.Live);
+
+        written.Should().Be(1, "an activity's sleep session is keyed by its own source and the id");
+        _created.Select(a => a.Id).Should().Equal("act-shared-sleep-id");
     }
 
     [Fact]
