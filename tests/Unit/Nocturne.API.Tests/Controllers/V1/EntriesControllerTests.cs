@@ -259,8 +259,8 @@ public class EntriesControllerTests
         var entry = processedInput![0];
         entry.Id.Should().NotBeNullOrEmpty();
 
-        // The ID should be a valid GUID-like string (hex characters, 32 chars without dashes)
-        entry.Id.Should().MatchRegex("^[a-f0-9]{32}$");
+        // The wire coerces a stored id that is not an ObjectId, so only an ObjectId is served as stored.
+        MongoObjectId.IsObjectId(entry.Id).Should().BeTrue();
     }
 
     [Fact]
@@ -393,7 +393,7 @@ public class EntriesControllerTests
     }
 
     [Fact]
-    public async Task UpdateEntry_AcceptsIdGeneratedByCreateEndpoint()
+    public async Task UpdateEntry_AcceptsA32HexUuid()
     {
         var generatedId = Guid.CreateVersion7().ToString("N");
         var update = new Entry { Sgv = 123, Mills = 1686565800000 };
@@ -423,7 +423,7 @@ public class EntriesControllerTests
     }
 
     [Fact]
-    public async Task DeleteEntry_AcceptsIdGeneratedByCreateEndpoint()
+    public async Task DeleteEntry_AcceptsA32HexUuid()
     {
         var generatedId = Guid.CreateVersion7().ToString("N");
 

@@ -905,10 +905,9 @@ public class EntriesController : ControllerBase
     /// </summary>
     private static void NormalizeEntry(Entry entry)
     {
-        // Generate ID if not provided
         if (string.IsNullOrEmpty(entry.Id))
         {
-            entry.Id = Guid.CreateVersion7().ToString("N");
+            entry.Id = MongoObjectId.NewObjectId();
         }
 
         // Materialize dateString from mills if the client didn't send one
@@ -954,8 +953,7 @@ public class EntriesController : ControllerBase
             HttpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown"
         );
 
-        // Validate ID format: legacy MongoDB ObjectIds (24 hex) and system-assigned
-        // UUID v7 ids from POST /api/v1/entries (32 hex, see NormalizeEntry) are both valid.
+        // A 32-hex id is a record uuid, or a legacy id an older POST /api/v1/entries assigned.
         if (
             string.IsNullOrEmpty(id)
             || !System.Text.RegularExpressions.Regex.IsMatch(
@@ -1027,8 +1025,7 @@ public class EntriesController : ControllerBase
             HttpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown"
         );
 
-        // Validate ID format: legacy MongoDB ObjectIds (24 hex) and system-assigned
-        // UUID v7 ids from POST /api/v1/entries (32 hex, see NormalizeEntry) are both valid.
+        // A 32-hex id is a record uuid, or a legacy id an older POST /api/v1/entries assigned.
         if (
             string.IsNullOrEmpty(id)
             || !System.Text.RegularExpressions.Regex.IsMatch(
