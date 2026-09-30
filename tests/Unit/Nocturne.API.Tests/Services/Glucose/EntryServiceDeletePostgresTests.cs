@@ -65,8 +65,11 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
         EntryService Service,
         EntriesController Controller,
         V3EntriesController V3Controller,
+        EntryDecomposer Decomposer,
+        EntryReadService Store,
         SensorGlucoseRepository SensorGlucose,
         MeterGlucoseRepository MeterGlucose,
+        CalibrationRepository Calibration,
         Mock<IDataEventSink<Entry>> Events,
         Func<NocturneDbContext> Db);
 
@@ -138,7 +141,9 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
 
-        return new Setup(service, controller, v3Controller, sensorGlucose, meterGlucose, events, () => Context(tenant));
+        return new Setup(
+            service, controller, v3Controller, decomposer, store, sensorGlucose, meterGlucose, calibration, events,
+            () => Context(tenant));
     }
 
     private static string ServedId(Entry entry) =>
@@ -196,6 +201,36 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
         (await setup.Service.DeleteEntryAsync(MongoObjectId.FromGuid(stored.Id))).Should().BeTrue();
 
         (await setup.MeterGlucose.GetByIdAsync(stored.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_calibration_stored_without_a_legacy_id_is_deleted_by_its_served_id()
+    {
+        var setup = await CreateAsync();
+        var stored = await setup.Calibration.CreateAsync(
+            new Calibration { Timestamp = DateTime.UtcNow.AddMinutes(-15), Slope = 850, Intercept = 30000, Scale = 1 },
+            WriteOrigin.Live);
+
+        (await setup.Service.DeleteEntryAsync(MongoObjectId.FromGuid(stored.Id))).Should().BeTrue();
+
+        (await setup.Calibration.GetByIdAsync(stored.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_record_deleted_after_it_was_resolved_deletes_nothing_and_broadcasts_once()
+    {
+        var setup = await CreateAsync();
+        var created = await setup.SensorGlucose.CreateAsync(
+            new SensorGlucose { Timestamp = DateTime.UtcNow.AddMinutes(-17), Mgdl = 133 }, WriteOrigin.Live);
+        var stored = await setup.Store.GetStoredByIdAsync(MongoObjectId.FromGuid(created.Id));
+        stored.Should().NotBeNull();
+        await setup.SensorGlucose.DeleteAsync(created.Id, WriteOrigin.Live);
+
+        (await setup.Decomposer.DeleteStoredAsync(stored!, WriteOrigin.Live)).Should().Be(0);
+
+        setup.Events.Verify(
+            e => e.OnDeletedAsync(It.IsAny<Entry>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

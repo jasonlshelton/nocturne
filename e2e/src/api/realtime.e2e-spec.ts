@@ -65,8 +65,7 @@ describe("realtime data hub", () => {
       what: "the entry's create event",
     });
 
-    // workaround: #1808 - neither v1 nor v3 deletes an entry by the _id REST serves, so it is
-    // deleted by its v4 id, which stays valid whatever id the socket and REST carry.
+    // Deleted by its v4 id; the v1 delete by the served _id is covered below.
     const readings = await tenant.api.ok<{ data: SensorGlucose[] }>(
       "GET",
       `/api/v4/glucose/sensor?from=${encodeURIComponent(new Date(entry!.date).toISOString())}&limit=50`,
@@ -80,8 +79,7 @@ describe("realtime data hub", () => {
     });
   });
 
-  // Bug #1808: the v1 delete matches legacy ids only. Flip to `it` once fixed.
-  it.fails("deletes an entry by the _id REST serves", async () => {
+  it("deletes an entry by the _id REST serves", async () => {
     const [entry] = sgvSeries({ count: 1, end: Date.now() - 90 * 60 * 1000, valueAt: () => 98, device: "e2e-realtime" });
     await postEntries(tenant.api, [entry!]);
     const [rest] = await tenant.api.ok<V1Entry[]>("GET", `/api/v1/entries.json?find[date][$eq]=${entry!.date}`);
