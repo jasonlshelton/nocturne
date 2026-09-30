@@ -38,12 +38,7 @@ public static class TempBasalToTreatmentMapper
             EnteredBy = tempBasal.App,
             UtcOffset = tempBasal.UtcOffset,
             DataSource = tempBasal.DataSource,
-            Automatic = tempBasal.Origin switch
-            {
-                TempBasalOrigin.Algorithm => true,
-                TempBasalOrigin.Manual => false,
-                _ => null,
-            },
+            Automatic = TempBasalAutomaticFlag.Of(tempBasal.AdditionalProperties),
             AdditionalProperties = TreatmentClientId.ToTreatment(tempBasal.AdditionalProperties),
         };
 

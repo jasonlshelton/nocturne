@@ -1163,6 +1163,24 @@ public class TreatmentDecomposerTests : IDisposable
         TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null).Origin.Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData(true, "loop://Test Phone")]
+    [InlineData(false, "loop://Test Phone")]
+    [InlineData(null, "loop://Test Phone")]
+    [InlineData(null, "Trio")]
+    [InlineData(null, "openaps://AndroidAPS")]
+    public void MapToTempBasal_ReadBackReturnsOnlyTheUploadedAutomaticFlag(bool? automatic, string enteredBy)
+    {
+        var upload = TempBasalForOrigin(reason: null, automatic, basalOrigin: null, enteredBy);
+
+        var record = TreatmentDecomposer.MapToTempBasal(upload, correlationId: null);
+        record.AdditionalProperties = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            JsonSerializer.Serialize(record.AdditionalProperties));
+
+        Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(record)
+            .Automatic.Should().Be(automatic);
+    }
+
     #endregion
 
     #region Event Type Case Insensitivity
