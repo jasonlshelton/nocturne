@@ -60,6 +60,9 @@ public class ActivityServiceTests
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<SleepSessionType?>(),
                 It.IsAny<SleepSource?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(0);
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns((IEnumerable<Activity> a) => a);
 
         _activityService = new ActivityService(
             _mockStateSpanService.Object,
@@ -449,6 +452,42 @@ public class ActivityServiceTests
             x => x.BroadcastStorageUpdateAsync("activity", It.IsAny<object>()),
             Times.Once
         );
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateActivityAsync_SanitisesAndHonoursTheClientTimestamp_AsCreateDoes()
+    {
+        const string activityId = "507f1f77bcf86cd799439011";
+        var activity = System.Text.Json.JsonSerializer.Deserialize<Activity>(
+            """
+            {"_id":"507f1f77bcf86cd799439011","type":"exercise","timestamp":1780000000123,
+             "created_at":"2026-05-28T20:26:40Z","notes":"<script>alert(1)</script>ran"}
+            """)!;
+        Activity? stored = null;
+        _mockStateSpanService
+            .Setup(x => x.UpdateActivityAsync(activityId, It.IsAny<Activity>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Activity, CancellationToken>((_, a, _) => stored = a)
+            .ReturnsAsync((string _, Activity a, CancellationToken _) => a);
+        var service = new ActivityService(
+            _mockStateSpanService.Object,
+            _mockSleepService.Object,
+            new Nocturne.API.Services.Legacy.DocumentProcessingService(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                    Nocturne.API.Services.Legacy.DocumentProcessingService>.Instance),
+            _mockSignalRBroadcastService.Object,
+            Mock.Of<IDataEventSink<Activity>>(),
+            _mockActivityDecomposer.Object,
+            _mockHeartRateService.Object,
+            _mockStepCountService.Object,
+            _mockLogger.Object
+        );
+
+        await service.UpdateActivityAsync(activityId, activity, CancellationToken.None);
+
+        stored.Should().NotBeNull();
+        stored!.Notes.Should().NotContain("<script").And.Contain("ran");
+        (stored.Mills, stored.CreatedAt).Should().Be((1_780_000_000_123L, "2026-05-28T20:26:40.123Z"));
     }
 
     [Fact]

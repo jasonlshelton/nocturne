@@ -200,26 +200,8 @@ public class TreatmentsController : ControllerBase
 
         try
         {
-            List<Treatment> treatmentsToCreate;
-
-            // Handle both single treatment and array of treatments
-            if (treatments.ValueKind == JsonValueKind.Array)
-            {
-                treatmentsToCreate =
-                    JsonSerializer.Deserialize<List<Treatment>>(treatments.GetRawText())
-                    ?? new List<Treatment>();
-            }
-            else if (treatments.ValueKind == JsonValueKind.Object)
-            {
-                var singleTreatment = JsonSerializer.Deserialize<Treatment>(
-                    treatments.GetRawText()
-                );
-                treatmentsToCreate =
-                    singleTreatment != null
-                        ? new List<Treatment> { singleTreatment }
-                        : new List<Treatment>();
-            }
-            else
+            var treatmentsToCreate = ReadTreatments(treatments);
+            if (treatmentsToCreate is null)
             {
                 _logger.LogWarning("Invalid JSON format for treatments");
                 return BadRequest("Invalid JSON format. Expected object or array of treatments.");
@@ -230,37 +212,8 @@ public class TreatmentsController : ControllerBase
                 return BadRequest("No treatments provided");
             }
 
-            // Process treatments: sanitize HTML, convert timestamps, set defaults, and deduplicate
-            var processedTreatments = _documentProcessingService.ProcessDocuments(
-                treatmentsToCreate
-            );
-
-            // Set default event types for treatments that don't have them
-            foreach (var treatment in processedTreatments)
-            {
-                if (string.IsNullOrWhiteSpace(treatment.EventType))
-                {
-                    if (treatment.Insulin.HasValue && treatment.Carbs.HasValue)
-                    {
-                        treatment.EventType = "Meal Bolus";
-                    }
-                    else if (treatment.Insulin.HasValue)
-                    {
-                        treatment.EventType = "Correction Bolus";
-                    }
-                    else if (treatment.Carbs.HasValue)
-                    {
-                        treatment.EventType = "Carb Correction";
-                    }
-                    else
-                    {
-                        treatment.EventType = "Note";
-                    }
-                }
-            }
-
             var createdTreatments = await _treatmentService.CreateTreatmentsAsync(
-                processedTreatments,
+                PrepareTreatments(treatmentsToCreate),
                 cancellationToken
             );
             var resultArray = createdTreatments.ToArray();
@@ -283,18 +236,61 @@ public class TreatmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Update an existing treatment by ID
+    /// Save treatments identified by the <c>_id</c> in the body, inserting any not already stored
     /// </summary>
-    /// <param name="id">Treatment ID to update</param>
-    /// <param name="treatment">Updated treatment data</param>
+    /// <param name="treatments">Treatment to save (can be single object or array)</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Updated treatment</returns>
+    /// <returns>The saved treatment, or an array of them when an array was sent</returns>
+    [HttpPut]
+    [Authorize]
+    [RequireScope(Scope.TreatmentsReadWrite)]
+    [NightscoutEndpoint("/api/v1/treatments")]
+    [ProducesResponseType(typeof(Treatment), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> SaveTreatments(
+        [FromBody] JsonElement treatments,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var treatmentsToSave = ReadTreatments(treatments);
+            if (treatmentsToSave is null)
+                return BadRequest("Invalid JSON format. Expected object or array of treatments.");
+            if (treatmentsToSave.Count == 0)
+                return BadRequest("No treatments provided");
+
+            return await SaveAsync(
+                treatmentsToSave,
+                treatments.ValueKind == JsonValueKind.Array,
+                cancellationToken
+            );
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Invalid JSON in save treatments request");
+            return BadRequest("Invalid JSON format");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving treatments");
+            return StatusCode(500, "Internal server error while saving treatments");
+        }
+    }
+
+    /// <summary>
+    /// Save a treatment by ID, inserting it when the ID is not already stored
+    /// </summary>
+    /// <param name="id">Treatment ID to save</param>
+    /// <param name="treatment">Treatment data</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Saved treatment</returns>
     [HttpPut("{id}")]
     [Authorize]
     [RequireScope(Scope.TreatmentsReadWrite)]
     [NightscoutEndpoint("/api/v1/treatments/:id")]
     [ProducesResponseType(typeof(Treatment), 200)]
-    [ProducesResponseType(404)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<Treatment>> UpdateTreatment(
@@ -323,35 +319,8 @@ public class TreatmentsController : ControllerBase
                 return BadRequest("Treatment data cannot be null");
             }
 
-            // Ensure the treatment has the correct ID
             treatment.Id = id;
-
-            // Update timestamp if mills is provided but created_at is not
-            if (treatment.Mills > 0 && string.IsNullOrWhiteSpace(treatment.CreatedAt))
-            {
-                var dateTime = DateTimeOffset.FromUnixTimeMilliseconds(treatment.Mills);
-                treatment.CreatedAt = dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
-            }
-            else if (treatment.Mills <= 0 && !string.IsNullOrWhiteSpace(treatment.CreatedAt))
-            {
-                treatment.Mills = treatment.CalculatedMills;
-            }
-
-            var updatedTreatment = await _treatmentService.UpdateTreatmentAsync(
-                id,
-                treatment,
-                cancellationToken
-            );
-
-            if (updatedTreatment == null)
-            {
-                _logger.LogDebug("Treatment not found for update with ID: {Id}", id);
-                return NotFound($"Treatment with ID '{id}' not found");
-            }
-
-            _logger.LogDebug("Successfully updated treatment with ID: {Id}", id);
-
-            return Ok(updatedTreatment);
+            return await SaveAsync([treatment], asArray: false, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -481,5 +450,77 @@ public class TreatmentsController : ControllerBase
             );
             return StatusCode(500, "Internal server error while bulk deleting treatments");
         }
+    }
+
+    /// <summary>
+    /// Nightscout's save is an upsert: a treatment whose id resolves to a stored record replaces it,
+    /// and any other goes through the create path, which keeps the client's id.
+    /// </summary>
+    private async Task<ActionResult> SaveAsync(
+        List<Treatment> treatments,
+        bool asArray,
+        CancellationToken cancellationToken
+    )
+    {
+        var saved = new List<Treatment>();
+        foreach (var treatment in PrepareTreatments(treatments))
+        {
+            if (!string.IsNullOrWhiteSpace(treatment.Id)
+                && await _treatmentService.UpdateTreatmentAsync(
+                    treatment.Id, treatment, cancellationToken) is { } updated)
+            {
+                saved.Add(updated);
+                continue;
+            }
+
+            saved.AddRange(
+                await _treatmentService.CreateTreatmentsAsync([treatment], cancellationToken));
+        }
+
+        if (asArray)
+            return Ok(saved.ToArray());
+
+        return saved.Count > 0
+            ? Ok(saved[0])
+            : StatusCode(500, "Internal server error while saving treatment");
+    }
+
+    private static List<Treatment>? ReadTreatments(JsonElement body) => body.ValueKind switch
+    {
+        JsonValueKind.Array => JsonSerializer.Deserialize<List<Treatment>>(body.GetRawText()) ?? [],
+        JsonValueKind.Object => JsonSerializer.Deserialize<Treatment>(body.GetRawText()) is { } single
+            ? [single]
+            : [],
+        _ => null,
+    };
+
+    private List<Treatment> PrepareTreatments(List<Treatment> treatments)
+    {
+        var processed = _documentProcessingService.ProcessDocuments(treatments).ToList();
+
+        foreach (var treatment in processed)
+        {
+            if (string.IsNullOrWhiteSpace(treatment.EventType))
+            {
+                if (treatment.Insulin.HasValue && treatment.Carbs.HasValue)
+                {
+                    treatment.EventType = "Meal Bolus";
+                }
+                else if (treatment.Insulin.HasValue)
+                {
+                    treatment.EventType = "Correction Bolus";
+                }
+                else if (treatment.Carbs.HasValue)
+                {
+                    treatment.EventType = "Carb Correction";
+                }
+                else
+                {
+                    treatment.EventType = "Note";
+                }
+            }
+        }
+
+        return processed;
     }
 }

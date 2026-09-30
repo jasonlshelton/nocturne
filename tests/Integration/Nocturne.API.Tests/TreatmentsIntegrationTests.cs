@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Nocturne.API.Tests.Integration.Infrastructure;
+using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Models;
 using Xunit;
 using Xunit.Abstractions;
@@ -269,6 +271,43 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
 
         var getContent = await getResponse.Content.ReadAsStringAsync();
         Log($"PUT treatment '{id}' returned: {putResponse.StatusCode}");
+    }
+
+    [Fact]
+    public async Task PutCollection_LoopOverrideByUuid_UpdatesInPlace()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        (await client.PostAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["durationType"] = "indefinite",
+            ["created_at"] = now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["duration"] = 30,
+            ["created_at"] = now.AddMinutes(-15).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        });
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+
+        var overrides = await WithTenantScopeAsync(async sp =>
+            (await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(
+                category: StateSpanCategory.Override,
+                from: now.AddHours(-2).UtcDateTime,
+                to: now.AddHours(1).UtcDateTime))
+            .Where(s => string.Equals(s.OriginalId, id, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+        var stored = overrides.Should().ContainSingle().Subject;
+        stored.StartTimestamp.Should().BeCloseTo(now.AddMinutes(-15).UtcDateTime, TimeSpan.FromSeconds(1));
+        (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(30));
     }
 
     #endregion

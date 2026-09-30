@@ -244,17 +244,8 @@ public class ActivityService : IActivityService
     {
         try
         {
-            var activityList = activities.ToList();
-            _logger.LogDebug("Creating {Count} activity records", activityList.Count);
-
-            // ProcessTimestamp would date these by whole-second created_at, or by the time of
-            // receipt when created_at is absent.
-            foreach (var activity in activityList)
-                ActivityDecomposer.ApplyClientTimestamp(activity);
-
-            // Process documents (sanitization and timestamp conversion)
-            var processedActivities = _documentProcessingService.ProcessDocuments(activityList);
-            var processedList = processedActivities.ToList();
+            var processedList = PrepareForStorage(activities);
+            _logger.LogDebug("Creating {Count} activity records", processedList.Count);
 
             // Separate sensor data, sleep activities, and regular activities
             var regularActivities = new List<Activity>();
@@ -361,6 +352,8 @@ public class ActivityService : IActivityService
         {
             _logger.LogDebug("Updating activity record with ID: {Id}", id);
 
+            activity = PrepareForStorage([activity]).Single();
+
             // Try sleep sessions first: GET projects sleep activities with the session Guid as id
             if (Guid.TryParse(id, out var sleepGuid))
             {
@@ -423,6 +416,20 @@ public class ActivityService : IActivityService
             _logger.LogError(ex, "Error updating activity record with ID: {Id}", id);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Sanitises and dates activities the same way for create and update. The client timestamp is
+    /// applied first because <see cref="IDocumentProcessingService.ProcessTimestamp"/> would date a
+    /// record by whole-second <c>created_at</c>, or by the time of receipt when it is absent.
+    /// </summary>
+    private List<Activity> PrepareForStorage(IEnumerable<Activity> activities)
+    {
+        var activityList = activities.ToList();
+        foreach (var activity in activityList)
+            ActivityDecomposer.ApplyClientTimestamp(activity);
+
+        return _documentProcessingService.ProcessDocuments(activityList).ToList();
     }
 
     /// <summary>
