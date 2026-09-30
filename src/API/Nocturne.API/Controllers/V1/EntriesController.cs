@@ -149,8 +149,13 @@ public class EntriesController : ControllerBase
     /// Get a specific entry by ID or get entries by type
     /// </summary>
     /// <param name="spec">Either an entry ID (24-character hex string) or entry type (e.g., "sgv", "mbg", "cal")</param>
+    /// <param name="count">Maximum number of entries to return for a type spec (default 10, capped at <see cref="LegacyReadLimits.MaxCount"/>)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Entry or entries matching the specification</returns>
+    /// <remarks>
+    /// A type spec runs the same query as <see cref="GetEntries"/>, honouring <c>count</c> and
+    /// <c>find[...]</c>, with the path type taking precedence over any <c>find[type]</c>.
+    /// </remarks>
     [HttpGet("{spec}")]
     [NightscoutEndpoint("/api/v1/entries/{spec}")]
     [ProducesResponseType(typeof(Entry[]), 200)]
@@ -159,6 +164,7 @@ public class EntriesController : ControllerBase
     [ErrorEnvelope]
     public async Task<ActionResult<Entry[]>> GetEntry(
         string spec,
+        [FromQuery] int? count = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -195,68 +201,26 @@ public class EntriesController : ControllerBase
 
             return Ok(new[] { entry }.ToV1Responses());
         }
-        else
+
+        var entriesArray = await QueryEntriesAsync(
+            type: spec,
+            find: null,
+            count: count,
+            dateString: null,
+            cancellationToken
+        );
+
+        if (NotModifiedSince(entriesArray) is { } notModified)
         {
-            // Treat spec as entry type (e.g., "sgv", "mbg", "cal")
-            _logger.LogDebug("Fetching entries of type: {Type}", spec);
-            var entries = await _entryService.GetEntriesAsync(
-                type: spec,
-                count: 10,
-                skip: 0,
-                cancellationToken
-            );
-            var entriesArray = entries.ToArray();
-
-            // Set Last-Modified header for caching
-            DateTimeOffset lastModified;
-            if (entriesArray.Length > 0)
-            {
-                // Set Last-Modified header based on most recent entry
-                lastModified = DateTimeOffset.FromUnixTimeMilliseconds(entriesArray[0].Mills);
-            }
-            else
-            {
-                // Set Last-Modified to current time when no entries exist
-                lastModified = DateTimeOffset.UtcNow;
-            }
-            Response.Headers["Last-Modified"] = lastModified.ToString("R");
-
-            // Check If-Modified-Since header
-            if (Request.Headers.IfModifiedSince.Count > 0)
-            {
-                if (
-                    DateTimeOffset.TryParse(
-                        Request.Headers.IfModifiedSince.First(),
-                        out var ifModifiedSince
-                    )
-                )
-                {
-                    if (lastModified <= ifModifiedSince)
-                    {
-                        _logger.LogDebug(
-                            "Entries not modified since {IfModifiedSince}, returning 304",
-                            ifModifiedSince
-                        );
-                        return StatusCode(
-                            304,
-                            new
-                            {
-                                status = 304,
-                                message = "Not modified",
-                                type = "internal",
-                            }
-                        );
-                    }
-                }
-            }
-
-            _logger.LogDebug(
-                "Found {Count} entries of type: {Type}",
-                entriesArray.Length,
-                spec
-            );
-            return Ok(entriesArray.ToV1Responses());
+            return notModified;
         }
+
+        _logger.LogDebug(
+            "Found {Count} entries of type: {Type}",
+            entriesArray.Length,
+            spec
+        );
+        return Ok(entriesArray.ToV1Responses());
     }
 
     /// <summary>
@@ -292,131 +256,30 @@ public class EntriesController : ControllerBase
         CancellationToken cancellationToken = default
     )
     {
-        // Get the full query string to handle multiple find parameters correctly
-        var queryString = HttpContext?.Request?.QueryString.ToString() ?? string.Empty;
-
-        // Strip the leading '?' if present
-        if (queryString.StartsWith("?"))
-        {
-            queryString = queryString.Substring(1);
-        }
-
-        // DEBUG: Log the query string details
-        _logger.LogDebug("Processing query string: '{QueryString}'", queryString);
-
-        // Extract find query from the query string (handles multiple find parameters)
-        // Use query string if it contains find parameters, otherwise use the find parameter for unit tests
-        string? findQuery = null;
-        if (
-            !string.IsNullOrEmpty(queryString)
-            && (queryString.Contains("find[") || queryString.Contains("find%5B"))
-        )
-        {
-            findQuery = queryString;
-        }
-        else if (!string.IsNullOrEmpty(find))
-        {
-            findQuery = find;
-        }
-
         _logger.LogInformation(
-            "Entries endpoint requested with count: {Count}, type: {Type}, findQuery: {FindQuery}, dateString: {DateString}, format: {Format} from {RemoteIpAddress}",
+            "Entries endpoint requested with count: {Count}, type: {Type}, dateString: {DateString}, format: {Format} from {RemoteIpAddress}",
             count,
             type,
-            findQuery,
             dateString,
             format,
             HttpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown"
         );
 
-        // In Nightscout v1, the ?type= parameter does NOT filter by entry type
-        // It may be related to output format. To filter by type, use find[type]=xxx
-        // Only apply type filtering when it comes from find query, not from ?type= parameter
-        string? entryType = null;
-
-        // Check if find query contains type filter
-        if (
-            !string.IsNullOrEmpty(findQuery)
-            && (findQuery.Contains("find[type]") || findQuery.Contains("find%5Btype%5D"))
-        )
-        {
-            // Type filtering will be handled by the find query parser
-            entryType = null;
-        }
-
-        // Handle count parameter for Nightscout compatibility:
-        // - null/not specified: default to 10 (Nightscout default)
-        // - 0 or negative: return empty array (Nightscout behavior)
-        // - positive: return that many entries
-        if (count.HasValue && count.Value <= 0)
-        {
-            // Nightscout returns empty array for count=0 or negative values
-            return Ok(Array.Empty<Entry>());
-        }
-        // Nightscout defaults to 10 when count is not specified; the upper bound is ours.
-        var limitedCount = LegacyReadLimits.ClampCount(count ?? 10);
-
-        // Use advanced filtering if any advanced parameters are provided
-        // reverseResults stays false (newest-first): legacy Nightscout ignores the cache-busting
-        // "rr" query parameter, so a nonzero "rr" value must never flip the sort order.
-        var entries = await _entryService.GetEntriesWithAdvancedFilterAsync(
-            type: entryType,
-            count: limitedCount,
-            skip: 0,
-            findQuery: findQuery,
+        // Nightscout v1 does not filter by ?type=; a type filter arrives as find[type].
+        var entriesArray = await QueryEntriesAsync(
+            type: null,
+            find: find,
+            count: count,
             dateString: dateString,
-            reverseResults: false,
-            cancellationToken: cancellationToken
+            cancellationToken
         );
-        var entriesArray = entries.ToArray();
 
-        // Set Last-Modified header for caching
-        DateTimeOffset lastModified;
-        if (entriesArray.Length > 0)
+        if (NotModifiedSince(entriesArray) is { } notModified)
         {
-            // Set Last-Modified header based on most recent entry
-            lastModified = DateTimeOffset.FromUnixTimeMilliseconds(entriesArray[0].Mills);
+            return notModified;
         }
-        else
-        {
-            // Set Last-Modified to current time when no entries exist
-            lastModified = DateTimeOffset.UtcNow;
-        }
-        Response.Headers["Last-Modified"] = lastModified.ToString("R");
 
-        // Check If-Modified-Since header
-        if (Request.Headers.IfModifiedSince.Count > 0)
-        {
-            if (
-                DateTimeOffset.TryParse(
-                    Request.Headers.IfModifiedSince.First(),
-                    out var ifModifiedSince
-                )
-            )
-            {
-                if (lastModified <= ifModifiedSince)
-                {
-                    _logger.LogDebug(
-                        "Entries not modified since {IfModifiedSince}, returning 304",
-                        ifModifiedSince
-                    );
-                    return StatusCode(
-                        304,
-                        new
-                        {
-                            status = 304,
-                            message = "Not modified",
-                            type = "internal",
-                        }
-                    );
-                }
-            }
-        }
-        _logger.LogDebug(
-            "Found {Count} entries of type: {Type}",
-            entriesArray.Length,
-            entryType
-        );
+        _logger.LogDebug("Found {Count} entries", entriesArray.Length);
 
         // Determine format from format parameter or Accept header (content negotiation)
         var effectiveFormat = format;
@@ -479,6 +342,82 @@ public class EntriesController : ControllerBase
         }
 
         return Ok(entriesArray.ToV1Responses());
+    }
+
+    /// <summary>
+    /// The v1 entries query shared by <see cref="GetEntries"/> and <see cref="GetEntry"/>.
+    /// <paramref name="find"/> is used only when the request's query string carries no <c>find[...]</c>.
+    /// </summary>
+    private async Task<Entry[]> QueryEntriesAsync(
+        string? type,
+        string? find,
+        int? count,
+        string? dateString,
+        CancellationToken cancellationToken
+    )
+    {
+        // Nightscout returns an empty array for count=0 or a negative count.
+        if (count is <= 0)
+        {
+            return [];
+        }
+
+        // The raw query string keeps every find[...] parameter, which model binding would collapse.
+        var queryString = (HttpContext?.Request?.QueryString.ToString() ?? string.Empty).TrimStart('?');
+        var findQuery =
+            queryString.Contains("find[") || queryString.Contains("find%5B") ? queryString
+            : string.IsNullOrEmpty(find) ? null
+            : find;
+
+        // reverseResults stays false (newest-first): legacy Nightscout ignores the cache-busting
+        // "rr" query parameter, so a nonzero "rr" value must never flip the sort order.
+        var entries = await _entryService.GetEntriesWithAdvancedFilterAsync(
+            type: type,
+            count: LegacyReadLimits.ClampCount(count ?? 10),
+            skip: 0,
+            findQuery: findQuery,
+            dateString: dateString,
+            reverseResults: false,
+            cancellationToken: cancellationToken
+        );
+        return entries.ToArray();
+    }
+
+    /// <summary>
+    /// Stamps <c>Last-Modified</c> from the newest entry and answers a satisfied
+    /// <c>If-Modified-Since</c> with a 304.
+    /// </summary>
+    /// <returns>The 304 result, or <see langword="null"/> when the body should be sent.</returns>
+    private ActionResult? NotModifiedSince(Entry[] entries)
+    {
+        var lastModified =
+            entries.Length > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(entries[0].Mills)
+                : DateTimeOffset.UtcNow;
+        Response.Headers["Last-Modified"] = lastModified.ToString("R");
+
+        if (
+            Request.Headers.IfModifiedSince.Count > 0
+            && DateTimeOffset.TryParse(Request.Headers.IfModifiedSince.First(), out var ifModifiedSince)
+            && lastModified <= ifModifiedSince
+        )
+        {
+            _logger.LogDebug(
+                "Entries not modified since {IfModifiedSince}, returning 304",
+                ifModifiedSince
+            );
+            return StatusCode(
+                304,
+                new
+                {
+                    status = 304,
+                    message = "Not modified",
+                    type = "internal",
+                }
+            );
+        }
+
+        return null;
     }
 
     /// <summary>

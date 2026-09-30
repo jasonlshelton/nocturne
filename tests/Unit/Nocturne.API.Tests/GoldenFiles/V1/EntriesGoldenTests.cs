@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text.Json;
+using FluentAssertions;
 using Nocturne.API.Tests.GoldenFiles.Infrastructure;
 using Nocturne.Infrastructure.Data.Entities.V4;
 
@@ -220,6 +223,77 @@ public class EntriesGoldenTests : GoldenFileTestBase
 
         await Verify(captured);
     }
+
+    [Fact]
+    public async Task GetEntriesByType_WithCount_ReturnsThatManyNewestFirst()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 300).Select(i => CreateSgvEntry(i)).ToArray());
+
+        var entries = await GetEntryArrayAsync("/api/v1/entries/sgv.json?count=288");
+
+        entries.Should().HaveCount(288);
+        entries.Select(DateOf).Should().BeInDescendingOrder();
+        DateOf(entries[0]).Should().Be(BaseMillis);
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_WithoutCount_ReturnsTenNewest()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 15).Select(i => CreateSgvEntry(i)).ToArray());
+
+        var entries = await GetEntryArrayAsync("/api/v1/entries/sgv.json");
+
+        entries.Should().HaveCount(10);
+        DateOf(entries[0]).Should().Be(BaseMillis);
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_WithFindDateRange_NarrowsToTheRangeAndTheType()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 20).Select(i => CreateSgvEntry(i)).ToArray());
+        await SeedMeterGlucose(Enumerable.Range(0, 3).Select(CreateMbgEntry).ToArray());
+        var from = BaseMillis - 4 * 300_000;
+
+        var entries = await GetEntryArrayAsync(
+            $"/api/v1/entries/sgv.json?count=100&find[date][$gte]={from}");
+
+        entries.Should().HaveCount(5);
+        entries.Select(DateOf).Should().OnlyContain(date => date >= from);
+        entries.Select(e => e.GetProperty("type").GetString()).Should().OnlyContain(t => t == "sgv");
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_PathTypeConstrainsACountedRead()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 20).Select(i => CreateSgvEntry(i)).ToArray());
+        await SeedMeterGlucose(Enumerable.Range(0, 12).Select(CreateMbgEntry).ToArray());
+
+        var entries = await GetEntryArrayAsync("/api/v1/entries/mbg.json?count=50");
+
+        entries.Should().HaveCount(12);
+        entries.Select(e => e.GetProperty("type").GetString()).Should().OnlyContain(t => t == "mbg");
+    }
+
+    [Fact]
+    public async Task GetEntriesById_WithCount_StillReturnsTheOneEntry()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 5).Select(i => CreateSgvEntry(i)).ToArray());
+
+        var entries = await GetEntryArrayAsync("/api/v1/entries/aaaaaaaaaaaaaaaaaaaaa003.json?count=50");
+
+        entries.Should().ContainSingle();
+        entries[0].GetProperty("_id").GetString().Should().Be("aaaaaaaaaaaaaaaaaaaaa003");
+    }
+
+    private async Task<JsonElement[]> GetEntryArrayAsync(string url)
+    {
+        var response = await Client.GetAsync(url);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.EnumerateArray().Select(e => e.Clone()).ToArray();
+    }
+
+    private static long DateOf(JsonElement entry) => entry.GetProperty("date").GetInt64();
 
     #endregion
 
