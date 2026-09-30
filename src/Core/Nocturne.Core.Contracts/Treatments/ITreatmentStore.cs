@@ -31,8 +31,9 @@ public interface ITreatmentStore
 
     /// <summary>
     /// Maps a wire identifier (a 24-hex ObjectId derived from a record's UUID) to the stored
-    /// <c>LegacyId</c> the decomposer upserts on. Returns null when the id is a raw UUID or already
-    /// the stored key. Used by update paths to re-decompose the existing record in place.
+    /// <c>LegacyId</c> the decomposer upserts on, or a state span's id to the treatment id it was
+    /// written under. Returns null when the id is a raw UUID of no state span, or already the stored
+    /// key. Used by update paths to re-decompose the existing record in place.
     /// </summary>
     /// <param name="id">The identifier as received from the client.</param>
     /// <param name="ct">Cancellation token.</param>

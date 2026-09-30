@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nocturne.Connectors.Core.Constants;
@@ -38,12 +39,13 @@ internal readonly record struct LegacyTreatmentRange(
 );
 
 /// <summary>
-/// One record fetched for projection, carrying the table that owns it and the <c>SysCreatedAt</c> and
-/// <c>SysUpdatedAt</c> of the row it came from.
+/// One record fetched for projection, carrying the table that owns it, the row's primary key, and the
+/// creation and modification stamps of the row it came from.
 /// </summary>
 internal readonly record struct FetchedRecord(
     ILegacyTreatmentTable Table,
     object Record,
+    Guid Id,
     DateTime Created,
     DateTime Modified
 );
@@ -85,6 +87,7 @@ internal interface ILegacyTreatmentTable
     /// </remarks>
     Task<IReadOnlyList<FetchedRecord>> InRangeAsync(
         LegacyTreatmentRepositories repositories,
+        NocturneDbContext context,
         LegacyTreatmentRange range,
         CancellationToken ct
     );
@@ -128,6 +131,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     /// <inheritdoc />
     public async Task<IReadOnlyList<FetchedRecord>> InRangeAsync(
         LegacyTreatmentRepositories repositories,
+        NocturneDbContext context,
         LegacyTreatmentRange range,
         CancellationToken ct
     )
@@ -137,7 +141,9 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
         if (range.NativeOnly)
             records = records.Where(r => legacyId(r) is null);
 
-        return records.Select(r => new FetchedRecord(this, r, CreatedAt(r), ModifiedAt(r))).ToList();
+        return records
+            .Select(r => new FetchedRecord(this, r, ((IV4Record)r).Id, CreatedAt(r), ModifiedAt(r)))
+            .ToList();
     }
 
     /// <inheritdoc />
@@ -161,7 +167,8 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
 
         return entities
             .Select(e => (Record: toRecord(e), e.SysUpdatedAt))
-            .Select(x => new FetchedRecord(this, x.Record, CreatedAt(x.Record), x.SysUpdatedAt))
+            .Select(x => new FetchedRecord(
+                this, x.Record, ((IV4Record)x.Record).Id, CreatedAt(x.Record), x.SysUpdatedAt))
             .ToList();
     }
 
@@ -174,6 +181,92 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
 
     /// <inheritdoc />
     public Treatment Project(object record, CarbFoodIndex foods) => project((TRecord)record, foods);
+}
+
+/// <summary>
+/// The <see cref="StateSpan"/>s of one category that <see cref="TreatmentDecomposer"/> wrote from a
+/// legacy treatment, read back as that treatment. Their <see cref="StateSpanEntity.UpdatedAt"/> is the
+/// modification stamp a history read pages on.
+/// </summary>
+internal sealed class LegacyStateSpanTable(
+    StateSpanCategory category,
+    Expression<Func<StateSpanEntity, bool>> fromTreatment,
+    Func<StateSpanEntity, IDictionary<string, object>?, Treatment> project
+) : ILegacyTreatmentTable
+{
+    private readonly string _category = category.ToString();
+
+    /// <inheritdoc />
+    public string RecordType { get; } = $"{nameof(StateSpan)}.{category}";
+
+    internal IQueryable<StateSpanEntity> Rows(NocturneDbContext context) =>
+        context.StateSpans.AsNoTracking().Where(s => s.Category == _category).Where(fromTreatment);
+
+    /// <summary>Spans starting inside the window, bounds inclusive.</summary>
+    internal IQueryable<StateSpanEntity> InWindow(NocturneDbContext context, DateTime? from, DateTime? to)
+    {
+        var rows = Rows(context);
+        if (from is { } lower)
+            rows = rows.Where(s => s.StartTimestamp >= lower);
+        if (to is { } upper)
+            rows = rows.Where(s => s.StartTimestamp <= upper);
+        return rows;
+    }
+
+    internal FetchedRecord Fetched(StateSpanEntity span) =>
+        new(this, span, span.Id, span.CreatedAt, span.UpdatedAt);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Every span here mirrors a legacy write, so <see cref="LegacyTreatmentRange.NativeOnly"/> leaves none.
+    /// </remarks>
+    public async Task<IReadOnlyList<FetchedRecord>> InRangeAsync(
+        LegacyTreatmentRepositories repositories,
+        NocturneDbContext context,
+        LegacyTreatmentRange range,
+        CancellationToken ct
+    )
+    {
+        if (range.NativeOnly)
+            return [];
+
+        var spans = await InWindow(context, range.From, range.To)
+            .OrderByDescending(s => s.StartTimestamp)
+            .ThenBy(s => s.Id)
+            .Take(range.Limit)
+            .ToListAsync(ct);
+
+        return spans.Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
+        NocturneDbContext context,
+        long cursorMills,
+        int limit,
+        ILogger logger,
+        CancellationToken ct
+    )
+    {
+        var spans = await HistoryPage.GetAsync(
+            Rows(context), s => s.UpdatedAt, s => s.Id, cursorMills, limit, logger, RecordType, ct);
+
+        return spans.Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    public Treatment Project(object record, CarbFoodIndex foods)
+    {
+        var span = (StateSpanEntity)record;
+        var metadata = StateSpanMapper.ToDomainModel(span).Metadata;
+
+        var treatment = project(span, metadata);
+        treatment.Id = span.Id.ToString();
+        treatment.Mills = HistoryPage.ToMilliseconds(span.StartTimestamp);
+        treatment.EnteredBy = metadata.TryReadString("enteredBy");
+        treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
+        return treatment;
+    }
 }
 
 /// <summary>
@@ -198,6 +291,49 @@ internal static class LegacyTreatmentTables
             [DeviceEventType.CannulaChange] = TreatmentTypes.CannulaChange,
             [DeviceEventType.TransmitterSensorInsert] = TreatmentTypes.TransmitterSensorInsert,
         };
+
+    internal static readonly IReadOnlyList<LegacyStateSpanTable> StateSpanTables =
+    [
+        new(StateSpanCategory.Override,
+            s => s.OriginalId != null && EF.Functions.JsonContains(s.MetadataJson!, TreatmentsCollectionJson),
+            (s, metadata) => new Treatment
+            {
+                EventType = "Temporary Override",
+                Duration = DurationMinutes(s),
+                Reason = metadata.TryReadString("reason"),
+                ReasonDisplay = metadata.TryReadString("reasonDisplay"),
+                TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
+                TargetBottom = (double?)metadata.TryReadDecimal("targetBottom"),
+                InsulinNeedsScaleFactor = (double?)metadata.TryReadDecimal("insulinNeedsScaleFactor"),
+                DurationType = metadata.TryReadString("durationType"),
+            }),
+        new(StateSpanCategory.TemporaryTarget,
+            s => s.OriginalId != null
+                && EF.Functions.JsonExists(s.MetadataJson!, StateSpanMetadataExtensions.UtcOffsetKey),
+            (s, metadata) => new Treatment
+            {
+                EventType = "Temporary Target",
+                Duration = s.State == nameof(TemporaryTargetState.Cancelled) ? 0 : DurationMinutes(s),
+                TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
+                TargetBottom = (double?)metadata.TryReadDecimal("targetBottom"),
+                Reason = metadata.TryReadString("reason"),
+                Units = metadata.TryReadString("units"),
+            }),
+        new(StateSpanCategory.Profile,
+            s => s.OriginalId != null
+                && EF.Functions.JsonExists(s.MetadataJson!, StateSpanMetadataExtensions.UtcOffsetKey),
+            // A later switch ends an open switch by supersession; the upload was permanent, and a
+            // non-zero duration would read as a temporary switch.
+            (s, metadata) => new Treatment
+            {
+                EventType = TreatmentTypes.ProfileSwitch,
+                Duration = s.SupersededById != null ? 0 : DurationMinutes(s),
+                Profile = metadata.TryReadString("profileName"),
+                ProfileJson = metadata.TryReadString("profileJson"),
+                Percentage = (double?)metadata.TryReadDecimal("percentage"),
+                Timeshift = (double?)metadata.TryReadDecimal("timeshift"),
+            }),
+    ];
 
     internal static readonly IReadOnlyList<ILegacyTreatmentTable> All =
     [
@@ -250,7 +386,14 @@ internal static class LegacyTreatmentTables
             r => r.LegacyId,
             c => c.BolusCalculations, BolusCalculationMapper.ToDomainModel,
             (r, _) => ProjectBolusCalculation(r)),
+        .. StateSpanTables,
     ];
+
+    private const string TreatmentsCollectionJson =
+        $$"""{"{{StateSpanMetadataExtensions.CollectionKey}}":"{{StateSpanMetadataExtensions.TreatmentsCollection}}"}""";
+
+    private static double? DurationMinutes(StateSpanEntity span) =>
+        span.EndTimestamp is { } end ? (end - span.StartTimestamp).TotalMinutes : null;
 
     private static readonly Dictionary<ILegacyTreatmentTable, int> Order =
         All.Select((table, index) => (table, index)).ToDictionary(x => x.table, x => x.index);

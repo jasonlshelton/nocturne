@@ -56,4 +56,26 @@ public interface IV4ToLegacyProjectionService
         int limit,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// The legacy <see cref="Treatment"/> a state span decomposed from a treatment projects into, found
+    /// by any id a client may hold for it, or <c>null</c> when no such span has that id. Its
+    /// <see cref="Treatment.Id"/> is the span's primary key.
+    /// </summary>
+    Task<Treatment?> GetProjectedStateSpanTreatmentAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// The treatment id a state span decomposed from a treatment was written under, which the
+    /// decomposer upserts that span on, or <c>null</c> when no such span has that id.
+    /// </summary>
+    Task<string?> GetStateSpanTreatmentIdAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts the state spans decomposed from treatments that start inside the window, bounds inclusive.
+    /// </summary>
+    Task<long> CountProjectedStateSpanTreatmentsAsync(
+        long? fromMills,
+        long? toMills,
+        CancellationToken ct = default
+    );
 }

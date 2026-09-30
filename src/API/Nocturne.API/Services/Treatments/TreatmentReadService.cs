@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -26,6 +27,7 @@ public class TreatmentReadService : ITreatmentStore
     private readonly INoteRepository _noteRepo;
     private readonly IDeviceEventRepository _deviceEventRepo;
     private readonly IBolusCalculationRepository _bolusCalcRepo;
+    private readonly IStateSpanService _stateSpans;
     private readonly ILogger<TreatmentReadService> _logger;
 
     public TreatmentReadService(
@@ -39,6 +41,7 @@ public class TreatmentReadService : ITreatmentStore
         INoteRepository noteRepo,
         IDeviceEventRepository deviceEventRepo,
         IBolusCalculationRepository bolusCalcRepo,
+        IStateSpanService stateSpans,
         ILogger<TreatmentReadService> logger)
     {
         _projection = projection;
@@ -51,6 +54,7 @@ public class TreatmentReadService : ITreatmentStore
         _noteRepo = noteRepo;
         _deviceEventRepo = deviceEventRepo;
         _bolusCalcRepo = bolusCalcRepo;
+        _stateSpans = stateSpans;
         _logger = logger;
     }
 
@@ -126,7 +130,10 @@ public class TreatmentReadService : ITreatmentStore
     }
 
     /// <inheritdoc />
-    public async Task<Treatment?> GetByIdAsync(string id, CancellationToken ct = default)
+    public async Task<Treatment?> GetByIdAsync(string id, CancellationToken ct = default) =>
+        await GetFromRecordsAsync(id, ct) ?? await _projection.GetProjectedStateSpanTreatmentAsync(id, ct);
+
+    private async Task<Treatment?> GetFromRecordsAsync(string id, CancellationToken ct)
     {
         if (Guid.TryParse(id, out var guid))
             return await GetByGuidAsync(guid, ct);
@@ -286,6 +293,10 @@ public class TreatmentReadService : ITreatmentStore
                 return true;
         }
 
+        if (deleted == 0
+            && await _projection.GetProjectedStateSpanTreatmentAsync(id, ct) is { Id: { } spanId })
+            return await _stateSpans.DeleteStateSpanAsync(spanId, ct);
+
         return deleted > 0;
     }
 
@@ -318,9 +329,10 @@ public class TreatmentReadService : ITreatmentStore
         var deviceEventCount = await _deviceEventRepo.CountAsync(from, to, ct);
         var tempBasalCount = await _tempBasalRepo.CountAsync(from, to, ct);
         var bolusCalcCount = await _bolusCalcRepo.CountAsync(from, to, ct);
+        var stateSpanCount = await _projection.CountProjectedStateSpanTreatmentsAsync(fromMills, toMills, ct);
 
         return bolusCount + carbCount + bgCheckCount + noteCount
-             + deviceEventCount + tempBasalCount + bolusCalcCount;
+             + deviceEventCount + tempBasalCount + bolusCalcCount + stateSpanCount;
     }
 
     #region Private — GetById helpers
@@ -414,10 +426,14 @@ public class TreatmentReadService : ITreatmentStore
     /// <summary>
     /// Maps a wire id (a 24-hex ObjectId derived from a record's UUID) to the <c>LegacyId</c> the
     /// decomposer upserts on, so an update re-decomposes the existing record in place instead of
-    /// creating a duplicate. Returns null for a raw UUID or an id that is already the stored key
-    /// (the caller falls back to the existing id in that case).
+    /// creating a duplicate. A state span decomposed from a treatment resolves to the treatment id it
+    /// was written under, by any id it is served or uploaded as. Otherwise returns null for a raw
+    /// UUID or an id that is already the stored key (the caller falls back to the existing id).
     /// </summary>
-    public async Task<string?> ResolveCanonicalIdAsync(string id, CancellationToken ct = default)
+    public async Task<string?> ResolveCanonicalIdAsync(string id, CancellationToken ct = default) =>
+        await ResolveRecordLegacyIdAsync(id, ct) ?? await _projection.GetStateSpanTreatmentIdAsync(id, ct);
+
+    private async Task<string?> ResolveRecordLegacyIdAsync(string id, CancellationToken ct)
     {
         if (Guid.TryParse(id, out _))
             return null;

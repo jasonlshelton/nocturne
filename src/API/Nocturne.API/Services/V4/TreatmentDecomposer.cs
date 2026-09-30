@@ -1094,7 +1094,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (!string.IsNullOrEmpty(treatment.EnteredBy))
             metadata["enteredBy"] = treatment.EnteredBy;
 
-        metadata["utcOffset"] = treatment.UtcOffset ?? 0;
+        metadata[StateSpanMetadataExtensions.UtcOffsetKey] = treatment.UtcOffset ?? 0;
 
         var icfg = ExtractAapsIcfg(treatment);
         if (icfg is not null)
@@ -1137,7 +1137,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (!string.IsNullOrEmpty(treatment.EnteredBy))
             metadata["enteredBy"] = treatment.EnteredBy;
 
-        metadata["utcOffset"] = treatment.UtcOffset ?? 0;
+        metadata[StateSpanMetadataExtensions.UtcOffsetKey] = treatment.UtcOffset ?? 0;
 
         return metadata.Count > 0 ? metadata : null;
     }
@@ -1161,7 +1161,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (!string.IsNullOrEmpty(treatment.EnteredBy))
             metadata["enteredBy"] = treatment.EnteredBy;
 
-        metadata["utcOffset"] = treatment.UtcOffset ?? 0;
+        metadata[StateSpanMetadataExtensions.UtcOffsetKey] = treatment.UtcOffset ?? 0;
 
         return metadata.Count > 0 ? metadata : null;
     }

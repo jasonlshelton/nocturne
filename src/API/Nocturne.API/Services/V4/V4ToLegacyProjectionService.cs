@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Services.Entries;
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Treatments;
@@ -7,6 +8,7 @@ using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Entities;
 
 namespace Nocturne.API.Services.V4;
 
@@ -19,7 +21,8 @@ namespace Nocturne.API.Services.V4;
 /// The write side (legacy record → V4 typed record) is handled by <see cref="DecompositionPipeline"/>.
 /// Projection covers: <see cref="SensorGlucose"/> → <see cref="Entry"/>,
 /// <see cref="Bolus"/> and <see cref="CarbIntake"/> → <see cref="Treatment"/>,
-/// <see cref="DeviceEvent"/> → <see cref="Treatment"/> using the legacy event-type map.
+/// <see cref="DeviceEvent"/> → <see cref="Treatment"/> using the legacy event-type map, and the
+/// <see cref="StateSpan"/>s a legacy treatment was decomposed into back into that treatment.
 /// <para>
 /// Entries are projected V4-native-only, supplementing the rows the legacy entries table still
 /// holds. Treatments have no legacy table left to supplement, so every treatment read projects
@@ -146,7 +149,7 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
         var range = new LegacyTreatmentRange(
             MillsToDateTime(fromMills), MillsToDateTime(toMills), limit, nativeOnly);
 
-        var rows = await FetchAsync(table => table.InRangeAsync(_repositories, range, ct));
+        var rows = await FetchAsync(table => table.InRangeAsync(_repositories, _dbContext, range, ct));
         var treatments = await AssembleAsync(rows, ct);
 
         return treatments.OrderByDescending(t => t.Mills).Take(limit);
@@ -220,7 +223,80 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             .ToList();
     }
 
-    private static Guid RecordId(FetchedRecord row) => ((IV4Record)row.Record).Id;
+    private static Guid RecordId(FetchedRecord row) => row.Id;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// An id resolves when it is the span's primary key, the 24-hex ObjectId served for that key, or
+    /// the treatment id the span was written under, verbatim or as the ObjectId it is served as.
+    /// </remarks>
+    public async Task<Treatment?> GetProjectedStateSpanTreatmentAsync(string id, CancellationToken ct = default) =>
+        await FindStateSpanAsync(id, ct) is { } row
+            ? LegacyTreatmentTables.Assemble([row], CarbFoodIndex.Empty).Single()
+            : null;
+
+    /// <inheritdoc />
+    /// <remarks>Resolves an id as <see cref="GetProjectedStateSpanTreatmentAsync"/> does.</remarks>
+    public async Task<string?> GetStateSpanTreatmentIdAsync(string id, CancellationToken ct = default) =>
+        await FindStateSpanAsync(id, ct) is { } row ? ((StateSpanEntity)row.Record).OriginalId : null;
+
+    private async Task<FetchedRecord?> FindStateSpanAsync(string id, CancellationToken ct)
+    {
+        foreach (var table in LegacyTreatmentTables.StateSpanTables)
+        {
+            var row = await FetchSafe(table, async _ =>
+            {
+                var span = await MatchingId(table.Rows(_dbContext), id)
+                    .OrderBy(s => s.OriginalId == id ? 0 : 1)
+                    .ThenBy(s => s.Id)
+                    .FirstOrDefaultAsync(ct);
+                return span is null ? (FetchedRecord?)null : table.Fetched(span);
+            }, null);
+
+            if (row is not null)
+                return row;
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<long> CountProjectedStateSpanTreatmentsAsync(
+        long? fromMills, long? toMills, CancellationToken ct = default)
+    {
+        long count = 0;
+        foreach (var table in LegacyTreatmentTables.StateSpanTables)
+        {
+            count += await FetchSafe(
+                table,
+                _ => table.InWindow(_dbContext, MillsToDateTime(fromMills), MillsToDateTime(toMills))
+                    .LongCountAsync(ct),
+                0L);
+        }
+
+        return count;
+    }
+
+    private static IQueryable<StateSpanEntity> MatchingId(IQueryable<StateSpanEntity> rows, string id)
+    {
+        if (Guid.TryParse(id, out var guid))
+        {
+            string[] forms = [id, guid.ToString(), guid.ToString().ToUpperInvariant()];
+            return rows.Where(s => s.Id == guid || forms.Contains(s.OriginalId!));
+        }
+
+        if (MongoObjectId.TryGetGuidPrefixRange(id, out var low, out var high))
+        {
+            var (lowerFrom, lowerTo) = (low.ToString(), high.ToString());
+            var (upperFrom, upperTo) = (lowerFrom.ToUpperInvariant(), lowerTo.ToUpperInvariant());
+            return rows.Where(s => s.OriginalId == id
+                || (s.Id >= low && s.Id <= high)
+                || (string.Compare(s.OriginalId, lowerFrom) >= 0 && string.Compare(s.OriginalId, lowerTo) <= 0)
+                || (string.Compare(s.OriginalId, upperFrom) >= 0 && string.Compare(s.OriginalId, upperTo) <= 0));
+        }
+
+        return rows.Where(s => s.OriginalId == id);
+    }
 
     /// <summary>
     /// Reads every record type through <paramref name="fetch"/>. Types are read sequentially: they
@@ -259,9 +335,16 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             : new CarbFoodIndex(await _treatmentFoodService.GetByCarbIntakeIdsAsync(carbIntakeIds, ct));
     }
 
-    private async Task<IReadOnlyList<FetchedRecord>> FetchSafe(
+    private Task<IReadOnlyList<FetchedRecord>> FetchSafe(
         ILegacyTreatmentTable table,
         Func<ILegacyTreatmentTable, Task<IReadOnlyList<FetchedRecord>>> fetch
+    ) => FetchSafe(table, fetch, []);
+
+    /// <summary>A read of one type that fails logs and yields <paramref name="fallback"/>.</summary>
+    private async Task<T> FetchSafe<T>(
+        ILegacyTreatmentTable table,
+        Func<ILegacyTreatmentTable, Task<T>> fetch,
+        T fallback
     )
     {
         try
@@ -274,7 +357,7 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
                 ex,
                 "Failed to fetch V4 records of type {Type} for legacy projection",
                 table.RecordType);
-            return [];
+            return fallback;
         }
     }
 
