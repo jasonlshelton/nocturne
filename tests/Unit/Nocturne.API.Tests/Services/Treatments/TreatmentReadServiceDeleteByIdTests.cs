@@ -55,6 +55,9 @@ public class TreatmentReadServiceDeleteByIdTests
         _projection
             .Setup(p => p.GetProjectedStateSpanTreatmentAsync(clientId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Treatment { Id = spanId, EventType = "Temporary Override" });
+        _projection
+            .Setup(p => p.GetStateSpanTreatmentIdAsync(clientId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(clientId);
         _stateSpans.Setup(s => s.DeleteStateSpanAsync(spanId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var deleted = await _service.DeleteAsync(clientId);
@@ -62,6 +65,9 @@ public class TreatmentReadServiceDeleteByIdTests
         deleted.Should().NotBeNull();
         deleted!.Served!.Id.Should().Be(spanId);
         _stateSpans.Verify(s => s.DeleteStateSpanAsync(spanId, It.IsAny<CancellationToken>()), Times.Once);
+        _pipeline.Verify(
+            p => p.DeleteByLegacyIdAsync<Treatment>(clientId, WriteOrigin.Live, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

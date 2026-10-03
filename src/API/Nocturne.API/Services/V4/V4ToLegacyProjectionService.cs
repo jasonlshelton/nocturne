@@ -9,6 +9,7 @@ using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Extensions;
 
 namespace Nocturne.API.Services.V4;
 
@@ -232,7 +233,7 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     /// </remarks>
     public async Task<Treatment?> GetProjectedStateSpanTreatmentAsync(string id, CancellationToken ct = default) =>
         await FindStateSpanAsync(id, ct) is { } row
-            ? LegacyTreatmentTables.Assemble([row], CarbFoodIndex.Empty).Single()
+            ? (await AssembleAsync([row], ct)).Single()
             : null;
 
     /// <inheritdoc />
@@ -277,17 +278,23 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     public async Task<long> CountProjectedStateSpanTreatmentsAsync(
         long? fromMills, long? toMills, CancellationToken ct = default)
     {
+        var (from, to) = (MillsToDateTime(fromMills), MillsToDateTime(toMills));
         long count = 0;
         foreach (var table in LegacyTreatmentTables.StateSpanTables)
         {
             count += await FetchSafe(
-                table,
-                _ => table.InWindow(_dbContext, MillsToDateTime(fromMills), MillsToDateTime(toMills))
-                    .LongCountAsync(ct),
-                0L);
+                table, _ => table.InWindow(_dbContext, from, to).LongCountAsync(ct), 0L);
         }
 
-        return count;
+        var notes = LegacyTreatmentTables.NotesWrittenBesideServedStateSpans(_dbContext)
+            .AsNoTracking()
+            .ExcludeNonPrimary(_dbContext, RecordType.Note);
+        if (from is { } lower)
+            notes = notes.Where(n => n.Timestamp >= lower);
+        if (to is { } upper)
+            notes = notes.Where(n => n.Timestamp <= upper);
+
+        return count - await notes.LongCountAsync(ct);
     }
 
     private static IQueryable<StateSpanEntity> MatchingId(IQueryable<StateSpanEntity> rows, string id)
@@ -328,9 +335,52 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
         return rows;
     }
 
+    /// <summary>
+    /// Assembles a page, serving the Note a span's treatment wrote beside it before
+    /// <see cref="LegacyTreatmentTables.NotesKey"/> was kept on the span as part of the span.
+    /// </summary>
     private async Task<List<Treatment>> AssembleAsync(
         IReadOnlyList<FetchedRecord> rows, CancellationToken ct
-    ) => LegacyTreatmentTables.Assemble(rows, await LoadCarbFoodsAsync(rows, ct));
+    )
+    {
+        var noteKeys = rows
+            .Select(r => r.Record)
+            .OfType<Note>()
+            .Select(n => n.LegacyId)
+            .OfType<string>()
+            .Distinct()
+            .ToList();
+        if (noteKeys.Count > 0)
+        {
+            var onSpans = (await LegacyTreatmentTables.ServedStateSpanKeys(_dbContext)
+                    .Where(key => noteKeys.Contains(key))
+                    .ToListAsync(ct))
+                .ToHashSet(StringComparer.Ordinal);
+            if (onSpans.Count > 0)
+                rows = rows.Where(r => r.Record is not Note { LegacyId: { } key } || !onSpans.Contains(key)).ToList();
+        }
+
+        var spanKeys = rows
+            .Select(r => r.Record)
+            .OfType<StateSpanEntity>()
+            .Select(s => s.OriginalId)
+            .OfType<string>()
+            .Distinct()
+            .ToList();
+        Dictionary<string, string>? spanNotes = null;
+        if (spanKeys.Count > 0)
+        {
+            spanNotes = (await _dbContext.Notes.AsNoTracking()
+                    .Where(n => n.LegacyId != null && spanKeys.Contains(n.LegacyId))
+                    .OrderBy(n => n.Id)
+                    .Select(n => new { Key = n.LegacyId!, n.Text })
+                    .ToListAsync(ct))
+                .GroupBy(n => n.Key, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Text, StringComparer.Ordinal);
+        }
+
+        return LegacyTreatmentTables.Assemble(rows, await LoadCarbFoodsAsync(rows, ct), spanNotes);
+    }
 
     private async Task<CarbFoodIndex> LoadCarbFoodsAsync(
         IReadOnlyList<FetchedRecord> rows,

@@ -77,7 +77,9 @@ public interface IV4ToLegacyProjectionService
     Task<bool> IsStateSpanDeletedByUserAsync(string id, CancellationToken ct = default);
 
     /// <summary>
-    /// Counts the state spans decomposed from treatments that start inside the window, bounds inclusive.
+    /// The treatments the state spans decomposed from treatments add to a count of the record tables
+    /// over the window, bounds inclusive: the spans that start inside it, less the Notes their
+    /// treatments wrote beside them, which a record count holds but are served as part of the span.
     /// </summary>
     Task<long> CountProjectedStateSpanTreatmentsAsync(
         long? fromMills,

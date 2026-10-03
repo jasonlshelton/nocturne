@@ -47,9 +47,9 @@ public static class TreatmentUploadedTimestamp
 
     private static JsonElement? Read(object? value) => value switch
     {
+        null => null,
         JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => null,
         JsonElement je => je,
-        null => null,
-        var other => JsonSerializer.SerializeToElement(other),
+        _ => JsonSerializer.SerializeToElement(value),
     };
 }

@@ -8,6 +8,9 @@ using Nocturne.API.Tests.Integration.Infrastructure;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Models.V4;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
@@ -299,12 +302,169 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
             notes = "Run",
             duration = 60,
         });
-        (await GetArrayAsync(client, "/api/v1/treatments")).Should().HaveCount(2);
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle()
+            .Which!["notes"]!.GetValue<string>().Should().Be("Run");
 
         var delete = await client.DeleteAsync($"/api/v1/treatments/{syncIdentifier}");
 
         delete.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await delete.Content.ReadFromJsonAsync<JsonNode>())!["deletedCount"]!.GetValue<long>().Should().Be(1);
         (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+        (await CountAsync(client)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// Nightscout stores one document per treatment, so a span treatment with <c>notes</c> is served
+    /// once, carrying them. AAPS reads <c>notes</c> on temporary targets and profile switches, and
+    /// LoopFollow shows a Trio override's name from them.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EventTypes))]
+    public async Task A_state_span_treatment_with_notes_is_served_once_carrying_them(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        var upload = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload(eventType)))!.AsObject();
+        upload["notes"] = "Synthetic note";
+        await PostAsync(client, upload);
+
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle()
+            .Which!["notes"]!.GetValue<string>().Should().Be("Synthetic note");
+        (await GetArrayAsync(client, "/api/v1/treatments?find[eventType]=Note")).Should().BeEmpty();
+        (await CountAsync(client)).Should().Be(1);
+        (await CountAsync(client, $"?find[eventType]={Uri.EscapeDataString(eventType)}")).Should().Be(1);
+        (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle()
+            .Which!["notes"]!.GetValue<string>().Should().Be("Synthetic note");
+        (await GetV3ResultAsync(client, "/api/v3/treatments/history/0")).Should().ContainSingle()
+            .Which!["notes"]!.GetValue<string>().Should().Be("Synthetic note");
+    }
+
+    public static TheoryData<string, string> OlderSpanNoteDeletes()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var eventType in new[] { "Temporary Override", "Temporary Target", "Profile Switch" })
+        foreach (var by in new[] { "served", "uploaded", "note" })
+            data.Add(eventType, by);
+        return data;
+    }
+
+    /// <summary>
+    /// A span written before notes were kept on it has them in a Note under the same treatment id. It
+    /// is served as one treatment carrying them, and a delete by any of its ids removes both.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(OlderSpanNoteDeletes))]
+    public async Task An_older_span_and_the_note_written_beside_it_are_served_and_deleted_as_one(
+        string eventType, string deleteBy)
+    {
+        var client = CreateAuthenticatedClient();
+        var uploadedId = Guid.NewGuid().ToString().ToUpperInvariant();
+        var upload = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload(eventType)))!.AsObject();
+        upload["_id"] = uploadedId;
+        await PostAsync(client, upload);
+        var noteId = await WriteNoteBesideAsync(uploadedId, eventType, upload["created_at"]!.GetValue<string>());
+
+        var served = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!;
+        var servedId = served["_id"]!.GetValue<string>();
+        servedId.Should().NotBe(noteId.ToString());
+        served["eventType"]!.GetValue<string>().Should().Be(eventType);
+        served["notes"]!.GetValue<string>().Should().Be("Written beside");
+        (await CountAsync(client)).Should().Be(1);
+        (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle();
+        (await GetV3ResultAsync(client, "/api/v3/treatments/history/0")).Should().ContainSingle()
+            .Which!["notes"]!.GetValue<string>().Should().Be("Written beside");
+        foreach (var id in new[] { servedId, uploadedId, noteId.ToString() })
+        {
+            var get = await client.GetAsync($"/api/v1/treatments/{id}");
+            get.StatusCode.Should().Be(HttpStatusCode.OK, id);
+            (await get.Content.ReadFromJsonAsync<JsonNode>())!["_id"]!.GetValue<string>().Should().Be(servedId);
+        }
+
+        var deleteId = deleteBy switch { "served" => servedId, "uploaded" => uploadedId, _ => noteId.ToString() };
+        var delete = await client.DeleteAsync($"/api/v1/treatments/{deleteId}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await delete.Content.ReadFromJsonAsync<JsonNode>())!["deletedCount"]!.GetValue<long>().Should().Be(1);
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+        (await CountAsync(client)).Should().Be(0);
+        (await WithScopeAsync(async sp => await sp.GetRequiredService<INoteRepository>()
+            .GetByIdAsync(noteId))).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_window_delete_counts_a_span_and_the_note_written_beside_it_once()
+    {
+        var client = CreateAuthenticatedClient();
+        var uploadedId = Guid.NewGuid().ToString().ToUpperInvariant();
+        var upload = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload("Temporary Override", 20)))!.AsObject();
+        upload["_id"] = uploadedId;
+        await PostAsync(client, upload);
+        await WriteNoteBesideAsync(uploadedId, "Temporary Override", upload["created_at"]!.GetValue<string>());
+        var withNotes = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload("Temporary Target", 10)))!.AsObject();
+        withNotes["notes"] = "Kept on the span";
+        await PostAsync(client, withNotes);
+
+        var delete = await client.DeleteAsync(
+            $"/api/v1/treatments?find[created_at][$gte]={MinutesAgo(60)}&find[created_at][$lte]={MinutesAgo(0)}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.OK, await delete.Content.ReadAsStringAsync());
+        (await delete.Content.ReadFromJsonAsync<JsonNode>())!["deletedCount"]!.GetValue<long>().Should().Be(2);
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+        (await CountAsync(client)).Should().Be(0);
+    }
+
+    /// <summary>The Note an older version of the treatment decomposer wrote beside a span.</summary>
+    private Task<Guid> WriteNoteBesideAsync(string treatmentId, string eventType, string createdAt) =>
+        WithScopeAsync(async sp => (await sp.GetRequiredService<INoteRepository>().CreateAsync(
+            new Note
+            {
+                LegacyId = treatmentId,
+                EventType = eventType,
+                Text = "Written beside",
+                Timestamp = DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            },
+            WriteOrigin.Live)).Id);
+
+    /// <summary>
+    /// NightscoutKit's <c>OverrideTreatment</c> uploads and reads <c>correctionRange</c> and
+    /// <c>remoteAddress</c>, and LoopFollow draws an override at its <c>correctionRange</c>, falling
+    /// back to <c>[targetBottom, targetTop]</c>, which Loop never uploads, so without it every Loop
+    /// override is drawn at [0, 0].
+    /// </summary>
+    [Fact]
+    public async Task A_loop_override_is_served_its_correction_range_and_remote_address_as_uploaded()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var timestamp = LoopTimestamp(10);
+        await PostAsync(client, new
+        {
+            _id = id, eventType = "Temporary Override", created_at = timestamp, timestamp,
+            enteredBy = "Loop", reason = "Running", duration = 60.0, insulinNeedsScaleFactor = 0.8,
+            correctionRange = new[] { 140, 160 }, remoteAddress = "synthetic-remote-address",
+            syncIdentifier = id,
+        });
+
+        var v1 = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!.AsObject();
+        var v3 = (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle().Which!.AsObject();
+        var byIdentifier = await client.GetAsync($"/api/v3/treatments/{v3["identifier"]!.GetValue<string>()}");
+        byIdentifier.StatusCode.Should().Be(HttpStatusCode.OK, await byIdentifier.Content.ReadAsStringAsync());
+        var body = JsonNode.Parse(await byIdentifier.Content.ReadAsStringAsync())!;
+        var v3Get = (body["result"] ?? body).AsObject();
+        var served = new[]
+        {
+            v1,
+            v3,
+            (await GetV3ResultAsync(client, "/api/v3/treatments/history/0")).Should().ContainSingle().Which!.AsObject(),
+            v3Get,
+        };
+
+        foreach (var treatment in served)
+        {
+            treatment["correctionRange"]!.ToJsonString().Should().Be("[140,160]");
+            treatment["remoteAddress"]!.GetValue<string>().Should().Be("synthetic-remote-address");
+            treatment["syncIdentifier"]!.GetValue<string>().Should().Be(id);
+            NightscoutKitParsesOverride(treatment).Should().BeTrue(treatment.ToJsonString());
+        }
     }
 
     [Fact]

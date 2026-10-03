@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4;
@@ -130,13 +131,11 @@ public class TreatmentReadService : ITreatmentStore
     }
 
     /// <inheritdoc />
-    public async Task<Treatment?> GetByIdAsync(string id, CancellationToken ct = default) =>
-        await GetFromRecordsAsync(id, ct) ?? await _projection.GetProjectedStateSpanTreatmentAsync(id, ct);
-
-    private async Task<Treatment?> GetFromRecordsAsync(string id, CancellationToken ct)
+    public async Task<Treatment?> GetByIdAsync(string id, CancellationToken ct = default)
     {
-        var stored = await FindStoredRecordAsync(id, ct);
-        return stored is null ? null : await ProjectAsync(stored.Record, ct);
+        var (stored, spanId) = await ResolveAsync(id, ct);
+        return (stored is null ? null : await ProjectAsync(stored.Record, ct))
+            ?? await _projection.GetProjectedStateSpanTreatmentAsync(spanId, ct);
     }
 
     /// <inheritdoc />
@@ -207,9 +206,9 @@ public class TreatmentReadService : ITreatmentStore
     /// <inheritdoc />
     public async Task<Treatment?> UpdateAsync(string id, Treatment treatment, CancellationToken ct = default)
     {
-        var stored = await FindStoredRecordAsync(id, ct);
+        var (stored, spanId) = await ResolveAsync(id, ct);
         if (stored is null)
-            return await UpdateStateSpanAsync(id, treatment, ct);
+            return await UpdateStateSpanAsync(spanId, treatment, ct);
 
         if (await ProjectAsync(stored.Record, ct) is not { } existing)
             return null;
@@ -250,13 +249,9 @@ public class TreatmentReadService : ITreatmentStore
             await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live, ct);
             return await _projection.GetProjectedStateSpanTreatmentAsync(spanId, ct);
         }
-        catch (OperationCanceledException)
+        catch (DbUpdateException ex)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update treatment {Id}", id);
+            _logger.LogError(ex, "Failed to update state span treatment {SpanId}", spanId);
             return null;
         }
     }
@@ -264,14 +259,14 @@ public class TreatmentReadService : ITreatmentStore
     /// <inheritdoc />
     public async Task<TreatmentDeletion?> DeleteAsync(string id, CancellationToken ct = default)
     {
-        var stored = await FindStoredRecordAsync(id, ct);
+        var (stored, spanId) = await ResolveAsync(id, ct);
         if (stored is null)
-            return await DeleteStateSpanAsync(id, ct);
+            return await DeleteStateSpanAsync(spanId, ct);
 
         var served = await ProjectAsync(stored.Record, ct);
 
         // Every record one treatment decomposed into (a meal bolus's carb, a bolus wizard's
-        // calculation, an override's note) shares its legacy id, so deleting by it leaves no sibling
+        // calculation, a correction's note) shares its legacy id, so deleting by it leaves no sibling
         // behind as a phantom treatment of its own.
         if (stored.Record.LegacyId is { Length: > 0 } legacyId)
         {
@@ -286,11 +281,20 @@ public class TreatmentReadService : ITreatmentStore
         return new TreatmentDeletion(served);
     }
 
-    private async Task<TreatmentDeletion?> DeleteStateSpanAsync(string id, CancellationToken ct) =>
-        await _projection.GetProjectedStateSpanTreatmentAsync(id, ct) is { Id: { } spanId } served
-        && await _stateSpans.DeleteStateSpanAsync(spanId, ct)
-            ? new TreatmentDeletion(served)
-            : null;
+    /// <summary>
+    /// Deletes a served state span with the Note its treatment wrote beside it before notes were kept
+    /// on the span, which is served as part of the span and would otherwise outlive it.
+    /// </summary>
+    private async Task<TreatmentDeletion?> DeleteStateSpanAsync(string id, CancellationToken ct)
+    {
+        if (await _projection.GetProjectedStateSpanTreatmentAsync(id, ct) is not { Id: { } spanId } served
+            || await _projection.GetStateSpanTreatmentIdAsync(id, ct) is not { } treatmentId
+            || !await _stateSpans.DeleteStateSpanAsync(spanId, ct))
+            return null;
+
+        await _pipeline.DeleteByLegacyIdAsync<Treatment>(treatmentId, WriteOrigin.Live, ct);
+        return new TreatmentDeletion(served);
+    }
 
     /// <inheritdoc />
     public async Task<long> CountAsync(string? find = null, CancellationToken ct = default)
@@ -359,7 +363,6 @@ public class TreatmentReadService : ITreatmentStore
 
     /// <summary>
     /// Whether a state span the decomposer wrote is read back as the treatment, under the span's id.
-    /// A note the same treatment wrote is served as a treatment of its own.
     /// </summary>
     private static bool IsServedStateSpan(StateSpan span) =>
         span is { OriginalId: not null, Category: StateSpanCategory.Override or StateSpanCategory.TemporaryTarget or StateSpanCategory.Profile };
@@ -374,11 +377,27 @@ public class TreatmentReadService : ITreatmentStore
     ];
 
     /// <summary>
+    /// The stored record a client-sent treatment id names, or none and the id to look a state span up
+    /// by. A Note a served span's treatment wrote beside it, before notes were kept on the span, is
+    /// served as that span, so it resolves to the span's treatment id.
+    /// </summary>
+    private async Task<(StoredRecord? Stored, string SpanId)> ResolveAsync(string id, CancellationToken ct)
+    {
+        if (await FindStoredRecordAsync(id, ct) is not { } stored)
+            return (null, id);
+
+        return stored.Record is Note { LegacyId: { Length: > 0 } legacyId }
+            && await _projection.GetStateSpanTreatmentIdAsync(legacyId, ct) == legacyId
+                ? (null, legacyId)
+                : (stored, id);
+    }
+
+    /// <summary>
     /// Resolves a client-sent treatment id to the stored record it names. Each key is tried against
     /// every table before the next, looser one, so an exact match always wins over a prefix or hash
     /// match. The records of one treatment share its legacy id, so the tables are tried in the order
     /// <see cref="ToCreatedAsync"/> names a treatment by: a legacy id resolves to the record the create
-    /// returned, not to the note any treatment with notes also writes.
+    /// returned, not to the note a record treatment with notes also writes.
     /// </summary>
     private async Task<StoredRecord?> FindStoredRecordAsync(string id, CancellationToken ct)
     {
@@ -459,9 +478,9 @@ public class TreatmentReadService : ITreatmentStore
     /// <inheritdoc />
     public async Task<Treatment?> GetForUpdateAsync(string id, CancellationToken ct = default)
     {
-        var stored = await FindStoredRecordAsync(id, ct);
+        var (stored, spanId) = await ResolveAsync(id, ct);
         if (stored is null)
-            return await GetStateSpanForUpdateAsync(id, ct);
+            return await GetStateSpanForUpdateAsync(spanId, ct);
 
         if (await ProjectAsync(stored.Record, ct) is not { } existing)
             return null;

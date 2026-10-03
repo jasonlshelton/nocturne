@@ -272,6 +272,9 @@ internal sealed class LegacyStateSpanTable(
         treatment.Mills = HistoryPage.ToMilliseconds(span.StartTimestamp);
         treatment.RawTimestamp ??= TreatmentUploadedTimestamp.OfSpan(metadata);
         treatment.EnteredBy = metadata.TryReadString("enteredBy");
+        treatment.Notes = metadata.TryReadString(LegacyTreatmentTables.NotesKey);
+        treatment.SyncIdentifier = metadata.TryReadString(LegacyTreatmentTables.SyncIdentifierKey);
+        treatment.InsulinType = metadata.TryReadString(LegacyTreatmentTables.InsulinTypeKey);
         treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
         return treatment;
     }
@@ -300,6 +303,13 @@ internal static class LegacyTreatmentTables
             [DeviceEventType.TransmitterSensorInsert] = TreatmentTypes.TransmitterSensorInsert,
         };
 
+    /// <summary>
+    /// Loop override fields with no <see cref="Treatment"/> property, kept and served with their JSON
+    /// type. NightscoutKit and LoopFollow read <c>correctionRange</c> as a number array, and LoopFollow
+    /// draws an override without one at <c>[targetBottom, targetTop]</c>, which Loop never uploads.
+    /// </summary>
+    internal static readonly string[] UploadedOverrideFields = ["correctionRange", "remoteAddress"];
+
     internal static readonly IReadOnlyList<LegacyStateSpanTable> StateSpanTables =
     [
         new(StateSpanCategory.Override,
@@ -317,6 +327,7 @@ internal static class LegacyTreatmentTables
                 TargetBottom = (double?)metadata.TryReadDecimal("targetBottom"),
                 InsulinNeedsScaleFactor = (double?)metadata.TryReadDecimal("insulinNeedsScaleFactor"),
                 DurationType = metadata.TryReadString("durationType"),
+                AdditionalProperties = UploadedFields(metadata, UploadedOverrideFields),
             }),
         new(StateSpanCategory.TemporaryTarget,
             s => s.OriginalId != null
@@ -347,6 +358,22 @@ internal static class LegacyTreatmentTables
                 Reason = metadata.TryReadString("reason"),
             }),
     ];
+
+    /// <summary>The treatment ids of every state span <see cref="StateSpanTables"/> serves.</summary>
+    internal static IQueryable<string> ServedStateSpanKeys(NocturneDbContext context) =>
+        StateSpanTables
+            .Select(table => table.Rows(context).Select(s => s.OriginalId!))
+            .Aggregate(Queryable.Concat);
+
+    /// <summary>
+    /// The notes a served state span's treatment wrote as a Note of its own before
+    /// <see cref="NotesKey"/> was kept on the span: one treatment, served once, as the span.
+    /// </summary>
+    internal static IQueryable<NoteEntity> NotesWrittenBesideServedStateSpans(NocturneDbContext context)
+    {
+        var keys = ServedStateSpanKeys(context);
+        return context.Notes.Where(n => n.LegacyId != null && keys.Contains(n.LegacyId));
+    }
 
     /// <summary>
     /// Every state span <see cref="StateSpanTables"/> serves that starts inside the window, bounds
@@ -442,6 +469,28 @@ internal static class LegacyTreatmentTables
         DateTime.SpecifyKind(start, DateTimeKind.Utc)
             .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
+    /// <summary>Metadata key for a span treatment's <c>notes</c>.</summary>
+    internal const string NotesKey = "notes";
+
+    /// <summary>Metadata key for the <c>syncIdentifier</c> NightscoutKit reads on every treatment.</summary>
+    internal const string SyncIdentifierKey = "syncIdentifier";
+
+    /// <summary>Metadata key for the <c>insulinType</c> NightscoutKit reads on every treatment.</summary>
+    internal const string InsulinTypeKey = "insulinType";
+
+    private static Dictionary<string, object>? UploadedFields(
+        IDictionary<string, object>? metadata, IEnumerable<string> keys)
+    {
+        Dictionary<string, object>? fields = null;
+        foreach (var key in keys)
+        {
+            if (metadata is not null && metadata.TryGetValue(key, out var value) && value is not null)
+                (fields ??= [])[key] = value;
+        }
+
+        return fields;
+    }
+
     /// <summary>Metadata key for a temporary target's <c>eventType</c> when it is not "Temporary Target".</summary>
     internal const string UploadedEventTypeKey = "eventType";
 
@@ -464,7 +513,15 @@ internal static class LegacyTreatmentTables
     /// sees the rows it is handed, so a page must be selected before it is assembled — see
     /// <see cref="V4ToLegacyProjectionService.GetProjectedTreatmentsModifiedSinceAsync"/>.
     /// </summary>
-    internal static List<Treatment> Assemble(IReadOnlyList<FetchedRecord> rows, CarbFoodIndex foods)
+    /// <remarks>
+    /// <c>spanNotes</c> holds the text of the Note a served span's treatment wrote beside it, by
+    /// treatment id, served on the span when the span keeps none itself; see
+    /// <see cref="NotesWrittenBesideServedStateSpans"/>.
+    /// </remarks>
+    internal static List<Treatment> Assemble(
+        IReadOnlyList<FetchedRecord> rows,
+        CarbFoodIndex foods,
+        IReadOnlyDictionary<string, string>? spanNotes = null)
     {
         var treatments = new List<Treatment>();
         var paired = PairMeals(rows, foods, treatments);
@@ -474,7 +531,13 @@ internal static class LegacyTreatmentTables
             if (paired.Contains(row.Record))
                 continue;
 
-            treatments.Add(Stamp(row.Table.Project(row.Record, foods), row.Created, row.Modified));
+            var treatment = row.Table.Project(row.Record, foods);
+            if (treatment.Notes is null
+                && row.Record is StateSpanEntity { OriginalId: { } key }
+                && spanNotes?.GetValueOrDefault(key) is { } notes)
+                treatment.Notes = notes;
+
+            treatments.Add(Stamp(treatment, row.Created, row.Modified));
         }
 
         return treatments;
