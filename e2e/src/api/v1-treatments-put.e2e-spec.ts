@@ -107,9 +107,10 @@ describe("v1 PUT /treatments, as Loop sends it", () => {
   });
 });
 
-// Loop keeps the `_id` each carb POST returns (its objectIdCache, keyed by syncIdentifier) and edits
-// the carb with PUT /api/v1/treatments carrying that `_id` and the syncIdentifier. Nightscout 15.0.8
-// matches a save on `identifier`, then `_id`, then `created_at` + `eventType`.
+// Loop keeps the `_id` each carb POST returns (its objectIdCache, keyed by syncIdentifier), edits the
+// carb with PUT /api/v1/treatments carrying that `_id` and the syncIdentifier, and deletes it with
+// DELETE /api/v1/treatments/{_id}. Nightscout answers the POST with the id it stored the document
+// under; 15.0.8 matches a save on `identifier`, then `_id`, then `created_at` + `eventType`.
 describe("v1 PUT /treatments, editing what an earlier POST stored", () => {
   let tenant: Tenant;
   let loop: ApiClient;
@@ -139,6 +140,15 @@ describe("v1 PUT /treatments, editing what an earlier POST stored", () => {
     loop = await loopClient(tenant);
   });
 
+  it("serves a Loop carb under the _id its POST returned", async () => {
+    const createdAt = minutesAgo(40);
+    const id = await postCarb(randomUUID().toUpperCase(), 18, createdAt);
+
+    const stored = await storedAt(createdAt);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]!._id).toBe(id);
+  });
+
   it("edits a Loop carb in place by the _id its POST returned", async () => {
     const syncIdentifier = randomUUID().toUpperCase();
     const createdAt = minutesAgo(55);
@@ -149,7 +159,17 @@ describe("v1 PUT /treatments, editing what an earlier POST stored", () => {
     expect(put.status, put.text).toBe(200);
     const stored = await storedAt(createdAt);
     expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ carbs: 35 });
+    expect(stored[0]).toMatchObject({ _id: id, carbs: 35 });
+  });
+
+  it("deletes a Loop carb by the _id its POST returned", async () => {
+    const createdAt = minutesAgo(70);
+    const id = await postCarb(randomUUID().toUpperCase(), 22, createdAt);
+
+    const del = await loop.delete(`/api/v1/treatments/${id}`);
+
+    expect(del.status, del.text).toBe(200);
+    expect(await storedAt(createdAt)).toHaveLength(0);
   });
 
   it("does not bring back a Loop carb the user deleted", async () => {
