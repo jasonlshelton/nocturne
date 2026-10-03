@@ -43,7 +43,16 @@ public static class SoftDeleteDedupExtensions
     /// </summary>
     public static IQueryable<TEntity> UserTombstones<TEntity>(this NocturneDbContext ctx)
         where TEntity : class, ITenantScoped, ISoftDeletable
-        => ctx.Set<TEntity>().IgnoreQueryFilters().AsNoTracking()
+        => ctx.Set<TEntity>().UserTombstones(ctx);
+
+    /// <summary>
+    /// The rows of <paramref name="source"/> that are
+    /// <see cref="UserTombstones{TEntity}(NocturneDbContext)"/>: the soft-delete query filter is
+    /// lifted and the tenant predicate re-applied.
+    /// </summary>
+    public static IQueryable<TEntity> UserTombstones<TEntity>(this IQueryable<TEntity> source, NocturneDbContext ctx)
+        where TEntity : class, ITenantScoped, ISoftDeletable
+        => source.IgnoreQueryFilters().AsNoTracking()
             .Where(e => e.TenantId == ctx.TenantId
                      && e.DeletedAt != null
                      && EF.Property<bool>(e, DeletedByUserProperty));

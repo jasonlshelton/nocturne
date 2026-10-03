@@ -394,12 +394,16 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
     [InlineData("returned")]
     [InlineData("legacy")]
     [InlineData("syncIdentifier")]
+    [InlineData("hashed")]
     public async Task PutCollection_OfATreatmentTheUserDeleted_SavesNothing(string idKind)
     {
         var client = CreateAuthenticatedClient();
         var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
         var at = DistinctTime();
-        var post = await client.PostAsJsonAsync("/api/v1/treatments", new[] { LoopCarb(syncIdentifier, 20, at) });
+        var posted = idKind == "hashed"
+            ? LoopCarb(syncIdentifier: null, 20, at, $"client-{Guid.NewGuid():N}")
+            : LoopCarb(syncIdentifier, 20, at);
+        var post = await client.PostAsJsonAsync("/api/v1/treatments", new[] { posted });
         var returnedId = (await post.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("_id").GetString()!;
         var servedId = MongoObjectId.Coerce((await TreatmentsAtAsync(at)).Single().Id)!;
         (await client.DeleteAsync($"/api/v1/treatments/{servedId}")).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -408,7 +412,7 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
         var body = idKind switch
         {
             "served" => LoopCarb(syncIdentifier: null, 30, at, servedId),
-            "returned" => LoopCarb(syncIdentifier: null, 30, at, returnedId),
+            "returned" or "hashed" => LoopCarb(syncIdentifier: null, 30, at, returnedId),
             "legacy" => LoopCarb(syncIdentifier: null, 30, at, syncIdentifier),
             _ => LoopCarb(syncIdentifier, 30, at, MongoObjectId.FromGuid(Guid.NewGuid())),
         };

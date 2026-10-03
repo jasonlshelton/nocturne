@@ -119,14 +119,11 @@ public interface ILegacyKeyedRepository<TRecord>
     Task<TRecord?> GetByLegacyIdHashAsync(string objectId, CancellationToken ct = default);
 
     /// <summary>
-    /// Whether a record the user deleted answers to <paramref name="id"/>: as its own id, the 24-hex
-    /// prefix of that id, its legacy id, or the 24-hex prefix of a UUID legacy id
-    /// (<see cref="GetByLegacyIdUuidPrefixAsync"/>). A record the system swept does not count.
+    /// Whether a record the user deleted answers to <paramref name="id"/> under any key the lookups
+    /// above resolve: its own id, the 24-hex prefix of that id, its legacy id, or the echo of a
+    /// legacy id (<see cref="GetByLegacyIdUuidPrefixAsync"/>, <see cref="GetByLegacyIdHashAsync"/>).
+    /// A record the system swept does not count.
     /// </summary>
-    /// <remarks>
-    /// The hashed form <see cref="GetByLegacyIdHashAsync"/> resolves is not checked: it scans every
-    /// row, and no client is known to send it back for a record it has since seen deleted.
-    /// </remarks>
     Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default);
 
     /// <summary>

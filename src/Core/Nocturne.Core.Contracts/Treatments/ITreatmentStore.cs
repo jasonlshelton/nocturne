@@ -23,7 +23,7 @@ public interface ITreatmentStore
 
     /// <summary>
     /// Whether <paramref name="id"/> names a treatment record the user deleted, under any key
-    /// <see cref="GetByIdAsync"/> resolves but the hashed one. A create under that id is refused.
+    /// <see cref="GetByIdAsync"/> resolves.
     /// </summary>
     /// <param name="id">The identifier as received from the client.</param>
     /// <param name="ct">Cancellation token.</param>
