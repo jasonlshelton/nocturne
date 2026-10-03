@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Nocturne.API.Tests.Integration.Infrastructure;
@@ -9,6 +10,7 @@ using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
+using Npgsql;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -469,6 +471,253 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
             new TenantContext(Fixture.TenantId, ApiIntegrationTestFixture.TenantSlug, "Integration", true, false));
         scope.ServiceProvider.GetRequiredService<NocturneDbContext>().TenantId = Fixture.TenantId;
         return await action(scope.ServiceProvider);
+    }
+
+    /// <summary>Loop's upload format: NightscoutKit's <c>TimeFormat.timestampStrFromDate</c>.</summary>
+    private static string LoopTimestamp(int minutesAgo) =>
+        DateTime.UtcNow.AddMinutes(-minutesAgo).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
+
+    /// <summary>
+    /// NightscoutKit 4ec9fd1 <c>TimeFormat.dateFromTimestamp</c>: ISO 8601 internet date time, with or
+    /// without fractional seconds.
+    /// </summary>
+    private static readonly Regex NightscoutKitDate =
+        new(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$");
+
+    private static bool IsString(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out _);
+
+    /// <summary>
+    /// <c>NightscoutTreatment.init?(_:)</c> at NightscoutKit 4ec9fd1: nil unless <c>_id</c>,
+    /// <c>eventType</c>, a parseable <c>timestamp</c> and <c>enteredBy</c> are all strings.
+    /// </summary>
+    private static bool NightscoutKitParsesTreatment(JsonObject t) =>
+        IsString(t["_id"])
+        && IsString(t["eventType"])
+        && IsString(t["timestamp"]) && NightscoutKitDate.IsMatch(t["timestamp"]!.GetValue<string>())
+        && IsString(t["enteredBy"]);
+
+    /// <summary>
+    /// <c>OverrideTreatment.init?(_:)</c> at NightscoutKit 4ec9fd1: a string <c>reason</c>, then a
+    /// numeric <c>duration</c> or <c>durationType: "indefinite"</c>, then the base treatment.
+    /// </summary>
+    private static bool NightscoutKitParsesOverride(JsonObject t) =>
+        t["eventType"]?.GetValue<string>() == "Temporary Override"
+        && IsString(t["reason"])
+        && ((t["duration"] is JsonValue d && d.TryGetValue<double>(out _))
+            || t["durationType"]?.GetValue<string>() == "indefinite")
+        && NightscoutKitParsesTreatment(t);
+
+    public static TheoryData<string> LoopUploads =>
+        new() { "Temporary Override", "Indefinite Override", "Temporary Target", "Profile Switch" };
+
+    private static object LoopUpload(string kind, string id, string timestamp) => kind switch
+    {
+        "Temporary Override" => new
+        {
+            _id = id, eventType = "Temporary Override", created_at = timestamp, timestamp,
+            enteredBy = "Loop", reason = "Running", duration = 60.0, insulinNeedsScaleFactor = 0.8,
+        },
+        "Indefinite Override" => new
+        {
+            _id = id, eventType = "Temporary Override", created_at = timestamp, timestamp,
+            enteredBy = "Loop", reason = "Pre-Meal", durationType = "indefinite",
+        },
+        "Temporary Target" => new
+        {
+            _id = id, eventType = "Temporary Target", created_at = timestamp, timestamp,
+            enteredBy = "Nightscout", reason = "Activity", duration = 45, targetTop = 140, targetBottom = 140,
+        },
+        _ => new
+        {
+            _id = id, eventType = "Profile Switch", created_at = timestamp, timestamp,
+            enteredBy = "Nightscout", reason = "Weekend", profile = "Weekend", duration = 30,
+        },
+    };
+
+    /// <summary>
+    /// NightscoutKit's <c>fetchTreatments</c>, behind LoopCaregiver, drops a treatment missing any of
+    /// <c>_id</c>, <c>eventType</c>, <c>timestamp</c> or <c>enteredBy</c>. Nightscout serves the
+    /// uploaded <c>timestamp</c> as stored.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(LoopUploads))]
+    public async Task A_state_span_treatment_is_served_with_the_keys_NightscoutKit_requires(string kind)
+    {
+        var client = CreateAuthenticatedClient();
+        var timestamp = LoopTimestamp(20);
+        await PostAsync(client, LoopUpload(kind, Guid.NewGuid().ToString().ToUpperInvariant(), timestamp));
+
+        var v1 = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!.AsObject();
+        var v3 = (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle().Which!.AsObject();
+
+        foreach (var served in new[] { v1, v3 })
+        {
+            served["timestamp"]!.GetValue<string>().Should().Be(timestamp);
+            served["reason"]!.GetValue<string>().Should().NotBeNullOrEmpty();
+            NightscoutKitParsesTreatment(served).Should().BeTrue(served.ToJsonString());
+            if (kind == "Indefinite Override")
+            {
+                served.ContainsKey("duration").Should().BeFalse();
+                served["durationType"]!.GetValue<string>().Should().Be("indefinite");
+            }
+            else
+            {
+                served["duration"]!.GetValue<double>().Should().BeGreaterThan(0);
+            }
+
+            if (kind.EndsWith("Override", StringComparison.Ordinal))
+                NightscoutKitParsesOverride(served).Should().BeTrue(served.ToJsonString());
+        }
+    }
+
+    /// <summary>
+    /// Overrides written before the uploaded timestamp was kept have none, so they are served their
+    /// start in a form NightscoutKit parses rather than dropped.
+    /// </summary>
+    [Fact]
+    public async Task An_override_uploaded_without_a_timestamp_is_served_one_NightscoutKit_parses()
+    {
+        var client = CreateAuthenticatedClient();
+        var createdAt = MinutesAgo(20);
+        await PostAsync(client, new
+        {
+            _id = Guid.NewGuid().ToString().ToUpperInvariant(),
+            eventType = "Temporary Override",
+            created_at = createdAt,
+            enteredBy = "Loop",
+            reason = "Running",
+            duration = 60,
+        });
+
+        var served = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!.AsObject();
+
+        NightscoutKitParsesOverride(served).Should().BeTrue(served.ToJsonString());
+        DateTimeOffset.Parse(served["timestamp"]!.GetValue<string>())
+            .Should().Be(DateTimeOffset.Parse(createdAt));
+    }
+
+    /// <summary>
+    /// AAPS uploads temporary targets and profile switches without a <c>timestamp</c>, and its v3
+    /// client reads that field as a number, so none is invented for them.
+    /// </summary>
+    [Theory]
+    [InlineData("Temporary Target")]
+    [InlineData("Profile Switch")]
+    public async Task An_aaps_upload_without_a_timestamp_is_served_without_one(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload(eventType));
+
+        (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle()
+            .Which!.AsObject().ContainsKey("timestamp").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Correction Bolus")]
+    [InlineData("Carb Correction")]
+    [InlineData("Note")]
+    public async Task A_record_treatment_is_served_with_the_timestamp_it_was_uploaded_with(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        var timestamp = LoopTimestamp(15);
+        await PostAsync(client, new
+        {
+            eventType,
+            created_at = timestamp,
+            timestamp,
+            enteredBy = "Loop",
+            insulin = eventType == "Correction Bolus" ? 1.5 : (double?)null,
+            carbs = eventType == "Carb Correction" ? 12 : (double?)null,
+            notes = eventType == "Note" ? "synthetic" : null,
+        });
+
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle()
+            .Which!["timestamp"]!.GetValue<string>().Should().Be(timestamp);
+    }
+
+    [Theory]
+    [MemberData(nameof(EventTypes))]
+    public async Task A_state_span_treatment_is_served_by_v3_get_by_identifier(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload(eventType));
+        var identifier = (await GetV3ResultAsync(client, "/api/v3/treatments")).Single()!["identifier"]!
+            .GetValue<string>();
+
+        var response = await client.GetAsync($"/api/v3/treatments/{identifier}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var served = (body["result"] ?? body)!;
+        served["eventType"]!.GetValue<string>().Should().Be(eventType);
+        served["identifier"]!.GetValue<string>().Should().Be(identifier);
+    }
+
+    [Theory]
+    [MemberData(nameof(EventTypes))]
+    public async Task A_v3_patch_rewrites_the_state_span_in_place(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload(eventType));
+        var identifier = (await GetV3ResultAsync(client, "/api/v3/treatments")).Single()!["identifier"]!
+            .GetValue<string>();
+
+        var patch = await client.PatchAsJsonAsync($"/api/v3/treatments/{identifier}", new { duration = 15 });
+
+        patch.StatusCode.Should().Be(HttpStatusCode.OK, await patch.Content.ReadAsStringAsync());
+        var served = (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle().Which!;
+        served["identifier"]!.GetValue<string>().Should().Be(identifier);
+        served["eventType"]!.GetValue<string>().Should().Be(eventType);
+        served["duration"]!.GetValue<double>().Should().BeApproximately(15, 0.001);
+        (await CountAsync(client)).Should().Be(1);
+    }
+
+    /// <summary>
+    /// A credential limited to the last 24 hours reads overrides, temporary targets and profile
+    /// switches only from that window, as it does every other treatment.
+    /// </summary>
+    [Fact]
+    public async Task A_history_clamped_credential_reads_only_the_last_24_hours_of_state_span_treatments()
+    {
+        var owner = CreateAuthenticatedClient();
+        foreach (var eventType in new[] { "Temporary Override", "Temporary Target", "Profile Switch" })
+        {
+            await PostAsync(owner, Upload(eventType, minutesAgo: 3 * 24 * 60));
+            await PostAsync(owner, Upload(eventType, minutesAgo: 60));
+        }
+
+        using var clamped = await CreateHistoryClampedClientAsync();
+
+        (await GetArrayAsync(owner, "/api/v1/treatments?count=100")).Should().HaveCount(6);
+        var v1 = await GetArrayAsync(clamped, "/api/v1/treatments?count=100");
+        v1.Should().HaveCount(3);
+        v1.Select(t => DateTimeOffset.FromUnixTimeMilliseconds(t!["mills"]!.GetValue<long>()))
+            .Should().OnlyContain(at => at > DateTimeOffset.UtcNow.AddHours(-24));
+        (await GetArrayAsync(clamped, "/api/v1/treatments?find[eventType]=Profile%20Switch")).Should().ContainSingle();
+        (await GetV3ResultAsync(clamped, "/api/v3/treatments/history/0")).Should().HaveCount(3);
+        (await GetV3ResultAsync(clamped, "/api/v3/treatments?limit=100")).Should().HaveCount(3);
+    }
+
+    private async Task<HttpClient> CreateHistoryClampedClientAsync()
+    {
+        await using var conn = new NpgsqlConnection(await GetPostgresConnectionStringAsync());
+        await conn.OpenAsync();
+        var (subjectId, token) = await AuthTestHelpers.SeedAuthenticatedSubjectAsync(
+            conn, Fixture.TenantId, "Clamped Follower");
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT set_config('app.current_tenant_id', @tenant, false);
+                UPDATE oauth_grants SET limit_to_24_hours = true WHERE subject_id = @subject;
+                """;
+            cmd.Parameters.AddWithValue("tenant", Fixture.TenantId.ToString());
+            cmd.Parameters.AddWithValue("subject", subjectId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        return AuthTestHelpers.CreateAuthenticatedSubjectClient(Fixture, token);
     }
 
     [Fact]

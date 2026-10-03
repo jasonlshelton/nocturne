@@ -273,6 +273,16 @@ public class RlsShareCategoryTests
             {
                 usingExpr.Should().NotContain("visible_categories",
                     $"{table} is hidden from shares, so its policy must not be unlockable by any category");
+                if (ShareDataCategories.RecencyColumnFor(table) is not null)
+                {
+                    usingExpr.Should().Contain("history_clamped",
+                        $"{table} is hidden from shares but clamps a history-clamped member to 24 hours");
+                }
+                else
+                {
+                    usingExpr.Should().NotContain("history_clamped",
+                        $"{table} is hidden from shares and unclamped, so its policy must not carry the clamp");
+                }
             }
             else
             {

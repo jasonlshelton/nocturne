@@ -92,6 +92,23 @@ public static class ShareDataCategories
             ["connector_food_entries"] = "consumed_at",
         };
 
+    /// <summary>
+    /// Recency column per table that no scope governs, so it stays hidden from every share, but whose
+    /// rows a history-clamped member still reads only the last 24 hours of. <c>state_spans</c> holds
+    /// overrides, temporary targets and profile switches the legacy treatment reads serve, beside
+    /// pump, profile and data-exclusion spans no single share scope covers.
+    /// </summary>
+    /// <remarks>
+    /// A span is clamped by its start, as <c>temp_basals</c> is, so one still running after more than
+    /// 24 hours is hidden from a clamped member too. Every tenant-keyed cache over it bypasses a
+    /// clamped request.
+    /// </remarks>
+    public static readonly IReadOnlyDictionary<string, string> HiddenRecencyColumns =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["state_spans"] = "start_timestamp",
+        };
+
     private static readonly IReadOnlyDictionary<string, string> TableToScope = BuildTableToScope();
 
     /// <summary>The governing scopes that have at least one table (the shareable, table-backed categories).</summary>
@@ -105,11 +122,12 @@ public static class ShareDataCategories
         TableToScope.TryGetValue(table, out var scope) ? scope : null;
 
     /// <summary>
-    /// Returns the recency column the share 24-hour clamp applies to a governed table, or
-    /// <c>null</c> when the table is not governed or is deliberately unclamped.
+    /// Returns the recency column the 24-hour clamp applies to a table, or <c>null</c> when the
+    /// table is deliberately unclamped or not classified for it.
     /// </summary>
     public static string? RecencyColumnFor(string table) =>
-        RecencyColumns.TryGetValue(table, out var column) ? column : null;
+        RecencyColumns.TryGetValue(table, out var column) ? column
+        : HiddenRecencyColumns.GetValueOrDefault(table);
 
     /// <summary>
     /// Computes the value for the <c>app.visible_categories</c> GUC carried by a
@@ -136,6 +154,11 @@ public static class ShareDataCategories
             foreach (var table in tables)
             {
                 map.Add(table, scope); // throws on a duplicate table across scopes — a map authoring error
+                if (HiddenRecencyColumns.ContainsKey(table))
+                {
+                    throw new InvalidOperationException(
+                        $"Governed table '{table}' is also in {nameof(HiddenRecencyColumns)}; declare it in {nameof(RecencyColumns)} only.");
+                }
                 if (!RecencyColumns.ContainsKey(table))
                 {
                     throw new InvalidOperationException(

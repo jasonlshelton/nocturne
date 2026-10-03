@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -263,6 +264,7 @@ internal sealed class LegacyStateSpanTable(
         var treatment = project(span, metadata);
         treatment.Id = span.Id.ToString();
         treatment.Mills = HistoryPage.ToMilliseconds(span.StartTimestamp);
+        treatment.Timestamp ??= metadata.TryReadString(LegacyTreatmentTables.UploadedTimestampKey);
         treatment.EnteredBy = metadata.TryReadString("enteredBy");
         treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
         return treatment;
@@ -299,6 +301,7 @@ internal static class LegacyTreatmentTables
             (s, metadata) => new Treatment
             {
                 EventType = "Temporary Override",
+                Timestamp = metadata.TryReadString(UploadedTimestampKey) ?? NightscoutKitTimestamp(s.StartTimestamp),
                 Duration = UploadedDuration(metadata)
                     ?? (metadata.TryReadString("durationType") == "indefinite" ? null : DurationMinutes(s)),
                 Reason = metadata.TryReadString("reason"),
@@ -334,6 +337,7 @@ internal static class LegacyTreatmentTables
                 ProfileJson = metadata.TryReadString("profileJson"),
                 Percentage = (double?)metadata.TryReadDecimal("percentage"),
                 Timeshift = (double?)metadata.TryReadDecimal("timeshift"),
+                Reason = metadata.TryReadString("reason"),
             }),
     ];
 
@@ -413,6 +417,23 @@ internal static class LegacyTreatmentTables
     /// be served with none, since NightscoutKit reads any numeric duration as a finite override.
     /// </summary>
     internal const string UploadedDurationKey = "duration";
+
+    /// <summary>
+    /// Metadata key for the <c>timestamp</c> a span's treatment was uploaded with, served verbatim:
+    /// NightscoutKit drops a treatment without one. See <see cref="TreatmentUploadedTimestamp"/>.
+    /// </summary>
+    internal const string UploadedTimestampKey = TreatmentUploadedTimestamp.Field;
+
+    /// <summary>
+    /// The <c>timestamp</c> served for an override that has no uploaded one (every override written
+    /// before <see cref="UploadedTimestampKey"/> was kept): its start, in the fractional ISO 8601 form
+    /// NightscoutKit's <c>TimeFormat</c> parses. Only
+    /// overrides get one: Loop and Trio are their only uploaders, while AAPS uploads temporary targets
+    /// and profile switches with no <c>timestamp</c> and reads that field as a number.
+    /// </summary>
+    private static string NightscoutKitTimestamp(DateTime start) =>
+        DateTime.SpecifyKind(start, DateTimeKind.Utc)
+            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>Metadata key for a temporary target's <c>eventType</c> when it is not "Temporary Target".</summary>
     internal const string UploadedEventTypeKey = "eventType";
@@ -525,6 +546,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bolus.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bolus.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
             EventType = TreatmentTypes.MealBolus,
             Mills = bolus.Mills,
             Insulin = bolus.Insulin,
@@ -547,6 +569,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bolus.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bolus.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
             EventType = TreatmentTypes.CorrectionBolus,
             Mills = bolus.Mills,
             Insulin = bolus.Insulin,
@@ -567,6 +590,7 @@ internal static class LegacyTreatmentTables
         {
             Id = carb.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(carb.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(carb.AdditionalProperties),
             EventType = TreatmentTypes.CarbCorrection,
             Mills = carb.Mills,
             Carbs = carb.Carbs,
@@ -614,6 +638,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bgCheck.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bgCheck.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(bgCheck.AdditionalProperties),
             EventType = TreatmentTypes.BgCheck,
             Mills = bgCheck.Mills,
             Glucose = bgCheck.Glucose,
@@ -632,6 +657,7 @@ internal static class LegacyTreatmentTables
         {
             Id = note.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(note.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(note.AdditionalProperties),
             EventType = note.EventType ?? "Note",
             Mills = note.Mills,
             Notes = note.Text,
@@ -649,6 +675,7 @@ internal static class LegacyTreatmentTables
         {
             Id = deviceEvent.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(deviceEvent.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(deviceEvent.AdditionalProperties),
             EventType = eventTypeString ?? deviceEvent.EventType.ToString(),
             Mills = deviceEvent.Mills,
             Notes = deviceEvent.Notes,
@@ -664,6 +691,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bc.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bc.AdditionalProperties),
+            Timestamp = TreatmentUploadedTimestamp.Of(bc.AdditionalProperties),
             EventType = "Bolus Wizard",
             Mills = bc.Mills,
             BloodGlucoseInput = bc.BloodGlucoseInput,
