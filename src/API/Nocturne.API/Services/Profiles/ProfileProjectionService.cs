@@ -238,15 +238,9 @@ public class ProfileProjectionService : IProfileProjectionService
         if (settings.LegacyId?.Contains(':') != true)
             return null;
 
-        return (await _therapyRepo.GetByLegacyIdPrefixAsync($"{DocumentId(settings)}:", ct))
+        return (await _therapyRepo.GetByLegacyIdPrefixAsync($"{TherapySettings.DocumentIdOf(settings)}:", ct))
             .FirstOrDefault(s => s.Id != settings.Id);
     }
-
-    /// <summary>The profile document's identifier: the legacy id up to its first colon.</summary>
-    private static string DocumentId(TherapySettings settings) =>
-        settings.LegacyId?.Contains(':') == true
-            ? settings.LegacyId.Split(':')[0]
-            : settings.LegacyId ?? settings.Id.ToString();
 
     /// <inheritdoc />
     public async Task<long> CountProfilesAsync(string? find = null, CancellationToken ct = default)
@@ -290,7 +284,7 @@ public class ProfileProjectionService : IProfileProjectionService
 
         return new Profile
         {
-            Id = DocumentId(settings),
+            Id = TherapySettings.DocumentIdOf(settings),
             DefaultProfile = settings.ProfileName,
             StartDate = settings.StartDate ?? settings.Timestamp.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             Mills = settings.Mills,
