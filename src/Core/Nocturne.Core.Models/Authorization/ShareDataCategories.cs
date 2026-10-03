@@ -94,21 +94,28 @@ public static class ShareDataCategories
 
     /// <summary>
     /// Recency column per table that no scope governs, so it stays hidden from every share, but whose
-    /// rows a history-clamped member still reads only the last 24 hours of. Both are served as legacy
-    /// treatments: <c>state_spans</c> holds overrides, temporary targets and profile switches beside
-    /// pump, profile and data-exclusion spans no single share scope covers, and <c>notes</c> holds
-    /// Note and Announcement treatments.
+    /// rows a history-clamped member still reads only the last 24 hours of. <c>notes</c> holds the
+    /// Note and Announcement treatments the legacy treatment reads serve.
     /// </summary>
-    /// <remarks>
-    /// A span is clamped by its start, as <c>temp_basals</c> is, so one still running after more than
-    /// 24 hours is hidden from a clamped member too. Every tenant-keyed cache over it bypasses a
-    /// clamped request.
-    /// </remarks>
     public static readonly IReadOnlyDictionary<string, string> HiddenRecencyColumns =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["state_spans"] = "start_timestamp",
             ["notes"] = "timestamp",
+        };
+
+    /// <summary>
+    /// End column per hidden table of spans, which a history-clamped member reads by overlap with the
+    /// last 24 hours: a span still running (end null) or ended inside the window stays visible however
+    /// long ago it started. <c>state_spans</c> holds the profile switches, pump modes and overrides the
+    /// therapy resolvers read to find what is active now, so clamping it by start would leave a clamped
+    /// member's carb ratio, basal, sensitivity and targets on the default profile. It also holds the
+    /// overrides, temporary targets and profile switches the legacy treatment reads serve.
+    /// </summary>
+    /// <remarks>Every tenant-keyed cache over these tables bypasses a clamped request.</remarks>
+    public static readonly IReadOnlyDictionary<string, string> HiddenSpanEndColumns =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["state_spans"] = "end_timestamp",
         };
 
     private static readonly IReadOnlyDictionary<string, string> TableToScope = BuildTableToScope();
@@ -130,6 +137,12 @@ public static class ShareDataCategories
     public static string? RecencyColumnFor(string table) =>
         RecencyColumns.TryGetValue(table, out var column) ? column
         : HiddenRecencyColumns.GetValueOrDefault(table);
+
+    /// <summary>
+    /// Returns the end column a span table is clamped by overlap on, or <c>null</c> when the table is
+    /// not a clamped span table. See <see cref="HiddenSpanEndColumns"/>.
+    /// </summary>
+    public static string? SpanEndColumnFor(string table) => HiddenSpanEndColumns.GetValueOrDefault(table);
 
     /// <summary>
     /// Computes the value for the <c>app.visible_categories</c> GUC carried by a
@@ -156,10 +169,10 @@ public static class ShareDataCategories
             foreach (var table in tables)
             {
                 map.Add(table, scope); // throws on a duplicate table across scopes — a map authoring error
-                if (HiddenRecencyColumns.ContainsKey(table))
+                if (HiddenRecencyColumns.ContainsKey(table) || HiddenSpanEndColumns.ContainsKey(table))
                 {
                     throw new InvalidOperationException(
-                        $"Governed table '{table}' is also in {nameof(HiddenRecencyColumns)}; declare it in {nameof(RecencyColumns)} only.");
+                        $"Governed table '{table}' is also in {nameof(HiddenRecencyColumns)} or {nameof(HiddenSpanEndColumns)}; declare it in {nameof(RecencyColumns)} only.");
                 }
                 if (!RecencyColumns.ContainsKey(table))
                 {

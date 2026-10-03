@@ -113,10 +113,18 @@ public class ShareDataCategoriesTests
     }
 
     [Fact]
-    public void StateSpans_AreHiddenFromSharesButClampedForMembersByTheirStart()
+    public void StateSpans_AreHiddenFromSharesButClampedForMembersByOverlap()
     {
         ShareDataCategories.GoverningScopeFor("state_spans").Should().BeNull();
-        ShareDataCategories.RecencyColumnFor("state_spans").Should().Be("start_timestamp");
+        ShareDataCategories.RecencyColumnFor("state_spans").Should().BeNull();
+        ShareDataCategories.SpanEndColumnFor("state_spans").Should().Be("end_timestamp");
+    }
+
+    [Fact]
+    public void HiddenSpanEndColumns_ReferenceOnlyUngovernedTablesWithoutARecencyColumn()
+    {
+        ShareDataCategories.HiddenSpanEndColumns.Keys.Should().OnlyContain(t =>
+            ShareDataCategories.GoverningScopeFor(t) == null && ShareDataCategories.RecencyColumnFor(t) == null);
     }
 
     [Fact]

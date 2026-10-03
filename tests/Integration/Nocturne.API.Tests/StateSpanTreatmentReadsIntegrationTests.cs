@@ -8,6 +8,7 @@ using Nocturne.API.Tests.Integration.Infrastructure;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Npgsql;
@@ -675,17 +676,20 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
 
     /// <summary>
     /// A credential limited to the last 24 hours reads overrides, temporary targets and profile
-    /// switches only from that window, as it does every other treatment.
+    /// switches that ended before that window not at all, as it does every other treatment.
     /// </summary>
     [Fact]
-    public async Task A_history_clamped_credential_reads_only_the_last_24_hours_of_state_span_treatments()
+    public async Task A_history_clamped_credential_reads_only_state_span_treatments_overlapping_the_last_24_hours()
     {
         var owner = CreateAuthenticatedClient();
-        foreach (var eventType in new[] { "Temporary Override", "Temporary Target", "Profile Switch" })
+        await PostAsync(owner, Upload("Temporary Override", minutesAgo: 3 * 24 * 60));
+        await PostAsync(owner, Upload("Temporary Target", minutesAgo: 3 * 24 * 60));
+        await PostAsync(owner, new
         {
-            await PostAsync(owner, Upload(eventType, minutesAgo: 3 * 24 * 60));
+            eventType = "Profile Switch", created_at = MinutesAgo(3 * 24 * 60), profile = "Weekend", duration = 60,
+        });
+        foreach (var eventType in new[] { "Temporary Override", "Temporary Target", "Profile Switch" })
             await PostAsync(owner, Upload(eventType, minutesAgo: 60));
-        }
 
         using var clamped = await CreateHistoryClampedClientAsync();
 
@@ -697,6 +701,93 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
         (await GetArrayAsync(clamped, "/api/v1/treatments?find[eventType]=Profile%20Switch")).Should().ContainSingle();
         (await GetV3ResultAsync(clamped, "/api/v3/treatments/history/0")).Should().HaveCount(3);
         (await GetV3ResultAsync(clamped, "/api/v3/treatments?limit=100")).Should().HaveCount(3);
+    }
+
+    private static object ProfileStore(double carbRatio, double basal) => new
+    {
+        dia = 5,
+        carbratio = new[] { new { time = "00:00", value = carbRatio, timeAsSeconds = 0 } },
+        sens = new[] { new { time = "00:00", value = 50, timeAsSeconds = 0 } },
+        basal = new[] { new { time = "00:00", value = basal, timeAsSeconds = 0 } },
+        target_low = new[] { new { time = "00:00", value = 100, timeAsSeconds = 0 } },
+        target_high = new[] { new { time = "00:00", value = 120, timeAsSeconds = 0 } },
+        units = "mg/dl",
+        timezone = "UTC",
+    };
+
+    /// <summary>
+    /// The therapy resolvers find the active profile from the profile switch span, so a clamped member
+    /// must still see a switch that started three days ago and is still running, or its carb ratio and
+    /// basal fall back to the default profile.
+    /// </summary>
+    [Fact]
+    public async Task A_history_clamped_member_resolves_a_profile_switch_still_running_from_three_days_ago()
+    {
+        var owner = CreateAuthenticatedClient();
+        var startDate = DateTimeOffset.UtcNow.AddDays(-5);
+        var profile = await owner.PostAsJsonAsync("/api/v1/profile", new
+        {
+            defaultProfile = "Default",
+            startDate = startDate.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            mills = startDate.ToUnixTimeMilliseconds(),
+            store = new Dictionary<string, object>
+            {
+                ["Default"] = ProfileStore(carbRatio: 10, basal: 1.0),
+                ["Weekend"] = ProfileStore(carbRatio: 7, basal: 1.6),
+            },
+        });
+        profile.StatusCode.Should().Be(HttpStatusCode.OK, await profile.Content.ReadAsStringAsync());
+        await PostAsync(owner, new
+        {
+            eventType = "Profile Switch", created_at = MinutesAgo(3 * 24 * 60), enteredBy = "Loop",
+            profile = "Weekend", duration = 0,
+        });
+        await PostAsync(owner, new
+        {
+            eventType = "Temporary Override", created_at = MinutesAgo(2 * 24 * 60 + 60), enteredBy = "Loop",
+            reason = "Ended two days ago", duration = 60,
+        });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var resolved = await WithHistoryClampedScopeAsync(async sp =>
+        {
+            var spans = await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(count: 100);
+            var segments = new List<Nocturne.Core.Models.Basal.BasalSegment>();
+            await foreach (var segment in sp.GetRequiredService<IBasalSegmentService>()
+                .GetSegmentsAsync(now - 3_600_000, now))
+                segments.Add(segment);
+            return (
+                Spans: spans.ToList(),
+                Profile: await sp.GetRequiredService<IActiveProfileResolver>().GetActiveProfileNameAsync(now),
+                CarbRatio: await sp.GetRequiredService<ICarbRatioResolver>().GetCarbRatioAsync(now),
+                Basal: await sp.GetRequiredService<IBasalRateResolver>().GetBasalRateAsync(now),
+                Segments: segments);
+        });
+
+        resolved.Spans.Should().ContainSingle(s => s.Category == StateSpanCategory.Profile);
+        resolved.Spans.Should().NotContain(s => s.Category == StateSpanCategory.Override,
+            "an override that ended two days ago is outside a clamped member's window");
+        resolved.Profile.Should().Be("Weekend");
+        resolved.CarbRatio.Should().BeApproximately(7, 0.001);
+        resolved.Basal.Should().BeApproximately(1.6, 0.001);
+        resolved.Segments.Should().NotBeEmpty().And.OnlyContain(s => s.ProfileName == "Weekend" && Math.Abs(s.UnitsPerHour - 1.6) < 0.001);
+
+        using var clamped = await CreateHistoryClampedClientAsync();
+        (await GetArrayAsync(clamped, "/api/v1/treatments?count=100")).Should().ContainSingle()
+            .Which!["profile"]!.GetValue<string>().Should().Be("Weekend");
+    }
+
+    /// <summary>A scope clamped as <c>MemberScopeMiddleware</c> clamps a 24-hour-limited member's request.</summary>
+    private async Task<T> WithHistoryClampedScopeAsync<T>(Func<IServiceProvider, Task<T>> action)
+    {
+        using var scope = Fixture.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantAccessor>().SetTenant(
+            new TenantContext(Fixture.TenantId, ApiIntegrationTestFixture.TenantSlug, "Integration", true, false));
+        scope.ServiceProvider.GetRequiredService<ICategoryReadContext>().ClampMemberHistory();
+        var db = scope.ServiceProvider.GetRequiredService<NocturneDbContext>();
+        db.TenantId = Fixture.TenantId;
+        db.HistoryClamped = true;
+        return await action(scope.ServiceProvider);
     }
 
     [Fact]
