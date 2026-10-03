@@ -286,15 +286,20 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
                 table, _ => table.InWindow(_dbContext, from, to).LongCountAsync(ct), 0L);
         }
 
-        var notes = LegacyTreatmentTables.NotesWrittenBesideServedStateSpans(_dbContext)
-            .AsNoTracking()
-            .ExcludeNonPrimary(_dbContext, RecordType.Note);
+        var notes = _dbContext.Notes.AsNoTracking().ExcludeNonPrimary(_dbContext, RecordType.Note);
         if (from is { } lower)
             notes = notes.Where(n => n.Timestamp >= lower);
         if (to is { } upper)
             notes = notes.Where(n => n.Timestamp <= upper);
 
-        return count - await notes.LongCountAsync(ct);
+        foreach (var table in LegacyTreatmentTables.StateSpanTables)
+        {
+            var keys = table.Rows(_dbContext).Select(s => s.OriginalId);
+            count -= await FetchSafe(
+                table, _ => notes.Where(n => n.LegacyId != null && keys.Contains(n.LegacyId)).LongCountAsync(ct), 0L);
+        }
+
+        return count;
     }
 
     private static IQueryable<StateSpanEntity> MatchingId(IQueryable<StateSpanEntity> rows, string id)
@@ -352,10 +357,17 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             .ToList();
         if (noteKeys.Count > 0)
         {
-            var onSpans = (await LegacyTreatmentTables.ServedStateSpanKeys(_dbContext)
-                    .Where(key => noteKeys.Contains(key))
-                    .ToListAsync(ct))
-                .ToHashSet(StringComparer.Ordinal);
+            var onSpans = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var table in LegacyTreatmentTables.StateSpanTables)
+            {
+                onSpans.UnionWith(await FetchSafe(
+                    table,
+                    _ => table.Rows(_dbContext)
+                        .Where(s => noteKeys.Contains(s.OriginalId!))
+                        .Select(s => s.OriginalId!)
+                        .ToListAsync(ct),
+                    new List<string>()));
+            }
             if (onSpans.Count > 0)
                 rows = rows.Where(r => r.Record is not Note { LegacyId: { } key } || !onSpans.Contains(key)).ToList();
         }
