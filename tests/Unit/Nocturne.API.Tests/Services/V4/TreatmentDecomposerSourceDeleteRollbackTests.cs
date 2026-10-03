@@ -2,6 +2,7 @@ using System.Data.Common;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Audit;
@@ -12,6 +13,7 @@ using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
@@ -119,6 +121,28 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
         await using var read = _db.CreateContext();
         (await read.Boluses.IgnoreQueryFilters().SingleAsync(b => b.Id == bolus)).DeletedAt.Should().BeNull();
         (await read.CarbIntakes.IgnoreQueryFilters().SingleAsync(c => c.Id == carb)).DeletedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_rolled_back_legacy_id_delete_reaches_the_pipeline_caller_as_an_error_not_as_nothing_deleted()
+    {
+        _context.Boluses.Add(new BolusEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, LegacyId = "t-3", DataSource = Connector, Insulin = 1, Timestamp = At,
+        });
+        _context.CarbIntakes.Add(new CarbIntakeEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, LegacyId = "t-3", DataSource = Connector, Carbs = 20, Timestamp = At,
+        });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var services = new ServiceCollection().AddSingleton<IDecomposer<Treatment>>(_decomposer).BuildServiceProvider();
+        var pipeline = new DecompositionPipeline(services, NullLogger<DecompositionPipeline>.Instance);
+
+        _failure.FailOn = "UPDATE \"carb_intakes\"";
+        var act = () => pipeline.DeleteByLegacyIdAsync<Treatment>("t-3", WriteOrigin.Live);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected write failure");
     }
 
     private static LinkedRecordEntity Link(Guid canonical, Guid recordId, string source, bool isPrimary) => new()
