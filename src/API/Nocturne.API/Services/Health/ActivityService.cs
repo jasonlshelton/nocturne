@@ -1,3 +1,4 @@
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Legacy;
@@ -273,20 +274,28 @@ public class ActivityService : IActivityService
 
             var results = new List<Activity>();
 
-            // No catch around the sensor and sleep writes: the outer handler logs a failure and
-            // rethrows it, so the uploader gets an error and does not advance its sync marker past
-            // a record never stored.
+            // Only a user tombstone is skipped here. Any other failure of the sensor and sleep writes
+            // reaches the outer handler, which logs and rethrows it, so the uploader gets an error and
+            // does not advance its sync marker past a record never stored.
             foreach (var sensorActivity in sensorDataActivities)
             {
-                await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
-                results.Add(sensorActivity);
+                var decomposed = await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
+                if (decomposed.SkippedDeleted == 0)
+                    results.Add(sensorActivity);
             }
 
             foreach (var sleepActivity in sleepActivities)
             {
-                var session = ActivityStateSpanMapper.ToSleepSession(sleepActivity);
-                var created = await _sleepService.UpsertSessionAsync(session, cancellationToken);
-                results.Add(ActivityStateSpanMapper.SleepSessionToActivity(created));
+                try
+                {
+                    var session = ActivityStateSpanMapper.ToSleepSession(sleepActivity);
+                    var created = await _sleepService.UpsertSessionAsync(session, cancellationToken);
+                    results.Add(ActivityStateSpanMapper.SleepSessionToActivity(created));
+                }
+                catch (RecreationBlockedException)
+                {
+                    _logger.LogDebug("Skipped sleep activity {Id}: the user deleted it", sleepActivity.Id);
+                }
             }
 
             // Process regular activities through existing StateSpan path
@@ -370,6 +379,10 @@ public class ActivityService : IActivityService
             {
                 var sleepSession = ActivityStateSpanMapper.ToSleepSession(activity);
                 sleepSession.OriginalId = id;
+                // A session Guid that missed the live lookup above may name a tombstone, which the
+                // upsert finds only by primary key.
+                if (Guid.TryParse(id, out _))
+                    sleepSession.Id = id;
 
                 var upsertedSession = await _sleepService.UpsertSessionAsync(sleepSession, cancellationToken);
                 var upsertedActivity = ActivityStateSpanMapper.SleepSessionToActivity(upsertedSession);
@@ -392,6 +405,11 @@ public class ActivityService : IActivityService
             }
 
             return updatedActivity;
+        }
+        catch (RecreationBlockedException)
+        {
+            _logger.LogDebug("Refused update of activity {Id}: the user deleted it", id);
+            throw;
         }
         catch (Exception ex)
         {
@@ -428,9 +446,10 @@ public class ActivityService : IActivityService
             _logger.LogDebug("Deleting activity record with ID: {Id}", id);
 
             // Attempt to delete decomposed records (heart rate / step count)
+            var decomposedDeleted = 0;
             try
             {
-                await _activityDecomposer.DeleteByLegacyIdAsync(id, WriteOrigin.Live, cancellationToken);
+                decomposedDeleted = await _activityDecomposer.DeleteByLegacyIdAsync(id, WriteOrigin.Live, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -457,7 +476,8 @@ public class ActivityService : IActivityService
                 }
             }
 
-            var deleted = await _stateSpanService.DeleteActivityAsync(id, cancellationToken);
+            var deleted = await _stateSpanService.DeleteActivityAsync(id, cancellationToken)
+                          || decomposedDeleted > 0;
 
             if (deleted)
             {

@@ -1,6 +1,9 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Nocturne.API.Services.Audit;
 using Nocturne.API.Tests.Integration.Infrastructure;
+using Nocturne.Core.Contracts.Audit;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -95,6 +98,25 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
         (await StoredAsync()).Should().ContainSingle().Which.Should().Be((storedId, (string?)null, (short?)90));
     }
 
+    [Fact]
+    public async Task UpsertSessionAsync_SourceRecordAnUncommittedUserDeleteIsTombstoning_WaitsAndIsRefused()
+    {
+        var storedId = await SeedAsync("sleep-race-upsert-after-user-delete");
+
+        var race = () => RaceAsync(
+            repo => repo.DeleteSessionAsync(storedId),
+            repo => repo.UpsertSessionAsync(Session(id: null, originalId: "sleep-race-upsert-after-user-delete", score: 90)),
+            firstAudit: new AuditContext { Endpoint = "DELETE /api/v1/activity" });
+
+        await race.Should().ThrowExactlyAsync<RecreationBlockedException>();
+        (await StoredAsync()).Should().BeEmpty();
+        await using var db = Fixture.CreateDbContext(Fixture.TenantId);
+        (await db.SleepSessions.IgnoreQueryFilters().AsNoTracking().Where(s => s.TenantId == Fixture.TenantId).ToListAsync())
+            .Should().ContainSingle()
+            .Which.Should().Match<Nocturne.Infrastructure.Data.Entities.SleepSessionEntity>(
+                s => s.Id == storedId && s.DeletedAt != null && s.SleepScore == 60);
+    }
+
     private async Task<Guid> SeedAsync(string originalId)
     {
         await using var seed = Fixture.CreateDbContext(Fixture.TenantId);
@@ -105,12 +127,14 @@ public class SleepSessionUpsertConcurrencyTests : ApiIntegrationTestBase
 
     private async Task<(TFirst First, TSecond Second)> RaceAsync<TFirst, TSecond>(
         Func<SleepSessionRepository, Task<TFirst>> first,
-        Func<SleepSessionRepository, Task<TSecond>> second)
+        Func<SleepSessionRepository, Task<TSecond>> second,
+        IAuditContext? firstAudit = null)
     {
         TestTenantDbContextFactory contexts;
         await using (var seed = Fixture.CreateDbContext(Fixture.TenantId))
             contexts = new TestTenantDbContextFactory(seed);
         var held = await contexts.CreateAsync();
+        held.AuditContext = firstAudit;
         var racer = await contexts.CreateAsync();
         Task<TSecond>? secondTask = null;
         try
