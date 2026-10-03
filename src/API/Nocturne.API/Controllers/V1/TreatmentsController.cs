@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Nocturne.API.Attributes;
 using Nocturne.API.Authorization;
+using Nocturne.API.Extensions;
 using Nocturne.API.Helpers;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Contracts.Legacy;
@@ -236,11 +237,15 @@ public class TreatmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Save treatments identified by the <c>_id</c> in the body, inserting any not already stored
+    /// Save the treatment identified by the <c>identifier</c> or <c>_id</c> in the body, inserting it
+    /// when that id is not already stored
     /// </summary>
-    /// <param name="treatments">Treatment to save (can be single object or array)</param>
+    /// <remarks>
+    /// Nightscout's save takes one document and matches on <c>identifier</c> before <c>_id</c>.
+    /// </remarks>
+    /// <param name="treatment">Treatment to save, as a single object</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>The saved treatment, or an array of them when an array was sent</returns>
+    /// <returns>The saved treatment</returns>
     [HttpPut]
     [Authorize]
     [RequireScope(Scope.TreatmentsReadWrite)]
@@ -248,34 +253,33 @@ public class TreatmentsController : ControllerBase
     [ProducesResponseType(typeof(Treatment), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult> SaveTreatments(
-        [FromBody] JsonElement treatments,
+    public async Task<ActionResult<Treatment>> SaveTreatments(
+        [FromBody] JsonElement treatment,
         CancellationToken cancellationToken = default
     )
     {
+        if (treatment.ValueKind != JsonValueKind.Object)
+            return BadRequest("Invalid treatment payload. Expected an object.");
+
         try
         {
-            var treatmentsToSave = ReadTreatments(treatments);
-            if (treatmentsToSave is null)
-                return BadRequest("Invalid JSON format. Expected object or array of treatments.");
-            if (treatmentsToSave.Count == 0)
-                return BadRequest("No treatments provided");
+            var toSave = JsonSerializer.Deserialize<Treatment>(treatment.GetRawText())!;
+            if (treatment.TryGetProperty("identifier", out var identifier)
+                && identifier.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(identifier.GetString()))
+                toSave.Id = identifier.GetString();
 
-            return await SaveAsync(
-                treatmentsToSave,
-                treatments.ValueKind == JsonValueKind.Array,
-                cancellationToken
-            );
+            return await SaveAsync(toSave, cancellationToken);
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Invalid JSON in save treatments request");
+            _logger.LogWarning(ex, "Invalid JSON in save treatment request");
             return BadRequest("Invalid JSON format");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error saving treatments");
-            return StatusCode(500, "Internal server error while saving treatments");
+            _logger.LogError(ex, "Error saving treatment");
+            return StatusCode(500, "Internal server error while saving treatment");
         }
     }
 
@@ -320,7 +324,7 @@ public class TreatmentsController : ControllerBase
             }
 
             treatment.Id = id;
-            return await SaveAsync([treatment], asArray: false, cancellationToken);
+            return await SaveAsync(treatment, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -339,9 +343,9 @@ public class TreatmentsController : ControllerBase
     [Authorize]
     [RequireScope(Scope.TreatmentsReadWrite)]
     [NightscoutEndpoint("/api/v1/treatments/:id")]
-    [ProducesResponseType(204)]
-    [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(500)]
     public async Task<ActionResult> DeleteTreatment(
         string id,
@@ -362,17 +366,18 @@ public class TreatmentsController : ControllerBase
                 return BadRequest("Treatment ID cannot be null or empty");
             }
 
-            var deleted = await _treatmentService.DeleteTreatmentAsync(id, cancellationToken);
-
-            if (!deleted)
+            if (id == LegacyDeleteStatus.AnyId)
             {
-                _logger.LogDebug("Treatment not found for deletion with ID: {Id}", id);
-                return NotFound($"Treatment with ID '{id}' not found");
+                return HttpContext?.HasScope(Scope.FullAccess) == true
+                    ? await BulkDeleteTreatments(cancellationToken)
+                    : Forbid();
             }
 
-            _logger.LogDebug("Successfully deleted treatment with ID: {Id}", id);
+            var deleted = await _treatmentService.DeleteTreatmentAsync(id, cancellationToken);
 
-            return NoContent();
+            _logger.LogDebug("Deleted treatment with ID {Id}: {Deleted}", id, deleted);
+
+            return Ok(LegacyDeleteStatus.For(deleted ? 1 : 0));
         }
         catch (Exception ex)
         {
@@ -430,16 +435,7 @@ public class TreatmentsController : ControllerBase
 
             _logger.LogDebug("Successfully deleted {Count} treatments", deletedCount);
 
-            // Return result in the same format as Nightscout legacy API
-            // Nightscout returns MongoDB driver result which includes result object, n, and ok
-            // Use Dictionary to ensure 'n' is always serialized even when 0 (WhenWritingDefault would omit it)
-            var response = new Dictionary<string, object>
-            {
-                ["result"] = new Dictionary<string, object> { ["n"] = deletedCount, ["ok"] = 1 },
-                ["n"] = deletedCount,
-                ["ok"] = 1
-            };
-            return Ok(response);
+            return Ok(LegacyDeleteStatus.For(deletedCount));
         }
         catch (Exception ex)
         {
@@ -456,32 +452,21 @@ public class TreatmentsController : ControllerBase
     /// Nightscout's save is an upsert: a treatment whose id resolves to a stored record replaces it,
     /// and any other goes through the create path, which keeps the client's id.
     /// </summary>
-    private async Task<ActionResult> SaveAsync(
-        List<Treatment> treatments,
-        bool asArray,
+    private async Task<ActionResult<Treatment>> SaveAsync(
+        Treatment treatment,
         CancellationToken cancellationToken
     )
     {
-        var saved = new List<Treatment>();
-        foreach (var treatment in PrepareTreatments(treatments))
-        {
-            if (!string.IsNullOrWhiteSpace(treatment.Id)
-                && await _treatmentService.UpdateTreatmentAsync(
-                    treatment.Id, treatment, cancellationToken) is { } updated)
-            {
-                saved.Add(updated);
-                continue;
-            }
+        var prepared = PrepareTreatments([treatment]).Single();
 
-            saved.AddRange(
-                await _treatmentService.CreateTreatmentsAsync([treatment], cancellationToken));
-        }
+        if (!string.IsNullOrWhiteSpace(prepared.Id)
+            && await _treatmentService.UpdateTreatmentAsync(
+                prepared.Id, prepared, cancellationToken) is { } updated)
+            return Ok(updated);
 
-        if (asArray)
-            return Ok(saved.ToArray());
-
-        return saved.Count > 0
-            ? Ok(saved[0])
+        var created = await _treatmentService.CreateTreatmentsAsync([prepared], cancellationToken);
+        return created.FirstOrDefault() is { } saved
+            ? Ok(saved)
             : StatusCode(500, "Internal server error while saving treatment");
     }
 
@@ -498,27 +483,15 @@ public class TreatmentsController : ControllerBase
     {
         var processed = _documentProcessingService.ProcessDocuments(treatments).ToList();
 
-        foreach (var treatment in processed)
+        foreach (var treatment in processed.Where(t => string.IsNullOrWhiteSpace(t.EventType)))
         {
-            if (string.IsNullOrWhiteSpace(treatment.EventType))
+            treatment.EventType = (treatment.Insulin.HasValue, treatment.Carbs.HasValue) switch
             {
-                if (treatment.Insulin.HasValue && treatment.Carbs.HasValue)
-                {
-                    treatment.EventType = "Meal Bolus";
-                }
-                else if (treatment.Insulin.HasValue)
-                {
-                    treatment.EventType = "Correction Bolus";
-                }
-                else if (treatment.Carbs.HasValue)
-                {
-                    treatment.EventType = "Carb Correction";
-                }
-                else
-                {
-                    treatment.EventType = "Note";
-                }
-            }
+                (true, true) => "Meal Bolus",
+                (true, false) => "Correction Bolus",
+                (false, true) => "Carb Correction",
+                _ => "Note",
+            };
         }
 
         return processed;

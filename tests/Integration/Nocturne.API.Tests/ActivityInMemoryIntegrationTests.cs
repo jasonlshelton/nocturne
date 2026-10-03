@@ -223,22 +223,58 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
-    public async Task UpdateActivity_WithNonExistentId_ShouldReturnNotFound()
+    public async Task UpdateActivity_WithNonExistentId_InsertsIt()
     {
-        // Arrange
-        var nonExistentId = Guid.NewGuid().ToString();
-        var updatedActivity = new Activity { Type = "Exercise", Description = "Test" };
+        var response = await AuthenticatedClient.PutAsJsonAsync(
+            $"/api/v1/activity/{Guid.NewGuid()}",
+            new Activity { Type = "Exercise", Description = "Inserted by PUT" },
+            cancellationToken: CancellationToken.None
+        );
 
-        // Act
-        var response = await AuthenticatedClient
-            .PutAsJsonAsync(
-                $"/api/v1/activity/{nonExistentId}",
-                updatedActivity,
-                cancellationToken: CancellationToken.None
-            );
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var saved = await response.Content.ReadFromJsonAsync<Activity>(
+            cancellationToken: CancellationToken.None
+        );
+        saved!.Description.Should().Be("Inserted by PUT");
+        saved.Id.Should().NotBeNullOrEmpty();
+    }
 
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    [Fact]
+    public async Task SaveActivity_WithTheStoredIdInTheBody_UpdatesInPlace()
+    {
+        var create = await AuthenticatedClient.PostAsJsonAsync(
+            "/api/v1/activity",
+            new Activity { Type = "Exercise", Description = "Before", Duration = 30 },
+            cancellationToken: CancellationToken.None
+        );
+        var id = (await create.Content.ReadFromJsonAsync<Activity[]>())![0].Id;
+
+        var put = await AuthenticatedClient.PutAsJsonAsync(
+            "/api/v1/activity",
+            new Activity { Id = id, Type = "Exercise", Description = "After", Duration = 45 },
+            cancellationToken: CancellationToken.None
+        );
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var saved = await put.Content.ReadFromJsonAsync<Activity>();
+        saved!.Id.Should().Be(id);
+        saved.Description.Should().Be("After");
+
+        var stored = await AuthenticatedClient.GetFromJsonAsync<Activity>($"/api/v1/activity/{id}");
+        stored!.Description.Should().Be("After");
+        stored.Duration.Should().Be(45);
+    }
+
+    [Fact]
+    public async Task SaveActivity_WithAnArray_IsRefused()
+    {
+        var put = await AuthenticatedClient.PutAsJsonAsync(
+            "/api/v1/activity",
+            new[] { new Activity { Type = "Exercise", Description = "In an array" } },
+            cancellationToken: CancellationToken.None
+        );
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -269,6 +305,10 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken.None);
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(1);
+        status.GetProperty("n").GetInt64().Should().Be(1);
 
         // Verify the activity is actually deleted
         var getResponse = await AuthenticatedClient
@@ -277,7 +317,7 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
-    public async Task DeleteActivity_WithNonExistentId_ShouldReturnNotFound()
+    public async Task DeleteActivity_WithNonExistentId_AnswersOkWithNoneDeleted()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid().ToString();
@@ -287,13 +327,19 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
             .DeleteAsync($"/api/v1/activity/{nonExistentId}", CancellationToken.None);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken.None);
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(0);
+        status.GetProperty("n").GetInt64().Should().Be(0);
     }
 
     [Fact]
     public async Task GetActivities_WithPaginationParameters_ShouldRespectParameters()
     {
-        // Arrange - Create multiple activities
+        // Arrange - Create multiple activities an hour apart: same-type spans from one source
+        // inside the dedup window collapse to one primary, and the list hides the rest
+        var start = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
         var activities = Enumerable
             .Range(1, 15)
             .Select(i => new Activity
@@ -301,6 +347,7 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
                 Type = "Exercise",
                 Description = $"Activity {i}",
                 Duration = i * 5,
+                Mills = start + i * (long)TimeSpan.FromHours(1).TotalMilliseconds,
             })
             .ToArray();
 

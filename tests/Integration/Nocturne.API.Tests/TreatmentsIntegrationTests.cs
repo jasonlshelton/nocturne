@@ -313,6 +313,50 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
         (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(30));
     }
 
+    [Fact]
+    public async Task PutCollection_UnknownUuid_InsertsTheOverride()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["duration"] = 45,
+            ["created_at"] = now.AddMinutes(-90).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        });
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var body = await put.Content.ReadFromJsonAsync<JsonElement>();
+        body.ValueKind.Should().Be(JsonValueKind.Object);
+        body.GetProperty("eventType").GetString().Should().Be("Temporary Override");
+
+        var overrides = await WithTenantScopeAsync(async sp =>
+            (await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(
+                category: StateSpanCategory.Override,
+                from: now.AddHours(-2).UtcDateTime,
+                to: now.AddHours(1).UtcDateTime))
+            .Where(s => string.Equals(s.OriginalId, id, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+        var stored = overrides.Should().ContainSingle().Subject;
+        (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(45));
+    }
+
+    [Fact]
+    public async Task PutCollection_WithAnArray_IsRefused()
+    {
+        var client = CreateAuthenticatedClient();
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new[]
+        {
+            new Dictionary<string, object> { ["eventType"] = "Note", ["notes"] = "in an array" },
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     #endregion
 
     #region DELETE /api/v1/treatments/{id}
@@ -348,13 +392,61 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
         var deleteResponse = await client.DeleteAsync($"/api/v1/treatments/{id}");
 
         // Assert
-        deleteResponse.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await deleteResponse.Content.ReadFromJsonAsync<JsonElement>();
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(1);
+        status.GetProperty("n").GetInt64().Should().Be(1);
 
         (await client.GetAsync($"/api/v1/treatments/{id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await client.GetFromJsonAsync<JsonElement>($"/api/v1/treatments?find[created_at][$eq]={treatment.Created_at}"))
             .GetArrayLength().Should().Be(0, "the meal's bolus, carbs and note all go with it");
 
         Log($"DELETE treatment '{id}' returned: {deleteResponse.StatusCode}");
+    }
+
+    [Fact]
+    public async Task DeleteTreatment_UnknownId_AnswersOkWithNoneDeleted()
+    {
+        var response = await CreateAuthenticatedClient().DeleteAsync("/api/v1/treatments/000000000000000000000000");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>();
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(0);
+        status.GetProperty("n").GetInt64().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteTreatment_AnyIdWithFind_DeletesTheMatches()
+    {
+        var client = CreateAuthenticatedClient();
+        var enteredBy = $"wildcard-{Guid.NewGuid():N}";
+        var treatments = new[] { CreateTestTreatment("first"), CreateTestTreatment("second") };
+        foreach (var treatment in treatments)
+            treatment.EnteredBy = enteredBy;
+        treatments[1].Mills -= 60_000;
+        treatments[1].Created_at = DateTimeOffset.FromUnixTimeMilliseconds(treatments[1].Mills)
+            .ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        (await client.PostAsJsonAsync("/api/v1/treatments", treatments))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var response = await client.DeleteAsync($"/api/v1/treatments/*?find[enteredBy]={enteredBy}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("deletedCount").GetInt64().Should().Be(2);
+        var remaining = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/treatments?find[enteredBy]={enteredBy}");
+        remaining.GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteTreatment_AnyIdWithoutFind_IsRefused()
+    {
+        var response = await CreateAuthenticatedClient().DeleteAsync("/api/v1/treatments/*");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
