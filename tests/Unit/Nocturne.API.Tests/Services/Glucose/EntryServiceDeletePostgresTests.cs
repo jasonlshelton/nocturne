@@ -239,14 +239,16 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
         var setup = await CreateAsync();
         var posted = await setup.Controller.CreateEntries(
             JsonSerializer.SerializeToElement(new { type = "sgv", sgv = 173, date = Mills() }));
-        var body = JsonSerializer.SerializeToElement(posted.Result.Should().BeOfType<ObjectResult>().Subject.Value);
+        var body = JsonSerializer.SerializeToElement(posted.Result.Should().BeAssignableTo<ObjectResult>().Subject.Value);
         var id = body[0].GetProperty("_id").GetString()!;
 
         var got = await setup.Controller.GetEntry(id);
         JsonSerializer.SerializeToElement(got.Result.Should().BeOfType<OkObjectResult>().Subject.Value)
             .EnumerateArray().Select(e => e.GetProperty("_id").GetString()).Should().Equal(id);
 
-        (await setup.Controller.DeleteEntry(id)).Should().BeOfType<OkObjectResult>();
+        var deleted = await setup.Controller.DeleteEntry(id);
+        JsonSerializer.SerializeToElement(deleted.Should().BeOfType<OkObjectResult>().Subject.Value)
+            .GetProperty("n").GetInt64().Should().Be(1);
 
         (await setup.Service.GetEntryByIdAsync(id)).Should().BeNull();
     }

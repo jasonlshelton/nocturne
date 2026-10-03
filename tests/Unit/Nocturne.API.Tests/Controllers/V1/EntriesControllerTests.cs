@@ -433,7 +433,43 @@ public class EntriesControllerTests
 
         var result = await _controller.DeleteEntry(generatedId);
 
-        result.Should().BeOfType<OkObjectResult>();
+        AssertDeleteStatus(result, 1);
+    }
+
+    [Fact]
+    public async Task DeleteEntry_UnknownId_AnswersOkWithNoneDeleted()
+    {
+        const string unknownId = "0123456789abcdef01234567";
+
+        _mockEntryService
+            .Setup(x => x.DeleteEntryAsync(unknownId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _controller.DeleteEntry(unknownId);
+
+        AssertDeleteStatus(result, 0);
+    }
+
+    [Theory]
+    [InlineData("sgv")]
+    [InlineData("0123456789abcdef0123456")]
+    public async Task DeleteEntry_NonIdSpec_AnswersBadRequestWithoutDeleting(string spec)
+    {
+        var result = await _controller.DeleteEntry(spec);
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        _mockEntryService.Verify(
+            x => x.DeleteEntryAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never
+        );
+    }
+
+    private static void AssertDeleteStatus(ActionResult result, long count)
+    {
+        var body = JsonSerializer.SerializeToElement(result.Should().BeOfType<OkObjectResult>().Subject.Value);
+        body.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        body.GetProperty("deletedCount").GetInt64().Should().Be(count);
+        body.GetProperty("n").GetInt64().Should().Be(count);
     }
 
     [Fact]

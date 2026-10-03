@@ -976,14 +976,13 @@ public class EntriesController : ControllerBase
     /// </summary>
     /// <param name="id">The entry ID to delete</param>
     /// <param name="cancellationToken">Cancellation token for async operations</param>
-    /// <returns>Confirmation of deletion</returns>
+    /// <returns>The <see cref="LegacyDeleteStatus"/> body, found or not</returns>
     [HttpDelete("{id}")]
     [Authorize]
     [RequireScope(Scope.GlucoseReadWrite)]
     [NightscoutEndpoint("/api/v1/entries/{id}")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(typeof(object), 400)]
-    [ProducesResponseType(typeof(object), 404)]
     [ProducesResponseType(typeof(object), 500)]
     [ErrorEnvelope]
     public async Task<ActionResult> DeleteEntry(
@@ -1019,29 +1018,8 @@ public class EntriesController : ControllerBase
 
         var deleted = await _entryService.DeleteEntryAsync(id, cancellationToken);
 
-        if (!deleted)
-        {
-            _logger.LogDebug("Entry with ID {Id} not found for deletion", id);
-            return NotFound(
-                new
-                {
-                    status = 404,
-                    message = "Entry not found",
-                    type = "client",
-                }
-            );
-        }
-
-        _logger.LogDebug("Successfully deleted entry with ID: {Id}", id);
-        return Ok(
-            new
-            {
-                status = 200,
-                message = "Entry deleted successfully",
-                type = "success",
-                id = id,
-            }
-        );
+        _logger.LogDebug("Deleted entry with ID {Id}: {Deleted}", id, deleted);
+        return Ok(LegacyDeleteStatus.For(deleted ? 1 : 0));
     }
 
     /// <summary>
