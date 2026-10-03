@@ -2,7 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Nocturne.API.Tests.Integration.Infrastructure;
+using Nocturne.Core.Contracts.Glucose;
+using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Models;
 using Xunit;
 using Xunit.Abstractions;
@@ -269,6 +272,239 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
 
         var getContent = await getResponse.Content.ReadAsStringAsync();
         Log($"PUT treatment '{id}' returned: {putResponse.StatusCode}");
+    }
+
+    [Fact]
+    public async Task PutCollection_LoopOverrideByUuid_UpdatesInPlace()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        (await client.PostAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["durationType"] = "indefinite",
+            ["created_at"] = now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["duration"] = 30,
+            ["created_at"] = now.AddMinutes(-15).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        });
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+
+        var overrides = await WithTenantScopeAsync(async sp =>
+            (await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(
+                category: StateSpanCategory.Override,
+                from: now.AddHours(-2).UtcDateTime,
+                to: now.AddHours(1).UtcDateTime))
+            .Where(s => string.Equals(s.OriginalId, id, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+        var stored = overrides.Should().ContainSingle().Subject;
+        stored.StartTimestamp.Should().BeCloseTo(now.AddMinutes(-15).UtcDateTime, TimeSpan.FromSeconds(1));
+        (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(30));
+    }
+
+    [Fact]
+    public async Task PutCollection_UnknownUuid_InsertsTheOverride()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["duration"] = 45,
+            ["created_at"] = now.AddMinutes(-90).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        });
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var body = await put.Content.ReadFromJsonAsync<JsonElement>();
+        body.ValueKind.Should().Be(JsonValueKind.Object);
+        body.GetProperty("eventType").GetString().Should().Be("Temporary Override");
+
+        var overrides = await WithTenantScopeAsync(async sp =>
+            (await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(
+                category: StateSpanCategory.Override,
+                from: now.AddHours(-2).UtcDateTime,
+                to: now.AddHours(1).UtcDateTime))
+            .Where(s => string.Equals(s.OriginalId, id, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+        var stored = overrides.Should().ContainSingle().Subject;
+        (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(45));
+    }
+
+    [Fact]
+    public async Task PutCollection_WithAnArray_IsRefused()
+    {
+        var client = CreateAuthenticatedClient();
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new[]
+        {
+            new Dictionary<string, object> { ["eventType"] = "Note", ["notes"] = "in an array" },
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task PutCollection_LoopCarbByTheIdItsPostReturned_UpdatesTheOneCarb()
+    {
+        var client = CreateAuthenticatedClient();
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        var at = DistinctTime();
+
+        var post = await client.PostAsJsonAsync("/api/v1/treatments", new[] { LoopCarb(syncIdentifier, 20, at) });
+        post.StatusCode.Should().Be(HttpStatusCode.OK);
+        var returnedId = (await post.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("_id").GetString()!;
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", LoopCarb(syncIdentifier, 35, at, returnedId));
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var stored = (await TreatmentsAtAsync(at)).Should().ContainSingle().Subject;
+        stored.Carbs.Should().Be(35);
+    }
+
+    [Fact]
+    public async Task PutCollection_LoopCarbWhoseIdResolvesToNothing_UpdatesTheCarbItsSyncIdentifierNames()
+    {
+        var client = CreateAuthenticatedClient();
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        var at = DistinctTime();
+        (await client.PostAsJsonAsync("/api/v1/treatments", new[] { LoopCarb(syncIdentifier, 20, at) }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var put = await client.PutAsJsonAsync(
+            "/api/v1/treatments", LoopCarb(syncIdentifier, 40, at, MongoObjectId.FromGuid(Guid.NewGuid())));
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        (await TreatmentsAtAsync(at)).Should().ContainSingle().Which.Carbs.Should().Be(40);
+    }
+
+    [Theory]
+    [InlineData("served")]
+    [InlineData("returned")]
+    [InlineData("legacy")]
+    [InlineData("syncIdentifier")]
+    [InlineData("hashed")]
+    public async Task PutCollection_OfATreatmentTheUserDeleted_SavesNothing(string idKind)
+    {
+        var client = CreateAuthenticatedClient();
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        var at = DistinctTime();
+        var posted = idKind == "hashed"
+            ? LoopCarb(syncIdentifier: null, 20, at, $"client-{Guid.NewGuid():N}")
+            : LoopCarb(syncIdentifier, 20, at);
+        var post = await client.PostAsJsonAsync("/api/v1/treatments", new[] { posted });
+        var returnedId = (await post.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("_id").GetString()!;
+        var servedId = MongoObjectId.Coerce((await TreatmentsAtAsync(at)).Single().Id)!;
+        (await client.DeleteAsync($"/api/v1/treatments/{servedId}")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await TreatmentsAtAsync(at)).Should().BeEmpty();
+
+        var body = idKind switch
+        {
+            "served" => LoopCarb(syncIdentifier: null, 30, at, servedId),
+            "returned" or "hashed" => LoopCarb(syncIdentifier: null, 30, at, returnedId),
+            "legacy" => LoopCarb(syncIdentifier: null, 30, at, syncIdentifier),
+            _ => LoopCarb(syncIdentifier, 30, at, MongoObjectId.FromGuid(Guid.NewGuid())),
+        };
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", body);
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var answer = await put.Content.ReadFromJsonAsync<JsonElement>();
+        answer.ValueKind.Should().Be(JsonValueKind.Array);
+        answer.GetArrayLength().Should().Be(0);
+        (await TreatmentsAtAsync(at)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PutCollection_WithoutAnId_ReplacesTheTreatmentAtTheSameTimeWithTheSameEventType()
+    {
+        var client = CreateAuthenticatedClient();
+        var at = DistinctTime();
+        (await client.PostAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["eventType"] = "Note",
+            ["notes"] = "before",
+            ["created_at"] = at,
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["eventType"] = "Note",
+            ["notes"] = "after",
+            ["created_at"] = at,
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        (await TreatmentsAtAsync(at)).Should().ContainSingle().Which.Notes.Should().Be("after");
+    }
+
+    [Fact]
+    public async Task PutCollection_WithoutAnId_CreatesWhenNoTreatmentOfThatEventTypeIsStoredThen()
+    {
+        var client = CreateAuthenticatedClient();
+        var at = DistinctTime();
+        (await client.PostAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["eventType"] = "Note",
+            ["notes"] = "a note",
+            ["created_at"] = at,
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["eventType"] = "BG Check",
+            ["glucose"] = 123,
+            ["glucoseType"] = "Finger",
+            ["units"] = "mg/dl",
+            ["created_at"] = at,
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var stored = await TreatmentsAtAsync(at);
+        stored.Should().HaveCount(2);
+        stored.Should().ContainSingle(t => t.EventType == "Note").Which.Notes.Should().Be("a note");
+        stored.Should().ContainSingle(t => t.EventType == "BG Check");
+    }
+
+    /// <summary>A carb entry as NightscoutKit's CarbCorrectionNightscoutTreatment serialises it.</summary>
+    private static Dictionary<string, object> LoopCarb(string? syncIdentifier, int carbs, string at, string? id = null)
+    {
+        var carb = new Dictionary<string, object>
+        {
+            ["eventType"] = "Carb Correction",
+            ["carbs"] = carbs,
+            ["absorptionTime"] = 180,
+            ["enteredBy"] = "loop://iPhone",
+            ["created_at"] = at,
+        };
+        if (syncIdentifier is not null)
+            carb["syncIdentifier"] = syncIdentifier;
+        if (id is not null)
+            carb["_id"] = id;
+        return carb;
+    }
+
+    /// <summary>A millisecond no other test in the fixture writes a treatment at.</summary>
+    private static string DistinctTime() => DateTimeOffset.UtcNow
+        .AddMinutes(-Random.Shared.Next(30, 6 * 60))
+        .AddMilliseconds(Random.Shared.Next(1, 60_000))
+        .ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+
+    private Task<IReadOnlyList<Treatment>> TreatmentsAtAsync(string at)
+    {
+        var mills = DateTimeOffset.Parse(at).ToUnixTimeMilliseconds();
+        return WithTenantScopeAsync(sp =>
+            sp.GetRequiredService<ITreatmentService>().GetTreatmentsByRangeAsync(mills, mills));
     }
 
     #endregion

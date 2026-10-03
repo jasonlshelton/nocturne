@@ -114,6 +114,11 @@ public class TreatmentService : ITreatmentService
     }
 
     /// <inheritdoc />
+    public Task<bool> IsTreatmentDeletedByUserAsync(
+        string id, CancellationToken cancellationToken = default)
+        => _store.IsDeletedByUserAsync(id, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IEnumerable<Treatment>> GetTreatmentsWithAdvancedFilterAsync(
         int count, int skip, string? findQuery, bool reverseResults,
         CancellationToken cancellationToken = default)

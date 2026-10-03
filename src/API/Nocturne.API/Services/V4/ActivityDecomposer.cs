@@ -226,6 +226,24 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
         return result;
     }
 
+    private static readonly List<string> ActivityCategoryNames =
+        ActivityStateSpanMapper.ActivityCategories.Select(c => c.ToString()).ToList();
+
+    /// <inheritdoc/>
+    public async Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default)
+    {
+        Guid? recordId = Guid.TryParse(id, out var parsed) ? parsed : null;
+
+        return await _dbContext.UserTombstones<StateSpanEntity>().AnyAsync(
+                s => ActivityCategoryNames.Contains(s.Category) && (s.OriginalId == id || s.Id == recordId), ct)
+            || await _dbContext.UserTombstones<SleepSessionEntity>().AnyAsync(
+                s => s.OriginalId == id || s.Id == recordId, ct)
+            || await _dbContext.UserTombstones<HeartRateEntity>().AnyAsync(
+                h => h.OriginalId == id || h.Id == recordId, ct)
+            || await _dbContext.UserTombstones<StepCountEntity>().AnyAsync(
+                s => s.OriginalId == id || s.Id == recordId, ct);
+    }
+
     /// <inheritdoc/>
     /// <remarks>
     /// Soft-deletes, as <c>SimpleEntityService.DeleteOneAsync</c> does: the tombstone a user's delete
