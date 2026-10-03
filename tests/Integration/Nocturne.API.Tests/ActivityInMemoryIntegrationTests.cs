@@ -269,6 +269,10 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken.None);
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(1);
+        status.GetProperty("n").GetInt64().Should().Be(1);
 
         // Verify the activity is actually deleted
         var getResponse = await AuthenticatedClient
@@ -277,7 +281,7 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
-    public async Task DeleteActivity_WithNonExistentId_ShouldReturnNotFound()
+    public async Task DeleteActivity_WithNonExistentId_AnswersOkWithNoneDeleted()
     {
         // Arrange
         var nonExistentId = Guid.NewGuid().ToString();
@@ -287,13 +291,19 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
             .DeleteAsync($"/api/v1/activity/{nonExistentId}", CancellationToken.None);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken.None);
+        status.GetProperty("acknowledged").GetBoolean().Should().BeTrue();
+        status.GetProperty("deletedCount").GetInt64().Should().Be(0);
+        status.GetProperty("n").GetInt64().Should().Be(0);
     }
 
     [Fact]
     public async Task GetActivities_WithPaginationParameters_ShouldRespectParameters()
     {
-        // Arrange - Create multiple activities
+        // Arrange - Create multiple activities an hour apart: same-type spans from one source
+        // inside the dedup window collapse to one primary, and the list hides the rest
+        var start = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
         var activities = Enumerable
             .Range(1, 15)
             .Select(i => new Activity
@@ -301,6 +311,7 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
                 Type = "Exercise",
                 Description = $"Activity {i}",
                 Duration = i * 5,
+                Mills = start + i * (long)TimeSpan.FromHours(1).TotalMilliseconds,
             })
             .ToArray();
 
