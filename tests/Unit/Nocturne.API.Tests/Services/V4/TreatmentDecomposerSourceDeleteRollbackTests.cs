@@ -21,8 +21,9 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.V4;
 
 /// <summary>
-/// <see cref="TreatmentDecomposer.DeleteFromSourceAsync"/> sweeps its tables in one transaction: a
-/// repoint that fails on a later table must leave the rows an earlier table already deleted live.
+/// <see cref="TreatmentDecomposer.DeleteFromSourceAsync"/> and <see cref="TreatmentDecomposer.DeleteByLegacyIdAsync"/>
+/// sweep their tables in one transaction: a failure on a later table must leave the rows an earlier
+/// table already deleted live.
 /// </summary>
 [Trait("Category", "Unit")]
 public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
@@ -94,6 +95,32 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
         (await read.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(carb);
     }
 
+    [Fact]
+    public async Task A_failure_on_the_carb_table_rolls_back_a_legacy_id_delete_of_the_bolus_table_swept_before_it()
+    {
+        var bolus = Guid.CreateVersion7();
+        var carb = Guid.CreateVersion7();
+        _context.Boluses.Add(new BolusEntity
+        {
+            Id = bolus, TenantId = TenantId, LegacyId = "t-2", DataSource = Connector, Insulin = 1, Timestamp = At,
+        });
+        _context.CarbIntakes.Add(new CarbIntakeEntity
+        {
+            Id = carb, TenantId = TenantId, LegacyId = "t-2", DataSource = Connector, Carbs = 20, Timestamp = At,
+        });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        _failure.FailOn = "UPDATE \"carb_intakes\"";
+        var act = () => _decomposer.DeleteByLegacyIdAsync("t-2", WriteOrigin.Live);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected write failure");
+        _failure.FailOn = null;
+        await using var read = _db.CreateContext();
+        (await read.Boluses.IgnoreQueryFilters().SingleAsync(b => b.Id == bolus)).DeletedAt.Should().BeNull();
+        (await read.CarbIntakes.IgnoreQueryFilters().SingleAsync(c => c.Id == carb)).DeletedAt.Should().BeNull();
+    }
+
     private static LinkedRecordEntity Link(Guid canonical, Guid recordId, string source, bool isPrimary) => new()
     {
         Id = Guid.CreateVersion7(), TenantId = TenantId, CanonicalId = canonical,
@@ -102,12 +129,16 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
         DataSource = source, IsPrimary = isPrimary, SysCreatedAt = DateTime.UtcNow,
     };
 
-    /// <summary>Armed, fails the second <c>UPDATE</c> of <c>linked_records</c>: a repoint's promote, after its demote.</summary>
+    /// <summary>
+    /// Armed, fails the second <c>UPDATE</c> of <c>linked_records</c>: a repoint's promote, after its
+    /// demote. With <see cref="FailOn"/> set, fails the first statement starting with it.
+    /// </summary>
     private sealed class FailingLinkPromote : DbCommandInterceptor
     {
         private int _linkUpdates;
 
         public bool Armed { get; set; }
+        public string? FailOn { get; set; }
 
         public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
             DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
@@ -127,6 +158,8 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
 
         private void Check(DbCommand command)
         {
+            if (FailOn is { } prefix && command.CommandText.TrimStart().StartsWith(prefix, StringComparison.Ordinal))
+                throw new InvalidOperationException("injected write failure");
             if (Armed && command.CommandText.TrimStart().StartsWith("UPDATE \"linked_records\"", StringComparison.Ordinal)
                 && ++_linkUpdates == 2)
             {

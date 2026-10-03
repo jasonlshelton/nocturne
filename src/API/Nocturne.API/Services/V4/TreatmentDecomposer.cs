@@ -1395,13 +1395,22 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The tables are swept in one transaction, as <see cref="DeleteFromSourceAsync"/>'s are: the
+    /// delete takes every copy in each row's duplicate group (<see cref="DuplicateDelete.EveryCopy"/>),
+    /// and a failure on a later table must not leave the treatment half deleted.
+    /// </remarks>
     public async Task<int> DeleteByLegacyIdAsync(string legacyId, WriteOrigin origin, CancellationToken ct = default)
     {
         // origin is accepted for interface uniformity; the v4-native delete broadcast is deferred to the glucose-unification follow-up (deletes here bypass the repository chokepoint).
-        var deleted = 0;
-        foreach (var table in DecomposedTables)
-            deleted += (await table.SoftDeleteAsync(
-                [legacyId], source: null, $"legacy_id={legacyId}", DuplicateDelete.EveryCopy, ct)).Count;
+        var deleted = await _dbContext.ExecuteInTransactionAsync(async token =>
+        {
+            var count = 0;
+            foreach (var table in DecomposedTables)
+                count += (await table.SoftDeleteAsync(
+                    [legacyId], source: null, $"legacy_id={legacyId}", DuplicateDelete.EveryCopy, token)).Count;
+            return count;
+        }, ct: ct);
 
         if (deleted > 0)
             Logger.LogDebug("Soft-deleted {Count} v4 records for legacy treatment {LegacyId}", deleted, legacyId);

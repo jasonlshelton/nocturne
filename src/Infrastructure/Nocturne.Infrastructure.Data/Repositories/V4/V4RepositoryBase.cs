@@ -447,23 +447,53 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.RestoreAsync" />
+    /// <remarks>
+    /// Restores the copies in the record's duplicate group deleted with it, so the group reads as
+    /// before the delete (<see cref="SoftDeleteRestoreExtensions.RestoreDeletedGroupAsync{TEntity}(NocturneDbContext, Guid, string, CancellationToken)"/>).
+    /// </remarks>
     public async Task<TModel> RestoreAsync(Guid id, WriteOrigin origin, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
-        var entity = await ctx.RestoreDeletedAsync<TEntity>(id, typeof(TModel).Name, ct);
-        // A restored record reappears in the dataset: broadcast it as a create so clients re-add it.
-        var restored = ToDomain(entity);
-        await RaiseBroadcastAsync([restored], [], [], origin, ct);
-        return restored;
+        var restore = await ctx.RestoreDeletedGroupAsync<TEntity>(id, typeof(TModel).Name, ct);
+        await BroadcastRestoreAsync(ctx, restore, origin, ct);
+        return ToDomain(restore.Restored[0]);
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.BulkRestoreAsync" />
+    /// <remarks>Restores each record's group as <see cref="RestoreAsync"/> does.</remarks>
     public async Task<BulkRestoreResult<TModel>> BulkRestoreAsync(IEnumerable<Guid> ids, WriteOrigin origin, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);
-        var result = (await ctx.RestoreDeletedAsync<TEntity>(ids, typeof(TModel).Name, ct)).Map(ToDomain);
-        await RaiseBroadcastAsync(result.Restored, [], [], origin, ct);
-        return result;
+        var restore = await ctx.RestoreDeletedGroupAsync<TEntity>(ids, typeof(TModel).Name, ct);
+        await BroadcastRestoreAsync(ctx, restore, origin, ct);
+        return new BulkRestoreResult<TModel>
+        {
+            Restored = restore.Restored.Select(ToDomain).ToList(),
+            Conflicts = restore.Conflicts,
+        };
+    }
+
+    /// <summary>
+    /// Broadcasts what a restore brought back into normal reads: a restored row that normal reads
+    /// show is re-added as a create, and a live copy promoted to its group's primary as an update. A
+    /// restored copy that is not its group's primary stays hidden, so it is not announced.
+    /// </summary>
+    private async Task BroadcastRestoreAsync(
+        NocturneDbContext ctx, GroupRestore<TEntity> restore, WriteOrigin origin, CancellationToken ct)
+    {
+        var restored = restore.Restored.Concat(restore.Copies).ToList();
+        Guid[] candidates = [.. restored.Select(e => e.Id), .. restore.Promoted];
+        var visible = (await ApplyReadVisibility(ctx.Set<TEntity>().AsNoTracking(), ctx)
+                .Where(e => candidates.Contains(e.Id))
+                .Select(e => e.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        var created = restored.Where(e => visible.Contains(e.Id)).ToList();
+        var createdIds = created.Select(e => e.Id).ToHashSet();
+        var updated = await LoadAsync(
+            ctx, restore.Promoted.Where(id => visible.Contains(id) && !createdIds.Contains(id)).ToList(), ct);
+        await RaiseBroadcastAsync(created.Select(ToDomain).ToList(), updated, [], origin, ct);
     }
 
     /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.GetDeletedAsync" />

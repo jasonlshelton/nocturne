@@ -482,21 +482,24 @@ public class ActivityService : IActivityService
                 }
             }
 
-            var deleted = await _stateSpanService.DeleteActivityAsync(id, cancellationToken);
+            var deletedIds = await _stateSpanService.DeleteActivityAsync(id, cancellationToken);
 
-            if (deleted)
+            if (deletedIds.Count > 0)
             {
-                await _signalRBroadcastService.BroadcastStorageDeleteAsync(
-                    "activity",
-                    new StorageDeleteEvent("activity", id)
-                );
+                foreach (var deletedId in deletedIds)
+                {
+                    await _signalRBroadcastService.BroadcastStorageDeleteAsync(
+                        "activity",
+                        new StorageDeleteEvent("activity", deletedId)
+                    );
+                }
 
                 await _events.OnDeletedAsync(null, cancellationToken);
 
                 _logger.LogDebug("Successfully deleted activity record with ID: {Id}", id);
             }
 
-            return deleted;
+            return deletedIds.Count > 0;
         }
         catch (Exception ex)
         {
@@ -549,8 +552,7 @@ public class ActivityService : IActivityService
                     );
                 }
 
-                if (await _stateSpanService.DeleteActivityAsync(activity.Id, cancellationToken))
-                    deletedCount++;
+                deletedCount += (await _stateSpanService.DeleteActivityAsync(activity.Id, cancellationToken)).Count;
             }
 
             if (deletedCount > 0)

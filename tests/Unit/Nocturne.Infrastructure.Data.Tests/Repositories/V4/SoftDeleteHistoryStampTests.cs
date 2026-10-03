@@ -114,6 +114,90 @@ public class SoftDeleteHistoryStampTests : IDisposable
         (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(primary, "nothing is promoted");
         (await verify.Notes.IgnoreQueryFilters().Select(n => EF.Property<bool>(n, "DeletedByUser")).ToListAsync())
             .Should().AllSatisfy(byUser => byUser.Should().BeTrue());
+        (await verify.MutationAuditLog.Where(a => a.Action == "delete").Select(a => a.EntityId).ToListAsync())
+            .Should().BeEquivalentTo(new Guid?[] { primary, copy }, "each copy gets its own audit row");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Restoring_either_copy_of_a_group_deleted_together_restores_the_group_with_one_live_primary(
+        bool restorePrimary)
+    {
+        var (primary, copy) = await SeedNotesAsync();
+        var repository = NotesAs(new UserAuditContext());
+        await repository.DeleteAsync(primary, WriteOrigin.Live);
+        var cursor = await SyncTheTombstonesAsync();
+
+        await repository.RestoreAsync(restorePrimary ? primary : copy, WriteOrigin.Live);
+
+        await AssertGroupRestoredAsync(repository, primary, copy, cursor);
+    }
+
+    [Fact]
+    public async Task Bulk_restoring_the_non_primary_copy_restores_its_group_with_one_live_primary()
+    {
+        var (primary, copy) = await SeedNotesAsync();
+        var repository = NotesAs(new UserAuditContext());
+        await repository.DeleteAsync(copy, WriteOrigin.Live);
+        var cursor = await SyncTheTombstonesAsync();
+
+        var result = await repository.BulkRestoreAsync([copy], WriteOrigin.Live);
+
+        result.Restored.Select(n => n.Id).Should().Equal(copy);
+        result.Conflicts.Should().BeEmpty();
+        await AssertGroupRestoredAsync(repository, primary, copy, cursor);
+    }
+
+    [Fact]
+    public async Task Restoring_a_copy_whose_primary_another_delete_took_makes_the_restored_copy_primary()
+    {
+        var (primary, copy) = await SeedNotesAsync();
+        var repository = NotesAs(new UserAuditContext());
+        await repository.DeleteAsync(primary, WriteOrigin.Live);
+        // The primary went in an earlier delete than the copy, so the two are not one delete's group.
+        await _context.Notes.IgnoreQueryFilters().Where(n => n.Id == primary)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.DeletedAt, Written));
+        var cursor = await SyncTheTombstonesAsync();
+
+        await repository.RestoreAsync(copy, WriteOrigin.Live);
+
+        (await repository.GetByIdAsync(primary)).Should().BeNull();
+        (await repository.GetAsync(null, null, null, null, 100, 0, true)).Select(n => n.Id).Should().Equal(copy);
+        await using var verify = _db.CreateContext();
+        (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(copy);
+        (await repository.GetModifiedSinceAsync(cursor, 1000))
+            .Select(r => (r.Record.Id, r.Deleted)).Should().Contain((copy, false));
+    }
+
+    /// <summary>
+    /// After a restore: both copies live, the original primary still the one primary, normal reads
+    /// show exactly it, each restored row has a <c>restore</c> audit row, and history re-sends the
+    /// primary live after <paramref name="cursor"/>.
+    /// </summary>
+    private async Task AssertGroupRestoredAsync(NoteRepository repository, Guid primary, Guid copy, long cursor)
+    {
+        await using var verify = _db.CreateContext();
+        (await verify.Notes.Select(n => n.Id).ToListAsync()).Should().BeEquivalentTo([primary, copy]);
+        (await verify.LinkedRecords.Where(l => l.IsPrimary).Select(l => l.RecordId).ToListAsync())
+            .Should().Equal(primary);
+        (await repository.GetAsync(null, null, null, null, 100, 0, true)).Select(n => n.Id).Should().Equal(primary);
+        (await verify.MutationAuditLog.Where(a => a.Action == "restore").Select(a => a.EntityId).ToListAsync())
+            .Should().BeEquivalentTo(new Guid?[] { primary, copy });
+        (await repository.GetModifiedSinceAsync(cursor, 1000))
+            .Select(r => (r.Record.Id, r.Deleted)).Should().Contain((primary, false));
+    }
+
+    /// <summary>
+    /// Moves every note's stamp to one fixed millisecond, past which a client that synced the
+    /// tombstones holds its cursor, and returns that cursor. Fixed, so the restore's own stamp
+    /// cannot fall in the delete's millisecond.
+    /// </summary>
+    private async Task<long> SyncTheTombstonesAsync()
+    {
+        var synced = Written.AddMinutes(1);
+        await _context.Notes.IgnoreQueryFilters().ExecuteUpdateAsync(s => s.SetProperty(n => n.SysUpdatedAt, synced));
+        return new DateTimeOffset(synced, TimeSpan.Zero).ToUnixTimeMilliseconds();
     }
 
     [Theory]
@@ -289,7 +373,7 @@ public class SoftDeleteHistoryStampTests : IDisposable
             ? await repository.DeleteActivityStateSpanAsync(primary.Id.ToString())
             : await repository.DeleteStateSpanAsync(primary.Id.ToString());
 
-        deleted.Should().BeTrue();
+        deleted.Select(s => s.Id).Should().Equal(primary.Id.ToString(), copy.Id.ToString());
         await using var verify = _db.CreateContext();
         (await verify.LinkedRecords.SingleAsync(l => l.IsPrimary)).RecordId.Should().Be(primary.Id);
         (await verify.StateSpans.IgnoreQueryFilters().ToListAsync())

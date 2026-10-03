@@ -87,6 +87,47 @@ internal static class DuplicateGroupPrimaries
     }
 
     /// <summary>
+    /// Gives every group one of <paramref name="restoredIds"/> is linked into, and whose primary is
+    /// not live, a live primary, and stamps each promoted copy's <c>SysUpdatedAt</c> from
+    /// <paramref name="touchAt"/>. A group whose primary is live keeps it.
+    /// </summary>
+    /// <returns>The ids of the live records made primary.</returns>
+    public static async Task<IReadOnlyList<Guid>> RepointHeadlessGroupsAsync(
+        NocturneDbContext ctx,
+        RecordType recordType,
+        IReadOnlyCollection<Guid> restoredIds,
+        DateTime touchAt,
+        CancellationToken ct)
+    {
+        if (restoredIds.Count == 0)
+            return [];
+
+        var key = RecordTypeKeys.Key(recordType);
+        var ids = restoredIds.ToArray();
+        var canonicals = await ctx.LinkedRecords.AsNoTracking()
+            .Where(lr => lr.RecordType == key && ids.Contains(lr.RecordId))
+            .Select(lr => lr.CanonicalId)
+            .Distinct()
+            .ToArrayAsync(ct);
+        if (canonicals.Length == 0)
+            return [];
+
+        var primaries = await ctx.LinkedRecords.AsNoTracking()
+            .Where(lr => lr.RecordType == key && lr.IsPrimary && canonicals.Contains(lr.CanonicalId))
+            .Select(lr => new { lr.CanonicalId, lr.RecordId })
+            .ToListAsync(ct);
+        var live = await LiveIdsAsync(ctx, recordType, primaries.Select(p => p.RecordId).Distinct().ToArray(), ct);
+        var headed = primaries.Where(p => live.Contains(p.RecordId)).Select(p => p.CanonicalId).ToHashSet();
+        var headless = canonicals.Where(c => !headed.Contains(c)).ToArray();
+        if (headless.Length == 0)
+            return [];
+
+        var promoted = await RepickAsync(ctx, recordType, headless, ct);
+        await TouchAsync(ctx, recordType, promoted, touchAt, ct);
+        return promoted;
+    }
+
+    /// <summary>
     /// Soft-deletes <paramref name="entity"/>, a tracked row of <paramref name="ctx"/>, together with
     /// every other copy in its duplicate group, in one transaction, so a failure leaves them all live.
     /// This is a user deleting one record: the dose or reading is gone whichever source reported it,
