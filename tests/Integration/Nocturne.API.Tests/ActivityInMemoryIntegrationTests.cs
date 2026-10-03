@@ -502,4 +502,70 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
             .GetAsync($"/api/v1/activity/{activityId}", CancellationToken.None);
         getFinalResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
+
+    [Fact]
+    public async Task UpdateActivity_OfASleepSessionTheUserDeleted_ShouldAnswerConflict()
+    {
+        var sleep = new Activity
+        {
+            Id = "sleep-put-after-delete",
+            Type = "sleep",
+            Mills = 1_767_300_000_000,
+            Duration = 480,
+        };
+        var createResponse = await AuthenticatedClient
+            .PostAsJsonAsync("/api/v1/activity", sleep, cancellationToken: CancellationToken.None);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var created = await createResponse.Content.ReadFromJsonAsync<Activity[]>(
+            cancellationToken: CancellationToken.None
+        );
+        var sessionId = created!.Should().ContainSingle().Which.Id;
+
+        var deleteResponse = await AuthenticatedClient
+            .DeleteAsync($"/api/v1/activity/{sessionId}", CancellationToken.None);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var updateResponse = await AuthenticatedClient
+            .PutAsJsonAsync($"/api/v1/activity/{sleep.Id}", sleep, cancellationToken: CancellationToken.None);
+
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a PUT must not bring back a sleep session the user deleted");
+        var getResponse = await AuthenticatedClient
+            .GetAsync($"/api/v1/activity/{sessionId}", CancellationToken.None);
+        getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task UpdateActivity_BySessionGuidOfASleepSessionTheUserDeleted_ShouldAnswerConflict()
+    {
+        var sleep = new Activity
+        {
+            Id = "sleep-put-by-guid-after-delete",
+            Type = "sleep",
+            Mills = 1_767_400_000_000,
+            Duration = 420,
+        };
+        var createResponse = await AuthenticatedClient
+            .PostAsJsonAsync("/api/v1/activity", sleep, cancellationToken: CancellationToken.None);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var created = await createResponse.Content.ReadFromJsonAsync<Activity[]>(
+            cancellationToken: CancellationToken.None
+        );
+        var sessionId = created!.Should().ContainSingle().Which.Id;
+        Guid.TryParse(sessionId, out _).Should().BeTrue("v1 projects a sleep session with its Guid as id");
+
+        var deleteResponse = await AuthenticatedClient
+            .DeleteAsync($"/api/v1/activity/{sessionId}", CancellationToken.None);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var update = new Activity { Id = sessionId, Type = "sleep", Mills = sleep.Mills, Duration = 450 };
+        var updateResponse = await AuthenticatedClient
+            .PutAsJsonAsync($"/api/v1/activity/{sessionId}", update, cancellationToken: CancellationToken.None);
+
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a PUT by session Guid must not bring back a sleep session the user deleted");
+        var getResponse = await AuthenticatedClient
+            .GetAsync($"/api/v1/activity/{sessionId}", CancellationToken.None);
+        getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
 }

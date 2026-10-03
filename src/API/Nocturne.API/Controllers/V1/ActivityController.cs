@@ -7,6 +7,7 @@ using Nocturne.API.Extensions;
 using Nocturne.API.Helpers;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 
@@ -275,6 +276,10 @@ public class ActivityController : ControllerBase
 
             activity.Id = id;
             return await SaveAsync(activity, cancellationToken);
+        }
+        catch (RecreationBlockedException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
