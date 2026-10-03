@@ -59,7 +59,8 @@ public class TreatmentReadServiceDeleteByIdTests
 
         var deleted = await _service.DeleteAsync(clientId);
 
-        deleted.Should().BeTrue();
+        deleted.Should().NotBeNull();
+        deleted!.Served!.Id.Should().Be(spanId);
         _stateSpans.Verify(s => s.DeleteStateSpanAsync(spanId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -85,7 +86,7 @@ public class TreatmentReadServiceDeleteByIdTests
 
         var deleted = await _service.DeleteAsync(id.ToString());
 
-        deleted.Should().BeTrue();
+        deleted.Should().NotBeNull();
         _pipeline.Verify(
             p => p.DeleteByLegacyIdAsync<Treatment>(bolus.LegacyId, WriteOrigin.Live, It.IsAny<CancellationToken>()),
             Times.Once);
@@ -104,17 +105,17 @@ public class TreatmentReadServiceDeleteByIdTests
 
         var deleted = await _service.DeleteAsync(id.ToString());
 
-        deleted.Should().BeTrue();
+        deleted.Should().NotBeNull();
         _noteRepo.As<IV4Repository<Note>>().Verify(
             r => r.DeleteAsync(id, WriteOrigin.Live, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
     [Fact]
-    public async Task DeleteAsync_RawGuidOwnedByNoRepo_ReturnsFalse()
+    public async Task DeleteAsync_RawGuidOwnedByNoRepo_DeletesNothing()
     {
         var deleted = await _service.DeleteAsync(Guid.NewGuid().ToString());
 
-        deleted.Should().BeFalse();
+        deleted.Should().BeNull();
     }
 }

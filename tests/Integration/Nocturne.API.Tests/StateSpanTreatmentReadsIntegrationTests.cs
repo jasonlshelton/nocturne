@@ -222,6 +222,70 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
     }
 
     [Theory]
+    [MemberData(nameof(EventTypes))]
+    public async Task The_create_response_carries_the_id_reads_serve(string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/v1/treatments", new[] { Upload(eventType) });
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var createdId = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray()
+            .Single()!["_id"]!.GetValue<string>();
+
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle()
+            .Which!["_id"]!.GetValue<string>().Should().Be(createdId);
+    }
+
+    [Fact]
+    public async Task Deleting_an_override_with_notes_by_its_uploaded_id_removes_the_span_and_the_note()
+    {
+        var client = CreateAuthenticatedClient();
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        await PostAsync(client, new
+        {
+            _id = syncIdentifier,
+            eventType = "Temporary Override",
+            created_at = MinutesAgo(10),
+            enteredBy = "Trio",
+            reason = "Exercise",
+            notes = "Run",
+            duration = 60,
+        });
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().HaveCount(2);
+
+        var delete = await client.DeleteAsync($"/api/v1/treatments/{syncIdentifier}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Saving_by_the_served_id_in_the_body_rewrites_the_state_span_in_place()
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload("Temporary Target"));
+        var id = (await GetArrayAsync(client, "/api/v1/treatments")).Single()!["_id"]!.GetValue<string>();
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new
+        {
+            _id = id,
+            eventType = "Temporary Target",
+            created_at = MinutesAgo(30),
+            reason = "Eating Soon",
+            duration = 20,
+            targetTop = 5.0,
+            targetBottom = 5.0,
+            units = "mmol",
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        JsonNode.Parse(await put.Content.ReadAsStringAsync())!["_id"]!.GetValue<string>().Should().Be(id);
+        var served = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!;
+        served["_id"]!.GetValue<string>().Should().Be(id);
+        served["reason"]!.GetValue<string>().Should().Be("Eating Soon");
+        served["duration"]!.GetValue<double>().Should().Be(20);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task A_temp_target_resolves_by_the_object_id_its_uploaded_uuid_is_served_as(bool upperCase)
