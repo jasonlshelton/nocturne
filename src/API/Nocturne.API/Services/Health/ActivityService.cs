@@ -274,26 +274,16 @@ public class ActivityService : IActivityService
 
             var results = new List<Activity>();
 
-            // Process sensor data through decomposer (NOT stored as StateSpans)
+            // Only a user tombstone is skipped here. Any other failure of the sensor and sleep writes
+            // reaches the outer handler, which logs and rethrows it, so the uploader gets an error and
+            // does not advance its sync marker past a record never stored.
             foreach (var sensorActivity in sensorDataActivities)
             {
-                try
-                {
-                    var decomposed = await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
-                    if (decomposed.SkippedDeleted == 0)
-                        results.Add(sensorActivity);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(
-                        ex,
-                        "Failed to decompose sensor data activity {Id}",
-                        sensorActivity.Id
-                    );
-                }
+                var decomposed = await _activityDecomposer.DecomposeAsync(sensorActivity, WriteOrigin.Live, cancellationToken);
+                if (decomposed.SkippedDeleted == 0)
+                    results.Add(sensorActivity);
             }
 
-            // Route sleep-type activities to the dedicated sleep_sessions table
             foreach (var sleepActivity in sleepActivities)
             {
                 try
@@ -305,18 +295,6 @@ public class ActivityService : IActivityService
                 catch (RecreationBlockedException)
                 {
                     _logger.LogDebug("Skipped sleep activity {Id}: the user deleted it", sleepActivity.Id);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    // Mirror the sensor-data branch: log and skip the failed record
-                    // rather than failing the whole batch. Covers the rare upsert
-                    // unique-constraint conflict (concurrent sync of the same record).
-                    _logger.LogError(
-                        ex,
-                        "Failed to create sleep session from activity {Id}",
-                        sleepActivity.Id
-                    );
                 }
             }
 
