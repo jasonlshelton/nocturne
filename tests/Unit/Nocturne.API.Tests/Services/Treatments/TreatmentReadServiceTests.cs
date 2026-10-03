@@ -316,6 +316,35 @@ public class TreatmentReadServiceTests
     }
 
     [Fact]
+    public async Task GetByIdAsync_LegacyIdOfATreatmentWithNotes_ResolvesTheRecordTheCreateReturned()
+    {
+        var treatment = new Treatment { Id = "site-1", Mills = 1000, EventType = "Site Change", Notes = "left arm" };
+        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(1000).UtcDateTime;
+        var deviceEvent = new DeviceEvent { Id = Guid.CreateVersion7(), LegacyId = "site-1", Timestamp = timestamp };
+        var note = new Note { Id = Guid.CreateVersion7(), LegacyId = "site-1", Timestamp = timestamp };
+        var result = new DecompositionResult { CorrelationId = Guid.NewGuid() };
+        result.CreatedRecords.Add(note);
+        result.CreatedRecords.Add(deviceEvent);
+        _decomposer
+            .Setup(d => d.DecomposeAsync(treatment, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        _deviceEventRepo.Setup(r => r.GetByLegacyIdAsync("site-1", It.IsAny<CancellationToken>())).ReturnsAsync(deviceEvent);
+        _noteRepo.Setup(r => r.GetByLegacyIdAsync("site-1", It.IsAny<CancellationToken>())).ReturnsAsync(note);
+        _projection
+            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new Treatment { Id = note.Id.ToString(), Mills = 1000 },
+                new Treatment { Id = deviceEvent.Id.ToString(), Mills = 1000 },
+            ]);
+
+        var created = await _service.CreateAsync([treatment]);
+        var read = await _service.GetByIdAsync("site-1");
+
+        created.Should().ContainSingle().Which.Id.Should().Be(deviceEvent.Id.ToString());
+        read!.Id.Should().Be(deviceEvent.Id.ToString());
+    }
+
+    [Fact]
     public async Task DeleteAsync_IdAnOlderCreateEchoed_DeletesTheRecordStoredUnderTheClientId()
     {
         var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();

@@ -303,19 +303,21 @@ public class TreatmentReadService : ITreatmentStore
     /// <summary>
     /// Resolves a client-sent treatment id to the stored record it names. Each key is tried against
     /// every table before the next, looser one, so an exact match always wins over a prefix or hash
-    /// match.
+    /// match. The records of one treatment share its legacy id, so the tables are tried in the order
+    /// <see cref="ToCreated"/> names a treatment by: a legacy id resolves to the record the create
+    /// returned, not to the note any treatment with notes also writes.
     /// </summary>
     private async Task<StoredRecord?> FindStoredRecordAsync(string id, CancellationToken ct)
     {
         foreach (var key in RecordKeysFor(id))
         {
-            var stored = await FindAsync(_bolusRepo, key, ct)
+            var stored = await FindAsync(_tempBasalRepo, key, ct)
+                ?? await FindAsync(_bolusRepo, key, ct)
                 ?? await FindAsync(_carbIntakeRepo, key, ct)
                 ?? await FindAsync(_bgCheckRepo, key, ct)
-                ?? await FindAsync(_noteRepo, key, ct)
                 ?? await FindAsync(_deviceEventRepo, key, ct)
                 ?? await FindAsync(_bolusCalcRepo, key, ct)
-                ?? await FindAsync(_tempBasalRepo, key, ct);
+                ?? await FindAsync(_noteRepo, key, ct);
             if (stored is not null)
                 return stored;
         }
