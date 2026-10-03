@@ -151,6 +151,41 @@ describe("v3 history after a delete", () => {
     expect(copies.every((t) => t.isValid === false)).toBe(true);
   });
 
+  it("restores a deleted duplicated bolus through its non-primary copy with one live primary, re-sent live", async () => {
+    for (const [offset, device] of [[0, "e2e-pump"], [10_000, "e2e-aaps"]] as const) {
+      const created = await tenant.api.request("POST", "/api/v3/treatments", {
+        eventType: "Correction Bolus", insulin: 3.1, date: date - 25 * MINUTE + offset, app: "e2e", device, utcOffset: 0, type: "NORMAL",
+        data_source: device,
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const bolusIds = async (path: string) =>
+      (await tenant.api.ok<{ data: { id: string; insulin: number }[] }>("GET", path))
+        .data.filter((b) => b.insulin === 3.1).map((b) => b.id);
+
+    const shown = await bolusIds("/api/v4/insulin/boluses?limit=100");
+    expect(shown).toHaveLength(1);
+    const primary = shown[0];
+    expect((await tenant.api.delete(`/api/v4/insulin/boluses/${primary}`)).status).toBeLessThan(300);
+    const synced = await history(tenant, "treatments", 0);
+
+    const deleted = await bolusIds("/api/v4/insulin/boluses/deleted?limit=100");
+    expect(deleted).toHaveLength(2);
+    expect(deleted).toContain(primary);
+    const copy = deleted.find((id) => id !== primary)!;
+
+    const restored = await tenant.api.request("POST", `/api/v4/insulin/boluses/${copy}/restore`);
+    expect(restored.status).toBe(200);
+
+    expect(await bolusIds("/api/v4/insulin/boluses?limit=100")).toEqual([primary]);
+    const next = await history(tenant, "treatments", synced.cursor);
+    // v3 treatment history serves each copy, as the creates did; every tombstoned copy comes back live.
+    const resent = next.docs.filter((t) => t.insulin === 3.1);
+    expect(resent).toHaveLength(2);
+    expect(resent.every((t) => t.isValid !== false)).toBe(true);
+  });
+
   it("serves a deleted treatment with isValid false, stamped after the client's cursor", async () => {
     const created = await tenant.api.request("POST", "/api/v3/treatments", {
       eventType: "Correction Bolus", insulin: 1.35, date, app: "AAPS", device: "AAPS-e2e-delete", utcOffset: 0, type: "NORMAL",

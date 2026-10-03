@@ -107,6 +107,39 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
             .And.OnlyContain(doc => !doc.GetProperty("isValid").GetBoolean());
     }
 
+    [Fact]
+    public async Task RestoringTheNonPrimaryCopyOfADeletedDuplicateBolus_RestoresItsGroupWithOneLivePrimary()
+    {
+        foreach (var (device, offset) in new[] { ("it-pump", 0), ("it-aaps", 10_000) })
+        {
+            await CreateAsync("treatments", new
+            {
+                eventType = "Correction Bolus", insulin = 3.1, date = Date - 1_500_000 + offset, app = "it", device, utcOffset = 0,
+                data_source = device,
+            });
+        }
+
+        var primary = (await BolusIdsAsync(3.1)).Should().ContainSingle().Subject;
+        (await AuthenticatedClient.DeleteAsync($"/api/v4/insulin/boluses/{primary}")).IsSuccessStatusCode.Should().BeTrue();
+        var (_, synced) = await HistoryAsync("treatments", 0);
+
+        var deleted = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/insulin/boluses/deleted?limit=100");
+        var copy = deleted.GetProperty("data").EnumerateArray()
+            .Where(b => b.GetProperty("insulin").GetDouble() == 3.1)
+            .Select(b => b.GetProperty("id").GetString())
+            .Should().HaveCount(2).And.Contain(primary).And.Subject.Single(id => id != primary);
+
+        var restore = await AuthenticatedClient.PostAsync($"/api/v4/insulin/boluses/{copy}/restore", null);
+        restore.IsSuccessStatusCode.Should().BeTrue(await restore.Content.ReadAsStringAsync());
+
+        (await BolusIdsAsync(3.1)).Should().Equal([primary], "the group reads through its one primary again, so the dose counts");
+        var (next, _) = await HistoryAsync("treatments", synced);
+        // v3 treatment history serves each copy, live or deleted, as the creates did; every copy the
+        // delete tombstoned comes back live.
+        next.Where(doc => Number(doc, "insulin") == 3.1).Should().HaveCount(2)
+            .And.OnlyContain(doc => !IsTombstone(doc));
+    }
+
     private async Task<List<string?>> BolusIdsAsync(double insulin)
     {
         var page = await AuthenticatedClient.GetFromJsonAsync<JsonElement>("/api/v4/insulin/boluses?limit=100");
@@ -401,6 +434,9 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
         doc.TryGetProperty("identifier", out var identifier) ? identifier.GetString()
         : doc.TryGetProperty("_id", out var id) ? id.GetString()
         : null;
+
+    private static bool IsTombstone(JsonElement doc) =>
+        doc.TryGetProperty("isValid", out var valid) && valid.ValueKind == JsonValueKind.False;
 
     private static double? Number(JsonElement doc, string property) =>
         doc.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : null;
