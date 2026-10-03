@@ -147,7 +147,8 @@ public class TreatmentReadService : ITreatmentStore
             || await _bgCheckRepo.IsDeletedByUserAsync(id, ct)
             || await _deviceEventRepo.IsDeletedByUserAsync(id, ct)
             || await _bolusCalcRepo.IsDeletedByUserAsync(id, ct)
-            || await _noteRepo.IsDeletedByUserAsync(id, ct);
+            || await _noteRepo.IsDeletedByUserAsync(id, ct)
+            || await _projection.IsStateSpanDeletedByUserAsync(id, ct);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<Treatment>> GetByRangeAsync(

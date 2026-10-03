@@ -71,6 +71,12 @@ public interface IV4ToLegacyProjectionService
     Task<string?> GetStateSpanTreatmentIdAsync(string id, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether a state span decomposed from a treatment that has that id, by any id a client may hold
+    /// for it, was deleted by the user.
+    /// </summary>
+    Task<bool> IsStateSpanDeletedByUserAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
     /// Counts the state spans decomposed from treatments that start inside the window, bounds inclusive.
     /// </summary>
     Task<long> CountProjectedStateSpanTreatmentsAsync(

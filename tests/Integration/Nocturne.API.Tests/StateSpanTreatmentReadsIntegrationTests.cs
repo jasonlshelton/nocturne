@@ -235,6 +235,55 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
             .Which!["_id"]!.GetValue<string>().Should().Be(createdId);
     }
 
+    public static TheoryData<string, bool, bool> DeletedThenReuploaded()
+    {
+        var data = new TheoryData<string, bool, bool>();
+        foreach (var eventType in new[] { "Temporary Override", "Temporary Target", "Profile Switch" })
+        foreach (var byServedId in new[] { true, false })
+        foreach (var viaV3 in new[] { true, false })
+            data.Add(eventType, byServedId, viaV3);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(DeletedThenReuploaded))]
+    public async Task A_deleted_state_span_treatment_is_not_brought_back_by_a_reupload(
+        string eventType, bool byServedId, bool viaV3)
+    {
+        var client = CreateAuthenticatedClient();
+        var uploadedId = Guid.NewGuid().ToString().ToUpperInvariant();
+        var upload = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload(eventType)))!.AsObject();
+        upload["_id"] = uploadedId;
+        await PostAsync(client, upload);
+        var servedId = (await GetArrayAsync(client, "/api/v1/treatments")).Single()!["_id"]!.GetValue<string>();
+
+        var delete = await client.DeleteAsync($"/api/v1/treatments/{(byServedId ? servedId : uploadedId)}");
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        if (viaV3)
+        {
+            var reupload = upload.DeepClone().AsObject();
+            reupload["identifier"] = uploadedId;
+            var post = await client.PostAsJsonAsync("/api/v3/treatments", reupload);
+            post.IsSuccessStatusCode.Should().BeTrue(await post.Content.ReadAsStringAsync());
+        }
+        else
+        {
+            var post = await client.PostAsJsonAsync("/api/v1/treatments", new[] { upload });
+            post.StatusCode.Should().Be(HttpStatusCode.OK, await post.Content.ReadAsStringAsync());
+            JsonNode.Parse(await post.Content.ReadAsStringAsync())!.AsArray().Should().HaveCount(1);
+        }
+
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+        (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().BeEmpty();
+        (await CountAsync(client)).Should().Be(0);
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", upload);
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        JsonNode.Parse(await put.Content.ReadAsStringAsync())!.AsArray().Should().BeEmpty();
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Deleting_an_override_with_notes_by_its_uploaded_id_removes_the_span_and_the_note()
     {

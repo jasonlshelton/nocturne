@@ -694,8 +694,8 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             Metadata = BuildProfileMetadata(treatment)
         };
 
-        var upserted = await _stateSpanService.UpsertStateSpanAsync(stateSpan, ct);
-        result.CreatedRecords.Add(upserted);
+        if (!await UpsertTreatmentSpanAsync(stateSpan, result, ct))
+            return;
         Logger.LogDebug("Delegated ProfileSwitch treatment {LegacyId} to IStateSpanService", treatment.Id);
 
         // If the treatment carries inline profile JSON, decompose it into V4 schedule records
@@ -750,9 +750,8 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             Metadata = BuildOverrideMetadata(treatment)
         };
 
-        var upserted = await _stateSpanService.UpsertStateSpanAsync(stateSpan, ct);
-        result.CreatedRecords.Add(upserted);
-        Logger.LogDebug("Delegated Temporary Override treatment {LegacyId} to IStateSpanService", treatment.Id);
+        if (await UpsertTreatmentSpanAsync(stateSpan, result, ct))
+            Logger.LogDebug("Delegated Temporary Override treatment {LegacyId} to IStateSpanService", treatment.Id);
     }
 
     private async Task DecomposeTemporaryTargetAsync(Treatment treatment, V4Models.DecompositionResult result, WriteOrigin origin, CancellationToken ct)
@@ -775,9 +774,35 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             Metadata = BuildTemporaryTargetMetadata(treatment)
         };
 
-        var upserted = await _stateSpanService.UpsertStateSpanAsync(stateSpan, ct);
-        result.CreatedRecords.Add(upserted);
-        Logger.LogDebug("Delegated Temporary Target treatment {LegacyId} to IStateSpanService", treatment.Id);
+        if (await UpsertTreatmentSpanAsync(stateSpan, result, ct))
+            Logger.LogDebug("Delegated Temporary Target treatment {LegacyId} to IStateSpanService", treatment.Id);
+    }
+
+    /// <summary>
+    /// Writes the span a treatment decomposes into, upserted on the treatment id it carries as its
+    /// <c>OriginalId</c>, unless the user deleted the span written under that id: a re-upload does
+    /// not bring back a deleted treatment, as for the records keyed by <c>LegacyId</c>.
+    /// </summary>
+    /// <returns>Whether the span was written.</returns>
+    private async Task<bool> UpsertTreatmentSpanAsync(
+        StateSpan stateSpan, V4Models.DecompositionResult result, CancellationToken ct)
+    {
+        if (stateSpan.OriginalId is { Length: > 0 } originalId)
+        {
+            var governing = await _dbContext.StateSpans.IgnoreQueryFilters().AsNoTracking()
+                .Where(s => s.TenantId == _dbContext.TenantId && s.OriginalId == originalId)
+                .WhereBlocksRecreation()
+                .Select(s => s.DeletedAt == null)
+                .ToListAsync(ct);
+            if (governing.Count > 0 && !governing.Contains(true))
+            {
+                result.SkippedDeleted++;
+                return false;
+            }
+        }
+
+        result.CreatedRecords.Add(await _stateSpanService.UpsertStateSpanAsync(stateSpan, ct));
+        return true;
     }
 
     #endregion
@@ -1316,6 +1341,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             await DecomposeProfileSwitchAsync(treatment, spanResult, origin, ct);
             result.CreatedRecords.AddRange(spanResult.CreatedRecords);
             result.UpdatedRecords.AddRange(spanResult.UpdatedRecords);
+            result.SkippedDeleted += spanResult.SkippedDeleted;
 
             var icfg = ExtractAapsIcfg(treatment);
             if (icfg is not null)
@@ -1395,6 +1421,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
 
             result.CreatedRecords.AddRange(spanResult.CreatedRecords);
             result.UpdatedRecords.AddRange(spanResult.UpdatedRecords);
+            result.SkippedDeleted += spanResult.SkippedDeleted;
         }
 
         // Post-insert linking: Bolus → BolusCalculation by matching LegacyId

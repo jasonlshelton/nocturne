@@ -261,6 +261,19 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     }
 
     /// <inheritdoc />
+    /// <remarks>Resolves an id as <see cref="GetProjectedStateSpanTreatmentAsync"/> does.</remarks>
+    public async Task<bool> IsStateSpanDeletedByUserAsync(string id, CancellationToken ct = default)
+    {
+        foreach (var table in LegacyTreatmentTables.StateSpanTables)
+        {
+            if (await MatchingId(table.UserTombstones(_dbContext), id).AnyAsync(ct))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
     public async Task<long> CountProjectedStateSpanTreatmentsAsync(
         long? fromMills, long? toMills, CancellationToken ct = default)
     {

@@ -10,6 +10,7 @@ using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Infrastructure.Data.Mappers.V4;
 
@@ -203,6 +204,10 @@ internal sealed class LegacyStateSpanTable(
 
     internal IQueryable<StateSpanEntity> Rows(NocturneDbContext context) =>
         context.StateSpans.AsNoTracking().Where(s => s.Category == _category).Where(fromTreatment);
+
+    /// <summary>The served spans of this category whose latest delete was the user's.</summary>
+    internal IQueryable<StateSpanEntity> UserTombstones(NocturneDbContext context) =>
+        context.StateSpans.UserTombstones(context).Where(s => s.Category == _category).Where(fromTreatment);
 
     /// <summary>Spans starting inside the window, bounds inclusive.</summary>
     internal IQueryable<StateSpanEntity> InWindow(NocturneDbContext context, DateTime? from, DateTime? to)
