@@ -154,7 +154,7 @@ public class EntriesController : ControllerBase
     /// <returns>Entry or entries matching the specification</returns>
     /// <remarks>
     /// A type spec runs the same query as <see cref="GetEntries"/>, honouring <c>count</c> and
-    /// <c>find[...]</c>, with the path type taking precedence over any <c>find[type]</c>.
+    /// <c>find[...]</c>, with the path type replacing any <c>find[type]</c> condition.
     /// </remarks>
     [HttpGet("{spec}")]
     [NightscoutEndpoint("/api/v1/entries/{spec}")]
@@ -209,6 +209,12 @@ public class EntriesController : ControllerBase
             dateString: null,
             cancellationToken
         );
+
+        // Nightscout's format_entries stamps no Last-Modified and never answers 304 on an empty result.
+        if (entriesArray.Length == 0)
+        {
+            return Ok(Array.Empty<Entry>());
+        }
 
         if (NotModifiedSince(entriesArray) is { } notModified)
         {
@@ -364,6 +370,11 @@ public class EntriesController : ControllerBase
 
         // The raw query string keeps every find[...] parameter, which model binding would collapse.
         var queryString = (HttpContext?.Request?.QueryString.ToString() ?? string.Empty).TrimStart('?');
+        if (type is not null)
+        {
+            queryString = WithoutFindType(queryString);
+        }
+
         var findQuery =
             queryString.Contains("find[") || queryString.Contains("find%5B") ? queryString
             : string.IsNullOrEmpty(find) ? null
@@ -382,6 +393,21 @@ public class EntriesController : ControllerBase
         );
         return entries.ToArray();
     }
+
+    /// <summary>
+    /// Drops every <c>find[type]...</c> parameter: Nightscout's <c>prepReqModel</c> replaces
+    /// <c>find.type</c> wholesale with the path model, operators included.
+    /// </summary>
+    private static string WithoutFindType(string queryString) =>
+        string.Join(
+            '&',
+            queryString
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Where(pair =>
+                    !Uri.UnescapeDataString(pair.Split('=', 2)[0])
+                        .StartsWith("find[type]", StringComparison.Ordinal)
+                )
+        );
 
     /// <summary>
     /// Stamps <c>Last-Modified</c> from the newest entry and answers a satisfied

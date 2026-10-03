@@ -286,6 +286,84 @@ public class EntriesGoldenTests : GoldenFileTestBase
         entries[0].GetProperty("_id").GetString().Should().Be("aaaaaaaaaaaaaaaaaaaaa003");
     }
 
+    [Fact]
+    public async Task GetEntriesByType_PathTypeReplacesFindTypeAlongsideAFieldFilter()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 6).Select(i => CreateSgvEntry(i, sgv: 100 + i * 10)).ToArray());
+        await SeedMeterGlucose(Enumerable.Range(0, 3).Select(CreateMbgEntry).ToArray());
+
+        var entries = await GetEntryArrayAsync(
+            "/api/v1/entries/sgv.json?find[type]=mbg&find[sgv][$gte]=130");
+
+        entries.Select(e => e.GetProperty("sgv").GetInt32()).Should().Equal(130, 140, 150);
+        entries.Select(e => e.GetProperty("type").GetString()).Should().OnlyContain(t => t == "sgv");
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_PathTypeReplacesAnEncodedFindTypeOperator()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 4).Select(i => CreateSgvEntry(i)).ToArray());
+        await SeedMeterGlucose(Enumerable.Range(0, 2).Select(CreateMbgEntry).ToArray());
+
+        var entries = await GetEntryArrayAsync(
+            "/api/v1/entries/sgv.json?find%5Btype%5D%5B%24ne%5D=sgv&find[sgv][$gte]=1");
+
+        entries.Should().HaveCount(4);
+        entries.Select(e => e.GetProperty("type").GetString()).Should().OnlyContain(t => t == "sgv");
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_WithCountZero_ReturnsEmptyArray()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 3).Select(i => CreateSgvEntry(i)).ToArray());
+
+        var entries = await GetEntryArrayAsync("/api/v1/entries/sgv.json?count=0");
+
+        entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_IfModifiedSinceAtTheNewestEntry_AnswersNotModified()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 3).Select(i => CreateSgvEntry(i)).ToArray());
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/entries/sgv.json?count=2");
+        request.Headers.IfModifiedSince = DateTimeOffset.FromUnixTimeMilliseconds(BaseMillis);
+        var response = await Client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotModified);
+        response.Content.Headers.LastModified.Should()
+            .Be(DateTimeOffset.FromUnixTimeMilliseconds(BaseMillis));
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_IfModifiedSinceBeforeTheNewestEntry_ReturnsTheEntries()
+    {
+        await SeedSensorGlucose(Enumerable.Range(0, 3).Select(i => CreateSgvEntry(i)).ToArray());
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/entries/sgv.json?count=2");
+        request.Headers.IfModifiedSince = DateTimeOffset.FromUnixTimeMilliseconds(BaseMillis - 60_000);
+        var response = await Client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.LastModified.Should()
+            .Be(DateTimeOffset.FromUnixTimeMilliseconds(BaseMillis));
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetArrayLength().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetEntriesByType_EmptyResult_SendsNoLastModifiedAndNeverNotModified()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/entries/sgv.json");
+        request.Headers.IfModifiedSince = DateTimeOffset.UtcNow.AddYears(1);
+        var response = await Client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.LastModified.Should().BeNull();
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+    }
+
     private async Task<JsonElement[]> GetEntryArrayAsync(string url)
     {
         var response = await Client.GetAsync(url);
