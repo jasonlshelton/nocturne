@@ -842,10 +842,9 @@ public class EntriesController : ControllerBase
     /// </summary>
     private static void NormalizeEntry(Entry entry)
     {
-        // Generate ID if not provided
         if (string.IsNullOrEmpty(entry.Id))
         {
-            entry.Id = Guid.CreateVersion7().ToString("N");
+            entry.Id = MongoObjectId.NewObjectId();
         }
 
         // Materialize dateString from mills if the client didn't send one
@@ -891,8 +890,7 @@ public class EntriesController : ControllerBase
             HttpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown"
         );
 
-        // Validate ID format: legacy MongoDB ObjectIds (24 hex) and system-assigned
-        // UUID v7 ids from POST /api/v1/entries (32 hex, see NormalizeEntry) are both valid.
+        // A 32-hex id is a record uuid, or a legacy id an older POST /api/v1/entries assigned.
         if (
             string.IsNullOrEmpty(id)
             || !System.Text.RegularExpressions.Regex.IsMatch(
@@ -943,14 +941,13 @@ public class EntriesController : ControllerBase
     /// </summary>
     /// <param name="id">The entry ID to delete</param>
     /// <param name="cancellationToken">Cancellation token for async operations</param>
-    /// <returns>Confirmation of deletion</returns>
+    /// <returns>The <see cref="LegacyDeleteStatus"/> body, found or not</returns>
     [HttpDelete("{id}")]
     [Authorize]
     [RequireScope(Scope.GlucoseReadWrite)]
     [NightscoutEndpoint("/api/v1/entries/{id}")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(typeof(object), 400)]
-    [ProducesResponseType(typeof(object), 404)]
     [ProducesResponseType(typeof(object), 500)]
     [ErrorEnvelope]
     public async Task<ActionResult> DeleteEntry(
@@ -964,8 +961,7 @@ public class EntriesController : ControllerBase
             HttpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown"
         );
 
-        // Validate ID format: legacy MongoDB ObjectIds (24 hex) and system-assigned
-        // UUID v7 ids from POST /api/v1/entries (32 hex, see NormalizeEntry) are both valid.
+        // A 32-hex id is a record uuid, or a legacy id an older POST /api/v1/entries assigned.
         if (
             string.IsNullOrEmpty(id)
             || !System.Text.RegularExpressions.Regex.IsMatch(
@@ -987,29 +983,8 @@ public class EntriesController : ControllerBase
 
         var deleted = await _entryService.DeleteEntryAsync(id, cancellationToken);
 
-        if (!deleted)
-        {
-            _logger.LogDebug("Entry with ID {Id} not found for deletion", id);
-            return NotFound(
-                new
-                {
-                    status = 404,
-                    message = "Entry not found",
-                    type = "client",
-                }
-            );
-        }
-
-        _logger.LogDebug("Successfully deleted entry with ID: {Id}", id);
-        return Ok(
-            new
-            {
-                status = 200,
-                message = "Entry deleted successfully",
-                type = "success",
-                id = id,
-            }
-        );
+        _logger.LogDebug("Deleted entry with ID {Id}: {Deleted}", id, deleted);
+        return Ok(LegacyDeleteStatus.For(deleted ? 1 : 0));
     }
 
     /// <summary>
