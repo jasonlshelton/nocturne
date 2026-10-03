@@ -44,8 +44,11 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
     {
         // Far enough apart in value that deduplication does not link them: the other stream's
         // reading is its own record, so deleting the canonical one leaves it standing.
-        await CreateAsync("entries", new { type = "sgv", sgv = 150, date = Date, device = "it-cgm-a", app = "it", utcOffset = 0 });
-        await CreateAsync("entries", new { type = "sgv", sgv = 158, date = Date + 30_000, device = "it-cgm-b", app = "it", utcOffset = 0 });
+        // Both inside one canonical bucket: buckets are fixed 5-minute windows, so two readings 30 s
+        // apart at an arbitrary time straddle a boundary one run in ten and both win their own bucket.
+        var bucket = Date / 300_000 * 300_000;
+        await CreateAsync("entries", new { type = "sgv", sgv = 150, date = bucket + 60_000, device = "it-cgm-a", app = "it", utcOffset = 0 });
+        await CreateAsync("entries", new { type = "sgv", sgv = 158, date = bucket + 90_000, device = "it-cgm-b", app = "it", utcOffset = 0 });
 
         var (synced, cursor) = await HistoryAsync("entries", 0);
         var winner = synced.Should().ContainSingle(doc => Number(doc, "sgv") == 150 || Number(doc, "sgv") == 158,
@@ -134,10 +137,27 @@ public partial class V3HistoryDeletionIntegrationTests : ApiIntegrationTestBase
 
         (await BolusIdsAsync(3.1)).Should().Equal([primary], "the group reads through its one primary again, so the dose counts");
         var (next, _) = await HistoryAsync("treatments", synced);
-        // v3 treatment history serves each copy, live or deleted, as the creates did; every copy the
-        // delete tombstoned comes back live.
-        next.Where(doc => Number(doc, "insulin") == 3.1).Should().HaveCount(2)
-            .And.OnlyContain(doc => !IsTombstone(doc));
+        var resent = next.Where(doc => Number(doc, "insulin") == 3.1).Should()
+            .ContainSingle("history sends the group's one primary").Subject;
+        IsTombstone(resent).Should().BeFalse("the primary is re-sent live");
+    }
+
+    [Fact]
+    public async Task ABolusTwoSourcesUploaded_IsSentOnceByHistory()
+    {
+        foreach (var (device, offset) in new[] { ("it-pump", 0), ("it-aaps", 10_000) })
+        {
+            await CreateAsync("treatments", new
+            {
+                eventType = "Correction Bolus", insulin = 4.2, date = Date - 1_800_000 + offset, app = "it", device, utcOffset = 0,
+                data_source = device,
+            });
+        }
+
+        var (docs, _) = await HistoryAsync("treatments", 0);
+        var sent = docs.Where(doc => Number(doc, "insulin") == 4.2).Should()
+            .ContainSingle("the dose would count twice in a client syncing history").Subject;
+        IsTombstone(sent).Should().BeFalse();
     }
 
     private async Task<List<string?>> BolusIdsAsync(double insulin)

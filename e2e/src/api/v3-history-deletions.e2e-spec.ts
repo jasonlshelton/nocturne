@@ -80,9 +80,12 @@ describe("v3 history after a delete", () => {
   it("re-sends the other stream's reading when the bucket's canonical reading is deleted", async () => {
     // Two CGM streams report into one bucket, one reading each, far enough apart in value that
     // deduplication does not link them: only the canonical one is delivered.
+    // Both inside one canonical bucket: buckets are fixed 5-minute windows, so two readings 30 s apart
+    // at an arbitrary time straddle a boundary one run in ten and both win their own bucket.
+    const bucket = Math.floor((date - 60 * MINUTE) / (5 * MINUTE)) * 5 * MINUTE;
     for (const [sgv, offset, device] of [[163, 0, "e2e-cgm-a"], [171, 30_000, "e2e-cgm-b"]] as const) {
       const created = await tenant.api.request("POST", "/api/v3/entries", {
-        type: "sgv", sgv, date: date - 60 * MINUTE + offset, direction: "Flat", device, app: "e2e", utcOffset: 0,
+        type: "sgv", sgv, date: bucket + MINUTE + offset, direction: "Flat", device, app: "e2e", utcOffset: 0,
       });
       expect(created.status).toBeLessThan(300);
     }
@@ -180,10 +183,23 @@ describe("v3 history after a delete", () => {
 
     expect(await bolusIds("/api/v4/insulin/boluses?limit=100")).toEqual([primary]);
     const next = await history(tenant, "treatments", synced.cursor);
-    // v3 treatment history serves each copy, as the creates did; every tombstoned copy comes back live.
     const resent = next.docs.filter((t) => t.insulin === 3.1);
-    expect(resent).toHaveLength(2);
-    expect(resent.every((t) => t.isValid !== false)).toBe(true);
+    expect(resent).toHaveLength(1);
+    expect(resent[0].isValid).not.toBe(false);
+  });
+
+  it("sends a bolus two sources uploaded once, so a client syncing history counts it once", async () => {
+    for (const [offset, device] of [[0, "e2e-pump"], [10_000, "e2e-aaps"]] as const) {
+      const created = await tenant.api.request("POST", "/api/v3/treatments", {
+        eventType: "Correction Bolus", insulin: 4.2, date: date - 30 * MINUTE + offset, app: "e2e", device, utcOffset: 0, type: "NORMAL",
+        data_source: device,
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const sent = (await history(tenant, "treatments", 0)).docs.filter((t) => t.insulin === 4.2);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].isValid).not.toBe(false);
   });
 
   it("serves a deleted treatment with isValid false, stamped after the client's cursor", async () => {

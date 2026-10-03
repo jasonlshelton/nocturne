@@ -7,6 +7,7 @@ using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Infrastructure.Data.Mappers.V4;
 
@@ -95,7 +96,21 @@ internal interface ILegacyTreatmentTable
     /// A page of records changed at or after <paramref name="cursorMills"/>, oldest first, ending on
     /// a millisecond boundary, soft-deleted rows included.
     /// </summary>
-    /// <remarks>The boundary rule is <see cref="HistoryPage"/>'s.</remarks>
+    /// <remarks>
+    /// The boundary rule is <see cref="HistoryPage"/>'s. A live copy deduplication marked
+    /// non-primary is left out, as every other treatment read leaves it out, so a client syncing
+    /// through history is sent one copy of a dose two sources reported. A deleted copy is always
+    /// delivered, so its tombstone reaches the client whatever deduplication decided about it.
+    /// <para>
+    /// A demotion is not sent: the demoted row's stamp does not move, and a client that already
+    /// holds it keeps it. That copy stands for the same dose as the group's primary, and a
+    /// tombstone for it would delete the uploader's own record on that client (AAPS invalidates its
+    /// local treatment when history serves its identifier with <c>isValid: false</c>), so the client
+    /// would stop counting a dose that was delivered. A primary that moves because its row was
+    /// deleted is sent: the delete tombstones the old primary and stamps the promoted copy
+    /// (<c>DuplicateGroupPrimaries.RepointAwayFromAsync</c>).
+    /// </para>
+    /// </remarks>
     Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
         NocturneDbContext context,
         long cursorMills,
@@ -104,7 +119,10 @@ internal interface ILegacyTreatmentTable
         CancellationToken ct
     );
 
-    /// <summary>The live records carrying one of <paramref name="correlationIds"/>.</summary>
+    /// <summary>
+    /// The live records carrying one of <paramref name="correlationIds"/>, non-primary copies left
+    /// out as <see cref="ModifiedSinceAsync"/> leaves them out.
+    /// </summary>
     Task<IReadOnlyList<FetchedRecord>> LiveByCorrelationAsync(
         NocturneDbContext context,
         IReadOnlyCollection<Guid> correlationIds,
@@ -125,6 +143,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     > inRange,
     Func<TRecord, string?> legacyId,
     Func<NocturneDbContext, IQueryable<TEntity>> table,
+    Nocturne.Core.Models.RecordType dedupType,
     Func<TEntity, TRecord> toRecord,
     Func<TRecord, CarbFoodIndex, Treatment> project
 ) : ILegacyTreatmentTable
@@ -159,7 +178,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     )
     {
         var entities = await HistoryPage.GetAsync(
-            table(context).IncludingDeleted().AsNoTracking(),
+            table(context).IncludingDeleted().AsNoTracking().ExcludeNonPrimaryKeepingDeleted(context, dedupType),
             e => e.SysUpdatedAt,
             e => e.Id,
             cursorMills,
@@ -184,6 +203,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
         var ids = correlationIds.Select(id => (Guid?)id).ToList();
         var entities = await table(context)
             .AsNoTracking()
+            .ExcludeNonPrimary(context, dedupType)
             .Where(e => ids.Contains(EF.Property<Guid?>(e, nameof(IV4Record.CorrelationId))))
             .ToListAsync(ct);
 
@@ -234,49 +254,49 @@ internal static class LegacyTreatmentTables
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
-            c => c.Boluses, BolusMapper.ToDomainModel,
+            c => c.Boluses, RecordType.Bolus, BolusMapper.ToDomainModel,
             (r, _) => ProjectCorrectionBolus(r)),
         new LegacyTreatmentTable<CarbIntake, CarbIntakeEntity>(
             (repositories, range, ct) => repositories.CarbIntakes.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
-            c => c.CarbIntakes, CarbIntakeMapper.ToDomainModel,
+            c => c.CarbIntakes, RecordType.CarbIntake, CarbIntakeMapper.ToDomainModel,
             (r, foods) => ProjectCarbCorrection(r, foods.For(r.Id))),
         new LegacyTreatmentTable<BGCheck, BGCheckEntity>(
             (repositories, range, ct) => repositories.BGChecks.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
-            c => c.BGChecks, BGCheckMapper.ToDomainModel,
+            c => c.BGChecks, RecordType.BGCheck, BGCheckMapper.ToDomainModel,
             (r, _) => ProjectBgCheck(r)),
         new LegacyTreatmentTable<Note, NoteEntity>(
             (repositories, range, ct) => repositories.Notes.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
-            c => c.Notes, NoteMapper.ToDomainModel,
+            c => c.Notes, RecordType.Note, NoteMapper.ToDomainModel,
             (r, _) => ProjectNote(r)),
         new LegacyTreatmentTable<DeviceEvent, DeviceEventEntity>(
             (repositories, range, ct) => repositories.DeviceEvents.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
-            c => c.DeviceEvents, DeviceEventMapper.ToDomainModel,
+            c => c.DeviceEvents, RecordType.DeviceEvent, DeviceEventMapper.ToDomainModel,
             (r, _) => ProjectDeviceEvent(r)),
         new LegacyTreatmentTable<TempBasal, TempBasalEntity>(
             (repositories, range, ct) => repositories.TempBasals.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, ct: ct),
             r => r.LegacyId,
-            c => c.TempBasals, TempBasalMapper.ToDomainModel,
+            c => c.TempBasals, RecordType.TempBasal, TempBasalMapper.ToDomainModel,
             (r, _) => TempBasalToTreatmentMapper.ToTreatment(r)),
         new LegacyTreatmentTable<BolusCalculation, BolusCalculationEntity>(
             (repositories, range, ct) => repositories.BolusCalculations.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
                 limit: range.Limit, offset: 0, descending: true, ct: ct),
             r => r.LegacyId,
-            c => c.BolusCalculations, BolusCalculationMapper.ToDomainModel,
+            c => c.BolusCalculations, RecordType.BolusCalculation, BolusCalculationMapper.ToDomainModel,
             (r, _) => ProjectBolusCalculation(r)),
     ];
 
