@@ -251,7 +251,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             isOverride = true;
             delegateToStateSpan = true;
         }
-        else if (string.Equals(eventType, "Temporary Target", StringComparison.OrdinalIgnoreCase)
+        else if (string.Equals(eventType, TemporaryTargetEventType, StringComparison.OrdinalIgnoreCase)
               || string.Equals(eventType, "Temporary Target Cancel", StringComparison.OrdinalIgnoreCase))
         {
             isTemporaryTarget = true;
@@ -1109,6 +1109,8 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         return metadata.Count > 0 ? metadata : null;
     }
 
+    private const string TemporaryTargetEventType = "Temporary Target";
+
     private static Dictionary<string, object>? BuildOverrideMetadata(Treatment treatment)
     {
         var metadata = new Dictionary<string, object>
@@ -1134,6 +1136,9 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (!string.IsNullOrEmpty(treatment.DurationType))
             metadata["durationType"] = treatment.DurationType;
 
+        if (treatment.Duration is { } duration)
+            metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
+
         if (!string.IsNullOrEmpty(treatment.EnteredBy))
             metadata["enteredBy"] = treatment.EnteredBy;
 
@@ -1145,6 +1150,14 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     private static Dictionary<string, object>? BuildTemporaryTargetMetadata(Treatment treatment)
     {
         var metadata = new Dictionary<string, object>();
+
+        // Nightscout stores a "Temporary Target Cancel" under that eventType, and finds it by it.
+        if (treatment.EventType is { } eventType
+            && !string.Equals(eventType, TemporaryTargetEventType, StringComparison.Ordinal))
+            metadata[LegacyTreatmentTables.UploadedEventTypeKey] = eventType;
+
+        if (treatment.Duration is { } duration)
+            metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
 
         if (treatment.TargetTop.HasValue)
             metadata["targetTop"] = treatment.TargetTop.Value;
@@ -1741,9 +1754,17 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
 
         var scope = $"timestamp={from:O}..{to:O}";
 
-        long total = 0;
-        foreach (var table in DecomposedTables)
-            total += await table.SoftDeleteInRangeAsync(from, to, scope, ct);
+        // The served state spans go with the records: a window read serves them, so a window
+        // delete that left them would leave them served.
+        var total = await _dbContext.ExecuteInTransactionAsync(async token =>
+        {
+            long deleted = 0;
+            foreach (var table in DecomposedTables)
+                deleted += await table.SoftDeleteInRangeAsync(from, to, scope, token);
+            deleted += await _dbContext.AuditedSoftDeleteAsync(
+                LegacyTreatmentTables.ServedStateSpansInWindow(_dbContext, from, to), _auditContext, scope, token);
+            return deleted;
+        }, ct: ct);
 
         Logger.LogInformation("BulkDelete: removed {Total} v4 treatment records for find={Find}", total, findForLog);
         return total;

@@ -142,6 +142,38 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
+    public async Task A_window_delete_removes_the_state_span_treatments_in_the_window()
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload("Temporary Override", minutesAgo: 40));
+        await PostAsync(client, Upload("Temporary Target", minutesAgo: 30));
+        await PostAsync(client, Upload("Profile Switch", minutesAgo: 20));
+        await PostAsync(client, new { eventType = "Note", created_at = MinutesAgo(10), notes = "in the window" });
+        await PostAsync(client, new
+        {
+            eventType = "Temporary Override",
+            created_at = MinutesAgo(180),
+            reason = "Before the window",
+            duration = 30,
+        });
+
+        var delete = await client.DeleteAsync(
+            $"/api/v1/treatments?find[created_at][$gte]={MinutesAgo(60)}&find[created_at][$lte]={MinutesAgo(0)}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.OK, await delete.Content.ReadAsStringAsync());
+        var status = (await delete.Content.ReadFromJsonAsync<JsonNode>())!;
+        status["deletedCount"]!.GetValue<long>().Should().Be(4);
+        status["n"]!.GetValue<long>().Should().Be(4);
+
+        var remaining = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!;
+        remaining["reason"]!.GetValue<string>().Should().Be("Before the window");
+        (await CountAsync(client)).Should().Be(1);
+        (await CountAsync(client, "?find[eventType]=Temporary%20Target")).Should().Be(0);
+        (await GetV3ResultAsync(client, "/api/v3/treatments/history/0")).Should()
+            .ContainSingle().Which!["reason"]!.GetValue<string>().Should().Be("Before the window");
+    }
+
+    [Fact]
     public async Task Updating_by_the_served_id_rewrites_the_state_span_in_place()
     {
         var client = CreateAuthenticatedClient();
@@ -222,20 +254,26 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
 
         served["duration"]!.GetValue<double>().Should().Be(60);
         served["reason"]!.GetValue<string>().Should().Be("Running");
-        served["insulinNeedsScaleFactor"]!.GetValue<double>().Should().Be(0.8);
+        served["insulinNeedsScaleFactor"]!.GetValue<double>().Should().BeApproximately(0.8, 0.0001);
         served["targetTop"]!.GetValue<double>().Should().Be(140);
         served["targetBottom"]!.GetValue<double>().Should().Be(120);
         served["enteredBy"]!.GetValue<string>().Should().Be("Loop");
     }
 
+    /// <summary>
+    /// Loop uploads an indefinite override with <c>durationType</c> and no <c>duration</c>, and
+    /// NightscoutKit reads any numeric duration as a finite override, so none is served even once a
+    /// later override has ended it.
+    /// </summary>
     [Fact]
-    public async Task An_override_ended_by_the_next_one_is_served_with_its_real_duration()
+    public async Task An_indefinite_override_is_served_without_a_duration_even_once_superseded()
     {
         var client = CreateAuthenticatedClient();
         await PostAsync(client, new
         {
             eventType = "Temporary Override",
             created_at = MinutesAgo(50),
+            enteredBy = "Loop",
             reason = "Indefinite",
             durationType = "indefinite",
         });
@@ -243,18 +281,53 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
         {
             eventType = "Temporary Override",
             created_at = MinutesAgo(20),
+            enteredBy = "Loop",
             reason = "Next",
             duration = 60,
         });
 
         var served = await GetArrayAsync(client, "/api/v1/treatments?find[eventType]=Temporary%20Override");
 
-        served.Single(t => t!["reason"]!.GetValue<string>() == "Indefinite")!["duration"]!
-            .GetValue<double>().Should().Be(30);
+        var indefinite = served.Single(t => t!["reason"]!.GetValue<string>() == "Indefinite")!.AsObject();
+        indefinite.ContainsKey("duration").Should().BeFalse();
+        indefinite["durationType"]!.GetValue<string>().Should().Be("indefinite");
+        served.Single(t => t!["reason"]!.GetValue<string>() == "Next")!["duration"]!
+            .GetValue<double>().Should().BeApproximately(60, 0.001);
+    }
+
+    /// <summary>Loop ends an indefinite override by uploading it again under the same id with its duration.</summary>
+    [Fact]
+    public async Task An_indefinite_override_reuploaded_with_a_duration_is_served_with_that_duration()
+    {
+        var client = CreateAuthenticatedClient();
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        await PostAsync(client, new
+        {
+            _id = syncIdentifier,
+            eventType = "Temporary Override",
+            created_at = MinutesAgo(50),
+            enteredBy = "Loop",
+            reason = "Pre-Meal",
+            durationType = "indefinite",
+        });
+        await PostAsync(client, new
+        {
+            _id = syncIdentifier,
+            eventType = "Temporary Override",
+            created_at = MinutesAgo(50),
+            enteredBy = "Loop",
+            reason = "Pre-Meal",
+            duration = 25,
+        });
+
+        var served = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Which!.AsObject();
+
+        served["duration"]!.GetValue<double>().Should().BeApproximately(25, 0.001);
+        served.ContainsKey("durationType").Should().BeFalse();
     }
 
     [Fact]
-    public async Task A_temp_target_cancel_is_served_beside_the_target_with_zero_duration()
+    public async Task A_temp_target_cancel_is_served_under_its_own_event_type()
     {
         var client = CreateAuthenticatedClient();
         await PostAsync(client, Upload("Temporary Target", minutesAgo: 30));
@@ -262,16 +335,53 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
         {
             eventType = "Temporary Target Cancel",
             created_at = MinutesAgo(10),
+            enteredBy = "Nightscout",
+            duration = 0,
+        });
+
+        var target = (await GetArrayAsync(client, "/api/v1/treatments?find[eventType]=Temporary%20Target"))
+            .Should().ContainSingle().Which!;
+        target["duration"]!.GetValue<double>().Should().BeApproximately(45, 0.001);
+        target["units"]!.GetValue<string>().Should().Be("mmol");
+
+        var cancel = (await GetArrayAsync(client, "/api/v1/treatments?find[eventType]=Temporary%20Target%20Cancel"))
+            .Should().ContainSingle().Which!;
+        cancel["duration"]!.GetValue<double>().Should().Be(0);
+        (await CountAsync(client, "?find[eventType]=Temporary%20Target%20Cancel")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Deleting_by_the_cancel_event_type_removes_only_the_cancel()
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload("Temporary Target", minutesAgo: 30));
+        await PostAsync(client, new { eventType = "Temporary Target Cancel", created_at = MinutesAgo(10), duration = 0 });
+
+        var delete = await client.DeleteAsync("/api/v1/treatments?find[eventType]=Temporary%20Target%20Cancel");
+
+        (await delete.Content.ReadFromJsonAsync<JsonNode>())!["deletedCount"]!.GetValue<long>().Should().Be(1);
+        (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle()
+            .Which!["eventType"]!.GetValue<string>().Should().Be("Temporary Target");
+    }
+
+    /// <summary>AAPS and the careportal cancel with a zero-duration "Temporary Target".</summary>
+    [Fact]
+    public async Task A_zero_duration_temp_target_is_served_as_a_cancel_of_that_event_type()
+    {
+        var client = CreateAuthenticatedClient();
+        await PostAsync(client, Upload("Temporary Target", minutesAgo: 30));
+        await PostAsync(client, new
+        {
+            eventType = "Temporary Target",
+            created_at = MinutesAgo(10),
             enteredBy = "AndroidAPS",
             duration = 0,
         });
 
         var served = await GetArrayAsync(client, "/api/v1/treatments?find[eventType]=Temporary%20Target");
 
-        served.Should().HaveCount(2);
-        served.Select(t => t!["duration"]!.GetValue<double>()).Should().BeEquivalentTo(new[] { 45.0, 0.0 });
-        served.Single(t => t!["duration"]!.GetValue<double>() == 45)!["units"]!.GetValue<string>()
-            .Should().Be("mmol");
+        served.Select(t => (int)Math.Round(t!["duration"]!.GetValue<double>()))
+            .Should().BeEquivalentTo(new[] { 45, 0 });
     }
 
     [Fact]

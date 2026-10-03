@@ -299,7 +299,8 @@ internal static class LegacyTreatmentTables
             (s, metadata) => new Treatment
             {
                 EventType = "Temporary Override",
-                Duration = DurationMinutes(s),
+                Duration = UploadedDuration(metadata)
+                    ?? (metadata.TryReadString("durationType") == "indefinite" ? null : DurationMinutes(s)),
                 Reason = metadata.TryReadString("reason"),
                 ReasonDisplay = metadata.TryReadString("reasonDisplay"),
                 TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
@@ -312,8 +313,9 @@ internal static class LegacyTreatmentTables
                 && EF.Functions.JsonExists(s.MetadataJson!, StateSpanMetadataExtensions.UtcOffsetKey),
             (s, metadata) => new Treatment
             {
-                EventType = "Temporary Target",
-                Duration = s.State == nameof(TemporaryTargetState.Cancelled) ? 0 : DurationMinutes(s),
+                EventType = metadata.TryReadString(UploadedEventTypeKey) ?? "Temporary Target",
+                Duration = UploadedDuration(metadata)
+                    ?? (s.State == nameof(TemporaryTargetState.Cancelled) ? 0 : DurationMinutes(s)),
                 TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
                 TargetBottom = (double?)metadata.TryReadDecimal("targetBottom"),
                 Reason = metadata.TryReadString("reason"),
@@ -334,6 +336,19 @@ internal static class LegacyTreatmentTables
                 Timeshift = (double?)metadata.TryReadDecimal("timeshift"),
             }),
     ];
+
+    /// <summary>
+    /// Every state span <see cref="StateSpanTables"/> serves that starts inside the window, bounds
+    /// inclusive, as one tracked-entity query a bulk update can run against.
+    /// </summary>
+    internal static IQueryable<StateSpanEntity> ServedStateSpansInWindow(
+        NocturneDbContext context, DateTime? from, DateTime? to)
+    {
+        var served = StateSpanTables
+            .Select(table => table.InWindow(context, from, to).Select(s => s.Id))
+            .Aggregate(Queryable.Concat);
+        return context.StateSpans.Where(s => served.Contains(s.Id));
+    }
 
     internal static readonly IReadOnlyList<ILegacyTreatmentTable> All =
     [
@@ -391,6 +406,20 @@ internal static class LegacyTreatmentTables
 
     private const string TreatmentsCollectionJson =
         $$"""{"{{StateSpanMetadataExtensions.CollectionKey}}":"{{StateSpanMetadataExtensions.TreatmentsCollection}}"}""";
+
+    /// <summary>
+    /// Metadata key for the <c>duration</c> an override or temporary target was uploaded with, served
+    /// verbatim as Nightscout does: an open-ended Loop override is uploaded with no duration and must
+    /// be served with none, since NightscoutKit reads any numeric duration as a finite override.
+    /// </summary>
+    internal const string UploadedDurationKey = "duration";
+
+    /// <summary>Metadata key for a temporary target's <c>eventType</c> when it is not "Temporary Target".</summary>
+    internal const string UploadedEventTypeKey = "eventType";
+
+    /// <remarks>Spans written before the key was kept fall back to their stored end.</remarks>
+    private static double? UploadedDuration(IDictionary<string, object>? metadata) =>
+        (double?)metadata.TryReadDecimal(UploadedDurationKey);
 
     private static double? DurationMinutes(StateSpanEntity span) =>
         span.EndTimestamp is { } end ? (end - span.StartTimestamp).TotalMinutes : null;
