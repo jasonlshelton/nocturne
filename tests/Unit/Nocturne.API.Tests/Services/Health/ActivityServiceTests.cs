@@ -365,6 +365,81 @@ public class ActivityServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_DecompositionFails_ThrowsWithoutStoringOrBroadcasting()
+    {
+        var activities = new List<Activity>
+        {
+            new() { Type = "hr-bpm", Mills = 1_780_000_000_123, AdditionalProperties = new() { ["bpm"] = 72 } },
+            new() { Type = "exercise", Mills = 1_780_000_000_000 },
+        };
+        var failure = new InvalidOperationException("decomposition failed");
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns((IEnumerable<Activity> docs) => docs);
+        _mockActivityDecomposer
+            .Setup(d => d.IsSensorData(It.IsAny<Activity>()))
+            .Returns((Activity a) => a.Type == "hr-bpm");
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(It.IsAny<Activity>(), WriteOrigin.Live, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _activityService.CreateActivitiesAsync(activities, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(failure);
+        _mockStateSpanService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()),
+            Times.Never);
+        _mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                failure,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_SleepWriteFails_ThrowsWithoutStoringOrBroadcasting()
+    {
+        var activities = new List<Activity>
+        {
+            new() { Id = "5f0c0c0c0c0c0c0c0c0c0c01", Type = "sleep", Mills = 1_780_000_000_000, Duration = 420 },
+            new() { Type = "exercise", Mills = 1_780_000_000_000 },
+        };
+        var failure = new InvalidOperationException("sleep write failed");
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns((IEnumerable<Activity> docs) => docs);
+        _mockSleepService
+            .Setup(x => x.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _activityService.CreateActivitiesAsync(activities, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(failure);
+        _mockStateSpanService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()),
+            Times.Never);
+        _mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                failure,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task CreateActivitiesAsync_ClientTimestamp_OutranksCreatedAtThroughDocumentProcessing()
     {
         var activities = System.Text.Json.JsonSerializer.Deserialize<List<Activity>>(

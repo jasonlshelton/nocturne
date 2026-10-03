@@ -532,4 +532,79 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
             .GetAsync($"/api/v1/activity/{sessionId}", CancellationToken.None);
         getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
+
+    [Fact]
+    public async Task CreateActivities_XDripHeartRateResentNextCycle_StoresEachSampleOnceWithItsType()
+    {
+        var first = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeMilliseconds();
+        long[] times = [first, first + 60_000, first + 120_000];
+
+        var cycle1 = await PostJsonAsync(XDripHeartRates((times[0], 70), (times[1], 75)));
+        var cycle2 = await PostJsonAsync(XDripHeartRates((times[1], 75), (times[2], 80)));
+
+        cycle1.StatusCode.Should().Be(HttpStatusCode.OK);
+        cycle2.StatusCode.Should().Be(HttpStatusCode.OK);
+        var stored = await GetHeartRateActivitiesAsync(times);
+        stored.Select(a => (a.Mills, a.Type, a.Bpm)).Should().BeEquivalentTo(
+            [(times[0], "hr-bpm", 70), (times[1], "hr-bpm", 75), (times[2], "hr-bpm", 80)]);
+    }
+
+    [Fact]
+    public async Task CreateActivities_HeartRateThatFailsToStore_Returns500AndStoresNothing()
+    {
+        var at = DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeMilliseconds();
+        var tooLongDevice = new string('d', 300);
+
+        var response = await PostJsonAsync(
+            $$"""[{"type":"hr-bpm","timeStamp":{{at}},"bpm":70,"device":"{{tooLongDevice}}"}]""");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await GetHeartRateActivitiesAsync([at])).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateActivities_SleepThatFailsToStore_Returns500AndStoresNothing()
+    {
+        var at = DateTimeOffset.UtcNow.AddHours(-36).ToUnixTimeMilliseconds();
+
+        var response = await PostJsonAsync(
+            $$"""[{"_id":"5f1a2b3c4d5e6f7a8b9c0d1f","type":"sleep","mills":{{at}},"duration":1e12}]""");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await GetActivitiesAtAsync("sleep", at)).Should().Be(0);
+    }
+
+    private async Task<int> GetActivitiesAtAsync(string type, long mills)
+    {
+        var response = await AuthenticatedClient.GetAsync("/api/v1/activity?count=1000", CancellationToken.None);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(CancellationToken.None));
+        return doc.RootElement.EnumerateArray().Count(a =>
+            a.TryGetProperty("type", out var t) && t.GetString() == type
+            && a.GetProperty("mills").GetInt64() == mills);
+    }
+
+    private static string XDripHeartRates(params (long At, int Bpm)[] readings) =>
+        "[" + string.Join(",", readings.Select(r =>
+            $$"""{"type":"hr-bpm","timeStamp":{{r.At}},"created_at":"{{DateTimeOffset.FromUnixTimeMilliseconds(r.At):yyyy-MM-dd'T'HH:mm:ss'Z'}}","bpm":{{r.Bpm}}}""")) + "]";
+
+    private Task<HttpResponseMessage> PostJsonAsync(string json) =>
+        AuthenticatedClient.PostAsync(
+            "/api/v1/activity",
+            new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+            CancellationToken.None);
+
+    private async Task<List<(long Mills, string? Type, int Bpm)>> GetHeartRateActivitiesAsync(long[] times)
+    {
+        var response = await AuthenticatedClient.GetAsync("/api/v1/activity?count=1000", CancellationToken.None);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(CancellationToken.None));
+        return doc.RootElement.EnumerateArray()
+            .Where(a => a.TryGetProperty("bpm", out _) && times.Contains(a.GetProperty("mills").GetInt64()))
+            .Select(a => (
+                a.GetProperty("mills").GetInt64(),
+                a.TryGetProperty("type", out var type) ? type.GetString() : null,
+                a.GetProperty("bpm").GetInt32()))
+            .ToList();
+    }
 }
