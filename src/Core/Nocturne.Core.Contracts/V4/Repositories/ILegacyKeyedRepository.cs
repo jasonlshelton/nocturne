@@ -99,6 +99,37 @@ public interface ILegacyKeyedRepository<TRecord>
     Task<TRecord?> GetByLegacyIdAsync(string legacyId, CancellationToken ct = default);
 
     /// <summary>
+    /// The record whose UUID <see cref="IV4Record.LegacyId"/> <see cref="Nocturne.Core.Models.MongoObjectId.Coerce"/>
+    /// turns into <paramref name="objectId"/>, its 24-hex prefix: the id a legacy create echoed
+    /// before it returned the stored record's own, which clients such as Loop cache and send back
+    /// on later edits and deletes.
+    /// </summary>
+    /// <remarks>
+    /// Index range lookups over the dashed and dashless forms, each in lower and upper case. A UUID
+    /// stored in mixed case is not found.
+    /// </remarks>
+    Task<TRecord?> GetByLegacyIdUuidPrefixAsync(string objectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The record whose non-UUID <see cref="IV4Record.LegacyId"/> <see cref="Nocturne.Core.Models.MongoObjectId.Coerce"/>
+    /// hashes into <paramref name="objectId"/>, the other shape of echoed id
+    /// <see cref="GetByLegacyIdUuidPrefixAsync"/> describes.
+    /// </summary>
+    /// <remarks>A scan that hashes every row, so it belongs behind every other lookup.</remarks>
+    Task<TRecord?> GetByLegacyIdHashAsync(string objectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether a record the user deleted answers to <paramref name="id"/>: as its own id, the 24-hex
+    /// prefix of that id, its legacy id, or the 24-hex prefix of a UUID legacy id
+    /// (<see cref="GetByLegacyIdUuidPrefixAsync"/>). A record the system swept does not count.
+    /// </summary>
+    /// <remarks>
+    /// The hashed form <see cref="GetByLegacyIdHashAsync"/> resolves is not checked: it scans every
+    /// row, and no client is known to send it back for a record it has since seen deleted.
+    /// </remarks>
+    Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
     /// Records whose server write stamp (<see cref="IV4Record.ModifiedAt"/>, reported as
     /// <c>srvModified</c>) falls after <paramref name="cursorMills"/>, oldest first, as one history
     /// page that ends on a millisecond boundary and so may exceed <paramref name="limit"/>.

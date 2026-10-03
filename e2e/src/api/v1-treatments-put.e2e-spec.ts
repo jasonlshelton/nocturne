@@ -15,6 +15,9 @@ interface DirectGrant {
 interface SavedTreatment {
   _id: string;
   eventType: string;
+  created_at?: string;
+  carbs?: number;
+  notes?: string;
   duration?: number;
 }
 
@@ -43,6 +46,15 @@ function loopOverride(id: string, startedAt: string, extra: Record<string, unkno
   };
 }
 
+/** A client authenticated as Loop is: the SHA-1 of a direct grant's token as its API secret. */
+async function loopClient(tenant: Tenant): Promise<ApiClient> {
+  const grant = await tenant.api.ok<DirectGrant>("POST", "/api/auth/direct-grants", {
+    label: "e2e loop",
+    scopes: ["glucose.readwrite", "treatments.readwrite", "devices.readwrite", "therapy.readwrite"],
+  });
+  return tenant.anonymous.with({ kind: "api-secret", secret: createHash("sha1").update(grant.token).digest("hex") });
+}
+
 describe("v1 PUT /treatments, as Loop sends it", () => {
   let tenant: Tenant;
   let loop: ApiClient;
@@ -55,11 +67,7 @@ describe("v1 PUT /treatments, as Loop sends it", () => {
 
   beforeAll(async () => {
     tenant = await seedTenant();
-    const grant = await tenant.api.ok<DirectGrant>("POST", "/api/auth/direct-grants", {
-      label: "e2e loop",
-      scopes: ["glucose.readwrite", "treatments.readwrite", "devices.readwrite", "therapy.readwrite"],
-    });
-    loop = tenant.anonymous.with({ kind: "api-secret", secret: createHash("sha1").update(grant.token).digest("hex") });
+    loop = await loopClient(tenant);
   });
 
   it("updates an override in place by its UUID _id", async () => {
@@ -96,5 +104,77 @@ describe("v1 PUT /treatments, as Loop sends it", () => {
   it("refuses an array, which Nightscout's save never accepted", async () => {
     const put = await loop.put("/api/v1/treatments", [loopOverride(randomUUID(), minutesAgo(10), { duration: 5 })]);
     expect(put.status).toBe(400);
+  });
+});
+
+// Loop keeps the `_id` each carb POST returns (its objectIdCache, keyed by syncIdentifier) and edits
+// the carb with PUT /api/v1/treatments carrying that `_id` and the syncIdentifier. Nightscout 15.0.8
+// matches a save on `identifier`, then `_id`, then `created_at` + `eventType`.
+describe("v1 PUT /treatments, editing what an earlier POST stored", () => {
+  let tenant: Tenant;
+  let loop: ApiClient;
+
+  /** A carb entry as NightscoutKit's CarbCorrectionNightscoutTreatment serialises it. */
+  const loopCarb = (syncIdentifier: string, carbs: number, createdAt: string) => ({
+    eventType: "Carb Correction",
+    carbs,
+    absorptionTime: 180,
+    syncIdentifier,
+    enteredBy: "loop://iPhone",
+    created_at: createdAt,
+  });
+
+  const storedAt = async (createdAt: string) =>
+    (await loop.ok<SavedTreatment[]>("GET", "/api/v1/treatments.json?count=1000")).filter(
+      (t) => t.created_at !== undefined && Date.parse(t.created_at) === Date.parse(createdAt),
+    );
+
+  const postCarb = async (syncIdentifier: string, carbs: number, createdAt: string) => {
+    const [created] = await loop.ok<SavedTreatment[]>("POST", "/api/v1/treatments", [loopCarb(syncIdentifier, carbs, createdAt)]);
+    return created!._id;
+  };
+
+  beforeAll(async () => {
+    tenant = await seedTenant();
+    loop = await loopClient(tenant);
+  });
+
+  it("edits a Loop carb in place by the _id its POST returned", async () => {
+    const syncIdentifier = randomUUID().toUpperCase();
+    const createdAt = minutesAgo(55);
+    const id = await postCarb(syncIdentifier, 20, createdAt);
+
+    const put = await loop.put<SavedTreatment>("/api/v1/treatments", { ...loopCarb(syncIdentifier, 35, createdAt), _id: id });
+
+    expect(put.status, put.text).toBe(200);
+    const stored = await storedAt(createdAt);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ carbs: 35 });
+  });
+
+  it("does not bring back a Loop carb the user deleted", async () => {
+    const syncIdentifier = randomUUID().toUpperCase();
+    const createdAt = minutesAgo(85);
+    const id = await postCarb(syncIdentifier, 22, createdAt);
+    const [served] = await storedAt(createdAt);
+    expect((await tenant.api.delete(`/api/v1/treatments/${served!._id}`)).status).toBe(200);
+
+    const put = await loop.put<SavedTreatment[]>("/api/v1/treatments", { ...loopCarb(syncIdentifier, 30, createdAt), _id: id });
+
+    expect(put.status, put.text).toBe(200);
+    expect(put.body).toEqual([]);
+    expect(await storedAt(createdAt)).toHaveLength(0);
+  });
+
+  it("replaces the treatment stored at the same created_at with the same eventType when the body has no id", async () => {
+    const createdAt = minutesAgo(115);
+    await tenant.api.ok("POST", "/api/v1/treatments", [{ eventType: "Note", notes: "before", created_at: createdAt }]);
+
+    const put = await loop.put<SavedTreatment>("/api/v1/treatments", { eventType: "Note", notes: "after", created_at: createdAt });
+
+    expect(put.status, put.text).toBe(200);
+    const stored = await storedAt(createdAt);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ eventType: "Note", notes: "after" });
   });
 });

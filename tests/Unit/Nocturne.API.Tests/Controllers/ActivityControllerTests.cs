@@ -7,6 +7,7 @@ using Moq;
 using Nocturne.API.Controllers.V1;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Xunit;
@@ -634,18 +635,67 @@ public class ActivityControllerTests
     }
 
     [Fact]
-    public async Task SaveActivities_WhenTheServiceThrows_Answers500()
+    public async Task SaveActivities_WhenTheServiceThrows_LeavesItToTheExceptionHandler()
     {
         _mockActivityService
             .Setup(x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("store down"));
 
-        var result = await _controller.SaveActivities(
+        var save = () => _controller.SaveActivities(
             JsonSerializer.SerializeToElement(new { type = "Walking" }),
             CancellationToken.None);
 
-        result.Result.Should().BeOfType<ObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        await save.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SaveActivities_WithTheIdOfAnActivityTheUserDeleted_IsRefusedWithoutCreating()
+    {
+        const string activityId = "507f1f77bcf86cd799439011";
+        CreateEchoesInput();
+        _mockActivityDecomposer
+            .Setup(d => d.IsDeletedByUserAsync(activityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var save = () => _controller.SaveActivities(
+            JsonSerializer.SerializeToElement(new { _id = activityId, type = "Exercise", duration = 45 }),
+            CancellationToken.None);
+
+        await save.Should().ThrowAsync<RecreationBlockedException>();
+        _mockActivityService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateActivity_WithTheIdOfAnActivityTheUserDeleted_IsRefusedWithoutCreating()
+    {
+        const string activityId = "0b8f0a52-5d0c-4d43-9a8e-1f2b9c6d7e10";
+        CreateEchoesInput();
+        _mockActivityDecomposer
+            .Setup(d => d.IsDeletedByUserAsync(activityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var update = () => _controller.UpdateActivity(
+            activityId, new Activity { Type = "Exercise", Duration = 30 }, CancellationToken.None);
+
+        await update.Should().ThrowAsync<RecreationBlockedException>();
+        _mockActivityService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveActivities_WithoutAnId_DoesNotLookForATombstone()
+    {
+        CreateEchoesInput();
+
+        await _controller.SaveActivities(
+            JsonSerializer.SerializeToElement(new { type = "Walking", duration = 20 }),
+            CancellationToken.None);
+
+        _mockActivityDecomposer.Verify(
+            d => d.IsDeletedByUserAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

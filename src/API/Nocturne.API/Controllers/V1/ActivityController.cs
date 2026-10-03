@@ -237,21 +237,18 @@ public class ActivityController : ControllerBase
         if (activity.ValueKind != JsonValueKind.Object)
             return BadRequest(new { error = "Invalid activity payload. Expected an object." });
 
+        Activity toSave;
         try
         {
-            return await SaveAsync(
-                JsonSerializer.Deserialize<Activity>(activity.GetRawText())!,
-                cancellationToken
-            );
+            toSave = JsonSerializer.Deserialize<Activity>(activity.GetRawText())!;
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            _logger.LogError(ex, "Error saving activity");
-            return StatusCode(
-                StatusCodes.Status500InternalServerError,
-                new { error = "An error occurred while saving the activity" }
-            );
+            _logger.LogWarning(ex, "Invalid JSON in save activity request");
+            return BadRequest(new { error = "Invalid activity payload." });
         }
+
+        return await SaveAsync(toSave, cancellationToken);
     }
 
     /// <summary>
@@ -326,7 +323,11 @@ public class ActivityController : ControllerBase
     /// <remarks>
     /// The scope gate covers the stored record as well as the payload, so a caller cannot edit
     /// sleep, heart-rate or step data without that category's scope by sending another type.
+    /// An id that names an activity the user deleted is refused with the 409 every other refused
+    /// recreation gets (<see cref="Filters.RecreationBlockedFilter"/>), as a PUT of a deleted sleep
+    /// session already was.
     /// </remarks>
+    /// <exception cref="RecreationBlockedException">The id names an activity the user deleted.</exception>
     private async Task<ActionResult<Activity>> SaveAsync(
         Activity activity,
         CancellationToken cancellationToken
@@ -347,6 +348,10 @@ public class ActivityController : ControllerBase
             && await _activityService.UpdateActivityAsync(
                 activity.Id!, activity, cancellationToken) is { } updated)
             return Ok(updated);
+
+        if (hasId && await _activityDecomposer.IsDeletedByUserAsync(activity.Id!, cancellationToken))
+            throw new RecreationBlockedException(
+                nameof(Activity), RecreationBlockedException.LegacyIdIdentity(activity.Id!));
 
         var created = await _activityService.CreateActivitiesAsync([activity], cancellationToken);
         return created.FirstOrDefault() is { } saved

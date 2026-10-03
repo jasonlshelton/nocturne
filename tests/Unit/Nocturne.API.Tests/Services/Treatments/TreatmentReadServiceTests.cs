@@ -281,4 +281,75 @@ public class TreatmentReadServiceTests
             r => r.UpdateAsync(uuid, It.Is<Note>(n => n.LegacyId == wireId), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    [Fact]
+    public async Task UpdateAsync_IdTheCreateEchoedForALoopCarb_UpdatesTheCarbItsSyncIdentifierKeys()
+    {
+        var syncIdentifier = Guid.NewGuid().ToString().ToUpperInvariant();
+        var echoed = MongoObjectId.Coerce(syncIdentifier)!;
+        var carb = new CarbIntake
+        {
+            Id = Guid.CreateVersion7(),
+            LegacyId = syncIdentifier,
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(1000).UtcDateTime,
+        };
+        _carbIntakeRepo
+            .Setup(r => r.GetByLegacyIdUuidPrefixAsync(echoed, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(carb);
+        _projection
+            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Treatment { Id = carb.Id.ToString(), Mills = 1000, Carbs = 35 }]);
+        _carbIntakeRepo.Setup(r => r.GetByIdAsync(carb.Id, It.IsAny<CancellationToken>())).ReturnsAsync(carb);
+
+        var edit = new Treatment { Id = echoed, EventType = "Carb Correction", Carbs = 35, Mills = 1000 };
+        var updated = await _service.UpdateAsync(echoed, edit);
+
+        updated.Should().NotBeNull();
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.Is<Treatment>(t => t.Id == syncIdentifier && t.Carbs == 35),
+            It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ExactLegacyIdWinsOverTheRecordIdPrefix()
+    {
+        var wireId = MongoObjectId.FromGuid(Guid.CreateVersion7());
+        var byLegacy = new Bolus
+        {
+            Id = Guid.CreateVersion7(),
+            LegacyId = wireId,
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(1000).UtcDateTime,
+        };
+        _carbIntakeRepo
+            .Setup(r => r.GetByGuidRangeAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CarbIntake { Id = Guid.CreateVersion7(), LegacyId = "other" });
+        _bolusRepo.Setup(r => r.GetByLegacyIdAsync(wireId, It.IsAny<CancellationToken>())).ReturnsAsync(byLegacy);
+        _projection
+            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Treatment { Id = byLegacy.Id.ToString(), Mills = 1000 }]);
+
+        await _service.UpdateAsync(wireId, new Treatment { Id = wireId, EventType = "Correction Bolus", Insulin = 1 });
+
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.Is<Treatment>(t => t.Id == wireId), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NothingStoredUnderTheId_WritesNothing()
+    {
+        var result = await _service.UpdateAsync("3f0b8b54aa1c4f7d8e2a6c11", new Treatment { EventType = "Note" });
+
+        result.Should().BeNull();
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IsDeletedByUserAsync_AnyTreatmentTableHoldingATombstone_IsTrue()
+    {
+        _noteRepo.Setup(r => r.IsDeletedByUserAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        (await _service.IsDeletedByUserAsync("t1")).Should().BeTrue();
+        (await _service.IsDeletedByUserAsync("t2")).Should().BeFalse();
+    }
 }

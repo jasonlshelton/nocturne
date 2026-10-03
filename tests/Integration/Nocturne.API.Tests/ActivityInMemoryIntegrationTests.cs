@@ -277,6 +277,47 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
         put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveActivity_OfAnActivityTheUserDeleted_IsRefusedAndNotBroughtBack(bool clientId)
+    {
+        var description = $"deleted-{Guid.NewGuid():N}";
+        var create = await AuthenticatedClient.PostAsJsonAsync(
+            "/api/v1/activity",
+            new Activity
+            {
+                Id = clientId ? $"exercise-{Guid.NewGuid():N}" : null,
+                Type = "Exercise",
+                Description = description,
+                Duration = 30,
+            },
+            cancellationToken: CancellationToken.None
+        );
+        create.StatusCode.Should().Be(HttpStatusCode.OK);
+        var id = (await create.Content.ReadFromJsonAsync<Activity[]>())![0].Id!;
+        (await AuthenticatedClient.DeleteAsync($"/api/v1/activity/{id}")).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+
+        var put = await AuthenticatedClient.PutAsJsonAsync(
+            "/api/v1/activity",
+            new Activity { Id = id, Type = "Exercise", Description = description, Duration = 45 },
+            cancellationToken: CancellationToken.None
+        );
+        var putById = await AuthenticatedClient.PutAsJsonAsync(
+            $"/api/v1/activity/{id}",
+            new Activity { Type = "Exercise", Description = description, Duration = 60 },
+            cancellationToken: CancellationToken.None
+        );
+
+        put.StatusCode.Should().Be(HttpStatusCode.Conflict, await put.Content.ReadAsStringAsync());
+        putById.StatusCode.Should().Be(HttpStatusCode.Conflict, await putById.Content.ReadAsStringAsync());
+        (await AuthenticatedClient.GetAsync($"/api/v1/activity/{id}")).StatusCode
+            .Should().Be(HttpStatusCode.NotFound);
+        var all = await AuthenticatedClient.GetFromJsonAsync<Activity[]>("/api/v1/activity?count=1000");
+        all!.Should().NotContain(a => a.Description == description);
+    }
+
     [Fact]
     public async Task DeleteActivity_WithExistingId_ShouldDeleteAndReturnSuccess()
     {

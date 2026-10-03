@@ -38,6 +38,17 @@ public static class SoftDeleteDedupExtensions
         => source.Where(e => e.DeletedAt == null || EF.Property<bool>(e, DeletedByUserProperty));
 
     /// <summary>
+    /// The rows of <typeparamref name="TEntity"/> in the context's tenant whose latest delete was the
+    /// user's: the tombstones <see cref="WhereBlocksRecreation{TEntity}"/> holds against a re-upload.
+    /// </summary>
+    public static IQueryable<TEntity> UserTombstones<TEntity>(this NocturneDbContext ctx)
+        where TEntity : class, ITenantScoped, ISoftDeletable
+        => ctx.Set<TEntity>().IgnoreQueryFilters().AsNoTracking()
+            .Where(e => e.TenantId == ctx.TenantId
+                     && e.DeletedAt != null
+                     && EF.Property<bool>(e, DeletedByUserProperty));
+
+    /// <summary>
     /// Of the rows <see cref="WhereBlocksRecreation{TEntity}"/> kept for one external identity, the
     /// row that governs a re-upload of it: the live row when there is one — the write upserts that —
     /// otherwise the user tombstone, which blocks the write. The partial unique index counts live
