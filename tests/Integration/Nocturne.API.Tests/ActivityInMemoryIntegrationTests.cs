@@ -223,22 +223,58 @@ public class ActivityInMemoryIntegrationTests : ApiIntegrationTestBase
     }
 
     [Fact]
-    public async Task UpdateActivity_WithNonExistentId_ShouldReturnNotFound()
+    public async Task UpdateActivity_WithNonExistentId_InsertsIt()
     {
-        // Arrange
-        var nonExistentId = Guid.NewGuid().ToString();
-        var updatedActivity = new Activity { Type = "Exercise", Description = "Test" };
+        var response = await AuthenticatedClient.PutAsJsonAsync(
+            $"/api/v1/activity/{Guid.NewGuid()}",
+            new Activity { Type = "Exercise", Description = "Inserted by PUT" },
+            cancellationToken: CancellationToken.None
+        );
 
-        // Act
-        var response = await AuthenticatedClient
-            .PutAsJsonAsync(
-                $"/api/v1/activity/{nonExistentId}",
-                updatedActivity,
-                cancellationToken: CancellationToken.None
-            );
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var saved = await response.Content.ReadFromJsonAsync<Activity>(
+            cancellationToken: CancellationToken.None
+        );
+        saved!.Description.Should().Be("Inserted by PUT");
+        saved.Id.Should().NotBeNullOrEmpty();
+    }
 
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    [Fact]
+    public async Task SaveActivity_WithTheStoredIdInTheBody_UpdatesInPlace()
+    {
+        var create = await AuthenticatedClient.PostAsJsonAsync(
+            "/api/v1/activity",
+            new Activity { Type = "Exercise", Description = "Before", Duration = 30 },
+            cancellationToken: CancellationToken.None
+        );
+        var id = (await create.Content.ReadFromJsonAsync<Activity[]>())![0].Id;
+
+        var put = await AuthenticatedClient.PutAsJsonAsync(
+            "/api/v1/activity",
+            new Activity { Id = id, Type = "Exercise", Description = "After", Duration = 45 },
+            cancellationToken: CancellationToken.None
+        );
+
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var saved = await put.Content.ReadFromJsonAsync<Activity>();
+        saved!.Id.Should().Be(id);
+        saved.Description.Should().Be("After");
+
+        var stored = await AuthenticatedClient.GetFromJsonAsync<Activity>($"/api/v1/activity/{id}");
+        stored!.Description.Should().Be("After");
+        stored.Duration.Should().Be(45);
+    }
+
+    [Fact]
+    public async Task SaveActivity_WithAnArray_IsRefused()
+    {
+        var put = await AuthenticatedClient.PutAsJsonAsync(
+            "/api/v1/activity",
+            new[] { new Activity { Type = "Exercise", Description = "In an array" } },
+            cancellationToken: CancellationToken.None
+        );
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]

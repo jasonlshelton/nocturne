@@ -52,7 +52,7 @@ public class TreatmentsSaveTests
 
         var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
 
-        result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeSameAs(stored);
+        result.Result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeSameAs(stored);
         _service.Verify(s => s.UpdateTreatmentAsync(
             LoopId, It.Is<Treatment>(t => t.Duration == 30), It.IsAny<CancellationToken>()), Times.Once);
         VerifyNothingCreated();
@@ -65,31 +65,110 @@ public class TreatmentsSaveTests
 
         var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
 
-        var saved = result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeOfType<Treatment>().Subject;
+        var saved = Saved(result);
         saved.Id.Should().Be(LoopId);
         saved.Duration.Should().Be(30);
         _service.Verify(s => s.CreateTreatmentsAsync(
             It.Is<IEnumerable<Treatment>>(t => t.Single().Id == LoopId), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task Put_WithAnArray_SavesEachAndAnswersAnArray()
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("[{\"_id\":\"507f1f77bcf86cd799439011\",\"eventType\":\"Note\"}]")]
+    [InlineData("\"note\"")]
+    public async Task Put_WithAnythingButAnObject_IsRefused(string json)
     {
-        const string storedId = "507f1f77bcf86cd799439011";
-        var stored = new Treatment { Id = storedId, EventType = "Carb Correction", Carbs = 20 };
-        UnknownIds();
-        _service
-            .Setup(s => s.UpdateTreatmentAsync(storedId, It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(stored);
+        var result = await _controller.SaveTreatments(JsonDocument.Parse(json).RootElement);
 
-        var result = await _controller.SaveTreatments(Body(new object[]
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        _service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Put_WithAnIdentifier_MatchesOnItBeforeTheId()
+    {
+        const string identifier = "0E5B7B1C-6E5A-4E9B-9C55-0B8C0C3E2A11";
+        UnknownIds();
+
+        var result = await _controller.SaveTreatments(Body(new
         {
-            new { _id = storedId, eventType = "Carb Correction", carbs = 20, created_at = "2026-09-30T01:00:00.000Z" },
-            Override(duration: 30),
+            identifier,
+            _id = "507f1f77bcf86cd799439011",
+            eventType = "Note",
+            created_at = "2026-09-30T01:00:00.000Z",
         }));
 
-        var saved = result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeOfType<Treatment[]>().Subject;
-        saved.Select(t => t.Id).Should().Equal(storedId, LoopId);
+        Saved(result).Id.Should().Be(identifier);
+        _service.Verify(s => s.UpdateTreatmentAsync(
+            identifier, It.IsAny<Treatment>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Put_WithABlankIdentifier_FallsBackToTheId()
+    {
+        const string storedId = "507f1f77bcf86cd799439011";
+        UnknownIds();
+
+        var result = await _controller.SaveTreatments(Body(new
+        {
+            identifier = " ",
+            _id = storedId,
+            eventType = "Note",
+            created_at = "2026-09-30T01:00:00.000Z",
+        }));
+
+        Saved(result).Id.Should().Be(storedId);
+    }
+
+    [Fact]
+    public async Task Put_KeepsTheClientsCreatedAt()
+    {
+        UnknownIds();
+
+        var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
+
+        var saved = Saved(result);
+        saved.CreatedAt.Should().Be("2026-09-30T01:45:00.000Z");
+        saved.Mills.Should().Be(DateTimeOffset.Parse("2026-09-30T01:45:00Z").ToUnixTimeMilliseconds());
+    }
+
+    [Theory]
+    [InlineData(1.5, 20.0, "Meal Bolus")]
+    [InlineData(1.5, null, "Correction Bolus")]
+    [InlineData(null, 20.0, "Carb Correction")]
+    [InlineData(null, null, "Note")]
+    public async Task Put_WithoutAnEventType_DefaultsItAsPostDoes(
+        double? insulin, double? carbs, string expected)
+    {
+        var result = await _controller.SaveTreatments(
+            Body(new { insulin, carbs, created_at = "2026-09-30T01:00:00.000Z" }));
+
+        Saved(result).EventType.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Put_WhenTheStoreKeepsNothing_Answers500()
+    {
+        _service
+            .Setup(s => s.CreateTreatmentsAsync(It.IsAny<IEnumerable<Treatment>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BulkWrite<Treatment>([], 0));
+
+        var result = await _controller.SaveTreatments(
+            Body(new { eventType = "Note", created_at = "2026-09-30T01:00:00.000Z" }));
+
+        result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task Put_WhenTheServiceThrows_Answers500()
+    {
+        _service
+            .Setup(s => s.UpdateTreatmentAsync(It.IsAny<string>(), It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store down"));
+
+        var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
+
+        result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(500);
     }
 
     [Fact]
@@ -98,7 +177,7 @@ public class TreatmentsSaveTests
         var result = await _controller.SaveTreatments(
             Body(new { eventType = "Note", notes = "hello", created_at = "2026-09-30T01:00:00.000Z" }));
 
-        result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeOfType<Treatment>();
+        Saved(result);
         _service.Verify(s => s.UpdateTreatmentAsync(
             It.IsAny<string>(), It.IsAny<Treatment>(), It.IsAny<CancellationToken>()), Times.Never);
         _service.Verify(s => s.CreateTreatmentsAsync(
@@ -116,6 +195,18 @@ public class TreatmentsSaveTests
         result.Result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeOfType<Treatment>().Which.Id.Should().Be(LoopId);
     }
+
+    [Fact]
+    public async Task PutById_WithoutABody_IsRefused()
+    {
+        var result = await _controller.UpdateTreatment(LoopId, null!);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        _service.VerifyNoOtherCalls();
+    }
+
+    private static Treatment Saved(ActionResult<Treatment> result) =>
+        result.Result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeOfType<Treatment>().Subject;
 
     private void UnknownIds() => _service
         .Setup(s => s.UpdateTreatmentAsync(It.IsAny<string>(), It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))

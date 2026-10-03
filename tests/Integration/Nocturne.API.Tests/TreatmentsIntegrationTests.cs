@@ -310,6 +310,50 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
         (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(30));
     }
 
+    [Fact]
+    public async Task PutCollection_UnknownUuid_InsertsTheOverride()
+    {
+        var client = CreateAuthenticatedClient();
+        var id = Guid.NewGuid().ToString().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new Dictionary<string, object>
+        {
+            ["_id"] = id,
+            ["eventType"] = "Temporary Override",
+            ["duration"] = 45,
+            ["created_at"] = now.AddMinutes(-90).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        });
+        put.StatusCode.Should().Be(HttpStatusCode.OK, await put.Content.ReadAsStringAsync());
+        var body = await put.Content.ReadFromJsonAsync<JsonElement>();
+        body.ValueKind.Should().Be(JsonValueKind.Object);
+        body.GetProperty("eventType").GetString().Should().Be("Temporary Override");
+
+        var overrides = await WithTenantScopeAsync(async sp =>
+            (await sp.GetRequiredService<IStateSpanService>().GetStateSpansAsync(
+                category: StateSpanCategory.Override,
+                from: now.AddHours(-2).UtcDateTime,
+                to: now.AddHours(1).UtcDateTime))
+            .Where(s => string.Equals(s.OriginalId, id, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+
+        var stored = overrides.Should().ContainSingle().Subject;
+        (stored.EndTimestamp - stored.StartTimestamp).Should().Be(TimeSpan.FromMinutes(45));
+    }
+
+    [Fact]
+    public async Task PutCollection_WithAnArray_IsRefused()
+    {
+        var client = CreateAuthenticatedClient();
+
+        var put = await client.PutAsJsonAsync("/api/v1/treatments", new[]
+        {
+            new Dictionary<string, object> { ["eventType"] = "Note", ["notes"] = "in an array" },
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     #endregion
 
     #region DELETE /api/v1/treatments/{id}
