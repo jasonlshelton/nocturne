@@ -5,7 +5,7 @@ namespace Nocturne.Core.Models;
 /// <summary>
 /// Carries the <c>timestamp</c> a treatment was uploaded with between a <see cref="Treatment"/> and
 /// the V4 records it decomposes into, beside <see cref="TreatmentClientId"/>, so it is served back
-/// verbatim as Nightscout stores it.
+/// verbatim, with its JSON type, as Nightscout stores it.
 /// </summary>
 /// <remarks>
 /// NightscoutKit drops a served treatment that has no string <c>timestamp</c>, so a Loop follower
@@ -23,20 +23,33 @@ public static class TreatmentUploadedTimestamp
     /// </summary>
     public static Dictionary<string, object?>? AddTo(Dictionary<string, object?>? record, Treatment treatment)
     {
-        if (string.IsNullOrEmpty(treatment.Timestamp))
+        if (Uploaded(treatment) is not { } timestamp)
             return record;
 
         record ??= new();
-        record[Field] = treatment.Timestamp;
+        record[Field] = timestamp;
         return record;
     }
 
+    /// <summary>The uploaded timestamp of <paramref name="treatment"/> as stored, or null.</summary>
+    public static JsonElement? Uploaded(Treatment treatment) =>
+        treatment.RawTimestamp is { ValueKind: not (JsonValueKind.Null or JsonValueKind.Undefined) } raw
+            ? raw.Clone()
+            : null;
+
     /// <summary>The uploaded timestamp a record's additional properties hold, or null.</summary>
-    public static string? Of(IReadOnlyDictionary<string, object?>? record) =>
-        record?.GetValueOrDefault(Field) switch
-        {
-            string s => s,
-            JsonElement { ValueKind: JsonValueKind.String } je => je.GetString(),
-            _ => null,
-        };
+    public static JsonElement? Of(IReadOnlyDictionary<string, object?>? record) =>
+        Read(record?.GetValueOrDefault(Field));
+
+    /// <summary>The uploaded timestamp a span's metadata holds, or null.</summary>
+    public static JsonElement? OfSpan(IDictionary<string, object>? metadata) =>
+        metadata is not null && metadata.TryGetValue(Field, out var value) ? Read(value) : null;
+
+    private static JsonElement? Read(object? value) => value switch
+    {
+        JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => null,
+        JsonElement je => je,
+        null => null,
+        var other => JsonSerializer.SerializeToElement(other),
+    };
 }

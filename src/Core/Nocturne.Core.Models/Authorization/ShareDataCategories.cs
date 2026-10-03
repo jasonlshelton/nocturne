@@ -94,9 +94,10 @@ public static class ShareDataCategories
 
     /// <summary>
     /// Recency column per table that no scope governs, so it stays hidden from every share, but whose
-    /// rows a history-clamped member still reads only the last 24 hours of. <c>state_spans</c> holds
-    /// overrides, temporary targets and profile switches the legacy treatment reads serve, beside
-    /// pump, profile and data-exclusion spans no single share scope covers.
+    /// rows a history-clamped member still reads only the last 24 hours of. Both are served as legacy
+    /// treatments: <c>state_spans</c> holds overrides, temporary targets and profile switches beside
+    /// pump, profile and data-exclusion spans no single share scope covers, and <c>notes</c> holds
+    /// Note and Announcement treatments.
     /// </summary>
     /// <remarks>
     /// A span is clamped by its start, as <c>temp_basals</c> is, so one still running after more than
@@ -107,6 +108,7 @@ public static class ShareDataCategories
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["state_spans"] = "start_timestamp",
+            ["notes"] = "timestamp",
         };
 
     private static readonly IReadOnlyDictionary<string, string> TableToScope = BuildTableToScope();

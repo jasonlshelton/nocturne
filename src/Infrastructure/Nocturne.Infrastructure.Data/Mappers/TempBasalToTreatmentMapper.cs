@@ -41,7 +41,7 @@ public static class TempBasalToTreatmentMapper
             UtcOffset = tempBasal.UtcOffset,
             DataSource = tempBasal.DataSource,
             AdditionalProperties = TreatmentClientId.ToTreatment(tempBasal.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(tempBasal.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(tempBasal.AdditionalProperties),
         };
 
         // Carry origin, scheduled rate, and device in AdditionalProperties for debug/display

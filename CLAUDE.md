@@ -266,7 +266,7 @@ and by history window:
 `foods`, carry just the category gate, and a table with no governing scope carries
 only the `is_share` test, so it is hidden from shares and never clamped for members,
 unless `ShareDataCategories.HiddenRecencyColumns` gives it a recency column
-(`state_spans`): then it is hidden from shares and clamped for members.
+(`state_spans`, `notes`): then it is hidden from shares and clamped for members.
 `IS [NOT] DISTINCT FROM` keeps the clamp test non-null when a GUC is unset.)
 
 Four extra GUCs carry the request state to the connection (set by

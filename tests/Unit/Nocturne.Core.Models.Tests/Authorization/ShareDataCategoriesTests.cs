@@ -120,6 +120,13 @@ public class ShareDataCategoriesTests
     }
 
     [Fact]
+    public void Notes_AreHiddenFromSharesButClampedForMembers()
+    {
+        ShareDataCategories.GoverningScopeFor("notes").Should().BeNull();
+        ShareDataCategories.RecencyColumnFor("notes").Should().Be("timestamp");
+    }
+
+    [Fact]
     public void HiddenRecencyColumns_ReferenceOnlyUngovernedTables()
     {
         ShareDataCategories.HiddenRecencyColumns.Keys

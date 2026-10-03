@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nocturne.Connectors.Core.Constants;
@@ -264,7 +265,7 @@ internal sealed class LegacyStateSpanTable(
         var treatment = project(span, metadata);
         treatment.Id = span.Id.ToString();
         treatment.Mills = HistoryPage.ToMilliseconds(span.StartTimestamp);
-        treatment.Timestamp ??= metadata.TryReadString(LegacyTreatmentTables.UploadedTimestampKey);
+        treatment.RawTimestamp ??= TreatmentUploadedTimestamp.OfSpan(metadata);
         treatment.EnteredBy = metadata.TryReadString("enteredBy");
         treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
         return treatment;
@@ -301,7 +302,8 @@ internal static class LegacyTreatmentTables
             (s, metadata) => new Treatment
             {
                 EventType = "Temporary Override",
-                Timestamp = metadata.TryReadString(UploadedTimestampKey) ?? NightscoutKitTimestamp(s.StartTimestamp),
+                RawTimestamp = TreatmentUploadedTimestamp.OfSpan(metadata)
+                    ?? JsonSerializer.SerializeToElement(NightscoutKitTimestamp(s.StartTimestamp)),
                 Duration = UploadedDuration(metadata)
                     ?? (metadata.TryReadString("durationType") == "indefinite" ? null : DurationMinutes(s)),
                 Reason = metadata.TryReadString("reason"),
@@ -546,7 +548,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bolus.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bolus.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
             EventType = TreatmentTypes.MealBolus,
             Mills = bolus.Mills,
             Insulin = bolus.Insulin,
@@ -569,7 +571,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bolus.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bolus.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(bolus.AdditionalProperties),
             EventType = TreatmentTypes.CorrectionBolus,
             Mills = bolus.Mills,
             Insulin = bolus.Insulin,
@@ -590,7 +592,7 @@ internal static class LegacyTreatmentTables
         {
             Id = carb.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(carb.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(carb.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(carb.AdditionalProperties),
             EventType = TreatmentTypes.CarbCorrection,
             Mills = carb.Mills,
             Carbs = carb.Carbs,
@@ -638,7 +640,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bgCheck.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bgCheck.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(bgCheck.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(bgCheck.AdditionalProperties),
             EventType = TreatmentTypes.BgCheck,
             Mills = bgCheck.Mills,
             Glucose = bgCheck.Glucose,
@@ -657,7 +659,7 @@ internal static class LegacyTreatmentTables
         {
             Id = note.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(note.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(note.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(note.AdditionalProperties),
             EventType = note.EventType ?? "Note",
             Mills = note.Mills,
             Notes = note.Text,
@@ -675,7 +677,7 @@ internal static class LegacyTreatmentTables
         {
             Id = deviceEvent.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(deviceEvent.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(deviceEvent.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(deviceEvent.AdditionalProperties),
             EventType = eventTypeString ?? deviceEvent.EventType.ToString(),
             Mills = deviceEvent.Mills,
             Notes = deviceEvent.Notes,
@@ -691,7 +693,7 @@ internal static class LegacyTreatmentTables
         {
             Id = bc.Id.ToString(),
             AdditionalProperties = TreatmentClientId.ToTreatment(bc.AdditionalProperties),
-            Timestamp = TreatmentUploadedTimestamp.Of(bc.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(bc.AdditionalProperties),
             EventType = "Bolus Wizard",
             Mills = bc.Mills,
             BloodGlucoseInput = bc.BloodGlucoseInput,

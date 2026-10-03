@@ -699,6 +699,73 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
         (await GetV3ResultAsync(clamped, "/api/v3/treatments?limit=100")).Should().HaveCount(3);
     }
 
+    [Fact]
+    public async Task A_history_clamped_credential_reads_only_the_last_24_hours_of_notes()
+    {
+        var owner = CreateAuthenticatedClient();
+        await PostAsync(owner, new { eventType = "Note", created_at = MinutesAgo(3 * 24 * 60), notes = "old" });
+        await PostAsync(owner, new { eventType = "Note", created_at = MinutesAgo(60), notes = "recent" });
+        await PostAsync(owner, Upload("Temporary Target", minutesAgo: 30));
+
+        using var clamped = await CreateHistoryClampedClientAsync();
+
+        (await GetArrayAsync(owner, "/api/v1/treatments?count=100")).Should().HaveCount(3);
+        var v1 = await GetArrayAsync(clamped, "/api/v1/treatments?count=100");
+        v1.Should().HaveCount(2);
+        v1.Where(t => t!["eventType"]!.GetValue<string>() == "Note")
+            .Should().ContainSingle().Which!["notes"]!.GetValue<string>().Should().Be("recent");
+        (await GetArrayAsync(clamped, "/api/v1/treatments?find[eventType]=Note")).Should().ContainSingle();
+        (await GetV3ResultAsync(clamped, "/api/v3/treatments/history/0")).Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// Nightscout serves <c>timestamp</c> with the JSON type it was uploaded with: AAPS's v1 client
+    /// uploads a temporary target's as epoch milliseconds, Loop a bolus's as an ISO string.
+    /// </summary>
+    [Theory]
+    [InlineData("Temporary Target", true)]
+    [InlineData("Temporary Target", false)]
+    [InlineData("Correction Bolus", true)]
+    [InlineData("Correction Bolus", false)]
+    public async Task The_uploaded_timestamp_keeps_its_json_type(string eventType, bool numeric)
+    {
+        var client = CreateAuthenticatedClient();
+        var at = DateTimeOffset.UtcNow.AddMinutes(-20);
+        var millis = at.ToUnixTimeMilliseconds();
+        JsonNode timestamp = numeric ? JsonValue.Create(millis) : JsonValue.Create(millis.ToString())!;
+        var upload = new JsonObject
+        {
+            ["eventType"] = eventType,
+            ["created_at"] = at.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            ["timestamp"] = timestamp,
+            ["enteredBy"] = "AndroidAPS",
+            ["duration"] = 30,
+            ["targetTop"] = 100,
+            ["targetBottom"] = 100,
+            ["insulin"] = eventType == "Correction Bolus" ? 1.0 : null,
+        };
+        await PostAsync(client, upload);
+
+        void ShouldKeepType(JsonNode served)
+        {
+            var value = served["timestamp"]!.AsValue();
+            if (numeric)
+                value.GetValueKind().Should().Be(System.Text.Json.JsonValueKind.Number, served.ToJsonString());
+            else
+                value.GetValueKind().Should().Be(System.Text.Json.JsonValueKind.String, served.ToJsonString());
+            value.ToJsonString().Trim('"').Should().Be(millis.ToString());
+        }
+
+        ShouldKeepType((await GetArrayAsync(client, "/api/v1/treatments")).Single()!);
+        var v3 = (await GetV3ResultAsync(client, "/api/v3/treatments")).Single()!;
+        ShouldKeepType(v3);
+
+        var patch = await client.PatchAsJsonAsync(
+            $"/api/v3/treatments/{v3["identifier"]!.GetValue<string>()}", new { reason = "patched" });
+        patch.StatusCode.Should().Be(HttpStatusCode.OK, await patch.Content.ReadAsStringAsync());
+        ShouldKeepType((await GetArrayAsync(client, "/api/v1/treatments")).Single()!);
+    }
+
     private async Task<HttpClient> CreateHistoryClampedClientAsync()
     {
         await using var conn = new NpgsqlConnection(await GetPostgresConnectionStringAsync());
