@@ -22,6 +22,14 @@ public interface ITreatmentStore
     Task<IReadOnlyList<Treatment>> QueryAsync(TreatmentQuery query, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether <paramref name="id"/> names a treatment record the user deleted, under any key
+    /// <see cref="GetByIdAsync"/> resolves.
+    /// </summary>
+    /// <param name="id">The identifier as received from the client.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns a single treatment by its identifier.
     /// </summary>
     /// <param name="id">The treatment identifier (GUID or legacy MongoDB ObjectId).</param>

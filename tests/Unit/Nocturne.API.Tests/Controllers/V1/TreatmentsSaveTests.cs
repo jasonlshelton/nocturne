@@ -160,28 +160,144 @@ public class TreatmentsSaveTests
     }
 
     [Fact]
-    public async Task Put_WhenTheServiceThrows_Answers500()
+    public async Task Put_WhenTheServiceThrows_LeavesItToTheExceptionHandler()
     {
         _service
             .Setup(s => s.UpdateTreatmentAsync(It.IsAny<string>(), It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("store down"));
 
-        var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
+        var save = () => _controller.SaveTreatments(Body(Override(duration: 30)));
 
-        result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(500);
+        await save.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
-    public async Task Put_WithoutAnId_Creates()
+    public async Task Put_WithAnIdThatResolvesToNothing_UpdatesTheTreatmentItsSyncIdentifierNames()
     {
+        const string echoedId = "3f0b8b54aa1c4f7d8e2a6c11";
+        const string syncIdentifier = "3F0B8B54-AA1C-4F7D-8E2A-6C11D0E5F9A2";
+        var stored = new Treatment { Id = Guid.CreateVersion7().ToString(), EventType = "Carb Correction", Carbs = 35 };
+        UnknownIds();
+        _service
+            .Setup(s => s.UpdateTreatmentAsync(syncIdentifier, It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stored);
+
+        var result = await _controller.SaveTreatments(Body(new
+        {
+            _id = echoedId,
+            syncIdentifier,
+            eventType = "Carb Correction",
+            carbs = 35,
+            created_at = "2026-09-30T01:00:00.000Z",
+        }));
+
+        result.Result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeSameAs(stored);
+        _service.Verify(s => s.UpdateTreatmentAsync(
+            echoedId, It.IsAny<Treatment>(), It.IsAny<CancellationToken>()), Times.Once);
+        VerifyNothingCreated();
+    }
+
+    [Fact]
+    public async Task Put_WithoutAnId_ReplacesTheTreatmentStoredAtTheSameTimeWithTheSameEventType()
+    {
+        var mills = DateTimeOffset.Parse("2026-09-30T01:00:00Z").ToUnixTimeMilliseconds();
+        var sameEvent = Guid.CreateVersion7().ToString();
+        var replaced = new Treatment { Id = sameEvent, EventType = "Note", Notes = "edited" };
+        _service
+            .Setup(s => s.GetTreatmentsByRangeAsync(mills, mills, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new Treatment { Id = Guid.CreateVersion7().ToString(), EventType = "Correction Bolus", Mills = mills },
+                new Treatment { Id = sameEvent, EventType = "Note", Mills = mills },
+            ]);
+        _service
+            .Setup(s => s.UpdateTreatmentAsync(sameEvent, It.IsAny<Treatment>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(replaced);
+
+        var result = await _controller.SaveTreatments(
+            Body(new { eventType = "Note", notes = "edited", created_at = "2026-09-30T01:00:00.000Z" }));
+
+        result.Result.Should().BeOfType<OkObjectResult>().Which.Value.Should().BeSameAs(replaced);
+        _service.Verify(s => s.UpdateTreatmentAsync(
+            sameEvent, It.Is<Treatment>(t => t.Notes == "edited"), It.IsAny<CancellationToken>()), Times.Once);
+        VerifyNothingCreated();
+    }
+
+    [Fact]
+    public async Task Put_WithoutAnId_CreatesWhenNothingIsStoredAtThatTimeWithThatEventType()
+    {
+        var mills = DateTimeOffset.Parse("2026-09-30T01:00:00Z").ToUnixTimeMilliseconds();
+        _service
+            .Setup(s => s.GetTreatmentsByRangeAsync(mills, mills, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Treatment { Id = Guid.CreateVersion7().ToString(), EventType = "Correction Bolus", Mills = mills }]);
+
         var result = await _controller.SaveTreatments(
             Body(new { eventType = "Note", notes = "hello", created_at = "2026-09-30T01:00:00.000Z" }));
 
-        Saved(result);
+        Saved(result).Notes.Should().Be("hello");
         _service.Verify(s => s.UpdateTreatmentAsync(
             It.IsAny<string>(), It.IsAny<Treatment>(), It.IsAny<CancellationToken>()), Times.Never);
         _service.Verify(s => s.CreateTreatmentsAsync(
             It.IsAny<IEnumerable<Treatment>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(LoopId)]
+    [InlineData("3f0b8b54aa1c4f7d8e2a6c11")]
+    public async Task Put_WithTheIdOfATreatmentTheUserDeleted_SavesNothing(string id)
+    {
+        UnknownIds();
+        _service
+            .Setup(s => s.IsTreatmentDeletedByUserAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _controller.SaveTreatments(Body(new
+        {
+            _id = id,
+            eventType = "Carb Correction",
+            carbs = 20,
+            created_at = "2026-09-30T01:00:00.000Z",
+        }));
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeAssignableTo<Treatment[]>().Which.Should().BeEmpty();
+        VerifyNothingCreated();
+    }
+
+    [Fact]
+    public async Task Put_WhoseSyncIdentifierNamesATreatmentTheUserDeleted_SavesNothing()
+    {
+        const string syncIdentifier = "3F0B8B54-AA1C-4F7D-8E2A-6C11D0E5F9A2";
+        UnknownIds();
+        _service
+            .Setup(s => s.IsTreatmentDeletedByUserAsync(syncIdentifier, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _controller.SaveTreatments(Body(new
+        {
+            _id = "3f0b8b54aa1c4f7d8e2a6c11",
+            syncIdentifier,
+            eventType = "Carb Correction",
+            carbs = 20,
+            created_at = "2026-09-30T01:00:00.000Z",
+        }));
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeAssignableTo<Treatment[]>().Which.Should().BeEmpty();
+        VerifyNothingCreated();
+    }
+
+    [Fact]
+    public async Task Put_WhenTheCreateSkipsATreatmentTheUserDeleted_SavesNothing()
+    {
+        UnknownIds();
+        _service
+            .Setup(s => s.CreateTreatmentsAsync(It.IsAny<IEnumerable<Treatment>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Treatment> t, CancellationToken _) => new BulkWrite<Treatment>(t.ToList(), 1));
+
+        var result = await _controller.SaveTreatments(Body(Override(duration: 30)));
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeAssignableTo<Treatment[]>().Which.Should().BeEmpty();
     }
 
     [Fact]

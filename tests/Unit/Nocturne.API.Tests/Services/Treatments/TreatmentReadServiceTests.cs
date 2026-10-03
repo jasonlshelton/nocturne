@@ -481,6 +481,8 @@ public class TreatmentReadServiceTests
         (await _service.UpdateAsync("0123456789abcdef01234567", new Treatment { EventType = "Note" })).Should().BeNull();
 
         VerifyOneHashScanPerTable();
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -507,7 +509,19 @@ public class TreatmentReadServiceTests
         var updated = await _service.UpdateAsync(echoed, new Treatment { EventType = "Carb Correction", Carbs = 25 });
 
         updated!.Id.Should().Be(carb.Id.ToString());
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.Is<Treatment>(t => t.Id == syncIdentifier && t.Carbs == 25),
+            It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Once);
         _carbIntakeRepo.Verify(r => r.GetByLegacyIdUuidPrefixAsync(echoed, It.IsAny<CancellationToken>()), Times.Once);
         _carbIntakeRepo.Verify(r => r.GetByLegacyIdHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IsDeletedByUserAsync_AnyTreatmentTableHoldingATombstone_IsTrue()
+    {
+        _noteRepo.Setup(r => r.IsDeletedByUserAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        (await _service.IsDeletedByUserAsync("t1")).Should().BeTrue();
+        (await _service.IsDeletedByUserAsync("t2")).Should().BeFalse();
     }
 }

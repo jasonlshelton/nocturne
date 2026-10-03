@@ -119,6 +119,14 @@ public interface ILegacyKeyedRepository<TRecord>
     Task<TRecord?> GetByLegacyIdHashAsync(string objectId, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether a record the user deleted answers to <paramref name="id"/> under any key the lookups
+    /// above resolve: its own id, the 24-hex prefix of that id, its legacy id, or the echo of a
+    /// legacy id (<see cref="GetByLegacyIdUuidPrefixAsync"/>, <see cref="GetByLegacyIdHashAsync"/>).
+    /// A record the system swept does not count.
+    /// </summary>
+    Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
     /// Records whose server write stamp (<see cref="IV4Record.ModifiedAt"/>, reported as
     /// <c>srvModified</c>) falls after <paramref name="cursorMills"/>, oldest first, as one history
     /// page that ends on a millisecond boundary and so may exceed <paramref name="limit"/>.

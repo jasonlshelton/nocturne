@@ -306,6 +306,18 @@ public abstract class V4RepositoryBase<TModel, TEntity>
             return null;
 
         await using var ctx = await ContextFactory.CreateAsync(ct);
+        var entity = await WhereLegacyIdHashesTo(ctx, objectId)
+            .OrderBy(e => e.Id)
+            .FirstOrDefaultAsync(ct);
+        return entity is null ? null : ToDomain(entity);
+    }
+
+    /// <summary>
+    /// The rows whose legacy id <see cref="MongoObjectId.Coerce"/> hashes into
+    /// <paramref name="objectId"/>, under the context's query filters.
+    /// </summary>
+    private static IQueryable<TEntity> WhereLegacyIdHashesTo(NocturneDbContext ctx, string objectId)
+    {
         var entityType = ctx.Model.FindEntityType(typeof(TEntity))!;
         var tableName = SqlIdentifier.Require(entityType.GetTableName()!, nameof(TEntity));
         var schema = entityType.GetSchema();
@@ -318,11 +330,28 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         var sql = "SELECT * FROM " + table + " WHERE "
             + "encode(substring(sha256(convert_to(" + column + ", 'UTF8')) FROM 1 FOR 12), 'hex') = {0}";
 
-        var entity = await ctx.Set<TEntity>()
-            .FromSqlRaw(sql, objectId)
-            .OrderBy(e => e.Id)
-            .FirstOrDefaultAsync(ct);
-        return entity is null ? null : ToDomain(entity);
+        return ctx.Set<TEntity>().FromSqlRaw(sql, objectId);
+    }
+
+    /// <inheritdoc cref="ILegacyKeyedRepository{TRecord}.IsDeletedByUserAsync" />
+    public async Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default)
+    {
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var tombstones = ctx.Set<TEntity>().UserTombstones(ctx);
+
+        if (Guid.TryParse(id, out var guid))
+            return await tombstones.AnyAsync(e => e.Id == guid || e.LegacyId == id, ct);
+
+        if (!MongoObjectId.TryGetGuidPrefixRange(id, out var low, out var high))
+            return await tombstones.AnyAsync(e => e.LegacyId == id, ct);
+
+        var dashed = string.Join('-', id[..8], id[8..12], id[12..16], id[16..20], id[20..]) + "%";
+        var dashless = id + "%";
+        return await tombstones.AnyAsync(e => e.LegacyId == id
+                || (e.Id >= low && e.Id <= high)
+                || (e.LegacyId != null && e.LegacyId.Length == 36 && EF.Functions.ILike(e.LegacyId, dashed))
+                || (e.LegacyId != null && e.LegacyId.Length == 32 && EF.Functions.ILike(e.LegacyId, dashless)), ct)
+            || await WhereLegacyIdHashesTo(ctx, id).UserTombstones(ctx).AnyAsync(ct);
     }
 
     /// <inheritdoc cref="ILegacyKeyedRepository{T}.GetCorrelationIdsByLegacyIdAsync" />

@@ -17,6 +17,7 @@ interface SavedTreatment {
   eventType: string;
   created_at?: string;
   carbs?: number;
+  notes?: string;
   duration?: number;
 }
 
@@ -106,10 +107,11 @@ describe("v1 PUT /treatments, as Loop sends it", () => {
   });
 });
 
-// Loop keeps the `_id` each treatment POST returns (its objectIdCache, keyed by syncIdentifier), then
-// edits the carb with PUT /api/v1/treatments carrying that `_id` and deletes it with
-// DELETE /api/v1/treatments/{_id}. Nightscout answers the POST with the id it stored the document under.
-describe("a Loop carb, addressed by the _id its POST returned", () => {
+// Loop keeps the `_id` each carb POST returns (its objectIdCache, keyed by syncIdentifier), edits the
+// carb with PUT /api/v1/treatments carrying that `_id` and the syncIdentifier, and deletes it with
+// DELETE /api/v1/treatments/{_id}. Nightscout answers the POST with the id it stored the document
+// under; 15.0.8 matches a save on `identifier`, then `_id`, then `created_at` + `eventType`.
+describe("v1 PUT /treatments, editing what an earlier POST stored", () => {
   let tenant: Tenant;
   let loop: ApiClient;
 
@@ -128,8 +130,8 @@ describe("a Loop carb, addressed by the _id its POST returned", () => {
       (t) => t.created_at !== undefined && Date.parse(t.created_at) === Date.parse(createdAt),
     );
 
-  const post = async (treatment: object) => {
-    const [created] = await loop.ok<SavedTreatment[]>("POST", "/api/v1/treatments", [treatment]);
+  const postCarb = async (syncIdentifier: string, carbs: number, createdAt: string) => {
+    const [created] = await loop.ok<SavedTreatment[]>("POST", "/api/v1/treatments", [loopCarb(syncIdentifier, carbs, createdAt)]);
     return created!._id;
   };
 
@@ -138,19 +140,19 @@ describe("a Loop carb, addressed by the _id its POST returned", () => {
     loop = await loopClient(tenant);
   });
 
-  it("is served by reads under that _id", async () => {
+  it("serves a Loop carb under the _id its POST returned", async () => {
     const createdAt = minutesAgo(40);
-    const id = await post(loopCarb(randomUUID().toUpperCase(), 18, createdAt));
+    const id = await postCarb(randomUUID().toUpperCase(), 18, createdAt);
 
     const stored = await storedAt(createdAt);
     expect(stored).toHaveLength(1);
     expect(stored[0]!._id).toBe(id);
   });
 
-  it("is edited in place by a PUT carrying that _id", async () => {
+  it("edits a Loop carb in place by the _id its POST returned", async () => {
     const syncIdentifier = randomUUID().toUpperCase();
     const createdAt = minutesAgo(55);
-    const id = await post(loopCarb(syncIdentifier, 20, createdAt));
+    const id = await postCarb(syncIdentifier, 20, createdAt);
 
     const put = await loop.put<SavedTreatment>("/api/v1/treatments", { ...loopCarb(syncIdentifier, 35, createdAt), _id: id });
 
@@ -160,13 +162,39 @@ describe("a Loop carb, addressed by the _id its POST returned", () => {
     expect(stored[0]).toMatchObject({ _id: id, carbs: 35 });
   });
 
-  it("is deleted by a DELETE of that _id", async () => {
+  it("deletes a Loop carb by the _id its POST returned", async () => {
     const createdAt = minutesAgo(70);
-    const id = await post(loopCarb(randomUUID().toUpperCase(), 22, createdAt));
+    const id = await postCarb(randomUUID().toUpperCase(), 22, createdAt);
 
     const del = await loop.delete(`/api/v1/treatments/${id}`);
 
     expect(del.status, del.text).toBe(200);
     expect(await storedAt(createdAt)).toHaveLength(0);
+  });
+
+  it("does not bring back a Loop carb the user deleted", async () => {
+    const syncIdentifier = randomUUID().toUpperCase();
+    const createdAt = minutesAgo(85);
+    const id = await postCarb(syncIdentifier, 22, createdAt);
+    const [served] = await storedAt(createdAt);
+    expect((await tenant.api.delete(`/api/v1/treatments/${served!._id}`)).status).toBe(200);
+
+    const put = await loop.put<SavedTreatment[]>("/api/v1/treatments", { ...loopCarb(syncIdentifier, 30, createdAt), _id: id });
+
+    expect(put.status, put.text).toBe(200);
+    expect(put.body).toEqual([]);
+    expect(await storedAt(createdAt)).toHaveLength(0);
+  });
+
+  it("replaces the treatment stored at the same created_at with the same eventType when the body has no id", async () => {
+    const createdAt = minutesAgo(115);
+    await tenant.api.ok("POST", "/api/v1/treatments", [{ eventType: "Note", notes: "before", created_at: createdAt }]);
+
+    const put = await loop.put<SavedTreatment>("/api/v1/treatments", { eventType: "Note", notes: "after", created_at: createdAt });
+
+    expect(put.status, put.text).toBe(200);
+    const stored = await storedAt(createdAt);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ eventType: "Note", notes: "after" });
   });
 });

@@ -241,7 +241,8 @@ public class TreatmentsController : ControllerBase
     /// when that id is not already stored
     /// </summary>
     /// <remarks>
-    /// Nightscout's save takes one document and matches on <c>identifier</c> before <c>_id</c>.
+    /// Nightscout's save takes one document and matches on <c>identifier</c> before <c>_id</c>; see
+    /// <see cref="SaveAsync"/> for the full match order.
     /// </remarks>
     /// <param name="treatment">Treatment to save, as a single object</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -275,11 +276,6 @@ public class TreatmentsController : ControllerBase
         {
             _logger.LogWarning(ex, "Invalid JSON in save treatment request");
             return BadRequest("Invalid JSON format");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error saving treatment");
-            return StatusCode(500, "Internal server error while saving treatment");
         }
     }
 
@@ -449,25 +445,76 @@ public class TreatmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Nightscout's save is an upsert: a treatment whose id resolves to a stored record replaces it,
-    /// and any other goes through the create path, which keeps the client's id.
+    /// Nightscout's save is an upsert. The treatment replaces the stored one its id names, else the
+    /// one its <c>syncIdentifier</c> names, else, when it carries no id, the one stored at the same
+    /// <c>created_at</c> with the same <c>eventType</c>. Anything else goes through the create path,
+    /// which keeps the client's id.
     /// </summary>
+    /// <remarks>
+    /// A treatment the user deleted is not brought back: the save answers 200 with an empty array, as
+    /// it saved nothing. Loop counts any other status as a failed upload and retries the whole carb
+    /// batch, so a refusal would stall its later uploads.
+    /// </remarks>
     private async Task<ActionResult<Treatment>> SaveAsync(
         Treatment treatment,
         CancellationToken cancellationToken
     )
     {
         var prepared = PrepareTreatments([treatment]).Single();
+        var keys = new[] { prepared.Id, prepared.SyncIdentifier }
+            .OfType<string>()
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
-        if (!string.IsNullOrWhiteSpace(prepared.Id)
-            && await _treatmentService.UpdateTreatmentAsync(
-                prepared.Id, prepared, cancellationToken) is { } updated)
-            return Ok(updated);
+        foreach (var key in keys)
+        {
+            if (await _treatmentService.UpdateTreatmentAsync(key, prepared, cancellationToken) is { } updated)
+                return Ok(updated);
+        }
+
+        if (string.IsNullOrWhiteSpace(prepared.Id)
+            && await FindSameEventAsync(prepared, cancellationToken) is { } sameEventId
+            && await _treatmentService.UpdateTreatmentAsync(sameEventId, prepared, cancellationToken) is { } replaced)
+            return Ok(replaced);
+
+        foreach (var key in keys)
+        {
+            if (await _treatmentService.IsTreatmentDeletedByUserAsync(key, cancellationToken))
+                return NothingSaved(key);
+        }
 
         var created = await _treatmentService.CreateTreatmentsAsync([prepared], cancellationToken);
+        if (created.SkippedDeleted > 0)
+            return NothingSaved(prepared.Id);
+
         return created.FirstOrDefault() is { } saved
             ? Ok(saved)
             : StatusCode(500, "Internal server error while saving treatment");
+    }
+
+    /// <summary>
+    /// The id of the treatment stored at <paramref name="treatment"/>'s <c>created_at</c> with its
+    /// <c>eventType</c>: Nightscout 15.0.8's last upsert key, for a document with neither
+    /// <c>identifier</c> nor <c>_id</c>.
+    /// </summary>
+    private async Task<string?> FindSameEventAsync(Treatment treatment, CancellationToken cancellationToken)
+    {
+        if (treatment.Mills <= 0)
+            return null;
+
+        var atSameTime = await _treatmentService.GetTreatmentsByRangeAsync(
+            treatment.Mills, treatment.Mills, cancellationToken);
+        return atSameTime?
+            .FirstOrDefault(stored => !string.IsNullOrEmpty(stored.Id)
+                && string.Equals(stored.EventType, treatment.EventType, StringComparison.Ordinal))
+            ?.Id;
+    }
+
+    private OkObjectResult NothingSaved(string? id)
+    {
+        _logger.LogDebug("Refused save of treatment {Id}: the user deleted it", id);
+        return Ok(Array.Empty<Treatment>());
     }
 
     private static List<Treatment>? ReadTreatments(JsonElement body) => body.ValueKind switch

@@ -133,6 +133,16 @@ public class TreatmentReadService : ITreatmentStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> IsDeletedByUserAsync(string id, CancellationToken ct = default)
+        => await _tempBasalRepo.IsDeletedByUserAsync(id, ct)
+            || await _bolusRepo.IsDeletedByUserAsync(id, ct)
+            || await _carbIntakeRepo.IsDeletedByUserAsync(id, ct)
+            || await _bgCheckRepo.IsDeletedByUserAsync(id, ct)
+            || await _deviceEventRepo.IsDeletedByUserAsync(id, ct)
+            || await _bolusCalcRepo.IsDeletedByUserAsync(id, ct)
+            || await _noteRepo.IsDeletedByUserAsync(id, ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<Treatment>> GetByRangeAsync(
         long fromMills, long toMills, CancellationToken ct = default)
     {
