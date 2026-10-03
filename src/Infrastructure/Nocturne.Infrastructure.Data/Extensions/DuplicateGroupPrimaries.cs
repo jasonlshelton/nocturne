@@ -143,7 +143,7 @@ internal static class DuplicateGroupPrimaries
         where TEntity : class, IIdentified, ISoftDeletable =>
         ctx.ExecuteInTransactionAsync<(int, IReadOnlyList<TEntity>)>(async token =>
         {
-            var deletedAt = DateTime.UtcNow;
+            var deletedAt = NocturneDbContext.UtcNowAtStoredPrecision();
             entity.DeletedAt = deletedAt;
             List<TEntity> copies = [];
             if (recordType is { } type)

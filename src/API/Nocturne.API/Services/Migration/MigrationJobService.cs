@@ -1537,17 +1537,13 @@ internal class MigrationJob
             {
                 try
                 {
-                    var exists = await dbContext.Foods.AnyAsync(
-                        f => f.Name == (food.Name ?? "") && f.Type == (food.Type ?? "food"),
-                        ct
-                    );
-
-                    if (!exists)
+                    if (!await FoodImportBlockedAsync(dbContext, food.Id, food.Name ?? "", food.Type ?? "food", ct))
                     {
                         dbContext.Foods.Add(
                             new Infrastructure.Data.Entities.FoodEntity
                             {
                                 Id = Guid.CreateVersion7(),
+                                OriginalId = food.Id,
                                 Type = food.Type ?? "food",
                                 Category = food.Category ?? "",
                                 Subcategory = food.Subcategory ?? "",
