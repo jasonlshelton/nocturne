@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Nocturne.Infrastructure.Data;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Nocturne.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(NocturneDbContext))]
-    partial class NocturneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260927224042_AddSoftDeleteToSleepSessions")]
+    partial class AddSoftDeleteToSleepSessions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2119,10 +2122,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("timestamp");
 
-                    b.Property<string>("Type")
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
@@ -2135,10 +2134,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("Timestamp")
                         .IsDescending()
                         .HasDatabaseName("ix_heart_rates_timestamp");
-
-                    b.HasIndex("TenantId", "OriginalId")
-                        .HasDatabaseName("ix_heart_rates_tenant_original_id")
-                        .HasFilter("original_id IS NOT NULL");
 
                     b.HasIndex("TenantId", "Timestamp")
                         .HasDatabaseName("ix_heart_rates_tenant_timestamp");
@@ -4229,10 +4224,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsDescending(false, true)
                         .HasDatabaseName("ix_state_spans_category_start");
 
-                    b.HasIndex("TenantId", "Category", "UpdatedAt", "Id")
-                        .HasDatabaseName("ix_state_spans_tenant_category_updated_at")
-                        .HasFilter("deleted_at IS NULL");
-
                     b.HasIndex("TenantId", "Source", "Category", "StartTimestamp")
                         .IsDescending(false, false, false, true)
                         .HasDatabaseName("ix_state_spans_tenant_source_category_start");
@@ -4310,10 +4301,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("timestamp");
 
-                    b.Property<string>("Type")
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
@@ -4326,10 +4313,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("Timestamp")
                         .IsDescending()
                         .HasDatabaseName("ix_step_counts_timestamp");
-
-                    b.HasIndex("TenantId", "OriginalId")
-                        .HasDatabaseName("ix_step_counts_tenant_original_id")
-                        .HasFilter("original_id IS NOT NULL");
 
                     b.HasIndex("TenantId", "Timestamp")
                         .HasDatabaseName("ix_step_counts_tenant_timestamp");

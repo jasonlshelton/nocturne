@@ -1,3 +1,5 @@
+using Nocturne.Core.Models.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -363,6 +365,81 @@ public class ActivityServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_DecompositionFails_ThrowsWithoutStoringOrBroadcasting()
+    {
+        var activities = new List<Activity>
+        {
+            new() { Type = "hr-bpm", Mills = 1_780_000_000_123, AdditionalProperties = new() { ["bpm"] = 72 } },
+            new() { Type = "exercise", Mills = 1_780_000_000_000 },
+        };
+        var failure = new InvalidOperationException("decomposition failed");
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns((IEnumerable<Activity> docs) => docs);
+        _mockActivityDecomposer
+            .Setup(d => d.IsSensorData(It.IsAny<Activity>()))
+            .Returns((Activity a) => a.Type == "hr-bpm");
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(It.IsAny<Activity>(), WriteOrigin.Live, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _activityService.CreateActivitiesAsync(activities, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(failure);
+        _mockStateSpanService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()),
+            Times.Never);
+        _mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                failure,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_SleepWriteFails_ThrowsWithoutStoringOrBroadcasting()
+    {
+        var activities = new List<Activity>
+        {
+            new() { Id = "5f0c0c0c0c0c0c0c0c0c0c01", Type = "sleep", Mills = 1_780_000_000_000, Duration = 420 },
+            new() { Type = "exercise", Mills = 1_780_000_000_000 },
+        };
+        var failure = new InvalidOperationException("sleep write failed");
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns((IEnumerable<Activity> docs) => docs);
+        _mockSleepService
+            .Setup(x => x.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _activityService.CreateActivitiesAsync(activities, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(failure);
+        _mockStateSpanService.Verify(
+            x => x.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()),
+            Times.Never);
+        _mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                failure,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task CreateActivitiesAsync_ClientTimestamp_OutranksCreatedAtThroughDocumentProcessing()
     {
         var activities = System.Text.Json.JsonSerializer.Deserialize<List<Activity>>(
@@ -535,6 +612,27 @@ public class ActivityServiceTests
             x => x.DeleteActivityAsync(activityId, It.IsAny<CancellationToken>()),
             Times.Once
         );
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageDeleteAsync("activity", It.IsAny<object>()),
+            Times.Once
+        );
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task DeleteActivityAsync_OfAHeartRateOrStepCountOnly_ReturnsTrueAndBroadcasts()
+    {
+        var activityId = "60a1b2c3d4e5f67890123456";
+        _mockActivityDecomposer
+            .Setup(x => x.DeleteByLegacyIdAsync(activityId, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockStateSpanService
+            .Setup(x => x.DeleteActivityAsync(activityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _activityService.DeleteActivityAsync(activityId, CancellationToken.None);
+
+        Assert.True(result);
         _mockSignalRBroadcastService.Verify(
             x => x.BroadcastStorageDeleteAsync("activity", It.IsAny<object>()),
             Times.Once
@@ -1184,6 +1282,63 @@ public class ActivityServiceTests
             x => x.BroadcastStorageUpdateAsync("activity", It.IsAny<object>()),
             Times.Once
         );
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateActivityAsync_SleepSessionTheUserDeleted_IsRefusedAndNotBroadcast()
+    {
+        var activity = new Activity { Id = "60a1b2c3d4e5f67890123456", Type = "sleep", Duration = 480, Mills = 1234567890000 };
+        _mockSleepService
+            .Setup(s => s.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RecreationBlockedException("sleep session", "original id '60a1b2c3d4e5f67890123456'"));
+
+        var update = () => _activityService.UpdateActivityAsync(activity.Id!, activity, CancellationToken.None);
+
+        await update.Should().ThrowAsync<RecreationBlockedException>();
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageUpdateAsync(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_SleepSessionTheUserDeleted_IsNotReturnedOrBroadcast()
+    {
+        var activity = new Activity { Id = "60a1b2c3d4e5f67890123456", Type = "sleep", Duration = 480, Mills = 1234567890000 };
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns(new List<Activity> { activity });
+        _mockSleepService
+            .Setup(s => s.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RecreationBlockedException("sleep session", "original id '60a1b2c3d4e5f67890123456'"));
+
+        var result = await _activityService.CreateActivitiesAsync([activity], CancellationToken.None);
+
+        result.Should().BeEmpty();
+        _mockSignalRBroadcastService.Verify(
+            x => x.BroadcastStorageCreateAsync(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CreateActivitiesAsync_HeartRateTheUserDeleted_IsNotReturnedOrBroadcast()
+    {
+        var skipped = new Activity { Id = "60a1b2c3d4e5f67890123456", Mills = 1234567890000 };
+        var written = new Activity { Id = "60a1b2c3d4e5f67890123457", Mills = 1234567890000 };
+        _mockDocumentProcessingService
+            .Setup(x => x.ProcessDocuments(It.IsAny<IEnumerable<Activity>>()))
+            .Returns(new List<Activity> { skipped, written });
+        _mockActivityDecomposer.Setup(d => d.IsSensorData(It.IsAny<Activity>())).Returns(true);
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(skipped, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DecompositionResult { SkippedDeleted = 1 });
+        _mockActivityDecomposer
+            .Setup(d => d.DecomposeAsync(written, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DecompositionResult());
+
+        var result = await _activityService.CreateActivitiesAsync([skipped, written], CancellationToken.None);
+
+        result.Select(a => a.Id).Should().Equal(written.Id);
     }
 
     [Fact]
