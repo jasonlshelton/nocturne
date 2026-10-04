@@ -30,7 +30,9 @@ namespace Nocturne.API.Services.ChartData.Stages;
 /// </para>
 /// <para>
 /// TempBasal records are fetched in ascending order because basal series construction
-/// (in <see cref="IobCobComputeStage"/>) walks them forward in time.
+/// (in <see cref="IobCobComputeStage"/>) walks them forward in time, and from
+/// <see cref="ChartDataContext.BufferStartTime"/> like boluses so basal IOB sees temp basals that
+/// began before the window. <see cref="ChartDataContext.DisplayTempBasals"/> is the display-window subset.
 /// </para>
 /// <para>
 /// All <see cref="StateSpanCategory"/> variants are fetched in one call to
@@ -167,13 +169,14 @@ internal sealed class DataFetchStage(
             )
         ).ToList();
 
-        // Fetch TempBasal records from v4 table (ascending — needed for basal series building)
+        // Fetch TempBasal records from v4 table (ascending — needed for basal series building);
+        // extended range so basal IOB counts temp basals that started before the window
         var tempBasalList = (await tempBasalRepository.GetAsync(
-            from: MillsToDateTime(startTime),
+            from: MillsToDateTime(bufferStartTime),
             to: MillsToDateTime(endTime),
             device: null,
             source: null,
-            limit: displayRangeLimit,
+            limit: treatmentLimit,
             offset: 0,
             descending: false,
             ct: cancellationToken
@@ -255,6 +258,9 @@ internal sealed class DataFetchStage(
         var displayCarbIntakes = carbIntakeList
             .Where(c => c.Mills >= startTime && c.Mills <= endTime)
             .ToList();
+        var displayTempBasals = tempBasalList
+            .Where(tb => tb.StartMills >= startTime && tb.StartMills <= endTime)
+            .ToList();
 
         logger.LogDebug(
             "DataFetchStage: fetched {Glucose} glucose, {Bolus} bolus, {Carb} carb, {BgCheck} bg-check, {DeviceEvent} device-event, {TempBasal} temp-basal, {HeartRate} heart-rate, {StepCount} step-count, {Sleep} sleep records",
@@ -286,6 +292,7 @@ internal sealed class DataFetchStage(
             BgCheckList = bgCheckList,
             DeviceEventList = deviceEventList,
             TempBasalList = tempBasalList,
+            DisplayTempBasals = displayTempBasals,
             ApsSnapshotList = apsSnapshotList,
             BasalInjectionList = basalInjectionList,
             StateSpans = stateSpansReadOnly,

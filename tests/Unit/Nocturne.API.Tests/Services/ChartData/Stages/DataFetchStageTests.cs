@@ -241,4 +241,47 @@ public class DataFetchStageTests
         result.EndTime.Should().Be(EndTime);
         result.BufferStartTime.Should().Be(BufferStartTime);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_FetchesTempBasalsFromBufferAndSplitsDisplayWindow()
+    {
+        var beforeWindow = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 60 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 30 * 60 * 1000).UtcDateTime,
+            Rate = 3.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        var inWindow = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 60 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 90 * 60 * 1000).UtcDateTime,
+            Rate = 0.5,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        DateTime? requestedFrom = null;
+        _mockTempBasalRepo
+            .Setup(r => r.GetAsync(
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<DateTime?, DateTime?, string?, string?, int, int, bool, CancellationToken>(
+                (from, _, _, _, _, _, _, _) => requestedFrom = from)
+            .ReturnsAsync([beforeWindow, inWindow]);
+
+        var result = await _stage.ExecuteAsync(
+            new ChartDataContext
+            {
+                StartTime = StartTime,
+                EndTime = EndTime,
+                IntervalMinutes = 5,
+                BufferStartTime = BufferStartTime,
+            },
+            CancellationToken.None);
+
+        requestedFrom.Should().Be(DateTimeOffset.FromUnixTimeMilliseconds(BufferStartTime).UtcDateTime);
+        result.TempBasalList.Should().BeEquivalentTo([beforeWindow, inWindow]);
+        result.DisplayTempBasals.Should().BeEquivalentTo([inWindow]);
+    }
 }
