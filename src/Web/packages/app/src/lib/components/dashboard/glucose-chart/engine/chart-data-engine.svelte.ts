@@ -155,9 +155,9 @@ export function createChartDataEngine(
 
   // ---- Data range ----
   // How far the realtime merge may reach: the window the consumer draws, per
-  // `dataWindow`. The realtime store holds the last 1000 readings — several days
-  // of them — so merging over `fullDataRange` for a consumer that draws only the
-  // visible window hands its chart points it will never render.
+  // `dataWindow`. The realtime store holds the last day's readings, at most 1000, so merging
+  // over `fullDataRange` for a consumer that draws only the visible window hands
+  // its chart points it will never render.
   const dataRange = $derived(
     options.dataWindow === "display" ? displayDateRange : fullDataRange
   );
