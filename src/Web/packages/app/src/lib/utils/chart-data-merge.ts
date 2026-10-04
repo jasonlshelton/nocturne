@@ -10,18 +10,29 @@ export function mergeChartData(
 ): TransformedChartData {
 	if (!historical) return initial;
 
-	// Helper to merge arrays by time, avoiding duplicates
+	// An empty id is a missing one: markers keyed by it would collide on "".
+	const hasId = (id: unknown) => id != null && id !== '';
+
+	// Helper to merge arrays by time, avoiding duplicates. Markers that render keyed by
+	// id also drop a historical row whose id the initial window already holds, since a
+	// treatment moved across the boundary between the two fetches appears in both.
 	const timeValue = (value: unknown) => (value instanceof Date ? value.getTime() : value);
 	const mergeByTime = <T,>(
 		initialArr: T[],
 		historicalArr: T[],
-		timeOf: (item: T) => unknown
+		timeOf: (item: T) => unknown,
+		idOf?: (item: T) => unknown
 	): T[] => {
 		if (!initialArr || !historicalArr) return initialArr || historicalArr || [];
 		const initialTimes = new Set(initialArr.map((item) => timeValue(timeOf(item))));
+		const initialIds = new Set(
+			idOf ? initialArr.map((item) => idOf(item)).filter(hasId) : []
+		);
 		const uniqueHistorical = historicalArr.filter((item) => {
 			const time = timeValue(timeOf(item));
-			return !initialTimes.has(time);
+			if (initialTimes.has(time)) return false;
+			const id = idOf?.(item);
+			return !(hasId(id) && initialIds.has(id));
 		});
 		return [...uniqueHistorical, ...initialArr];
 	};
@@ -63,10 +74,15 @@ export function mergeChartData(
 		stepSeries: mergeByTime(initial.stepSeries, historical.stepSeries, (p) => p.time),
 
 		// Merge markers (keyed by time)
-		bolusMarkers: mergeByTime(initial.bolusMarkers, historical.bolusMarkers, (p) => p.time),
-		carbMarkers: mergeByTime(initial.carbMarkers, historical.carbMarkers, (p) => p.time),
-		deviceEventMarkers: mergeByTime(initial.deviceEventMarkers, historical.deviceEventMarkers, (p) => p.time),
-		bgCheckMarkers: mergeByTime(initial.bgCheckMarkers, historical.bgCheckMarkers, (p) => p.time),
+		bolusMarkers: mergeByTime(initial.bolusMarkers, historical.bolusMarkers, (p) => p.time, (p) => p.treatmentId),
+		carbMarkers: mergeByTime(initial.carbMarkers, historical.carbMarkers, (p) => p.time, (p) => p.treatmentId),
+		deviceEventMarkers: mergeByTime(
+			initial.deviceEventMarkers,
+			historical.deviceEventMarkers,
+			(p) => p.time,
+			(p) => p.treatmentId
+		),
+		bgCheckMarkers: mergeByTime(initial.bgCheckMarkers, historical.bgCheckMarkers, (p) => p.time, (p) => p.treatmentId),
 
 		// Merge markers and spans keyed by id in {#each} blocks — must dedup by id
 		systemEventMarkers: mergeSpansById(initial.systemEventMarkers, historical.systemEventMarkers),
@@ -108,9 +124,10 @@ export function mergeChartData(
 /**
  * Swap the window starting at `startTime` for a fresh fetch of it, leaving older
  * rows alone. Unlike `mergeChartData`, rows inside the window that the server no
- * longer returns (a deleted or moved treatment) do not survive. A treatment moved
- * to before `startTime` is therefore dropped until the next full load, and fresh
- * rows before it are ignored since older rows already hold them.
+ * longer returns (a deleted or moved treatment) do not survive. Markers keyed by id
+ * also drop an older copy of an id the fresh set holds, so a treatment moved from
+ * before `startTime` into the window is not drawn twice. One moved out of the window
+ * disappears until the next full load: fresh rows before `startTime` are ignored.
  */
 export function replaceWindow(
 	current: TransformedChartData,
@@ -118,12 +135,25 @@ export function replaceWindow(
 	startTime: number
 ): TransformedChartData {
 	const ms = (value: unknown) => (value instanceof Date ? value.getTime() : Number(value));
-	const swap = <T,>(older: T[], fresh: T[], timeOf: (item: T) => unknown): T[] => [
-		...older.filter((item) => ms(timeOf(item)) < startTime),
-		...fresh
-			.filter((item) => ms(timeOf(item)) >= startTime)
-			.sort((a, b) => ms(timeOf(a)) - ms(timeOf(b))),
-	];
+	const hasId = (id: unknown) => id != null && id !== '';
+	const swap = <T,>(
+		older: T[],
+		fresh: T[],
+		timeOf: (item: T) => unknown,
+		idOf?: (item: T) => unknown
+	): T[] => {
+		const freshIds = new Set(idOf ? fresh.map((item) => idOf(item)).filter(hasId) : []);
+		return [
+			...older.filter((item) => {
+				if (ms(timeOf(item)) >= startTime) return false;
+				const id = idOf?.(item);
+				return !(hasId(id) && freshIds.has(id));
+			}),
+			...fresh
+				.filter((item) => ms(timeOf(item)) >= startTime)
+				.sort((a, b) => ms(timeOf(a)) - ms(timeOf(b))),
+		];
+	};
 	// A span that began before the window and is still running comes back in the
 	// fresh fetch under the same id, so ids in the fresh set replace the old row too.
 	const swapSpans = <T extends { id?: unknown; startTime: Date }>(
@@ -159,16 +189,27 @@ export function replaceWindow(
 		glucoseData,
 		heartRateSeries: swap(current.heartRateSeries, recent.heartRateSeries, (p) => p.time),
 		stepSeries: swap(current.stepSeries, recent.stepSeries, (p) => p.time),
-		bolusMarkers: swap(current.bolusMarkers, recent.bolusMarkers, (p) => p.time),
-		carbMarkers: swap(current.carbMarkers, recent.carbMarkers, (p) => p.time),
-		deviceEventMarkers: swap(current.deviceEventMarkers, recent.deviceEventMarkers, (p) => p.time),
-		bgCheckMarkers: swap(current.bgCheckMarkers, recent.bgCheckMarkers, (p) => p.time),
-		systemEventMarkers: swap(current.systemEventMarkers, recent.systemEventMarkers, (p) => p.time),
-		trackerMarkers: swap(current.trackerMarkers, recent.trackerMarkers, (p) => p.time),
+		bolusMarkers: swap(current.bolusMarkers, recent.bolusMarkers, (p) => p.time, (p) => p.treatmentId),
+		carbMarkers: swap(current.carbMarkers, recent.carbMarkers, (p) => p.time, (p) => p.treatmentId),
+		deviceEventMarkers: swap(
+			current.deviceEventMarkers,
+			recent.deviceEventMarkers,
+			(p) => p.time,
+			(p) => p.treatmentId
+		),
+		bgCheckMarkers: swap(current.bgCheckMarkers, recent.bgCheckMarkers, (p) => p.time, (p) => p.treatmentId),
+		systemEventMarkers: swap(
+			current.systemEventMarkers,
+			recent.systemEventMarkers,
+			(p) => p.time,
+			(p) => p.id
+		),
+		trackerMarkers: swap(current.trackerMarkers, recent.trackerMarkers, (p) => p.time, (p) => p.id),
 		basalInjectionMarkers: swap(
 			current.basalInjectionMarkers,
 			recent.basalInjectionMarkers,
-			(p) => p.time
+			(p) => p.time,
+			(p) => p.id
 		),
 		pumpModeSpans: swapSpans(current.pumpModeSpans, recent.pumpModeSpans),
 		profileSpans: swapSpans(current.profileSpans, recent.profileSpans),

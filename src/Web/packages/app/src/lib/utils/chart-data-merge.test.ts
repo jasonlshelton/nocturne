@@ -221,4 +221,62 @@ describe("replaceWindow", () => {
 
     expect(result.bolusMarkers.map((m) => m.insulin)).toEqual([2, 3]);
   });
+
+  it("draws a treatment moved from before the window into it once", () => {
+    const marker = (iso: string, treatmentId: string) =>
+      ({ time: T(iso), insulin: 2, treatmentId }) as never;
+    const result = replaceWindow(
+      chartData({ bolusMarkers: [marker("2026-08-29T03:00:00Z", "t1")] }),
+      chartData({ bolusMarkers: [marker("2026-08-29T11:00:00Z", "t1")] }),
+      start
+    );
+
+    expect(result.bolusMarkers.map((m) => m.treatmentId)).toEqual(["t1"]);
+    expect(result.bolusMarkers[0].time.toISOString()).toBe("2026-08-29T11:00:00.000Z");
+  });
+
+  it("does the same for markers keyed by id", () => {
+    const tracker = (iso: string, id: string) => ({ id, time: T(iso) }) as never;
+    const result = replaceWindow(
+      chartData({ trackerMarkers: [tracker("2026-08-29T03:00:00Z", "k1")] }),
+      chartData({ trackerMarkers: [tracker("2026-08-29T11:00:00Z", "k1")] }),
+      start
+    );
+
+    expect(result.trackerMarkers).toHaveLength(1);
+  });
+
+  it("keeps older markers whose ids are empty", () => {
+    const marker = (iso: string) => ({ time: T(iso), insulin: 1, treatmentId: "" }) as never;
+    const result = replaceWindow(
+      chartData({ bolusMarkers: [marker("2026-08-29T03:00:00Z")] }),
+      chartData({ bolusMarkers: [marker("2026-08-29T11:00:00Z")] }),
+      start
+    );
+
+    expect(result.bolusMarkers).toHaveLength(2);
+  });
+});
+
+describe("mergeChartData treatments across the boundary", () => {
+  const marker = (iso: string, treatmentId: string) =>
+    ({ time: new Date(iso), insulin: 2, treatmentId }) as never;
+
+  it("draws a treatment that moved across the boundary between the two fetches once", () => {
+    const merged = mergeChartData(
+      chartData({ bolusMarkers: [marker("2026-08-29T10:00:00Z", "t1")] }),
+      chartData({ bolusMarkers: [marker("2026-08-29T04:00:00Z", "t1")] })
+    );
+
+    expect(merged.bolusMarkers).toHaveLength(1);
+  });
+
+  it("keeps historical markers that have no id", () => {
+    const merged = mergeChartData(
+      chartData({ bolusMarkers: [marker("2026-08-29T10:00:00Z", "")] }),
+      chartData({ bolusMarkers: [marker("2026-08-29T04:00:00Z", "")] })
+    );
+
+    expect(merged.bolusMarkers).toHaveLength(2);
+  });
 });
