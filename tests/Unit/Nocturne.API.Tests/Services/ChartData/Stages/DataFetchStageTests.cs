@@ -252,6 +252,20 @@ public class DataFetchStageTests
             Rate = 3.0,
             Origin = TempBasalOrigin.Algorithm,
         };
+        var runningAcrossStart = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 5 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 25 * 60 * 1000).UtcDateTime,
+            Rate = 2.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        var atStart = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 10 * 60 * 1000).UtcDateTime,
+            Rate = 1.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
         var inWindow = new TempBasal
         {
             StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 60 * 60 * 1000).UtcDateTime,
@@ -260,6 +274,8 @@ public class DataFetchStageTests
             Origin = TempBasalOrigin.Algorithm,
         };
         DateTime? requestedFrom = null;
+        int requestedLimit = 0;
+        bool requestedDescending = true;
         _mockTempBasalRepo
             .Setup(r => r.GetAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
@@ -267,8 +283,13 @@ public class DataFetchStageTests
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .Callback<DateTime?, DateTime?, string?, string?, int, int, bool, CancellationToken>(
-                (from, _, _, _, _, _, _, _) => requestedFrom = from)
-            .ReturnsAsync([beforeWindow, inWindow]);
+                (from, _, _, _, limit, _, descending, _) =>
+                {
+                    requestedFrom = from;
+                    requestedLimit = limit;
+                    requestedDescending = descending;
+                })
+            .ReturnsAsync([beforeWindow, runningAcrossStart, atStart, inWindow]);
 
         var result = await _stage.ExecuteAsync(
             new ChartDataContext
@@ -281,7 +302,9 @@ public class DataFetchStageTests
             CancellationToken.None);
 
         requestedFrom.Should().Be(DateTimeOffset.FromUnixTimeMilliseconds(BufferStartTime).UtcDateTime);
-        result.TempBasalList.Should().BeEquivalentTo([beforeWindow, inWindow]);
-        result.DisplayTempBasals.Should().BeEquivalentTo([inWindow]);
+        requestedLimit.Should().Be(Nocturne.API.Services.Analytics.ChartDataService.TempBasalQueryLimit);
+        requestedDescending.Should().BeFalse();
+        result.TempBasalList.Should().BeEquivalentTo([beforeWindow, runningAcrossStart, atStart, inWindow]);
+        result.DisplayTempBasals.Should().BeEquivalentTo([atStart, inWindow]);
     }
 }

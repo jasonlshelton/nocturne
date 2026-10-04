@@ -29,10 +29,11 @@ namespace Nocturne.API.Services.ChartData.Stages;
 /// <see cref="ChartDataContext.DisplayCarbIntakes"/> are derived subsets trimmed to the display window.
 /// </para>
 /// <para>
-/// TempBasal records are fetched in ascending order because basal series construction
-/// (in <see cref="IobCobComputeStage"/>) walks them forward in time, and from
-/// <see cref="ChartDataContext.BufferStartTime"/> like boluses so basal IOB sees temp basals that
-/// began before the window. <see cref="ChartDataContext.DisplayTempBasals"/> is the display-window subset.
+/// TempBasal records are fetched from <see cref="ChartDataContext.BufferStartTime"/> like boluses so
+/// basal IOB sees temp basals that began before the window, under the same cap as
+/// <see cref="Nocturne.API.Services.Analytics.ChartDataService"/> because the ascending read truncates the newest
+/// rows. Consumers sort for themselves. <see cref="ChartDataContext.DisplayTempBasals"/> is the
+/// display-window subset.
 /// </para>
 /// <para>
 /// All <see cref="StateSpanCategory"/> variants are fetched in one call to
@@ -169,14 +170,12 @@ internal sealed class DataFetchStage(
             )
         ).ToList();
 
-        // Fetch TempBasal records from v4 table (ascending — needed for basal series building);
-        // extended range so basal IOB counts temp basals that started before the window
         var tempBasalList = (await tempBasalRepository.GetAsync(
             from: MillsToDateTime(bufferStartTime),
             to: MillsToDateTime(endTime),
             device: null,
             source: null,
-            limit: treatmentLimit,
+            limit: Nocturne.API.Services.Analytics.ChartDataService.TempBasalQueryLimit,
             offset: 0,
             descending: false,
             ct: cancellationToken
