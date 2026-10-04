@@ -349,6 +349,7 @@ public class DataFetchStageTests
         {
             InterlockedMax(ref maxInFlight, Interlocked.Increment(ref inFlight));
             await release.Task;
+            await Task.Yield();
             Interlocked.Decrement(ref inFlight);
             return result;
         }
