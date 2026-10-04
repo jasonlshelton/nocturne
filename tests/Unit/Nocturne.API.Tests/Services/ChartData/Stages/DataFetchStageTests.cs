@@ -337,4 +337,67 @@ public class DataFetchStageTests
         result.DisplayBoluses.Should().ContainSingle();
         result.StateSpans.Should().HaveCount(6);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_NeverOverlapsScopedContextReads()
+    {
+        var inFlight = 0;
+        var maxInFlight = 0;
+
+        async Task<T> Tracked<T>(T result)
+        {
+            var now = Interlocked.Increment(ref inFlight);
+            InterlockedMax(ref maxInFlight, now);
+            await Task.Delay(10);
+            Interlocked.Decrement(ref inFlight);
+            return result;
+        }
+
+        _mockStateSpanRepo
+            .Setup(r => r.GetByCategories(
+                It.IsAny<IEnumerable<StateSpanCategory>>(), It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked(new Dictionary<StateSpanCategory, List<StateSpan>>()));
+        _mockSystemEventRepo
+            .Setup(r => r.GetSystemEventsAsync(
+                It.IsAny<SystemEventType?>(), It.IsAny<SystemEventCategory?>(),
+                It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked<IEnumerable<SystemEvent>>(Array.Empty<SystemEvent>()));
+        _mockTrackerRepo
+            .Setup(r => r.GetAllDefinitionsAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked(new List<TrackerDefinitionEntity>()));
+        _mockTrackerRepo
+            .Setup(r => r.GetActiveInstancesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked(Array.Empty<TrackerInstanceEntity>()));
+        _mockHeartRateService
+            .Setup(s => s.GetHeartRatesByDateRangeAsync(
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int?>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked<IEnumerable<HeartRate>>(Array.Empty<HeartRate>()));
+        _mockStepCountService
+            .Setup(s => s.GetStepCountsByDateRangeAsync(
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int?>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() => Tracked<IEnumerable<StepCount>>(Array.Empty<StepCount>()));
+
+        await _stage.ExecuteAsync(
+            new ChartDataContext
+            {
+                StartTime = StartTime,
+                EndTime = EndTime,
+                IntervalMinutes = 5,
+                BufferStartTime = BufferStartTime,
+            },
+            CancellationToken.None);
+
+        maxInFlight.Should().Be(1);
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref target))
+               && Interlocked.CompareExchange(ref target, value, current) != current) { }
+    }
 }

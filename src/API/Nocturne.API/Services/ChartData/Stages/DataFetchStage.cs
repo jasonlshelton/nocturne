@@ -82,9 +82,6 @@ internal sealed class DataFetchStage(
         var treatmentLimit = (int)Math.Max(500, Math.Ceiling(treatmentRangeHours * 10));
         var displayRangeLimit = (int)Math.Max(500, Math.Ceiling(rangeHours * 10));
 
-        // Factory-backed reads each open their own context, so they are started together and
-        // awaited after the scoped-context reads below.
-
         // Fetch glucose data from v4 SensorGlucose table; the dashboard renders the canonical
         // stream, not blended concurrent CGMs.
         var sensorGlucoseTask = FetchCanonicalGlucoseAsync();
@@ -187,7 +184,6 @@ internal sealed class DataFetchStage(
             ct: cancellationToken
         );
 
-        // Sleep sessions
         var sleepSessionTask = sleepService.GetSessionsAsync(
             from: MillsToDateTime(startTime),
             to: MillsToDateTime(endTime),
@@ -195,8 +191,6 @@ internal sealed class DataFetchStage(
             cancellationToken: cancellationToken
         );
 
-        // These share the request-scoped DbContext, which is not thread-safe, so they stay
-        // sequential within this one task.
         async Task<ChartDataContext> FetchScopedContextReadsAsync()
         {
             var stateSpanCategories = new[]
@@ -216,7 +210,6 @@ internal sealed class DataFetchStage(
                 cancellationToken
             );
 
-            // System events
             var systemEventsResult = await systemEventRepository.GetSystemEventsAsync(
                 eventType: null,
                 category: null,
@@ -228,21 +221,18 @@ internal sealed class DataFetchStage(
                 cancellationToken: cancellationToken
             );
 
-            // Tracker data
             var trackerDefs = await trackerRepository.GetAllDefinitionsAsync(cancellationToken);
             var trackerInstances = await trackerRepository.GetActiveInstancesAsync(
                 userId: null,
                 cancellationToken: cancellationToken
             );
 
-            // Heart rate data
             var heartRateList = (await heartRateService.GetHeartRatesByDateRangeAsync(
                 MillsToDateTime(startTime)!.Value,
                 MillsToDateTime(endTime)!.Value,
                 cancellationToken: cancellationToken
             )).ToList();
 
-            // Step count data
             var stepCountList = (await stepCountService.GetStepCountsByDateRangeAsync(
                 MillsToDateTime(startTime)!.Value,
                 MillsToDateTime(endTime)!.Value,
