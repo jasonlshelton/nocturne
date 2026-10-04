@@ -108,7 +108,8 @@ export function mergeChartData(
 /**
  * Swap the window starting at `startTime` for a fresh fetch of it, leaving older
  * rows alone. Unlike `mergeChartData`, rows inside the window that the server no
- * longer returns (a deleted or moved treatment) do not survive.
+ * longer returns (a deleted or moved treatment) do not survive. A treatment moved
+ * to before `startTime` is therefore dropped until the next full load.
  */
 export function replaceWindow(
 	current: TransformedChartData,
@@ -137,6 +138,11 @@ export function replaceWindow(
 	const peak = (floor: number, values: Iterable<number | undefined>) =>
 		Math.max(floor, ...Array.from(values, (v) => v ?? 0));
 
+	const glucoseData = swap(current.glucoseData, recent.glucoseData, (p) => p.time);
+	const glucoseYMax = peak(
+		recent.thresholds.glucoseYMax,
+		glucoseData.map((p) => p.sgv)
+	);
 	const iobSeries = swap(current.iobSeries, recent.iobSeries, (p) => p.time);
 	const cobSeries = swap(current.cobSeries, recent.cobSeries, (p) => p.time);
 	const basalSeries = swap(current.basalSeries, recent.basalSeries, (p) => p.timestamp);
@@ -145,7 +151,7 @@ export function replaceWindow(
 		iobSeries,
 		cobSeries,
 		basalSeries,
-		glucoseData: swap(current.glucoseData, recent.glucoseData, (p) => p.time),
+		glucoseData,
 		heartRateSeries: swap(current.heartRateSeries, recent.heartRateSeries, (p) => p.time),
 		stepSeries: swap(current.stepSeries, recent.stepSeries, (p) => p.time),
 		bolusMarkers: swap(current.bolusMarkers, recent.bolusMarkers, (p) => p.time),
@@ -166,10 +172,7 @@ export function replaceWindow(
 		tempBasalSpans: swapSpans(current.tempBasalSpans, recent.tempBasalSpans),
 		basalDeliverySpans: swapSpans(current.basalDeliverySpans, recent.basalDeliverySpans),
 		defaultBasalRate: current.defaultBasalRate,
-		thresholds: {
-			...current.thresholds,
-			glucoseYMax: Math.max(current.thresholds.glucoseYMax, recent.thresholds.glucoseYMax),
-		},
+		thresholds: { ...current.thresholds, glucoseYMax },
 		maxIob: peak(recent.maxIob ?? 0, iobSeries.map((p) => p.value)),
 		maxCob: peak(recent.maxCob ?? 0, cobSeries.map((p) => p.value)),
 		maxBasalRate: peak(recent.maxBasalRate ?? 0, basalSeries.map((p) => p.rate ?? undefined)),

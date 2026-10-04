@@ -1,5 +1,5 @@
 import { render } from "vitest-browser-svelte";
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 vi.mock("$api/chart-data.remote", () => ({
   getChartData: vi.fn(() => {
@@ -269,9 +269,14 @@ describe("chart data engine — SSR data refresh", () => {
   it("refreshes on the 5-minute fallback, not on each minute, and re-arms after a data refresh", async () => {
     const { store } = await mount();
 
-    await vi.advanceTimersByTimeAsync(4 * MINUTE);
-    expect(calls()).toBe(0);
-    await vi.advanceTimersByTimeAsync(1 * MINUTE + SECOND);
+    // The harness never starts the store's clock, so tick it by hand as production does.
+    for (let minute = 0; minute < 4; minute++) {
+      await vi.advanceTimersByTimeAsync(MINUTE);
+      store.now = Date.now();
+      flushSync();
+      expect(calls()).toBe(0);
+    }
+    await vi.advanceTimersByTimeAsync(MINUTE + SECOND);
     expect(calls()).toBe(1);
 
     store.boluses = [{ id: "a" }];
@@ -303,5 +308,64 @@ describe("chart data engine — SSR data refresh", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(engine.serverChartData?.bolusMarkers).toHaveLength(1);
+  });
+
+  it("refreshes when a treatment is edited or deleted, which the store's arrays never show", async () => {
+    const { store } = await mount();
+    const receive = (kind: "handleCreate" | "handleUpdate" | "handleDelete") =>
+      (store as unknown as Record<string, (e: unknown) => void>)[kind]({
+        colName: "treatments",
+        doc: { _id: "t1" },
+      });
+
+    receive("handleUpdate");
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    expect(calls()).toBe(1);
+    receive("handleDelete");
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    expect(calls()).toBe(2);
+    receive("handleCreate");
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    expect(calls()).toBe(3);
+  });
+
+  describe("in a hidden tab", () => {
+    let visibility = "visible";
+    const setVisibility = (value: "visible" | "hidden") => {
+      visibility = value;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    beforeEach(() => {
+      visibility = "visible";
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibility,
+      });
+    });
+    afterEach(() => {
+      Reflect.deleteProperty(document, "visibilityState");
+    });
+
+    it("skips the fallback fetch and refreshes once the tab is visible again", async () => {
+      await mount();
+      setVisibility("hidden");
+
+      await vi.advanceTimersByTimeAsync(11 * MINUTE);
+      expect(calls()).toBe(0);
+
+      setVisibility("visible");
+      await vi.advanceTimersByTimeAsync(3 * SECOND);
+      expect(calls()).toBe(1);
+    });
+
+    it("does not refresh on becoming visible when nothing was skipped", async () => {
+      await mount();
+      setVisibility("hidden");
+      setVisibility("visible");
+      await vi.advanceTimersByTimeAsync(3 * SECOND);
+
+      expect(calls()).toBe(0);
+    });
   });
 });

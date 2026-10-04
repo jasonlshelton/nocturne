@@ -194,4 +194,19 @@ describe("replaceWindow", () => {
 
     expect(result.maxIob).toBe(2);
   });
+
+  it("sizes the glucose axis from the fresh response and the readings that remain", () => {
+    const reading = (iso: string, sgv: number) =>
+      ({ time: T(iso), sgv, color: "" }) as never;
+    const result = replaceWindow(
+      chartData({
+        glucoseData: [reading("2026-08-29T08:00:00Z", 250), reading("2026-08-29T11:00:00Z", 400)],
+        thresholds: thresholds({ glucoseYMax: 400 }),
+      }),
+      chartData({ thresholds: thresholds({ glucoseYMax: 180 }) }),
+      start
+    );
+
+    expect(result.thresholds.glucoseYMax).toBe(250);
+  });
 });

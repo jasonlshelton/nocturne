@@ -307,12 +307,13 @@ export function createChartDataEngine(
   });
 
   // The effect above never refetches SSR data and realtime streams only glucose,
-  // so IOB, COB, basal and treatment markers are refreshed here. The store's
-  // treatment and device arrays change on its backfill (focus, reconnect, stale
-  // poll), which is the trigger; the timer covers IOB decaying with no new data.
+  // so IOB, COB, basal and treatment markers are refreshed here. Triggers: realtime
+  // devicestatus creates (the AID cadence), treatment events via `treatmentRevision`,
+  // and the store's backfill; the timer covers IOB decaying with no new data.
   const dataFingerprint = $derived(
     options.initialChartData
       ? [
+          realtimeStore.treatmentRevision,
           fingerprint(realtimeStore.boluses),
           fingerprint(realtimeStore.carbIntakes),
           fingerprint(realtimeStore.bgChecks),
@@ -327,6 +328,7 @@ export function createChartDataEngine(
   let refreshSeq = 0;
   let disposed = false;
   let seenFingerprint: string | null = null;
+  let skippedWhileHidden = false;
 
   function scheduleRefresh() {
     clearTimeout(debounceTimer);
@@ -336,6 +338,12 @@ export function createChartDataEngine(
   function refreshRecent() {
     clearTimeout(fallbackTimer);
     fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
+
+    if (document.visibilityState === "hidden") {
+      skippedWhileHidden = true;
+      return;
+    }
+    skippedWhileHidden = false;
 
     const seq = ++refreshSeq;
     const end = Math.ceil(Date.now() / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
@@ -357,7 +365,6 @@ export function createChartDataEngine(
     // The store's own initial load rewrites these arrays; SSR data predates it by seconds.
     if (seenFingerprint === null) {
       seenFingerprint = dataFingerprint;
-      fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
       return;
     }
     if (dataFingerprint === seenFingerprint) return;
@@ -365,10 +372,21 @@ export function createChartDataEngine(
     scheduleRefresh();
   });
 
-  $effect(() => () => {
-    disposed = true;
-    clearTimeout(debounceTimer);
-    clearTimeout(fallbackTimer);
+  $effect(() => {
+    if (!isBrowser || !options.initialChartData) return;
+
+    fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && skippedWhileHidden) scheduleRefresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      disposed = true;
+      clearTimeout(debounceTimer);
+      clearTimeout(fallbackTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   });
 
   // Check prediction service availability on mount
