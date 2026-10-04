@@ -84,7 +84,7 @@ internal sealed class DataFetchStage(
         // stream, not blended concurrent CGMs.
         var sensorGlucoseList = (
             await canonicalGlucose.SelectAsync(
-                (await sensorGlucoseRepository.GetAsync(
+                (await sensorGlucoseRepository.GetForAnalyticsAsync(
                     from: MillsToDateTime(startTime),
                     to: MillsToDateTime(endTime),
                     device: null,
