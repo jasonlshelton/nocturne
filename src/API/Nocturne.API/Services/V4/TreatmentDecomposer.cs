@@ -1165,12 +1165,11 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (treatment.Duration is { } duration)
             metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
 
-        foreach (var key in LegacyTreatmentTables.UploadedOverrideFields)
-        {
-            if (treatment.AdditionalProperties?.GetValueOrDefault(key) is { } value
-                && value is not JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined })
-                metadata[key] = value is JsonElement element ? element.Clone() : value;
-        }
+        var uploaded = LegacyTreatmentTables.UploadedOverrideFields
+            .Select(key => (Key: key, Value: treatment.AdditionalProperties?.GetValueOrDefault(key)))
+            .Where(field => field.Value is not (null or JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined }));
+        foreach (var (key, value) in uploaded)
+            metadata[key] = value is JsonElement element ? element.Clone() : value!;
 
         AddServedTreatmentFields(metadata, treatment);
 

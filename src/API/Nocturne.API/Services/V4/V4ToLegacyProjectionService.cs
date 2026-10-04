@@ -245,17 +245,13 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     {
         foreach (var table in LegacyTreatmentTables.StateSpanTables)
         {
-            var row = await FetchSafe(table, async _ =>
-            {
-                var span = await MatchingId(table.Rows(_dbContext), id)
-                    .OrderBy(s => s.OriginalId == id ? 0 : 1)
-                    .ThenBy(s => s.Id)
-                    .FirstOrDefaultAsync(ct);
-                return span is null ? (FetchedRecord?)null : table.Fetched(span);
-            }, null);
+            var span = await MatchingId(table.Rows(_dbContext), id)
+                .OrderBy(s => s.OriginalId == id ? 0 : 1)
+                .ThenBy(s => s.Id)
+                .FirstOrDefaultAsync(ct);
 
-            if (row is not null)
-                return row;
+            if (span is not null)
+                return table.Fetched(span);
         }
 
         return null;
@@ -415,7 +411,11 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
         Func<ILegacyTreatmentTable, Task<IReadOnlyList<FetchedRecord>>> fetch
     ) => FetchSafe(table, fetch, []);
 
-    /// <summary>A read of one type that fails logs and yields <paramref name="fallback"/>.</summary>
+    /// <summary>
+    /// A read of one type the database provider cannot translate logs and yields
+    /// <paramref name="fallback"/>, so the other types still serve. Any other failure, a cancellation
+    /// included, propagates.
+    /// </summary>
     private async Task<T> FetchSafe<T>(
         ILegacyTreatmentTable table,
         Func<ILegacyTreatmentTable, Task<T>> fetch,
@@ -426,7 +426,7 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
         {
             return await fetch(table);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex) when (ex is not ObjectDisposedException)
         {
             _logger.LogError(
                 ex,

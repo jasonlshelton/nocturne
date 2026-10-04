@@ -481,14 +481,13 @@ internal static class LegacyTreatmentTables
     private static Dictionary<string, object>? UploadedFields(
         IDictionary<string, object>? metadata, IEnumerable<string> keys)
     {
-        Dictionary<string, object>? fields = null;
-        foreach (var key in keys)
-        {
-            if (metadata is not null && metadata.TryGetValue(key, out var value) && value is not null)
-                (fields ??= [])[key] = value;
-        }
+        if (metadata is null)
+            return null;
 
-        return fields;
+        var fields = keys
+            .Where(key => metadata.TryGetValue(key, out var value) && value is not null)
+            .ToDictionary(key => key, key => metadata[key]);
+        return fields.Count > 0 ? fields : null;
     }
 
     /// <summary>Metadata key for a temporary target's <c>eventType</c> when it is not "Temporary Target".</summary>

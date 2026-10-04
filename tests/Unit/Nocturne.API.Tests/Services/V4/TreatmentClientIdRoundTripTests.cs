@@ -52,7 +52,7 @@ public class TreatmentClientIdRoundTripTests : IDisposable
 
     public TreatmentClientIdRoundTripTests()
     {
-        _db = TestDbContextFactory.CreateSqliteWithTenant(TenantId);
+        _db = TestDbContextFactory.CreateSqliteWithTenant(TenantId, SqliteNpgsqlJson.Translate);
         _context = _db.CreateContext();
 
         IAuditContext apiSecretCaller = new AuditContext
