@@ -239,7 +239,6 @@ internal sealed class DataFetchStage(
                 cancellationToken: cancellationToken
             )).ToList();
 
-            // Project Dictionary<K, List<V>> to IReadOnlyDictionary<K, IEnumerable<V>>
             var stateSpansReadOnly = allStateSpans
                 .ToDictionary(
                     kvp => kvp.Key,

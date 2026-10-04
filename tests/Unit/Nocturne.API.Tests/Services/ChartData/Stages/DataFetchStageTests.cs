@@ -343,12 +343,12 @@ public class DataFetchStageTests
     {
         var inFlight = 0;
         var maxInFlight = 0;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         async Task<T> Tracked<T>(T result)
         {
-            var now = Interlocked.Increment(ref inFlight);
-            InterlockedMax(ref maxInFlight, now);
-            await Task.Delay(10);
+            InterlockedMax(ref maxInFlight, Interlocked.Increment(ref inFlight));
+            await release.Task;
             Interlocked.Decrement(ref inFlight);
             return result;
         }
@@ -381,7 +381,7 @@ public class DataFetchStageTests
                 It.IsAny<CancellationToken>()))
             .Returns(() => Tracked<IEnumerable<StepCount>>(Array.Empty<StepCount>()));
 
-        await _stage.ExecuteAsync(
+        var run = _stage.ExecuteAsync(
             new ChartDataContext
             {
                 StartTime = StartTime,
@@ -390,6 +390,8 @@ public class DataFetchStageTests
                 BufferStartTime = BufferStartTime,
             },
             CancellationToken.None);
+        release.SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
 
         maxInFlight.Should().Be(1);
     }
