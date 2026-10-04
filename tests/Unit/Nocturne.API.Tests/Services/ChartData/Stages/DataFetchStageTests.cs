@@ -71,7 +71,7 @@ public class DataFetchStageTests
     {
         // ISensorGlucoseRepository.GetAsync
         _mockSensorGlucoseRepo
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),

@@ -83,7 +83,7 @@ public class StatisticsControllerTests
 
     private void SetupGlucose(IEnumerable<SensorGlucose> readings) =>
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -180,7 +180,7 @@ public class StatisticsControllerTests
         analysedEntries.Should().HaveCount(12_000);
 
         // The glucose fetch requests an uncapped limit.
-        _glucoseRepoMock.Verify(r => r.GetAsync(
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
             It.IsAny<string?>(), It.IsAny<string?>(),
             int.MaxValue, It.IsAny<int>(), It.IsAny<bool>(),
@@ -681,7 +681,7 @@ public class StatisticsControllerTests
         patterns.TimeZoneUnavailableReason.Should().BeNull();
         usedEntries.Should().BeEquivalentTo(canonical);
         usedTz.Should().Be(TimeZoneHelper.GetTimeZoneInfoFromId("Europe/Stockholm"));
-        _glucoseRepoMock.Verify(r => r.GetAsync(
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
             It.IsAny<string?>(), It.IsAny<string?>(),
             int.MaxValue, It.IsAny<int>(), It.IsAny<bool>(),
@@ -1078,7 +1078,7 @@ public class StatisticsControllerTests
             .ReturnsAsync("Europe/Stockholm");
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1135,7 +1135,7 @@ public class StatisticsControllerTests
             .ReturnsAsync("Australia/Sydney");
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1175,7 +1175,7 @@ public class StatisticsControllerTests
             .ToArray();
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1225,7 +1225,7 @@ public class StatisticsControllerTests
         };
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1271,7 +1271,7 @@ public class StatisticsControllerTests
         };
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1399,7 +1399,7 @@ public class StatisticsControllerTests
             int.MaxValue, It.IsAny<int>(), false,
             It.IsAny<bool>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        _glucoseRepoMock.Verify(r => r.GetAsync(
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
             It.IsAny<string?>(), It.IsAny<string?>(),
             int.MaxValue, It.IsAny<int>(), false,
@@ -1421,7 +1421,7 @@ public class StatisticsControllerTests
             .ToArray();
 
         _glucoseRepoMock
-            .Setup(r => r.GetAsync(
+            .Setup(r => r.GetForAnalyticsAsync(
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
@@ -1595,7 +1595,7 @@ public class StatisticsControllerTests
             It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
             It.IsAny<bool>(), It.IsAny<Guid?>(), token), Times.Once);
 
-        _glucoseRepoMock.Verify(r => r.GetAsync(
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
             It.IsAny<string?>(), It.IsAny<string?>(),
             It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
