@@ -3180,16 +3180,23 @@ public class StatisticsService : IStatisticsService
             if (changeTime == 0)
                 continue;
 
-            // Find glucose readings in the window around this site change
             var windowStart = changeTime - (minutesBefore * 60 * 1000); // Convert minutes to milliseconds
             var windowEnd = changeTime + (minutesAfter * 60 * 1000);
 
-            var windowEntries = entriesList
-                .Where(e => e.Mills >= windowStart && e.Mills <= windowEnd)
-                .ToList();
-
-            foreach (var entry in windowEntries)
+            var left = 0;
+            var right = entriesList.Count;
+            while (left < right)
             {
+                var middle = left + (right - left) / 2;
+                if (entriesList[middle].Mills < windowStart)
+                    left = middle + 1;
+                else
+                    right = middle;
+            }
+
+            for (var i = left; i < entriesList.Count && entriesList[i].Mills <= windowEnd; i++)
+            {
+                var entry = entriesList[i];
                 var minutesFromChange = (entry.Mills - changeTime) / (60.0 * 1000.0);
 
                 // Find the appropriate bucket
