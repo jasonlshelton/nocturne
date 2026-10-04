@@ -784,7 +784,7 @@ public class StatisticsController : ControllerBase
 
     /// <summary>
     /// Gets comprehensive statistics for multiple time periods (1, 3, 7, 30, and 90 days).
-    /// Fetches sensor glucose, bolus, carb, and temp-basal data from the database for each period,
+    /// Reads sensor glucose, bolus, carb, and temp-basal data for the 90-day window once and slices each period from it,
     /// computes <see cref="GlucoseAnalytics"/>, <see cref="TreatmentSummary"/>, and
     /// <see cref="InsulinDeliveryStatistics"/>, and caches the result for 5 minutes.
     /// </summary>
@@ -824,7 +824,7 @@ public class StatisticsController : ControllerBase
 
         var periodResults = new List<(int Days, PeriodStatistics Statistics)>();
 
-        // Every window ends at `now`, so the widest one holds the rest and the repositories'
+        // Every window ends at `now`, so the 90-day read contains every shorter window and the repositories'
         // inclusive lower bound on Timestamp is reproduced by the slices below.
         var widestStart = now.AddDays(-periods.Max());
         var glucoseTask = _sensorGlucoseRepository.GetForAnalyticsAsync(from: (DateTime?)widestStart, to: (DateTime?)now, device: null, source: null, limit: int.MaxValue, descending: false, ct: cancellationToken);
