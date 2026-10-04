@@ -14,7 +14,7 @@ import {
   glucoseChartLookback,
   GLUCOSE_CHART_FETCH_HOURS,
 } from "$lib/stores/appearance-store.svelte";
-import { mergeChartData } from "$lib/utils/chart-data-merge";
+import { mergeChartData, replaceWindow } from "$lib/utils/chart-data-merge";
 import type { TransformedChartData } from "$lib/utils/chart-data-transform";
 import { stableBy } from "$lib/utils/stable-by";
 import { mergeRealtimeGlucose } from "./merge-glucose";
@@ -53,6 +53,18 @@ export interface ChartDataEngineOptions {
   dataWindow?: "buffer" | "display";
   /** Fired once when `serverChartData` first becomes non-null. */
   onDataReady?: () => void;
+}
+
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
+// Equals INITIAL_HOURS in routes/(authenticated)/+page.server.ts.
+const RECENT_REFRESH_HOURS = 6;
+const RECENT_REFRESH_DEBOUNCE_MS = 2000;
+const RECENT_REFRESH_FALLBACK_MS = FIVE_MINUTES_MS;
+
+function fingerprint(rows: readonly { id?: string; _id?: string }[]): string {
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  return `${rows.length}:${first?.id ?? first?._id ?? ""}:${last?.id ?? last?._id ?? ""}`;
 }
 
 // ===== Date helpers =====
@@ -294,56 +306,69 @@ export function createChartDataEngine(
     };
   });
 
-  // SSR data is never refetched by the effect above, and realtime only streams
-  // glucose, so IOB, COB, basal and treatment markers are refreshed here: when the
-  // store sees new treatment or device data, and on each 5-minute tick so IOB decays.
-  const RECENT_REFRESH_HOURS = 6;
-  const RECENT_REFRESH_DEBOUNCE_MS = 2000;
-  const refreshSignal = $derived(
+  // The effect above never refetches SSR data and realtime streams only glucose,
+  // so IOB, COB, basal and treatment markers are refreshed here. The store's
+  // treatment and device arrays change on its backfill (focus, reconnect, stale
+  // poll), which is the trigger; the timer covers IOB decaying with no new data.
+  const dataFingerprint = $derived(
     options.initialChartData
-      ? {
-          boluses: realtimeStore.boluses,
-          carbIntakes: realtimeStore.carbIntakes,
-          bgChecks: realtimeStore.bgChecks,
-          deviceEvents: realtimeStore.deviceEvents,
-          deviceStatuses: realtimeStore.deviceStatuses,
-          tick: Math.floor(nowMinute / (5 * 60 * 1000)),
-        }
+      ? [
+          fingerprint(realtimeStore.boluses),
+          fingerprint(realtimeStore.carbIntakes),
+          fingerprint(realtimeStore.bgChecks),
+          fingerprint(realtimeStore.deviceEvents),
+          fingerprint(realtimeStore.deviceStatuses),
+        ].join("|")
       : null
   );
 
-  let refreshArmed = false;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshSeq = 0;
+  let disposed = false;
+  let seenFingerprint: string | null = null;
+
+  function scheduleRefresh() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(refreshRecent, RECENT_REFRESH_DEBOUNCE_MS);
+  }
+
+  function refreshRecent() {
+    clearTimeout(fallbackTimer);
+    fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
+
+    const seq = ++refreshSeq;
+    const end = Math.ceil(Date.now() / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
+    const startTime = end - RECENT_REFRESH_HOURS * 60 * 60 * 1000;
+    getChartData({ startTime, endTime: end, intervalMinutes: 5 })
+      .run()
+      .then((recent) => {
+        if (disposed || seq !== refreshSeq) return;
+        const current = untrack(() => serverChartData);
+        serverChartData = current ? replaceWindow(current, recent, startTime) : recent;
+      })
+      .catch((err) => {
+        if (!disposed) console.error("Failed to refresh recent chart data:", err);
+      });
+  }
+
   $effect(() => {
-    if (!isBrowser || !refreshSignal) return;
-    // SSR data is already current on mount.
-    if (!refreshArmed) {
-      refreshArmed = true;
+    if (!isBrowser || dataFingerprint === null || !realtimeStore.isReady) return;
+    // The store's own initial load rewrites these arrays; SSR data predates it by seconds.
+    if (seenFingerprint === null) {
+      seenFingerprint = dataFingerprint;
+      fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
       return;
     }
+    if (dataFingerprint === seenFingerprint) return;
+    seenFingerprint = dataFingerprint;
+    scheduleRefresh();
+  });
 
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const end = Math.ceil(Date.now() / (5 * 60 * 1000)) * 5 * 60 * 1000;
-      getChartData({
-        startTime: end - RECENT_REFRESH_HOURS * 60 * 60 * 1000,
-        endTime: end,
-        intervalMinutes: 5,
-      })
-        .run()
-        .then((recent) => {
-          if (cancelled) return;
-          const current = untrack(() => serverChartData);
-          serverChartData = current ? mergeChartData(recent, current) : recent;
-        })
-        .catch((err) => {
-          if (!cancelled) console.error("Failed to refresh recent chart data:", err);
-        });
-    }, RECENT_REFRESH_DEBOUNCE_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+  $effect(() => () => {
+    disposed = true;
+    clearTimeout(debounceTimer);
+    clearTimeout(fallbackTimer);
   });
 
   // Check prediction service availability on mount

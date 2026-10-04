@@ -104,3 +104,74 @@ export function mergeChartData(
 		maxBasalRate: Math.max(initial.maxBasalRate ?? 0, historical.maxBasalRate ?? 0),
 	};
 }
+
+/**
+ * Swap the window starting at `startTime` for a fresh fetch of it, leaving older
+ * rows alone. Unlike `mergeChartData`, rows inside the window that the server no
+ * longer returns (a deleted or moved treatment) do not survive.
+ */
+export function replaceWindow(
+	current: TransformedChartData,
+	recent: TransformedChartData,
+	startTime: number
+): TransformedChartData {
+	const ms = (value: unknown) => (value instanceof Date ? value.getTime() : Number(value));
+	const swap = <T,>(older: T[], fresh: T[], timeOf: (item: T) => unknown): T[] => [
+		...older.filter((item) => ms(timeOf(item)) < startTime),
+		...[...fresh].sort((a, b) => ms(timeOf(a)) - ms(timeOf(b))),
+	];
+	// A span that began before the window and is still running comes back in the
+	// fresh fetch under the same id, so ids in the fresh set replace the old row too.
+	const swapSpans = <T extends { id?: unknown; startTime: Date }>(
+		older: T[],
+		fresh: T[]
+	): T[] => {
+		const freshIds = new Set(fresh.map((s) => s.id).filter((id) => id != null));
+		return [
+			...older.filter(
+				(s) => s.startTime.getTime() < startTime && !(s.id != null && freshIds.has(s.id))
+			),
+			...[...fresh].sort((a, b) => a.startTime.getTime() - b.startTime.getTime()),
+		];
+	};
+	const peak = (floor: number, values: Iterable<number | undefined>) =>
+		Math.max(floor, ...Array.from(values, (v) => v ?? 0));
+
+	const iobSeries = swap(current.iobSeries, recent.iobSeries, (p) => p.time);
+	const cobSeries = swap(current.cobSeries, recent.cobSeries, (p) => p.time);
+	const basalSeries = swap(current.basalSeries, recent.basalSeries, (p) => p.timestamp);
+
+	return {
+		iobSeries,
+		cobSeries,
+		basalSeries,
+		glucoseData: swap(current.glucoseData, recent.glucoseData, (p) => p.time),
+		heartRateSeries: swap(current.heartRateSeries, recent.heartRateSeries, (p) => p.time),
+		stepSeries: swap(current.stepSeries, recent.stepSeries, (p) => p.time),
+		bolusMarkers: swap(current.bolusMarkers, recent.bolusMarkers, (p) => p.time),
+		carbMarkers: swap(current.carbMarkers, recent.carbMarkers, (p) => p.time),
+		deviceEventMarkers: swap(current.deviceEventMarkers, recent.deviceEventMarkers, (p) => p.time),
+		bgCheckMarkers: swap(current.bgCheckMarkers, recent.bgCheckMarkers, (p) => p.time),
+		systemEventMarkers: swap(current.systemEventMarkers, recent.systemEventMarkers, (p) => p.time),
+		trackerMarkers: swap(current.trackerMarkers, recent.trackerMarkers, (p) => p.time),
+		basalInjectionMarkers: swap(
+			current.basalInjectionMarkers,
+			recent.basalInjectionMarkers,
+			(p) => p.time
+		),
+		pumpModeSpans: swapSpans(current.pumpModeSpans, recent.pumpModeSpans),
+		profileSpans: swapSpans(current.profileSpans, recent.profileSpans),
+		overrideSpans: swapSpans(current.overrideSpans, recent.overrideSpans),
+		activitySpans: swapSpans(current.activitySpans, recent.activitySpans),
+		tempBasalSpans: swapSpans(current.tempBasalSpans, recent.tempBasalSpans),
+		basalDeliverySpans: swapSpans(current.basalDeliverySpans, recent.basalDeliverySpans),
+		defaultBasalRate: current.defaultBasalRate,
+		thresholds: {
+			...current.thresholds,
+			glucoseYMax: Math.max(current.thresholds.glucoseYMax, recent.thresholds.glucoseYMax),
+		},
+		maxIob: peak(recent.maxIob ?? 0, iobSeries.map((p) => p.value)),
+		maxCob: peak(recent.maxCob ?? 0, cobSeries.map((p) => p.value)),
+		maxBasalRate: peak(recent.maxBasalRate ?? 0, basalSeries.map((p) => p.rate ?? undefined)),
+	};
+}

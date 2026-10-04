@@ -1,5 +1,5 @@
 import { render } from "vitest-browser-svelte";
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 
 vi.mock("$api/chart-data.remote", () => ({
   getChartData: vi.fn(() => {
@@ -16,6 +16,8 @@ vi.mock("$api/predictions.remote", () => ({
 }));
 
 import { error } from "@sveltejs/kit";
+import { flushSync } from "svelte";
+import type { RealtimeStore } from "$lib/stores/realtime-store.svelte";
 import { getChartData } from "$api/chart-data.remote";
 import { transformChartData } from "$lib/utils/chart-data-transform";
 import type { Entry } from "$lib/websocket/types";
@@ -172,34 +174,134 @@ describe("chart data engine — refused fetch", () => {
 });
 
 describe("chart data engine — SSR data refresh", () => {
-  it("refetches the recent window when the store receives a new bolus, keeping SSR rows", async () => {
-    const ssrBolus = { time: new Date(Date.now() - 3 * HOUR), insulin: 1 };
-    const fresh = transformChartData({});
-    fresh.bolusMarkers = [{ time: new Date(Date.now() - MINUTE), insulin: 2 }] as never;
-    const initial = transformChartData({});
-    initial.bolusMarkers = [ssrBolus] as never;
-    vi.mocked(getChartData).mockClear();
-    vi.mocked(getChartData).mockImplementation((() => {
-      const result = Promise.resolve(fresh) as Promise<typeof fresh> & {
-        run: () => Promise<typeof fresh>;
-      };
-      result.run = () => Promise.resolve(fresh);
-      return result;
-    }) as never);
+  const SECOND = 1000;
+  type Served = typeof served;
+  type Store = RealtimeStore;
 
+  function resolving(value: Served) {
+    const result = Promise.resolve(value) as Promise<Served> & { run: () => Promise<Served> };
+    result.run = () => result;
+    return result;
+  }
+
+  function boluslike(minutesAgo: number): Served {
+    const data = transformChartData({});
+    data.bolusMarkers = [
+      { time: new Date(Date.now() - minutesAgo * MINUTE), insulin: 2 },
+    ] as never;
+    return data;
+  }
+
+  async function mount(initial: Served = transformChartData({}), initialLoad?: (s: Store) => void) {
+    vi.useFakeTimers();
+    vi.mocked(getChartData).mockReset();
+    vi.mocked(getChartData).mockImplementation((() => resolving(boluslike(1))) as never);
     let engine!: ChartDataEngine;
-    let store!: { boluses: unknown[] };
+    let store!: Store;
     render(Harness, {
       props: {
         entries: [],
         options: { focusHours: 3, enablePredictions: false, initialChartData: initial },
         onengine: (e: ChartDataEngine) => (engine = e),
-        onstore: (s: typeof store) => (store = s),
+        // The store is a process-wide singleton, so reset what earlier tests left on it
+        // before the engine is created.
+        onstore: (s: Store) => {
+          store = s;
+          s.isReady = false;
+          s.boluses = [];
+          s.carbIntakes = [];
+          s.bgChecks = [];
+          s.deviceEvents = [];
+          s.deviceStatuses = [];
+        },
       },
     });
+    await vi.advanceTimersByTimeAsync(0);
+    initialLoad?.(store);
+    store.isReady = true;
+    flushSync();
+    await vi.advanceTimersByTimeAsync(0);
+    return { engine, store };
+  }
+
+  const calls = () => vi.mocked(getChartData).mock.calls.length;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not fetch on mount, including when the store's initial load lands", async () => {
+    await mount(undefined, (s) => {
+      s.boluses = [{ id: "loaded" }];
+    });
+    await vi.advanceTimersByTimeAsync(4 * SECOND);
+
+    expect(calls()).toBe(0);
+  });
+
+  it("refetches once the debounce passes after the store's treatment data changes, replacing the window", async () => {
+    const initial = transformChartData({});
+    initial.bolusMarkers = [
+      { time: new Date(Date.now() - 2 * MINUTE), insulin: 5 },
+    ] as never;
+    const { engine, store } = await mount(initial);
 
     store.boluses = [{ id: "new" }];
-    await vi.waitFor(() => expect(getChartData).toHaveBeenCalledTimes(1), { timeout: 5000 });
-    await vi.waitFor(() => expect(engine.serverChartData?.bolusMarkers).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(1 * SECOND);
+    expect(calls()).toBe(0);
+    await vi.advanceTimersByTimeAsync(2 * SECOND);
+
+    expect(calls()).toBe(1);
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([2]);
+  });
+
+  it("coalesces changes inside the debounce into one fetch", async () => {
+    const { store } = await mount();
+
+    store.boluses = [{ id: "a" }];
+    await vi.advanceTimersByTimeAsync(1 * SECOND);
+    store.boluses = [{ id: "a" }, { id: "b" }];
+    await vi.advanceTimersByTimeAsync(4 * SECOND);
+
+    expect(calls()).toBe(1);
+  });
+
+  it("refreshes on the 5-minute fallback, not on each minute, and re-arms after a data refresh", async () => {
+    const { store } = await mount();
+
+    await vi.advanceTimersByTimeAsync(4 * MINUTE);
+    expect(calls()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1 * MINUTE + SECOND);
+    expect(calls()).toBe(1);
+
+    store.boluses = [{ id: "a" }];
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    expect(calls()).toBe(2);
+    // The data refresh restarted the timer: 4 minutes later is still not due.
+    await vi.advanceTimersByTimeAsync(4 * MINUTE);
+    expect(calls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1 * MINUTE);
+    expect(calls()).toBe(3);
+  });
+
+  it("drops a response that a later refresh has overtaken", async () => {
+    const { engine, store } = await mount();
+    let releaseSlow!: (v: Served) => void;
+    const slow = new Promise<Served>((r) => (releaseSlow = r)) as Promise<Served> & {
+      run: () => Promise<Served>;
+    };
+    slow.run = () => slow;
+    vi.mocked(getChartData).mockImplementationOnce((() => slow) as never);
+
+    store.boluses = [{ id: "a" }];
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    store.boluses = [{ id: "a" }, { id: "b" }];
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([2]);
+
+    releaseSlow(transformChartData({}));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(engine.serverChartData?.bolusMarkers).toHaveLength(1);
   });
 });

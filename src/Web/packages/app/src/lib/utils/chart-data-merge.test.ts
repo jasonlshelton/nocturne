@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeChartData } from "./chart-data-merge";
+import { mergeChartData, replaceWindow } from "./chart-data-merge";
 import type { TransformedChartData } from "./chart-data-transform";
 import { resolveChartThresholds } from "$lib/constants/glucose-thresholds";
 
@@ -137,5 +137,61 @@ describe("mergeChartData", () => {
     });
 
     expect(mergeChartData(initial, null)).toBe(initial);
+  });
+});
+
+describe("replaceWindow", () => {
+  const T = (iso: string) => new Date(iso);
+  const start = T("2026-08-29T10:00:00Z").getTime();
+  const bolus = (iso: string, insulin: number) => ({ time: T(iso), insulin }) as never;
+
+  it("shows a bolus moved within the window once", () => {
+    const current = chartData({ bolusMarkers: [bolus("2026-08-29T10:00:00Z", 2)] });
+    const recent = chartData({ bolusMarkers: [bolus("2026-08-29T10:05:00Z", 2)] });
+
+    const result = replaceWindow(current, recent, start);
+
+    expect(result.bolusMarkers.map((m) => m.time.toISOString())).toEqual([
+      "2026-08-29T10:05:00.000Z",
+    ]);
+  });
+
+  it("drops a bolus the server no longer returns and keeps older rows", () => {
+    const current = chartData({
+      bolusMarkers: [bolus("2026-08-29T08:00:00Z", 1), bolus("2026-08-29T11:00:00Z", 3)],
+    });
+
+    const result = replaceWindow(current, chartData(), start);
+
+    expect(result.bolusMarkers.map((m) => m.insulin)).toEqual([1]);
+  });
+
+  it("does not duplicate a span that began before the window and is still running", () => {
+    const span = (startIso: string) => ({
+      id: "p1",
+      startTime: T(startIso),
+      endTime: null,
+    }) as never;
+    const result = replaceWindow(
+      chartData({ pumpModeSpans: [span("2026-08-29T08:00:00Z")] }),
+      chartData({ pumpModeSpans: [span("2026-08-29T10:00:00Z")] }),
+      start
+    );
+
+    expect(result.pumpModeSpans).toHaveLength(1);
+  });
+
+  it("lets the scale maxima fall back to the data that remains", () => {
+    const point = (iso: string, value: number) => ({ time: T(iso), value });
+    const result = replaceWindow(
+      chartData({
+        iobSeries: [point("2026-08-29T08:00:00Z", 2), point("2026-08-29T11:00:00Z", 9)],
+        maxIob: 9,
+      }),
+      chartData({ iobSeries: [point("2026-08-29T11:00:00Z", 1)], maxIob: 1 }),
+      start
+    );
+
+    expect(result.maxIob).toBe(2);
   });
 });
