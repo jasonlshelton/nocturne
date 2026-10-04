@@ -477,6 +477,7 @@
       await submit();
       const result = activeCarbsForm.result;
       if (result) {
+        realtimeStore?.noteTreatmentWrite();
         // If creating with pending foods, add them
         if (!existingCarbsRecord?.data.id && carbsPendingFoods.length > 0) {
           const newId = isRecord(result) ? result.id : undefined;
@@ -486,7 +487,6 @@
             }
           }
         }
-        realtimeStore?.noteTreatmentWrite();
         carbsFormDone = true;
       } else {
         saveError = "Failed to save carb intake";

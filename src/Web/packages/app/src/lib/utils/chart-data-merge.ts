@@ -109,7 +109,8 @@ export function mergeChartData(
  * Swap the window starting at `startTime` for a fresh fetch of it, leaving older
  * rows alone. Unlike `mergeChartData`, rows inside the window that the server no
  * longer returns (a deleted or moved treatment) do not survive. A treatment moved
- * to before `startTime` is therefore dropped until the next full load.
+ * to before `startTime` is therefore dropped until the next full load, and fresh
+ * rows before it are ignored since older rows already hold them.
  */
 export function replaceWindow(
 	current: TransformedChartData,
@@ -119,7 +120,9 @@ export function replaceWindow(
 	const ms = (value: unknown) => (value instanceof Date ? value.getTime() : Number(value));
 	const swap = <T,>(older: T[], fresh: T[], timeOf: (item: T) => unknown): T[] => [
 		...older.filter((item) => ms(timeOf(item)) < startTime),
-		...[...fresh].sort((a, b) => ms(timeOf(a)) - ms(timeOf(b))),
+		...fresh
+			.filter((item) => ms(timeOf(item)) >= startTime)
+			.sort((a, b) => ms(timeOf(a)) - ms(timeOf(b))),
 	];
 	// A span that began before the window and is still running comes back in the
 	// fresh fetch under the same id, so ids in the fresh set replace the old row too.

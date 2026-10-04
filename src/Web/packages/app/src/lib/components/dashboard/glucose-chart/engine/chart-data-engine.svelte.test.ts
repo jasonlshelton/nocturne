@@ -358,6 +358,31 @@ describe("chart data engine — SSR data refresh", () => {
     expect(calls()).toBe(0);
   });
 
+  it("adopts page data from the window the server loaded, not from the client clock", async () => {
+    const insulinAt = (start: number, offsetMs: number, insulin: number) =>
+      ({ time: new Date(start + offsetMs), insulin }) as never;
+    const loadStart = Date.now() - 6 * HOUR;
+    const initial = transformChartData({});
+    initial.bolusMarkers = [
+      insulinAt(loadStart, -HOUR, 1),
+      insulinAt(loadStart, 2 * MINUTE, 2),
+    ];
+    const options = reactiveOptions(initial);
+    options.initialWindowStart = loadStart;
+    const { engine } = await mount(undefined, undefined, options);
+
+    // The reload was computed against a window starting 5 minutes earlier than
+    // the one the first load covered, so it holds the same marker again.
+    const next = transformChartData({});
+    next.bolusMarkers = [insulinAt(loadStart, -3 * MINUTE, 9), insulinAt(loadStart, 2 * MINUTE, 2)];
+    options.initialWindowStart = loadStart - 5 * MINUTE;
+    options.initialChartData = next;
+    flushSync();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([1, 9, 2]);
+  });
+
   it("still refreshes when page data is replaced inside the debounce of a write", async () => {
     const options = reactiveOptions(transformChartData({}));
     const { engine, store } = await mount(undefined, undefined, options);

@@ -210,4 +210,15 @@ describe("replaceWindow", () => {
     // The 400 reading sat in the replaced window; 330 plus the server's 20 of headroom remains.
     expect(result.thresholds.glucoseYMax).toBe(350);
   });
+
+  it("ignores fresh rows before the window so a start mismatch cannot duplicate them", () => {
+    const early = bolus("2026-08-29T09:58:00Z", 2);
+    const result = replaceWindow(
+      chartData({ bolusMarkers: [early] }),
+      chartData({ bolusMarkers: [early, bolus("2026-08-29T10:01:00Z", 3)] }),
+      start
+    );
+
+    expect(result.bolusMarkers.map((m) => m.insulin)).toEqual([2, 3]);
+  });
 });

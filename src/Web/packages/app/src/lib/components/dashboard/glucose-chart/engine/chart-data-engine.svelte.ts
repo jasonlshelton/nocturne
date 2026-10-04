@@ -35,6 +35,8 @@ export interface ChartDataEngineOptions {
   dateRange?: { from: Date | string; to: Date | string };
   focusHours?: number;
   initialChartData?: TransformedChartData | null;
+  /** Where `initialChartData`'s window starts, in ms; adopting a reload replaces from here. */
+  initialWindowStart?: number;
   streamedHistoricalData?: Promise<TransformedChartData | null>;
   externalPredictionData?: PredictionData | null;
   enablePredictions?: boolean;
@@ -377,7 +379,11 @@ export function createChartDataEngine(
     seenInitialData = next;
     refreshSeq++;
     const current = untrack(() => serverChartData);
-    serverChartData = current ? replaceWindow(current, next, recentWindow().startTime) : next;
+    serverChartData = current ? replaceWindow(
+          current,
+          next,
+          options.initialWindowStart ?? recentWindow().startTime
+        ) : next;
   });
 
   $effect(() => {
