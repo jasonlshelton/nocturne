@@ -294,6 +294,58 @@ export function createChartDataEngine(
     };
   });
 
+  // SSR data is never refetched by the effect above, and realtime only streams
+  // glucose, so IOB, COB, basal and treatment markers are refreshed here: when the
+  // store sees new treatment or device data, and on each 5-minute tick so IOB decays.
+  const RECENT_REFRESH_HOURS = 6;
+  const RECENT_REFRESH_DEBOUNCE_MS = 2000;
+  const refreshSignal = $derived(
+    options.initialChartData
+      ? {
+          boluses: realtimeStore.boluses,
+          carbIntakes: realtimeStore.carbIntakes,
+          bgChecks: realtimeStore.bgChecks,
+          deviceEvents: realtimeStore.deviceEvents,
+          deviceStatuses: realtimeStore.deviceStatuses,
+          tick: Math.floor(nowMinute / (5 * 60 * 1000)),
+        }
+      : null
+  );
+
+  let refreshArmed = false;
+  $effect(() => {
+    if (!isBrowser || !refreshSignal) return;
+    // SSR data is already current on mount.
+    if (!refreshArmed) {
+      refreshArmed = true;
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const end = Math.ceil(Date.now() / (5 * 60 * 1000)) * 5 * 60 * 1000;
+      getChartData({
+        startTime: end - RECENT_REFRESH_HOURS * 60 * 60 * 1000,
+        endTime: end,
+        intervalMinutes: 5,
+      })
+        .run()
+        .then((recent) => {
+          if (cancelled) return;
+          const current = untrack(() => serverChartData);
+          serverChartData = current ? mergeChartData(recent, current) : recent;
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Failed to refresh recent chart data:", err);
+        });
+    }, RECENT_REFRESH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  });
+
   // Check prediction service availability on mount
   $effect(() => {
     if (!isBrowser) return;

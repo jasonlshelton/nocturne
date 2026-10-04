@@ -2,7 +2,13 @@ import { render } from "vitest-browser-svelte";
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("$api/chart-data.remote", () => ({
-  getChartData: vi.fn(async () => served),
+  getChartData: vi.fn(() => {
+    const result = Promise.resolve(served) as Promise<typeof served> & {
+      run: () => Promise<typeof served>;
+    };
+    result.run = () => Promise.resolve(served);
+    return result;
+  }),
 }));
 vi.mock("$api/predictions.remote", () => ({
   getPredictions: vi.fn(async () => null),
@@ -162,5 +168,38 @@ describe("chart data engine — refused fetch", () => {
     await vi.waitFor(() =>
       expect(engine.chartDataError).toBe("The chart data could not be loaded.")
     );
+  });
+});
+
+describe("chart data engine — SSR data refresh", () => {
+  it("refetches the recent window when the store receives a new bolus, keeping SSR rows", async () => {
+    const ssrBolus = { time: new Date(Date.now() - 3 * HOUR), insulin: 1 };
+    const fresh = transformChartData({});
+    fresh.bolusMarkers = [{ time: new Date(Date.now() - MINUTE), insulin: 2 }] as never;
+    const initial = transformChartData({});
+    initial.bolusMarkers = [ssrBolus] as never;
+    vi.mocked(getChartData).mockClear();
+    vi.mocked(getChartData).mockImplementation((() => {
+      const result = Promise.resolve(fresh) as Promise<typeof fresh> & {
+        run: () => Promise<typeof fresh>;
+      };
+      result.run = () => Promise.resolve(fresh);
+      return result;
+    }) as never);
+
+    let engine!: ChartDataEngine;
+    let store!: { boluses: unknown[] };
+    render(Harness, {
+      props: {
+        entries: [],
+        options: { focusHours: 3, enablePredictions: false, initialChartData: initial },
+        onengine: (e: ChartDataEngine) => (engine = e),
+        onstore: (s: typeof store) => (store = s),
+      },
+    });
+
+    store.boluses = [{ id: "new" }];
+    await vi.waitFor(() => expect(getChartData).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await vi.waitFor(() => expect(engine.serverChartData?.bolusMarkers).toHaveLength(2));
   });
 });
