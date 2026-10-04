@@ -978,7 +978,7 @@ public class StatisticsControllerTests
     [Fact]
     public async Task GetMultiPeriodStatistics_WithTempBasals_DoesNotFallBackToProfileBasal()
     {
-        var start = DateTime.UtcNow.AddDays(-1);
+        var start = DateTime.UtcNow.AddHours(-23);
         SetupMultiPeriodWithProfile(
             [new BasalSegment(Mills(start), Mills(start.AddDays(1)), 1.0, 1.0, "Default")]);
         _tempBasalRepoMock
@@ -1632,6 +1632,38 @@ public class StatisticsControllerTests
         var ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
         var payload = ok.Value.Should().BeOfType<AidSystemMetrics>().Subject;
         payload.PumpDeviceNames.Should().Be("YpsoPump");
+    }
+
+    [Fact]
+    public async Task GetMultiPeriodStatistics_ReadsTheWidestWindowOnce_AndSlicesEachPeriodFromIt()
+    {
+        var now = DateTime.UtcNow;
+        SetupGlucose(new[] { TimeSpan.FromHours(1), TimeSpan.FromHours(2), TimeSpan.FromDays(2),
+                TimeSpan.FromDays(5), TimeSpan.FromDays(20), TimeSpan.FromDays(60) }
+            .Select(age => new SensorGlucose { Timestamp = now - age, Mgdl = 120 }).ToList());
+        SetupEmptyTreatments();
+
+        var result = await CreateController().GetMultiPeriodStatistics();
+
+        var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
+            .Value.Should().BeOfType<MultiPeriodStatistics>().Subject;
+        new[] { payload.LastDay, payload.Last3Days, payload.LastWeek, payload.LastMonth, payload.Last90Days }
+            .Select(p => p!.EntryCount).Should().Equal(2, 3, 4, 5, 6);
+
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
+            It.Is<DateTime?>(d => d < now.AddDays(-89)), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<bool>(),
+            It.IsAny<DateTime?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Once);
+        _glucoseRepoMock.Verify(r => r.GetForAnalyticsAsync(
+            It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<bool>(),
+            It.IsAny<DateTime?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Once);
+        _tempBasalRepoMock.Verify(r => r.GetAsync(
+            It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
