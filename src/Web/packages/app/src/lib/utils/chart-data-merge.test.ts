@@ -200,13 +200,14 @@ describe("replaceWindow", () => {
       ({ time: T(iso), sgv, color: "" }) as never;
     const result = replaceWindow(
       chartData({
-        glucoseData: [reading("2026-08-29T08:00:00Z", 250), reading("2026-08-29T11:00:00Z", 400)],
+        glucoseData: [reading("2026-08-29T08:00:00Z", 330), reading("2026-08-29T11:00:00Z", 400)],
         thresholds: thresholds({ glucoseYMax: 400 }),
       }),
-      chartData({ thresholds: thresholds({ glucoseYMax: 180 }) }),
+      chartData({ thresholds: thresholds({ glucoseYMax: 300 }) }),
       start
     );
 
-    expect(result.thresholds.glucoseYMax).toBe(250);
+    // The 400 reading sat in the replaced window; 330 plus the server's 20 of headroom remains.
+    expect(result.thresholds.glucoseYMax).toBe(350);
   });
 });

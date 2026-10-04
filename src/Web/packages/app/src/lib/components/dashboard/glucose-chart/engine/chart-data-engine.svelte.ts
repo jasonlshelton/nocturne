@@ -308,8 +308,8 @@ export function createChartDataEngine(
 
   // The effect above never refetches SSR data and realtime streams only glucose,
   // so IOB, COB, basal and treatment markers are refreshed here. Triggers: realtime
-  // devicestatus creates (the AID cadence), treatment events via `treatmentRevision`,
-  // and the store's backfill; the timer covers IOB decaying with no new data.
+  // devicestatus creates (the AID cadence), legacy `treatments` socket events and app
+  // writes via `treatmentRevision`, and the store's backfill; the timer covers IOB decaying with no new data.
   const dataFingerprint = $derived(
     options.initialChartData
       ? [
@@ -375,6 +375,9 @@ export function createChartDataEngine(
   $effect(() => {
     if (!isBrowser || !options.initialChartData) return;
 
+    // This effect re-runs when the page data is replaced (invalidateAll), so the
+    // flag has to be reset per run.
+    disposed = false;
     fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible" && skippedWhileHidden) scheduleRefresh();

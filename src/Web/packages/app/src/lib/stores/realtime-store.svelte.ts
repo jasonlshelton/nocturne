@@ -159,6 +159,11 @@ export class RealtimeStore {
   /** Bumped on every treatments create/update/delete event, which the store does not otherwise apply. */
   treatmentRevision = $state(0);
 
+  /** App-originated v4 writes reach no socket the store listens to; the writing form calls this. */
+  noteTreatmentWrite(): void {
+    this.treatmentRevision++;
+  }
+
   /** V4 record types — used by dashboard and entry components */
   boluses = $state.raw<Bolus[]>([]);
   carbIntakes = $state.raw<CarbIntake[]>([]);

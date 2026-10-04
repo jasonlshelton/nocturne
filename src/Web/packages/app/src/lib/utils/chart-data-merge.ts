@@ -139,9 +139,11 @@ export function replaceWindow(
 		Math.max(floor, ...Array.from(values, (v) => v ?? 0));
 
 	const glucoseData = swap(current.glucoseData, recent.glucoseData, (p) => p.time);
-	const glucoseYMax = peak(
+	// Mirrors the server's sizing: 20 over the highest reading, between 300 and 400.
+	const olderPeak = peak(0, glucoseData.map((p) => p.sgv));
+	const glucoseYMax = Math.max(
 		recent.thresholds.glucoseYMax,
-		glucoseData.map((p) => p.sgv)
+		Math.min(400, Math.max(280, olderPeak) + 20)
 	);
 	const iobSeries = swap(current.iobSeries, recent.iobSeries, (p) => p.time);
 	const cobSeries = swap(current.cobSeries, recent.cobSeries, (p) => p.time);

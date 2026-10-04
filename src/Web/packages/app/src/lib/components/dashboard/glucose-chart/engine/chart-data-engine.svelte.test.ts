@@ -192,7 +192,15 @@ describe("chart data engine — SSR data refresh", () => {
     return data;
   }
 
-  async function mount(initial: Served = transformChartData({}), initialLoad?: (s: Store) => void) {
+  async function mount(
+    initial: Served = transformChartData({}),
+    initialLoad?: (s: Store) => void,
+    options: ChartDataEngineOptions = {
+      focusHours: 3,
+      enablePredictions: false,
+      initialChartData: initial,
+    }
+  ) {
     vi.useFakeTimers();
     vi.mocked(getChartData).mockReset();
     vi.mocked(getChartData).mockImplementation((() => resolving(boluslike(1))) as never);
@@ -201,7 +209,7 @@ describe("chart data engine — SSR data refresh", () => {
     render(Harness, {
       props: {
         entries: [],
-        options: { focusHours: 3, enablePredictions: false, initialChartData: initial },
+        options,
         onengine: (e: ChartDataEngine) => (engine = e),
         // The store is a process-wide singleton, so reset what earlier tests left on it
         // before the engine is created.
@@ -308,6 +316,34 @@ describe("chart data engine — SSR data refresh", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(engine.serverChartData?.bolusMarkers).toHaveLength(1);
+  });
+
+  it("keeps refreshing after the page data is replaced", async () => {
+    const options = $state<ChartDataEngineOptions>({
+      focusHours: 3,
+      enablePredictions: false,
+      initialChartData: transformChartData({}),
+    });
+    const { engine, store } = await mount(undefined, undefined, options);
+
+    // invalidateAll() hands the page a new initialChartData object.
+    options.initialChartData = transformChartData({});
+    flushSync();
+    await vi.advanceTimersByTimeAsync(0);
+    store.boluses = [{ id: "after-invalidate" }];
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+
+    expect(calls()).toBe(1);
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([2]);
+  });
+
+  it("refreshes when the app itself writes a treatment", async () => {
+    const { store } = await mount();
+
+    store.noteTreatmentWrite();
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+
+    expect(calls()).toBe(1);
   });
 
   it("refreshes when a treatment is edited or deleted, which the store's arrays never show", async () => {

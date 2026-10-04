@@ -29,6 +29,7 @@
   import Smartphone from "@lucide/svelte/icons/smartphone";
   import { getDataSourceDisplayName } from "$lib/utils/data-source-display";
   import { toast } from "svelte-sonner";
+  import { tryGetRealtimeStore } from "$lib/stores/realtime-store.svelte";
   import { useToastSubmission } from "$lib/forms";
   import {
     create as createBolusForm,
@@ -61,6 +62,8 @@
     update as updateBasalInjectionForm,
     remove as deleteBasalInjection,
   } from "$api/generated/basalInjections.generated.remote";
+
+  const realtimeStore = tryGetRealtimeStore();
 
   interface Sections {
     bolus: Partial<Bolus> | null;
@@ -337,6 +340,7 @@
   function checkAllDone() {
     if (bolusFormDone && carbsFormDone && bgCheckFormDone && noteFormDone && deviceEventFormDone && basalInjectionFormDone) {
       if (!saveError) {
+        realtimeStore?.noteTreatmentWrite();
         toast.success(isEditing ? "Entry updated" : "Entry created");
         open = false;
         onClose();
@@ -410,6 +414,7 @@
       }
 
       await Promise.all(promises);
+      realtimeStore?.noteTreatmentWrite();
       toast.success("Entry deleted");
       open = false;
       onClose();
