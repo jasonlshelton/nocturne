@@ -10,6 +10,19 @@ vi.mock("$api/chart-data.remote", () => ({
     return result;
   }),
 }));
+// The store registers its handlers on the client; capturing them lets a test deliver a
+// socket event the way the bridge would.
+const socketHandlers = vi.hoisted(() => ({}) as Record<string, (event: unknown) => void>);
+vi.mock("$lib/websocket/websocket-client.svelte", () => ({
+  WebSocketClient: class {
+    on(event: string, handler: (event: unknown) => void) {
+      socketHandlers[event] = handler;
+    }
+    connect() {}
+    ensureConnected() {}
+    disconnect() {}
+  },
+}));
 vi.mock("$api/predictions.remote", () => ({
   getPredictions: vi.fn(async () => null),
   getPredictionStatus: vi.fn(async () => ({ available: false })),
@@ -318,23 +331,66 @@ describe("chart data engine — SSR data refresh", () => {
     expect(engine.serverChartData?.bolusMarkers).toHaveLength(1);
   });
 
-  it("keeps refreshing after the page data is replaced", async () => {
+  const pageData = (insulin: number) => {
+    const data = transformChartData({});
+    data.bolusMarkers = [{ time: new Date(Date.now() - MINUTE), insulin }] as never;
+    return data;
+  };
+  const reactiveOptions = (initialChartData: Served) => {
     const options = $state<ChartDataEngineOptions>({
       focusHours: 3,
       enablePredictions: false,
-      initialChartData: transformChartData({}),
+      initialChartData,
     });
-    const { engine, store } = await mount(undefined, undefined, options);
+    return options;
+  };
 
-    // invalidateAll() hands the page a new initialChartData object.
-    options.initialChartData = transformChartData({});
+  it("adopts replaced page data as a fresh window", async () => {
+    const options = reactiveOptions(transformChartData({}));
+    const { engine } = await mount(undefined, undefined, options);
+
+    // Every successful form submit runs invalidateAll(), which hands the page new data.
+    options.initialChartData = pageData(7);
     flushSync();
     await vi.advanceTimersByTimeAsync(0);
-    store.boluses = [{ id: "after-invalidate" }];
+
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([7]);
+    expect(calls()).toBe(0);
+  });
+
+  it("still refreshes when page data is replaced inside the debounce of a write", async () => {
+    const options = reactiveOptions(transformChartData({}));
+    const { engine, store } = await mount(undefined, undefined, options);
+
+    store.noteTreatmentWrite();
+    await vi.advanceTimersByTimeAsync(1 * SECOND);
+    options.initialChartData = pageData(7);
+    flushSync();
     await vi.advanceTimersByTimeAsync(3 * SECOND);
 
+    // The timer the write armed survives the replacement and its result is the latest.
     expect(calls()).toBe(1);
     expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([2]);
+  });
+
+  it("does not let an older in-flight refresh overwrite newer page data", async () => {
+    const options = reactiveOptions(transformChartData({}));
+    const { engine, store } = await mount(undefined, undefined, options);
+    let releaseSlow!: (v: Served) => void;
+    const slow = new Promise<Served>((r) => (releaseSlow = r)) as Promise<Served> & {
+      run: () => Promise<Served>;
+    };
+    slow.run = () => slow;
+    vi.mocked(getChartData).mockImplementationOnce((() => slow) as never);
+    store.noteTreatmentWrite();
+    await vi.advanceTimersByTimeAsync(3 * SECOND);
+
+    options.initialChartData = pageData(7);
+    flushSync();
+    releaseSlow(pageData(99));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(engine.serverChartData?.bolusMarkers.map((m) => m.insulin)).toEqual([7]);
   });
 
   it("refreshes when the app itself writes a treatment", async () => {
@@ -346,21 +402,18 @@ describe("chart data engine — SSR data refresh", () => {
     expect(calls()).toBe(1);
   });
 
-  it("refreshes when a treatment is edited or deleted, which the store's arrays never show", async () => {
-    const { store } = await mount();
-    const receive = (kind: "handleCreate" | "handleUpdate" | "handleDelete") =>
-      (store as unknown as Record<string, (e: unknown) => void>)[kind]({
-        colName: "treatments",
-        doc: { _id: "t1" },
-      });
+  it("refreshes when a legacy treatments socket event is created, edited or deleted", async () => {
+    await mount();
+    const deliver = (kind: "create" | "update" | "delete") =>
+      socketHandlers[kind]({ colName: "treatments", doc: { _id: "t1" } });
 
-    receive("handleUpdate");
+    deliver("update");
     await vi.advanceTimersByTimeAsync(3 * SECOND);
     expect(calls()).toBe(1);
-    receive("handleDelete");
+    deliver("delete");
     await vi.advanceTimersByTimeAsync(3 * SECOND);
     expect(calls()).toBe(2);
-    receive("handleCreate");
+    deliver("create");
     await vi.advanceTimersByTimeAsync(3 * SECOND);
     expect(calls()).toBe(3);
   });

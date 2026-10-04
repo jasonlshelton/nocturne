@@ -311,6 +311,7 @@
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    aria-label="Edit bolus"
                     onclick={() => startEdit(bolus)}
                   >
                     <Pencil class="h-4 w-4" />
@@ -318,6 +319,7 @@
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    aria-label="Delete bolus"
                     onclick={() => (deletingBolusId = bolus.id ?? null)}
                   >
                     <Trash2 class="h-4 w-4" />

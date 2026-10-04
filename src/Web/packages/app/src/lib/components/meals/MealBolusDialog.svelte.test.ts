@@ -1,11 +1,28 @@
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
 const removeBolus = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+const saved = vi.hoisted(() => ({ result: true }));
 
+vi.mock("svelte-sonner", () => ({
+  toast: { success: vi.fn(), error: toastError },
+}));
 vi.mock("$api/generated/bolus.generated.remote", () => {
-  const form = () => ({ enhance: () => ({}), result: undefined });
+  // The component spreads enhance()'s return onto its form; a submit handler here runs
+  // the callback it was given, as kit's form does after a successful round trip.
+  const form = () => ({
+    get result() {
+      return saved.result ? { id: "new" } : undefined;
+    },
+    enhance: (callback: (arg: { submit: () => Promise<void> }) => Promise<void>) => ({
+      onsubmit: (event: Event) => {
+        event.preventDefault();
+        void callback({ submit: async () => {} });
+      },
+    }),
+  });
   return { create: form(), update: form(), remove: removeBolus };
 });
 vi.mock("$api/generated/patientRecords.generated.remote", () => ({
@@ -15,27 +32,36 @@ vi.mock("$api/generated/patientRecords.generated.remote", () => ({
 import type { RealtimeStore } from "$lib/stores/realtime-store.svelte";
 import Wrapper from "./meal-bolus-dialog-test-wrapper.svelte";
 
-// The dialog is portaled and its icon buttons carry no names.
-const trashButton = () =>
-  document.querySelector<HTMLButtonElement>("svg.lucide-trash-2")?.closest("button") ?? null;
+function mount() {
+  let store!: RealtimeStore;
+  const onSave = vi.fn();
+  render(Wrapper, {
+    props: {
+      meal: { boluses: [{ id: "b1", mills: Date.now(), insulin: 4 }] },
+      onstore: (s: RealtimeStore) => (store = s),
+      onSave,
+    },
+  });
+  return { store, onSave };
+}
+
+async function deleteBolus() {
+  await page.getByRole("button", { name: "Delete bolus" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+}
 
 describe("MealBolusDialog", () => {
+  beforeEach(() => {
+    toastError.mockClear();
+    saved.result = true;
+  });
+
   it("tells the realtime store a treatment changed once a delete succeeds", async () => {
     removeBolus.mockResolvedValue(undefined);
-    let store!: RealtimeStore;
-    const onSave = vi.fn();
-    render(Wrapper, {
-      props: {
-        meal: { boluses: [{ id: "b1", mills: Date.now(), insulin: 4 }] },
-        onstore: (s: RealtimeStore) => (store = s),
-        onSave,
-      },
-    });
+    const { store, onSave } = mount();
     const before = store.treatmentRevision;
 
-    await vi.waitFor(() => expect(trashButton()).not.toBeNull());
-    trashButton()!.click();
-    await page.getByRole("button", { name: "Delete" }).click();
+    await deleteBolus();
 
     await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(store.treatmentRevision).toBe(before + 1);
@@ -43,21 +69,36 @@ describe("MealBolusDialog", () => {
 
   it("leaves the store alone when the delete fails", async () => {
     removeBolus.mockRejectedValue(new Error("nope"));
-    let store!: RealtimeStore;
-    render(Wrapper, {
-      props: {
-        meal: { boluses: [{ id: "b1", mills: Date.now(), insulin: 4 }] },
-        onstore: (s: RealtimeStore) => (store = s),
-        onSave: vi.fn(),
-      },
-    });
+    const { store, onSave } = mount();
     const before = store.treatmentRevision;
 
-    await vi.waitFor(() => expect(trashButton()).not.toBeNull());
-    trashButton()!.click();
-    await page.getByRole("button", { name: "Delete" }).click();
-    await vi.waitFor(() => expect(removeBolus).toHaveBeenCalled());
+    await deleteBolus();
 
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(store.treatmentRevision).toBe(before);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("tells the realtime store a treatment changed once a save succeeds", async () => {
+    const { store, onSave } = mount();
+    const before = store.treatmentRevision;
+
+    await page.getByRole("button", { name: "Add bolus" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(store.treatmentRevision).toBe(before + 1);
+  });
+
+  it("leaves the store alone when the save fails", async () => {
+    saved.result = false;
+    const { store } = mount();
+    const before = store.treatmentRevision;
+
+    await page.getByRole("button", { name: "Add bolus" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(store.treatmentRevision).toBe(before);
   });
 });

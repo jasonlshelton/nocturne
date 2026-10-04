@@ -340,7 +340,6 @@
   function checkAllDone() {
     if (bolusFormDone && carbsFormDone && bgCheckFormDone && noteFormDone && deviceEventFormDone && basalInjectionFormDone) {
       if (!saveError) {
-        realtimeStore?.noteTreatmentWrite();
         toast.success(isEditing ? "Entry updated" : "Entry created");
         open = false;
         onClose();
@@ -413,8 +412,10 @@
         }
       }
 
-      await Promise.all(promises);
-      realtimeStore?.noteTreatmentWrite();
+      const settled = await Promise.allSettled(promises);
+      if (settled.some((r) => r.status === "fulfilled")) realtimeStore?.noteTreatmentWrite();
+      const failed = settled.find((r) => r.status === "rejected");
+      if (failed) throw failed.reason;
       toast.success("Entry deleted");
       open = false;
       onClose();
@@ -431,6 +432,7 @@
     {...activeBolusForm.enhance(async ({ submit }) => {
       await submit();
       if (activeBolusForm.result) {
+        realtimeStore?.noteTreatmentWrite();
         bolusFormDone = true;
       } else {
         saveError = "Failed to save bolus";
@@ -484,6 +486,7 @@
             }
           }
         }
+        realtimeStore?.noteTreatmentWrite();
         carbsFormDone = true;
       } else {
         saveError = "Failed to save carb intake";
@@ -517,6 +520,7 @@
     {...activeBGCheckForm.enhance(async ({ submit }) => {
       await submit();
       if (activeBGCheckForm.result) {
+        realtimeStore?.noteTreatmentWrite();
         bgCheckFormDone = true;
       } else {
         saveError = "Failed to save BG check";
@@ -546,6 +550,7 @@
     {...activeNoteForm.enhance(async ({ submit }) => {
       await submit();
       if (activeNoteForm.result) {
+        realtimeStore?.noteTreatmentWrite();
         noteFormDone = true;
       } else {
         saveError = "Failed to save note";
@@ -574,6 +579,7 @@
     {...activeDeviceEventForm.enhance(async ({ submit }) => {
       await submit();
       if (activeDeviceEventForm.result) {
+        realtimeStore?.noteTreatmentWrite();
         deviceEventFormDone = true;
       } else {
         saveError = "Failed to save device event";
@@ -604,6 +610,7 @@
     {...activeBasalInjectionForm.enhance(async ({ submit }) => {
       await submit();
       if (activeBasalInjectionForm.result) {
+        realtimeStore?.noteTreatmentWrite();
         basalInjectionFormDone = true;
       } else {
         saveError = "Failed to save basal injection";

@@ -309,9 +309,11 @@ export function createChartDataEngine(
   // The effect above never refetches SSR data and realtime streams only glucose,
   // so IOB, COB, basal and treatment markers are refreshed here. Triggers: realtime
   // devicestatus creates (the AID cadence), legacy `treatments` socket events and app
-  // writes via `treatmentRevision`, and the store's backfill; the timer covers IOB decaying with no new data.
+  // writes via `treatmentRevision`, and the store's backfill; the timer covers IOB
+  // decaying with no new data.
+  const hasInitialData = $derived(!!options.initialChartData);
   const dataFingerprint = $derived(
-    options.initialChartData
+    hasInitialData
       ? [
           realtimeStore.treatmentRevision,
           fingerprint(realtimeStore.boluses),
@@ -325,10 +327,18 @@ export function createChartDataEngine(
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  // A response is applied only while its sequence number is still current; adopting
+  // page data, a newer refresh and teardown all bump it.
   let refreshSeq = 0;
-  let disposed = false;
   let seenFingerprint: string | null = null;
   let skippedWhileHidden = false;
+  // svelte-ignore state_referenced_locally
+  let seenInitialData = options.initialChartData;
+
+  function recentWindow() {
+    const endTime = Math.ceil(Date.now() / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
+    return { startTime: endTime - RECENT_REFRESH_HOURS * 60 * 60 * 1000, endTime };
+  }
 
   function scheduleRefresh() {
     clearTimeout(debounceTimer);
@@ -346,19 +356,29 @@ export function createChartDataEngine(
     skippedWhileHidden = false;
 
     const seq = ++refreshSeq;
-    const end = Math.ceil(Date.now() / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
-    const startTime = end - RECENT_REFRESH_HOURS * 60 * 60 * 1000;
-    getChartData({ startTime, endTime: end, intervalMinutes: 5 })
+    const { startTime, endTime } = recentWindow();
+    getChartData({ startTime, endTime, intervalMinutes: 5 })
       .run()
       .then((recent) => {
-        if (disposed || seq !== refreshSeq) return;
+        if (seq !== refreshSeq) return;
         const current = untrack(() => serverChartData);
         serverChartData = current ? replaceWindow(current, recent, startTime) : recent;
       })
       .catch((err) => {
-        if (!disposed) console.error("Failed to refresh recent chart data:", err);
+        if (seq === refreshSeq) console.error("Failed to refresh recent chart data:", err);
       });
   }
+
+  // A page-data reload (every successful form submit runs invalidateAll) carries a
+  // freshly computed window; take it rather than discard it.
+  $effect(() => {
+    const next = options.initialChartData;
+    if (!next || next === seenInitialData) return;
+    seenInitialData = next;
+    refreshSeq++;
+    const current = untrack(() => serverChartData);
+    serverChartData = current ? replaceWindow(current, next, recentWindow().startTime) : next;
+  });
 
   $effect(() => {
     if (!isBrowser || dataFingerprint === null || !realtimeStore.isReady) return;
@@ -373,11 +393,8 @@ export function createChartDataEngine(
   });
 
   $effect(() => {
-    if (!isBrowser || !options.initialChartData) return;
+    if (!isBrowser || !hasInitialData) return;
 
-    // This effect re-runs when the page data is replaced (invalidateAll), so the
-    // flag has to be reset per run.
-    disposed = false;
     fallbackTimer = setTimeout(refreshRecent, RECENT_REFRESH_FALLBACK_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible" && skippedWhileHidden) scheduleRefresh();
@@ -385,7 +402,7 @@ export function createChartDataEngine(
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      disposed = true;
+      refreshSeq++;
       clearTimeout(debounceTimer);
       clearTimeout(fallbackTimer);
       document.removeEventListener("visibilitychange", onVisible);
