@@ -70,10 +70,8 @@ export function mergeChartData(
 		cobSeries: mergeByTime(initial.cobSeries, historical.cobSeries, (p) => p.time),
 		basalSeries: mergeByTime(initial.basalSeries, historical.basalSeries, (p) => p.timestamp),
 		glucoseData: mergeByTime(initial.glucoseData, historical.glucoseData, (p) => p.time),
-		heartRateSeries: mergeByTime(initial.heartRateSeries, historical.heartRateSeries, (p) => p.time),
-		stepSeries: mergeByTime(initial.stepSeries, historical.stepSeries, (p) => p.time),
 
-		// Merge markers (keyed by time)
+		// Markers drop a repeat by time, and by id where they render keyed by one
 		bolusMarkers: mergeByTime(initial.bolusMarkers, historical.bolusMarkers, (p) => p.time, (p) => p.treatmentId),
 		carbMarkers: mergeByTime(initial.carbMarkers, historical.carbMarkers, (p) => p.time, (p) => p.treatmentId),
 		deviceEventMarkers: mergeByTime(
@@ -187,8 +185,6 @@ export function replaceWindow(
 		cobSeries,
 		basalSeries,
 		glucoseData,
-		heartRateSeries: swap(current.heartRateSeries, recent.heartRateSeries, (p) => p.time),
-		stepSeries: swap(current.stepSeries, recent.stepSeries, (p) => p.time),
 		bolusMarkers: swap(current.bolusMarkers, recent.bolusMarkers, (p) => p.time, (p) => p.treatmentId),
 		carbMarkers: swap(current.carbMarkers, recent.carbMarkers, (p) => p.time, (p) => p.treatmentId),
 		deviceEventMarkers: swap(

@@ -21,8 +21,6 @@ function chartData(
     cobSeries: [],
     basalSeries: [],
     glucoseData: [],
-    heartRateSeries: [],
-    stepSeries: [],
     bolusMarkers: [],
     carbMarkers: [],
     deviceEventMarkers: [],
@@ -89,21 +87,6 @@ describe("mergeChartData basal injections", () => {
       "early",
       "late",
     ]);
-  });
-});
-
-describe("mergeChartData wearable series", () => {
-  it("keeps heart-rate and step samples from the historical half", () => {
-    const merged = mergeChartData(
-      chartData(),
-      chartData({
-        heartRateSeries: [{ time: new Date("2026-08-29T01:00:00Z"), bpm: 58 }],
-        stepSeries: [{ time: new Date("2026-08-29T01:00:00Z"), steps: 120 }],
-      })
-    );
-
-    expect(merged.heartRateSeries).toHaveLength(1);
-    expect(merged.stepSeries).toHaveLength(1);
   });
 });
 
@@ -278,5 +261,46 @@ describe("mergeChartData treatments across the boundary", () => {
     );
 
     expect(merged.bolusMarkers).toHaveLength(2);
+  });
+});
+
+describe("one copy of an id on each side of the boundary", () => {
+  type Lists =
+    | "bolusMarkers"
+    | "carbMarkers"
+    | "bgCheckMarkers"
+    | "deviceEventMarkers"
+    | "systemEventMarkers"
+    | "trackerMarkers"
+    | "basalInjectionMarkers";
+  const cases: { list: Lists; key: "treatmentId" | "id" }[] = [
+    { list: "bolusMarkers", key: "treatmentId" },
+    { list: "carbMarkers", key: "treatmentId" },
+    { list: "bgCheckMarkers", key: "treatmentId" },
+    { list: "deviceEventMarkers", key: "treatmentId" },
+    { list: "systemEventMarkers", key: "id" },
+    { list: "trackerMarkers", key: "id" },
+    { list: "basalInjectionMarkers", key: "id" },
+  ];
+  const row = (key: string, iso: string) => ({ [key]: "x1", time: new Date(iso) }) as never;
+  const boundary = new Date("2026-08-29T10:00:00Z").getTime();
+
+  it.each(cases)("replaceWindow keeps one $list row", ({ list, key }) => {
+    const result = replaceWindow(
+      chartData({ [list]: [row(key, "2026-08-29T03:00:00Z")] }),
+      chartData({ [list]: [row(key, "2026-08-29T11:00:00Z")] }),
+      boundary
+    );
+
+    expect(result[list]).toHaveLength(1);
+  });
+
+  it.each(cases)("mergeChartData keeps one $list row", ({ list, key }) => {
+    const merged = mergeChartData(
+      chartData({ [list]: [row(key, "2026-08-29T11:00:00Z")] }),
+      chartData({ [list]: [row(key, "2026-08-29T03:00:00Z")] })
+    );
+
+    expect(merged[list]).toHaveLength(1);
   });
 });
