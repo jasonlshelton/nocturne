@@ -26,7 +26,7 @@ namespace Nocturne.API.Services.Analytics;
 /// <seealso cref="ChartDataContext"/>
 public class ChartDataService : IChartDataService
 {
-    private const int TempBasalQueryLimit = 131072;
+    internal const int TempBasalQueryLimit = 131072;
 
     private readonly IEnumerable<IChartDataStage> _pipeline;
     private readonly IChartDataAssembler _assembler;
