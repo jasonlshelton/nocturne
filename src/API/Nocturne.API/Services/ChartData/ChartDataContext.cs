@@ -69,6 +69,9 @@ public sealed record ChartDataContext
     public IReadOnlyList<DeviceEvent> DeviceEventList { get; init; } = [];
     public IReadOnlyList<TempBasal> TempBasalList { get; init; } = [];
 
+    /// <summary>Temp basals starting in the display window (StartTime..EndTime).</summary>
+    public IReadOnlyList<TempBasal> DisplayTempBasals { get; init; } = [];
+
     /// <summary>
     /// APS snapshot IOB/COB points covering the buffer window, ascending by timestamp. Carries the
     /// IOB/COB the AID system reported, which the IOB/COB series prefers over its own recomputation.

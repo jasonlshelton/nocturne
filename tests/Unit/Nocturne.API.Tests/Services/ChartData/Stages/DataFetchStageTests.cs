@@ -243,6 +243,72 @@ public class DataFetchStageTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_FetchesTempBasalsFromBufferAndSplitsDisplayWindow()
+    {
+        var beforeWindow = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 60 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 30 * 60 * 1000).UtcDateTime,
+            Rate = 3.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        var runningAcrossStart = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime - 5 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 25 * 60 * 1000).UtcDateTime,
+            Rate = 2.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        var atStart = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 10 * 60 * 1000).UtcDateTime,
+            Rate = 1.0,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        var inWindow = new TempBasal
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 60 * 60 * 1000).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(StartTime + 90 * 60 * 1000).UtcDateTime,
+            Rate = 0.5,
+            Origin = TempBasalOrigin.Algorithm,
+        };
+        DateTime? requestedFrom = null;
+        int requestedLimit = 0;
+        bool requestedDescending = true;
+        _mockTempBasalRepo
+            .Setup(r => r.GetAsync(
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<DateTime?, DateTime?, string?, string?, int, int, bool, CancellationToken>(
+                (from, _, _, _, limit, _, descending, _) =>
+                {
+                    requestedFrom = from;
+                    requestedLimit = limit;
+                    requestedDescending = descending;
+                })
+            .ReturnsAsync([beforeWindow, runningAcrossStart, atStart, inWindow]);
+
+        var result = await _stage.ExecuteAsync(
+            new ChartDataContext
+            {
+                StartTime = StartTime,
+                EndTime = EndTime,
+                IntervalMinutes = 5,
+                BufferStartTime = BufferStartTime,
+            },
+            CancellationToken.None);
+
+        requestedFrom.Should().Be(DateTimeOffset.FromUnixTimeMilliseconds(BufferStartTime).UtcDateTime);
+        requestedLimit.Should().Be(Nocturne.API.Services.Analytics.ChartDataService.TempBasalQueryLimit);
+        requestedDescending.Should().BeFalse();
+        result.TempBasalList.Should().BeEquivalentTo([beforeWindow, runningAcrossStart, atStart, inWindow]);
+        result.DisplayTempBasals.Should().BeEquivalentTo([atStart, inWindow]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WithHealthSeries_LoadsHeartRateAndSteps()
     {
         _mockHeartRateService
