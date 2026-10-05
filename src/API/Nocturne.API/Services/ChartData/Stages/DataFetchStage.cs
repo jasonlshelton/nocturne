@@ -227,17 +227,22 @@ internal sealed class DataFetchStage(
                 cancellationToken: cancellationToken
             );
 
-            var heartRateList = (await heartRateService.GetHeartRatesByDateRangeAsync(
-                MillsToDateTime(startTime)!.Value,
-                MillsToDateTime(endTime)!.Value,
-                cancellationToken: cancellationToken
-            )).ToList();
+            List<HeartRate> heartRateList = [];
+            List<StepCount> stepCountList = [];
+            if (context.IncludeHealthSeries)
+            {
+                heartRateList = (await heartRateService.GetHeartRatesByDateRangeAsync(
+                    MillsToDateTime(startTime)!.Value,
+                    MillsToDateTime(endTime)!.Value,
+                    cancellationToken: cancellationToken
+                )).ToList();
 
-            var stepCountList = (await stepCountService.GetStepCountsByDateRangeAsync(
-                MillsToDateTime(startTime)!.Value,
-                MillsToDateTime(endTime)!.Value,
-                cancellationToken: cancellationToken
-            )).ToList();
+                stepCountList = (await stepCountService.GetStepCountsByDateRangeAsync(
+                    MillsToDateTime(startTime)!.Value,
+                    MillsToDateTime(endTime)!.Value,
+                    cancellationToken: cancellationToken
+                )).ToList();
+            }
 
             var stateSpansReadOnly = allStateSpans
                 .ToDictionary(
