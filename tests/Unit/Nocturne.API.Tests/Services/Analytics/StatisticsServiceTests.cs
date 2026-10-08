@@ -308,7 +308,7 @@ public class StatisticsServiceTests
     )
     {
         var result = _statisticsService.CalculateTimeInRange(
-            Sequence(cadenceMinutes, 100, 60, 40, 60, 70, 180, 200, 300)
+            Sequence(cadenceMinutes, [100, 60, 40, 60, 70, 180, 200, 300])
         );
 
         result.Durations.BelowRange.Should().Be(belowMinutes);
