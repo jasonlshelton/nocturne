@@ -45,11 +45,11 @@
   const DEFAULT_PRESET: Preset = "last14-prior14";
 
   /**
-   * The comparison lives in the URL, so refresh, share and Back all reproduce it,
-   * and the committed periods the queries read are the same values the labels and
-   * range lines render from — previously the header read a draft the numbers had
-   * never been loaded for, so after Swap period A's figures sat under period B's
-   * label until Load was pressed.
+   * The comparison lives in the URL, so refresh, share and Back all reproduce
+   * it, and the committed periods the queries read are the same values the
+   * labels and range lines render from — previously the header read a draft the
+   * numbers had never been loaded for, so after Swap period A's figures sat
+   * under period B's label until Load was pressed.
    */
   const ComparisonParamsSchema = z.object({
     preset: z.enum(PRESETS).nullable().default(null),
@@ -93,7 +93,8 @@
       };
     }
 
-    const span = preset === "last7-prior7" ? 7 : preset === "last14-prior14" ? 14 : 30;
+    const span =
+      preset === "last7-prior7" ? 7 : preset === "last14-prior14" ? 14 : 30;
     const bFrom = shiftDays(today, -(span - 1));
     const aTo = shiftDays(bFrom, -1);
     const aFrom = shiftDays(aTo, -(span - 1));
@@ -118,12 +119,14 @@
 
   /**
    * The committed comparison, read out of the URL with the preset as fallback.
-   * A day that isn't resolvable falls back to the preset's rather than being fed
-   * to the queries.
+   * A day that isn't resolvable falls back to the preset's rather than being
+   * fed to the queries.
    */
   function readCommitted(): Periods {
     const preset = urlParams.preset ?? DEFAULT_PRESET;
-    const fromPreset = computePreset(preset === "custom" ? DEFAULT_PRESET : preset);
+    const fromPreset = computePreset(
+      preset === "custom" ? DEFAULT_PRESET : preset
+    );
     const day = (value: string | null, fallback: string) =>
       dayPart(isDayString(value) ? value : fallback);
     return {
@@ -149,7 +152,9 @@
   }));
 
   let openPopover = $state<Side | null>(null);
-  let preset = $state<Preset>(untrack(() => urlParams.preset ?? DEFAULT_PRESET));
+  let preset = $state<Preset>(
+    untrack(() => urlParams.preset ?? DEFAULT_PRESET)
+  );
   /** Pending edits to the compared ranges, applied to the URL by Load. */
   let draft = $state<Periods>(untrack(readCommitted));
 
@@ -190,15 +195,21 @@
     urlParams.update(side === "a" ? { aLabel: label } : { bLabel: label });
   }
 
-  const inputA = $derived<DateRangeInput>({ from: committed.a.from, to: committed.a.to });
-  const inputB = $derived<DateRangeInput>({ from: committed.b.from, to: committed.b.to });
+  const inputA = $derived<DateRangeInput>({
+    from: committed.a.from,
+    to: committed.a.to,
+  });
+  const inputB = $derived<DateRangeInput>({
+    from: committed.b.from,
+    to: committed.b.to,
+  });
 
   // Only the compared windows need reloading; labels are excluded.
   const isDirty = $derived(
     draft.a.from !== committed.a.from ||
-    draft.a.to !== committed.a.to ||
-    draft.b.from !== committed.b.from ||
-    draft.b.to !== committed.b.to
+      draft.a.to !== committed.a.to ||
+      draft.b.from !== committed.b.from ||
+      draft.b.to !== committed.b.to
   );
 
   // Both periods register with the layout's ResourceContext, which merges them:
@@ -217,7 +228,9 @@
     | "gri"
     | "mean"
     | "hyperHours"
-    | "hyperEvents";
+    | "hyperEvents"
+    | "hypoHours"
+    | "hypoEvents";
 
   function signed(value: number, digits = 1): string {
     if (Math.abs(value) < (digits === 0 ? 0.5 : 0.05)) return "±0";
@@ -268,6 +281,16 @@
       format: (v) => v.toFixed(0),
       formatDelta: (d) => signed(d, 0),
     },
+    hypoHours: {
+      label: "Hypo Duration",
+      format: (v) => `${v.toFixed(1)} h`,
+      formatDelta: (d) => `${signed(d)} h`,
+    },
+    hypoEvents: {
+      label: "Hypo Events",
+      format: (v) => v.toFixed(0),
+      formatDelta: (d) => signed(d, 0),
+    },
   };
 
   type Analysis = NonNullable<NonNullable<typeof queryA.current>["analysis"]>;
@@ -297,9 +320,17 @@
       case "mean":
         return stats?.mean ?? null;
       case "hyperHours":
-        return tir?.durations?.aboveRange != null ? tir.durations.aboveRange / 60 : null;
+        return tir?.durations?.aboveRange != null
+          ? tir.durations.aboveRange / 60
+          : null;
       case "hyperEvents":
         return tir?.episodes?.aboveRange ?? null;
+      case "hypoHours":
+        return tir?.durations?.belowRange != null
+          ? tir.durations.belowRange / 60
+          : null;
+      case "hypoEvents":
+        return tir?.episodes?.belowRange ?? null;
     }
     return null;
   }
@@ -312,6 +343,8 @@
     "mean",
     "hyperHours",
     "hyperEvents",
+    "hypoHours",
+    "hypoEvents",
   ];
 
   // Cap percent change at ±60 % so outliers don't blow out the bar.
@@ -359,7 +392,10 @@
 
       const delta = bv - av;
       const flat =
-        Math.abs(delta) < (key === "gri" || key === "hyperEvents" ? 0.5 : 0.05);
+        Math.abs(delta) <
+        (key === "gri" || key === "hyperEvents" || key === "hypoEvents"
+          ? 0.5
+          : 0.05);
 
       const magnitude = Math.min(BAR_CAP_PCT, Math.abs(percentChange(av, bv)));
       const halfWidth = (magnitude / BAR_CAP_PCT) * 50;
@@ -421,7 +457,10 @@
     <Card.Content class="space-y-4 p-4">
       <div class="flex flex-wrap items-end gap-3">
         <div class="min-w-[220px] flex-1">
-          <label class="mb-1 block text-xs font-medium text-muted-foreground" for="cmp-preset">
+          <label
+            class="mb-1 block text-xs font-medium text-muted-foreground"
+            for="cmp-preset"
+          >
             Preset
           </label>
           <Select.Root
@@ -488,7 +527,9 @@
                     size="sm"
                     class="w-full justify-start"
                   >
-                    <CalendarDays class="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <CalendarDays
+                      class="h-3.5 w-3.5 text-muted-foreground shrink-0"
+                    />
                     <span class="tabular-nums">
                       {rangeDisplay(p.from, p.to)}
                     </span>
@@ -519,7 +560,9 @@
 
   <Card.Root>
     <Card.Content class="space-y-4 p-6 print:space-y-2 print:p-4">
-      <div class="flex flex-wrap items-center gap-3 border-b border-border pb-3 print:hidden">
+      <div
+        class="flex flex-wrap items-center gap-3 border-b border-border pb-3 print:hidden"
+      >
         <span class="inline-flex items-center gap-2 text-sm font-medium">
           <span
             class="inline-block h-2 w-2 rounded-full bg-muted-foreground"
@@ -554,17 +597,26 @@
           <div
             class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 print:py-1.5 @2xl:grid @2xl:flex-nowrap @2xl:gap-4 @2xl:[grid-template-columns:minmax(140px,1fr)_90px_90px_minmax(120px,2fr)_100px]"
           >
-            <div class="w-full text-sm font-medium @2xl:w-auto">{row.label}</div>
-            <div class="text-sm tabular-nums text-muted-foreground @2xl:text-right">
+            <div class="w-full text-sm font-medium @2xl:w-auto">
+              {row.label}
+            </div>
+            <div
+              class="text-sm tabular-nums text-muted-foreground @2xl:text-right"
+            >
               {valueText(row.key, row.av)}
             </div>
             <div class="text-sm font-semibold tabular-nums @2xl:text-right">
               {valueText(row.key, row.bv)}
             </div>
-            <div class="relative order-last h-2 w-full overflow-hidden rounded-full bg-muted @2xl:order-none @2xl:w-auto">
-              <div class="absolute top-0 bottom-0 left-1/2 w-px bg-border"></div>
+            <div
+              class="relative order-last h-2 w-full overflow-hidden rounded-full bg-muted @2xl:order-none @2xl:w-auto"
+            >
               <div
-                class="absolute top-0 bottom-0 rounded-full bg-foreground transition-all duration-200 {row.bar === 'flat'
+                class="absolute top-0 bottom-0 left-1/2 w-px bg-border"
+              ></div>
+              <div
+                class="absolute top-0 bottom-0 rounded-full bg-foreground transition-all duration-200 {row.bar ===
+                'flat'
                   ? 'left-[calc(50%-1px)] w-0.5'
                   : row.bar === 'up'
                     ? 'left-1/2 w-(--bar-w)'
@@ -620,7 +672,9 @@
               {#if col.tir}
                 <TIRStackedChart percentages={col.tir} />
               {:else}
-                <div class="flex h-full items-center justify-center text-sm text-muted-foreground">
+                <div
+                  class="flex h-full items-center justify-center text-sm text-muted-foreground"
+                >
                   No data
                 </div>
               {/if}
