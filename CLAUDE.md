@@ -195,6 +195,10 @@ Know what it actually checks before trusting it:
   green. That migration's exact spacing is load-bearing for a regex nothing tests.
   `AddUniqueConstraint`/`AddPrimaryKey` and `ALTER TABLE … ADD CONSTRAINT … UNIQUE`
   have no live example at all. Treat all three as unexercised.
+- **A concurrent unique index goes through `ConcurrentIndexBuilder.BuildUnique`**
+  (`ConcurrentIndexBuildGuardTests` forbids writing `CREATE UNIQUE INDEX CONCURRENTLY` in a
+  migration). The guard reads its table off the `ON <table>` in the definition, and
+  `TheGuardSeesAConcurrentUniqueBuild` keeps that pattern from silently stopping to match.
 
 An index whose table it cannot read off the call — an interpolated `{table}` hole,
 or a loop variable — is reported rather than skipped, so the multi-table loop the
@@ -260,7 +264,14 @@ and by history window:
 (The recency conjunct appears only on tables with a recency column in
 `ShareDataCategories.RecencyColumns`; catalog tables with no per-row time, e.g.
 `foods`, carry just the category gate, and a table with no governing scope carries
-only the `is_share` test, so it is hidden from shares and never clamped for members.
+only the `is_share` test, so it is hidden from shares and never clamped for members,
+unless `ShareDataCategories.HiddenRecencyColumns` gives it a recency column
+(`notes`): then it is hidden from shares and clamped for members. A hidden table of
+spans in `ShareDataCategories.HiddenSpanEndColumns` (`state_spans`) is clamped by
+overlap instead, `("end_timestamp" IS NULL OR "end_timestamp" >= now() - interval
+'24 hours')`, so a profile switch or pump mode still running stays visible to a
+clamped member however long ago it started; clamping it by start would leave the
+therapy resolvers on the default profile.
 `IS [NOT] DISTINCT FROM` keeps the clamp test non-null when a GUC is unset.)
 
 Four extra GUCs carry the request state to the connection (set by

@@ -30,6 +30,8 @@ public static class TempBasalToTreatmentMapper
                 ? tempBasal.LegacyId
                 : tempBasal.Id.ToString(),
             Mills = tempBasal.StartMills,
+            SrvCreated = new DateTimeOffset(tempBasal.CreatedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+            SrvModified = new DateTimeOffset(tempBasal.ModifiedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
             EventType = "Temp Basal",
             Duration = durationMinutes,
             Absolute = rate,
@@ -40,6 +42,7 @@ public static class TempBasalToTreatmentMapper
             DataSource = tempBasal.DataSource,
             Automatic = TempBasalAutomaticFlag.Of(tempBasal.AdditionalProperties),
             AdditionalProperties = TreatmentClientId.ToTreatment(tempBasal.AdditionalProperties),
+            RawTimestamp = TreatmentUploadedTimestamp.Of(tempBasal.AdditionalProperties),
         };
 
         // TreatmentDecomposer reads basalOrigin back when an edit re-decomposes;

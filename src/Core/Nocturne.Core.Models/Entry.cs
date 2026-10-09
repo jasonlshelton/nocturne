@@ -24,6 +24,7 @@ public class Entry : ProcessableDocumentBase
     /// Gets or sets the MongoDB ObjectId
     /// </summary>
     [JsonPropertyName("_id")]
+    [JsonConverter(typeof(ObjectIdJsonConverter))]
     public override string? Id { get; set; }
 
     /// <summary>
@@ -52,22 +53,8 @@ public class Entry : ProcessableDocumentBase
             }
 
             // If mills is not set but dateString is available, calculate it
-            if (!string.IsNullOrEmpty(_dateString))
-            {
-                if (
-                    DateTime.TryParse(
-                        _dateString,
-                        null,
-                        System.Globalization.DateTimeStyles.RoundtripKind,
-                        out var parsedDate
-                    )
-                )
-                {
-                    return (
-                        (DateTimeOffset)DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc)
-                    ).ToUnixTimeMilliseconds();
-                }
-            }
+            if (UploaderTimestamp.TryParse(_dateString, out var parsedDate))
+                return parsedDate.ToUnixTimeMilliseconds();
 
             return _mills;
         }
@@ -106,20 +93,8 @@ public class Entry : ProcessableDocumentBase
                 return DateTimeOffset.FromUnixTimeMilliseconds(_mills).UtcDateTime;
             }
             // If date is not set but we have dateString, parse it
-            if (_date == null && !string.IsNullOrEmpty(_dateString))
-            {
-                if (
-                    DateTime.TryParse(
-                        _dateString,
-                        null,
-                        System.Globalization.DateTimeStyles.RoundtripKind,
-                        out var parsedDate
-                    )
-                )
-                {
-                    return DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc);
-                }
-            }
+            if (_date == null && UploaderTimestamp.TryParse(_dateString, out var parsedDate))
+                return parsedDate.UtcDateTime;
             return _date;
         }
         set => _date = value;
@@ -378,6 +353,7 @@ public class Entry : ProcessableDocumentBase
     /// Gets the V3 API identifier - alias for <see cref="ProcessableDocumentBase.Id"/>.
     /// </summary>
     [JsonPropertyName("identifier")]
+    [JsonConverter(typeof(ObjectIdJsonConverter))]
     public string? Identifier => Id;
 
     /// <summary>
