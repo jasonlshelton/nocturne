@@ -184,7 +184,7 @@ public class TreatmentServiceTests
             Origin = V4Models.TempBasalOrigin.Algorithm,
             App = "loop://Test Phone",
         });
-        _mockStore.Setup(x => x.GetByIdAsync("tb1", It.IsAny<CancellationToken>())).ReturnsAsync(stored);
+        _mockStore.Setup(x => x.GetForUpdateAsync("tb1", It.IsAny<CancellationToken>())).ReturnsAsync(stored);
         Treatment? decomposed = null;
         _mockDecomposer.Setup(x => x.DecomposeAsync(It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .Callback<Treatment, WriteOrigin, CancellationToken>((t, _, _) => decomposed = t)
