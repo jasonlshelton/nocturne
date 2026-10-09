@@ -722,6 +722,110 @@ public class TreatmentsIntegrationTests : ApiIntegrationTestBase
         (await client.GetAsync($"/api/v3/treatments/{identifier}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+
+    /// <summary>
+    /// AAPS's temp basal lifecycle: POST at start, then PATCH by the identifier the create returned
+    /// when the pump cuts it short, then PATCH again by the identifier the first PATCH returned.
+    /// AAPS stores the identifier from every response, so a PATCH that answers with a different
+    /// identifier than the create re-keys the client to it for every later edit.
+    /// </summary>
+    [Fact]
+    public async Task AapsTempBasal_PatchByTheIdentifierTheFirstPatchReturned_UpdatesInPlace()
+    {
+        var client = CreateAuthenticatedClient();
+        var createdAt = DistinctTime();
+        var mills = DateTimeOffset.Parse(createdAt).ToUnixTimeMilliseconds();
+
+        Dictionary<string, object> TempBasal(long durationMs, string? identifier = null)
+        {
+            var body = new Dictionary<string, object>
+            {
+                ["eventType"] = "Temp Basal",
+                ["date"] = mills,
+                ["utcOffset"] = 120,
+                ["isValid"] = true,
+                ["isReadOnly"] = false,
+                ["app"] = "AAPS",
+                ["device"] = "Pixel",
+                ["pumpId"] = mills,
+                ["pumpType"] = "MEDTRUM_NANO",
+                ["pumpSerial"] = "d89535d4",
+                ["duration"] = durationMs / 60_000,
+                ["durationInMilliseconds"] = durationMs,
+                ["rate"] = 1.25,
+                ["absolute"] = 1.25,
+                ["type"] = "NORMAL",
+            };
+            if (identifier is not null)
+            {
+                body["identifier"] = identifier;
+                body["srvCreated"] = mills;
+                body["srvModified"] = mills + 5_000;
+            }
+            return body;
+        }
+
+        var post = await client.PostAsJsonAsync("/api/v3/treatments", TempBasal(30 * 60_000));
+        post.StatusCode.Should().Be(HttpStatusCode.Created, await post.Content.ReadAsStringAsync());
+        var created = V3Result(await post.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("identifier").GetString()!;
+
+        var first = await client.PatchAsJsonAsync($"/api/v3/treatments/{created}", TempBasal(4_250, created));
+        first.StatusCode.Should().Be(HttpStatusCode.OK, await first.Content.ReadAsStringAsync());
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var firstIdentifier = firstBody.GetProperty("identifier").GetString()!;
+        firstIdentifier.Should().Be(created, "a PATCH answers with the identifier the record is served under");
+        V3Result(firstBody).GetProperty("identifier").GetString().Should().Be(created);
+
+        var second = await client.PatchAsJsonAsync($"/api/v3/treatments/{firstIdentifier}", TempBasal(4_250, firstIdentifier));
+        second.StatusCode.Should().Be(HttpStatusCode.OK, await second.Content.ReadAsStringAsync());
+
+        V3Result(await client.GetFromJsonAsync<JsonElement>($"/api/v3/treatments/{created}"))
+            .GetProperty("eventType").GetString().Should().Be("Temp Basal");
+        var stored = (await TreatmentsAtAsync(createdAt)).Should().ContainSingle().Which;
+        stored.EventType.Should().Be("Temp Basal");
+        stored.Duration.Should().BeApproximately(4_250 / 60_000.0, 1e-6, "both PATCHes cut the temp basal to 4.25 s");
+    }
+
+    /// <summary>
+    /// AAPS turns any served record with <c>insulin &gt; 0</c> into a bolus before it reads the event
+    /// type (nssdk TreatmentMapper.toTreatment), so the rate × duration a temp basal delivers must
+    /// never be served as its insulin on any read AAPS uses.
+    /// </summary>
+    [Fact]
+    public async Task AapsTempBasal_IsServedWithoutInsulin_OnGetSearchAndHistory()
+    {
+        var client = CreateAuthenticatedClient();
+        var createdAt = DistinctTime();
+        var mills = DateTimeOffset.Parse(createdAt).ToUnixTimeMilliseconds();
+        var post = await client.PostAsJsonAsync("/api/v3/treatments", new Dictionary<string, object>
+        {
+            ["eventType"] = "Temp Basal",
+            ["date"] = mills,
+            ["app"] = "AAPS",
+            ["duration"] = 30,
+            ["durationInMilliseconds"] = 30 * 60_000,
+            ["rate"] = 1.25,
+            ["absolute"] = 1.25,
+            ["type"] = "NORMAL",
+        });
+        post.StatusCode.Should().Be(HttpStatusCode.Created, await post.Content.ReadAsStringAsync());
+        var createdBody = V3Result(await post.Content.ReadFromJsonAsync<JsonElement>());
+        var identifier = createdBody.GetProperty("identifier").GetString()!;
+
+        static void CarriesNoInsulin(JsonElement treatment, string read) =>
+            (treatment.TryGetProperty("insulin", out var insulin) && insulin.ValueKind != JsonValueKind.Null)
+                .Should().BeFalse("{0} served insulin {1} on a temp basal", read, treatment);
+
+        CarriesNoInsulin(createdBody, "create");
+        CarriesNoInsulin(V3Result(await client.GetFromJsonAsync<JsonElement>($"/api/v3/treatments/{identifier}")), "get");
+
+        var search = V3Result(await client.GetFromJsonAsync<JsonElement>($"/api/v3/treatments?date$eq={mills}"));
+        CarriesNoInsulin(search.EnumerateArray().Single(t => t.GetProperty("identifier").GetString() == identifier), "search");
+
+        var history = V3Result(await client.GetFromJsonAsync<JsonElement>("/api/v3/treatments/history/0"));
+        CarriesNoInsulin(history.EnumerateArray().Single(t => t.GetProperty("identifier").GetString() == identifier), "history");
+    }
+
     #endregion
 
     #region Trio lowercase id

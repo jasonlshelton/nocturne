@@ -103,28 +103,18 @@ public class Treatment : ProcessableDocumentBase
     private double? _insulin;
 
     /// <summary>
-    /// Gets or sets the insulin amount in units.
-    /// Derives from Amount if null, or calculates from Rate * Duration.
+    /// Gets or sets the insulin amount in units. Derives from Amount if null.
     /// </summary>
+    /// <remarks>
+    /// Never derived from <see cref="Rate"/> × <see cref="Duration"/>: that is what a temp basal
+    /// delivers, not a dose, and AAPS classifies any served record carrying <c>insulin &gt; 0</c> as a
+    /// bolus before it looks at <c>eventType</c> (nssdk TreatmentMapper.toTreatment), so a temp basal
+    /// served with it comes back as a phantom bolus under the temp basal's identifier.
+    /// </remarks>
     [JsonPropertyName("insulin")]
     public double? Insulin
     {
-        get
-        {
-            if (_insulin.HasValue)
-                return _insulin;
-            if (_amount.HasValue)
-                return _amount;
-
-            // Try to calculate from Rate * Duration
-            // resolving synonyms for Rate
-            var r = _rate ?? _absolute;
-            if (r.HasValue && _duration.HasValue && _duration.Value > 0)
-            {
-                return r.Value * (_duration.Value / 60.0);
-            }
-            return null;
-        }
+        get => _insulin ?? _amount;
         set => _insulin = value;
     }
 
