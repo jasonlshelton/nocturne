@@ -5,10 +5,7 @@ using Xunit;
 
 namespace Nocturne.Core.Models.Tests;
 
-/// <summary>
-/// AAPS classifies any served treatment carrying <c>insulin &gt; 0</c> as a bolus before it reads
-/// <c>eventType</c>, so a temp basal must never be served with an insulin amount it did not carry.
-/// </summary>
+/// <summary>Pins the derivation <see cref="Treatment.Insulin"/> must not make.</summary>
 [Trait("Category", "Unit")]
 public class TreatmentInsulinTests
 {
@@ -18,9 +15,10 @@ public class TreatmentInsulinTests
         var tempBasal = new Treatment { EventType = "Temp Basal", Rate = 1.25, Absolute = 1.25, Duration = 30 };
 
         tempBasal.Insulin.Should().BeNull();
-        JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(tempBasal))
-            .TryGetProperty("insulin", out var insulin).Should().BeTrue();
-        insulin.ValueKind.Should().Be(JsonValueKind.Null);
+        tempBasal.Amount.Should().BeNull();
+        var serialized = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(tempBasal));
+        (serialized.TryGetProperty("insulin", out var insulin) && insulin.ValueKind != JsonValueKind.Null)
+            .Should().BeFalse();
     }
 
     [Fact]

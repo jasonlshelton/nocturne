@@ -157,7 +157,7 @@ public class TreatmentServiceTests
         var existing = new Treatment { Id = "syn-abc", Mills = 1000, EventType = "Note", Notes = "old" };
         var served = new Treatment { Id = "01a1203c38ea7808a510f88b", Mills = 1000, EventType = "Note", Notes = "updated" };
         _mockStore.Setup(x => x.GetForUpdateAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync(existing);
-        _mockStore.Setup(x => x.GetByIdAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync(served);
+        _mockStore.Setup(x => x.GetByIdAsync("syn-abc", It.IsAny<CancellationToken>())).ReturnsAsync(served);
         Treatment? decomposed = null;
         _mockDecomposer.Setup(x => x.DecomposeAsync(It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .Callback<Treatment, WriteOrigin, CancellationToken>((t, _, _) => decomposed = t)
@@ -181,7 +181,7 @@ public class TreatmentServiceTests
     {
         var existing = new Treatment { Id = "syn-abc", Mills = 1000, EventType = "Note", Notes = "old" };
         _mockStore.Setup(x => x.GetForUpdateAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync(existing);
-        _mockStore.Setup(x => x.GetByIdAsync("t1", It.IsAny<CancellationToken>())).ReturnsAsync((Treatment?)null);
+        _mockStore.Setup(x => x.GetByIdAsync("syn-abc", It.IsAny<CancellationToken>())).ReturnsAsync((Treatment?)null);
         _mockDecomposer.Setup(x => x.DecomposeAsync(It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DecompositionResult());
 

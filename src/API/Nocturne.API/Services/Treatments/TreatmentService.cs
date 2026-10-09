@@ -204,7 +204,14 @@ public class TreatmentService : ITreatmentService
         // The merged record carries the upsert key, which the wire would coerce to a different
         // identifier than the create returned; AAPS stores the identifier from every response and
         // every pushed record, so the response and the event carry the record as reads serve it.
-        var served = await _store.GetByIdAsync(id, cancellationToken) ?? existing;
+        // The upsert key is a stored legacy id, so it resolves exactly, with no hash scan.
+        var served = await _store.GetByIdAsync(existing.Id ?? id, cancellationToken);
+        if (served is null)
+        {
+            _logger.LogWarning("Patched treatment {Id} did not read back under its upsert key", id);
+            served = existing;
+        }
+
         await _events.OnUpdatedAsync(served, cancellationToken);
 
         return served;

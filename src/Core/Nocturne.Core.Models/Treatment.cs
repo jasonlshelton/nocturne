@@ -14,9 +14,10 @@ namespace Nocturne.Core.Models;
 /// <para>Follows the mills-first timestamp pattern: <see cref="Mills"/> is computed from
 /// <see cref="Created_at"/> if not explicitly set. <see cref="Created_at"/> is likewise
 /// computed from Mills when not set.</para>
-/// <para><see cref="Insulin"/>, <see cref="Rate"/>, and <see cref="Duration"/> form a
-/// computed triangle: any two can derive the third. <see cref="Absolute"/> and
-/// <see cref="Amount"/> are synonyms for Rate and Insulin respectively.</para>
+/// <para><see cref="Rate"/> derives from Insulin ÷ Duration and <see cref="Duration"/> from
+/// Insulin ÷ Rate when not set; <see cref="Insulin"/> is never derived from the other two (see its
+/// remarks). <see cref="Absolute"/> and <see cref="Amount"/> are synonyms for Rate and Insulin
+/// respectively.</para>
 /// </remarks>
 /// <seealso cref="ProcessableDocumentBase"/>
 /// <seealso cref="Entry"/>
