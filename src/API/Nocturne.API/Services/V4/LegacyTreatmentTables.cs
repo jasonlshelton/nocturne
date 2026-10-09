@@ -251,7 +251,10 @@ internal sealed class LegacyStateSpanTable(
     public string RecordType { get; } = $"{nameof(StateSpan)}.{category}";
 
     internal IQueryable<StateSpanEntity> Rows(NocturneDbContext context) =>
-        context.StateSpans.AsNoTracking().Where(s => s.Category == _category).Where(fromTreatment);
+        Served(context.StateSpans.AsNoTracking());
+
+    private IQueryable<StateSpanEntity> Served(IQueryable<StateSpanEntity> spans) =>
+        spans.Where(s => s.Category == _category).Where(fromTreatment);
 
     /// <summary>The served spans of this category whose latest delete was the user's.</summary>
     internal IQueryable<StateSpanEntity> UserTombstones(NocturneDbContext context) =>
@@ -304,9 +307,10 @@ internal sealed class LegacyStateSpanTable(
     )
     {
         var spans = await HistoryPage.GetAsync(
-            Rows(context), s => s.UpdatedAt, s => s.Id, cursorMills, limit, logger, RecordType, ct);
+            Served(context.StateSpans.IncludingDeleted().AsNoTracking()),
+            s => s.UpdatedAt, s => s.Id, cursorMills, limit, logger, RecordType, ct);
 
-        return spans.Select(Fetched).ToList();
+        return spans.Select(span => Fetched(span) with { Deleted = span.DeletedAt is not null }).ToList();
     }
 
     /// <inheritdoc />

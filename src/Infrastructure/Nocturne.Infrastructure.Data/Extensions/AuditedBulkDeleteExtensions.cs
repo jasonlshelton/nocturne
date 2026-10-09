@@ -261,9 +261,10 @@ public static class AuditedBulkDeleteExtensions
     /// deleted, stamping each promoted copy after the deletes.
     /// </summary>
     /// <remarks>
-    /// A delete is a write a v3 history client has to be told of, so on an
-    /// <see cref="ISystemTimestamped"/> row it moves <c>SysUpdatedAt</c> as a tracked save would,
-    /// and like one it spreads the rows over successive milliseconds,
+    /// A delete is a write a v3 history client has to be told of, so it moves the row's update stamp
+    /// as a tracked save would (<c>SysUpdatedAt</c> on an <see cref="ISystemTimestamped"/> row,
+    /// <c>UpdatedAt</c> on an <see cref="IEntityTimestamped"/> one), and like one it spreads the rows
+    /// over successive milliseconds,
     /// <see cref="NocturneDbContext.SystemTimestampGroupSize"/> to each (see <see cref="HistoryPage"/>).
     /// </remarks>
     private static async Task<(int Count, IReadOnlyList<Guid> Promoted)> SoftDeleteRowsAsync<T>(
@@ -275,10 +276,14 @@ public static class AuditedBulkDeleteExtensions
         CancellationToken ct) where T : class, ISoftDeletable
     {
         var isUserDelete = !auditContext.IsSystemMutation();
-        var timestamped = typeof(ISystemTimestamped).IsAssignableFrom(typeof(T));
+        var stampColumn = typeof(ISystemTimestamped).IsAssignableFrom(typeof(T))
+            ? nameof(ISystemTimestamped.SysUpdatedAt)
+            : typeof(IEntityTimestamped).IsAssignableFrom(typeof(T))
+                ? nameof(IEntityTimestamped.UpdatedAt)
+                : null;
         var recordType = DuplicateGroupPrimaries.RecordTypeOf<T>();
 
-        if (!timestamped && recordType is null)
+        if (stampColumn is null && recordType is null)
         {
             var updated = await query.ExecuteUpdateAsync(
                 s => s
@@ -297,18 +302,26 @@ public static class AuditedBulkDeleteExtensions
         {
             var stamp = deletedAt.AddMilliseconds(index);
             var rows = live.Where(e => group.Contains(EF.Property<Guid>(e, "Id")));
-            total += timestamped
-                ? await rows.ExecuteUpdateAsync(
+            total += stampColumn switch
+            {
+                nameof(ISystemTimestamped.SysUpdatedAt) => await rows.ExecuteUpdateAsync(
                     s => s
                         .SetProperty(e => e.DeletedAt, deletedAt)
                         .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete)
                         .SetProperty(e => EF.Property<DateTime>(e, nameof(ISystemTimestamped.SysUpdatedAt)), stamp),
-                    ct)
-                : await rows.ExecuteUpdateAsync(
+                    ct),
+                nameof(IEntityTimestamped.UpdatedAt) => await rows.ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(e => e.DeletedAt, deletedAt)
+                        .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete)
+                        .SetProperty(e => EF.Property<DateTime>(e, nameof(IEntityTimestamped.UpdatedAt)), stamp),
+                    ct),
+                _ => await rows.ExecuteUpdateAsync(
                     s => s
                         .SetProperty(e => e.DeletedAt, deletedAt)
                         .SetProperty(e => EF.Property<bool>(e, "DeletedByUser"), isUserDelete),
-                    ct);
+                    ct),
+            };
         }
 
         IReadOnlyList<Guid> promoted = recordType is { } type && duplicates == DuplicateDelete.PromoteSurvivor
