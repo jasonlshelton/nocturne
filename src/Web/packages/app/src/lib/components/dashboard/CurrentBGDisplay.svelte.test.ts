@@ -1,7 +1,7 @@
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 
-const now = Date.UTC(2026, 5, 14, 9, 30, 0);
+const { now } = vi.hoisted(() => ({ now: Date.UTC(2026, 5, 14, 9, 30, 0) }));
 
 vi.mock("$lib/stores/realtime-store.svelte", () => {
   const store = {
