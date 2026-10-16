@@ -20665,9 +20665,8 @@ msgstr ""
 #~ msgid "Once running, the bundled Caddy proxy obtains Let's Encrypt TLS certificates automatically and serves the stack at <0/> on ports 80 and 443 — no certificate files to manage. Each tenant subdomain gets its own certificate on demand the first time it is visited."
 #~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/portainer/+page.svelte
-msgid "Watchtower is included and checks for image updates daily. To update manually in Portainer:"
-msgstr ""
+#~ msgid "Watchtower is included and checks for image updates daily. To update manually in Portainer:"
+#~ msgstr ""
 
 #~ msgid "Data source connectors (Dexcom, LibreLinkUp, Glooko, etc.) are configured through the Nocturne UI after deployment — no compose changes required."
 #~ msgstr ""
@@ -20724,9 +20723,8 @@ msgstr ""
 msgid "Step 4: Verify the installation"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
-msgid "Watchtower checks for image updates daily. To update manually:"
-msgstr ""
+#~ msgid "Watchtower checks for image updates daily. To update manually:"
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
 msgid "Check the logs for error details:"
@@ -21423,9 +21421,8 @@ msgstr ""
 msgid "Invite the people who follow you, or create a <0>share link</0>."
 msgstr ""
 
-#: ../portal/src/lib/components/docs/NextSteps.svelte
-msgid "Watchtower is included and checks for image updates daily; no action required."
-msgstr ""
+#~ msgid "Watchtower is included and checks for image updates daily; no action required."
+#~ msgstr ""
 
 #~ msgid "Four things Nocturne is <0>good at.</0>"
 #~ msgstr ""
@@ -23562,9 +23559,8 @@ msgstr ""
 msgid "Download the SSH key the script created. It lives only in your Cloud Shell home, which Oracle deletes after six months without a Cloud Shell session. Use the Cloud Shell menu, <0>Download</0>, and enter <1/>. Nocturne keeps running without it, but it is your only way onto the server."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Updates are automatic. Watchtower checks for new Nocturne images daily."
-msgstr ""
+#~ msgid "Updates are automatic. Watchtower checks for new Nocturne images daily."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Nocturne starts again by itself when the server reboots."
@@ -25471,9 +25467,8 @@ msgstr ""
 msgid "Snoozed until {0}"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
-msgid "Watchtower updates images, not the compose file. If you installed before the restart policy and log rotation below were added, download the new bundle and run <0/> to pick them up. That first run recreates the containers, which clears their old logs; your database data is kept."
-msgstr ""
+#~ msgid "Watchtower updates images, not the compose file. If you installed before the restart policy and log rotation below were added, download the new bundle and run <0/> to pick them up. That first run recreates the containers, which clears their old logs; your database data is kept."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
 #: ../portal/src/routes/docs/installation/portainer/+page.svelte
@@ -26696,4 +26691,24 @@ msgstr ""
 
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-page.svelte
 msgid "Scanning the selected history in Google Health… The catalog remains available while the inventory is loading."
+msgstr ""
+
+#: ../portal/src/lib/components/docs/NextSteps.svelte
+msgid "Watchtower is included and checks for image updates daily. It does not update Caddy or Postgres; see the update steps on this page."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
+msgid "Watchtower checks for image updates daily, except for Caddy and Postgres. To update everything, including Caddy and Postgres:"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
+msgid "Watchtower updates images, not the compose file. If you installed before the restart policy and log rotation below were added, download the new bundle and run <0/> to pick them up. That first run recreates the containers, which clears their old logs; your database data is kept. If you installed before Caddy was excluded from Watchtower, set <1/> to <2/> on the <3/> service, or download the new bundle, then run <4/> to recreate it."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/portainer/+page.svelte
+msgid "Watchtower is included and checks for image updates daily, except for Caddy and Postgres. To update everything, including Caddy and Postgres, in Portainer:"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Watchtower checks for new Nocturne images daily. It does not update Caddy or Postgres; update them with <0/>."
 msgstr ""
