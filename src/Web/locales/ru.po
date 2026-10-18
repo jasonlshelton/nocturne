@@ -23432,29 +23432,24 @@ msgstr ""
 msgid "BASE_DOMAIN=nocturne.example.com bash <(curl -fsSL https://github.com/nightscout/nocturne/releases/latest/download/oracle-cloud-install.sh)"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "An <0>Oracle Cloud account</0>. Sign-up asks for a payment card to verify your identity. Always Free gives you 2 Ampere cores, 12 GB of memory and 200 GB of storage; this guide uses half the processor and memory and a quarter of the storage, so nothing is charged. Oracle reduced that allowance in June 2026, so older guides quoting 4 cores and 24 GB are out of date."
-msgstr ""
+#~ msgid "An <0>Oracle Cloud account</0>. Sign-up asks for a payment card to verify your identity. Always Free gives you 2 Ampere cores, 12 GB of memory and 200 GB of storage; this guide uses half the processor and memory and a quarter of the storage, so nothing is charged. Oracle reduced that allowance in June 2026, so older guides quoting 4 cores and 24 GB are out of date."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "A domain name. Nocturne gives every site its own subdomain, so the DNS provider must support wildcard records. If you do not have a domain, a free one from deSEC works well; see below."
-msgstr ""
+#~ msgid "A domain name. Nocturne gives every site its own subdomain, so the DNS provider must support wildcard records. If you do not have a domain, a free one from deSEC works well; see below."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "A decision about how to keep the server from being reclaimed as idle. It changes the command you run, so make it before you start."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Create an account at desec.io and confirm your email address."
-msgstr ""
+#~ msgid "Create an account at desec.io and confirm your email address."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Under <0>Domains</0>, add a dynDNS domain and pick a name. Your domain is then <1/>."
-msgstr ""
+#~ msgid "Under <0>Domains</0>, add a dynDNS domain and pick a name. Your domain is then <1/>."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Under <0>Token management</0>, create a token and copy the long secret it shows you once — not the name you gave the token. You can delete the token afterwards."
-msgstr ""
+#~ msgid "Under <0>Token management</0>, create a token and copy the long secret it shows you once — not the name you gave the token. You can delete the token afterwards."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Which one should you pick?"
@@ -23468,25 +23463,21 @@ msgstr ""
 msgid "In the Oracle console, open <0>Billing & Cost Management</0>, then <1>Upgrade and Manage Payment</1>, and choose Pay As You Go. Your card is already on file from sign-up. Always Free resources stay free after the upgrade, and Oracle's own terms exempt Pay As You Go accounts from idle reclamation. Everything this installer creates is within the free allowance, so the upgrade does not by itself cost anything."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "What changes is that the card can now be charged if something outside the free tier is ever created. The installer closes that off from both ends: it refuses a server size above the free allowance, and it writes an Oracle quota policy that stops the account creating anything outside the Always Free compute shapes at all, whether or not you have upgraded. That policy is a real limit rather than a warning: Oracle refuses the request instead of billing you for it. On top of that it sets a spending alert that emails you the moment the account is billed one unit of your currency. Nothing needs adding to the command in Step 2."
-msgstr ""
+#~ msgid "What changes is that the card can now be charged if something outside the free tier is ever created. The installer closes that off from both ends: it refuses a server size above the free allowance, and it writes an Oracle quota policy that stops the account creating anything outside the Always Free compute shapes at all, whether or not you have upgraded. That policy is a real limit rather than a warning: Oracle refuses the request instead of billing you for it. On top of that it sets a spending alert that emails you the moment the account is billed one unit of your currency. Nothing needs adding to the command in Step 2."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Option 2: stay on the trial and donate spare time to Folding@home"
-msgstr ""
+#~ msgid "Option 2: stay on the trial and donate spare time to Folding@home"
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "<0>Folding@home</0> is a research project that simulates how proteins fold, to help understand diseases such as Alzheimer's, cancer and, yes, diabetes. With this option the installer adds its client to the server and runs it from 02:00 to 04:00 UTC each night. Two hours a day of real computation is well above Oracle's idle threshold, so the server is never a candidate for reclamation, and the time goes to something useful."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "The client runs at the lowest priority the system has, so Nocturne and its alarms always come first. To choose this option, add <0/> to the command in Step 2:"
-msgstr ""
+#~ msgid "The client runs at the lowest priority the system has, so Nocturne and its alarms always come first. To choose this option, add <0/> to the command in Step 2:"
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Work is contributed anonymously by default. To count it towards a team, add <0/> as well. Trial accounts cannot be charged, but the installer still creates the spending alert in case the account is upgraded later."
-msgstr ""
+#~ msgid "Work is contributed anonymously by default. To count it towards a team, add <0/> as well. Trial accounts cannot be charged, but the installer still creates the spending alert in case the account is upgraded later."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Keep the run alive if Cloud Shell disconnects"
@@ -23548,9 +23539,8 @@ msgstr ""
 msgid "Running the installer a second time is the fix for almost any failure. It looks every resource up before creating it, and checks the server itself on every run, so a run that was interrupted or stopped part-way carries on from where it got to rather than starting over. It remembers your domain, so the command on its own is enough."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "The script ends by printing your <0>instance key</0>. It is the master credential for this installation, used for administrative API access and account recovery. Save it in a password manager. Running the script again shows it again."
-msgstr ""
+#~ msgid "The script ends by printing your <0>instance key</0>. It is the master credential for this installation, used for administrative API access and account recovery. Save it in a password manager. Running the script again shows it again."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Download the SSH key the script created. It lives only in your Cloud Shell home, which Oracle deletes after six months without a Cloud Shell session. Use the Cloud Shell menu, <0>Download</0>, and enter <1/>. Nocturne keeps running without it, but it is your only way onto the server."
@@ -23567,9 +23557,8 @@ msgstr ""
 msgid "To get a shell on the server, run the SSH command the script printed. Everything lives in <0/>."
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Nothing backs up your data automatically. In the Oracle console, under Block Storage, you can take a backup of the server's boot volume at any time. The free tier includes five volume backups, so take them by hand and delete old ones rather than attaching a scheduled policy."
-msgstr ""
+#~ msgid "Nothing backs up your data automatically. In the Oracle console, under Block Storage, you can take a backup of the server's boot volume at any time. The free tier includes five volume backups, so take them by hand and delete old ones rather than attaching a scheduled policy."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "To remove everything, terminate the instance in the Oracle console, then delete the reserved public IP and the <0>nocturne</0> virtual cloud network."
@@ -23583,29 +23572,24 @@ msgstr ""
 msgid "What you need"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "No domain yet? Get one from deSEC"
-msgstr ""
+#~ msgid "No domain yet? Get one from deSEC"
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "<0>deSEC</0> is a non-profit DNS provider that gives out free names under <1>dedyn.io</1>. With one of those, the installer creates the DNS records for you and there is nothing to configure by hand."
-msgstr ""
+#~ msgid "<0>deSEC</0> is a non-profit DNS provider that gives out free names under <1>dedyn.io</1>. With one of those, the installer creates the DNS records for you and there is nothing to configure by hand."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "The same works for a domain you already own if its DNS is hosted at deSEC. If it is hosted elsewhere, you add two records by hand in Step 3."
-msgstr ""
+#~ msgid "The same works for a domain you already own if its DNS is hosted at deSEC. If it is hosted elsewhere, you add two records by hand in Step 3."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Before you start: keeping it free"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Oracle switches off Always Free servers on trial accounts that it judges idle for seven days in a row. Its measure is whether the processor, network and memory each stayed below 20 percent of capacity for nearly all of that week. A Nocturne server for one person does very little work by that yardstick, so left alone it is likely to be stopped after its first quiet week. There are two ways to prevent that, and one of them changes the command in Step 2, so pick now rather than later."
-msgstr ""
+#~ msgid "Oracle switches off Always Free servers on trial accounts that it judges idle for seven days in a row. Its measure is whether the processor, network and memory each stayed below 20 percent of capacity for nearly all of that week. A Nocturne server for one person does very little work by that yardstick, so left alone it is likely to be stopped after its first quiet week. There are two ways to prevent that, and one of them changes the command in Step 2, so pick now rather than later."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Pay As You Go suits most people: it is a single change in the Oracle console, adds nothing to the server, and paying accounts are served first when Ampere capacity is scarce. The trade-off is that the card already on file <0>can</0> be charged if anything outside the free allowance is ever created. Choose Folding@home instead if you would rather the account stay a trial that cannot be billed at all, and you do not mind a second piece of software with network access on the server that holds your health data."
-msgstr ""
+#~ msgid "Pay As You Go suits most people: it is a single change in the Oracle console, adds nothing to the server, and paying accounts are served first when Ampere capacity is scarce. The trade-off is that the card already on file <0>can</0> be charged if anything outside the free allowance is ever created. Choose Folding@home instead if you would rather the account stay a trial that cannot be billed at all, and you do not mind a second piece of software with network access on the server that holds your health data."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Step 1: Open Cloud Shell"
@@ -23619,21 +23603,18 @@ msgstr ""
 msgid "Step 2: Run the installer"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Paste this into Cloud Shell, replacing <0/> with your domain. Nocturne will answer on that name and every site you create gets a subdomain under it, so pick something you are happy to keep. If you chose Folding@home above, add <1/> in front."
-msgstr ""
+#~ msgid "Paste this into Cloud Shell, replacing <0/> with your domain. Nocturne will answer on that name and every site you create gets a subdomain under it, so pick something you are happy to keep. If you chose Folding@home above, add <1/> in front."
+#~ msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Early on it asks for a deSEC token. <0>Nothing appears on screen as you paste it</0> — the token is hidden, and the installer tells you how many characters it read so you can see the paste landed. If deSEC does not accept it you can paste another. Press Enter with nothing pasted and it prints two records for you to create by hand instead. Either way it keeps working while the server boots, and waits for the records before it requests certificates."
-msgstr ""
+#~ msgid "Early on it asks for a deSEC token. <0>Nothing appears on screen as you paste it</0> — the token is hidden, and the installer tells you how many characters it read so you can see the paste landed. If deSEC does not accept it you can paste another. Press Enter with nothing pasted and it prints two records for you to create by hand instead. Either way it keeps working while the server boots, and waits for the records before it requests certificates."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Step 3: Add the DNS records"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Skip this step if you gave the installer a deSEC token. Otherwise, at your domain provider, create two <0>A</0> records pointing at the IP address the script printed:"
-msgstr ""
+#~ msgid "Skip this step if you gave the installer a deSEC token. Otherwise, at your domain provider, create two <0>A</0> records pointing at the IP address the script printed:"
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "The second one is a wildcard. It makes every site's subdomain resolve without a record each. If you use Cloudflare, leave the proxy off for both records, shown as a grey cloud. Cloudflare's proxy cannot carry the certificates Nocturne issues for its own subdomains."
@@ -23643,9 +23624,8 @@ msgstr ""
 msgid "Step 4: Create your first site"
 msgstr ""
 
-#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Once the script reports that Nocturne is answering, open <0/> in a browser. You are taken to the setup page to name your first site and register a passkey, which is your phone's or computer's built-in unlock. Register a second device as soon as you can, because there is no password to fall back on."
-msgstr ""
+#~ msgid "Once the script reports that Nocturne is answering, open <0/> in a browser. You are taken to the setup page to name your first site and register a passkey, which is your phone's or computer's built-in unlock. Register a second device as soon as you can, because there is no password to fall back on."
+#~ msgstr ""
 
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
 msgid "Afterwards"
@@ -26706,6 +26686,93 @@ msgstr ""
 msgid "Watchtower is included and checks for image updates daily, except for Caddy and Postgres. To update everything, including Caddy and Postgres, in Portainer:"
 msgstr ""
 
+#~ msgid "Watchtower checks for new Nocturne images daily. It does not update Caddy or Postgres; update them with <0/>."
+#~ msgstr ""
+
 #: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
-msgid "Watchtower checks for new Nocturne images daily. It does not update Caddy or Postgres; update them with <0/>."
+msgid "An <0>Oracle Cloud account</0>. Sign-up asks for a payment card to verify your identity. The region you pick at sign-up becomes your home region. The free server can only be created there, and the choice cannot be changed later, so pick the region closest to you. Always Free gives you 2 Ampere cores, 12 GB of memory and 200 GB of storage. Oracle halved the cores and memory in June 2026, so older guides that quote 4 cores and 24 GB are out of date. This guide uses half the cores and memory and a quarter of the storage, which stays well inside the free allowance."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "A domain name. Nocturne gives every site its own subdomain, so the DNS provider must support wildcard records. If you do not have a domain, a free one from DuckDNS works well; <0>see below</0>."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Sign in at duckdns.org with one of the accounts it offers, such as GitHub or Google."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Under <0>domains</0>, type a name and click <1>add domain</1>. Your domain is then <2/>."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Copy the <0>token</0> shown at the top of the page. It looks like <1/>. It controls every name on your account, so keep it to yourself."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "What changes is that the card can now be charged if something outside the free tier is ever created. The installer closes that off from both ends: it refuses a server size above the free allowance, and it writes an Oracle quota policy that stops the account creating anything outside the Always Free compute shapes at all, whether or not you have upgraded. That policy is a real limit rather than a warning: Oracle refuses the request instead of billing you for it. The installer also sets a spending alert that emails you the moment the account is billed one unit of your currency. Nothing needs adding to the command in <0>Step 2</0>."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Option 2: stay on an Always Free account and donate spare time to Folding@home"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "The client runs at the lowest priority the system has, so Nocturne and its alarms always come first. To choose this option, add <0/> to the command in <1>Step 2</1>:"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Work is contributed anonymously by default. To count it towards a team, add <0/> as well. Always Free accounts cannot be charged, but the installer still creates the spending alert in case the account is upgraded later."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Points your DuckDNS name at that address when you give it the token; for any other domain, it prints the two records to create by hand"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "The script ends by printing your <0>instance key</0>. It is the master credential for this installation, used for administrative API access and account recovery. Save it in a password manager. Running the script a second time prints it once more."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "To update Caddy and Postgres, run <0/> on the server."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Nothing backs up your data automatically. In the Oracle console, under Block Storage, you can take a backup of the server's boot volume at any time. The free tier includes five volume backups, so take them by hand and delete old ones rather than attaching a scheduled policy, which would keep more than five and be charged."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "No domain yet? Get one from DuckDNS"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "<0>DuckDNS</0> is a free dynamic DNS service that gives out names under <1>duckdns.org</1>, each with a wildcard for the subdomains below it. The installer uses your DuckDNS token to point your name at your server, so there is nothing to set up by hand."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "For a domain you already own, you add two records by hand at your DNS provider in <0>Step 3</0>."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Oracle switches off servers on Always Free accounts that it judges idle for seven days in a row. Its measure is whether the processor, network and memory each stayed below 20 percent of capacity for nearly all of that week. A Nocturne server for one person does very little work by that yardstick, so left alone it is likely to be stopped after its first quiet week. There are two ways to prevent that, and one of them changes the command in <0>Step 2</0>, so pick now rather than later."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Pay As You Go suits most people: it is a single change in the Oracle console, adds nothing to the server, and paying accounts are served first when Ampere capacity is scarce. The trade-off is that the card already on file <0>can</0> be charged if anything outside the free allowance is ever created. Choose Folding@home instead if you would rather keep an Always Free account that cannot be billed at all, and you do not mind a second piece of software with network access on the server that holds your health data."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Paste this into Cloud Shell, replacing <0/> with your domain, such as <1/>. Nocturne will answer on that name and every site you create gets a subdomain under it, so pick something you are happy to keep. If you chose Folding@home above, add <2/> in front."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "If your domain is under duckdns.org, the installer asks early on for your DuckDNS token. <0>Nothing appears on screen as you paste it</0> – the token is hidden, and the installer tells you how many characters it read so you can see the paste landed. If DuckDNS does not accept it you can paste another. Press Enter with nothing pasted and it tells you the address to set yourself in <1>Step 3</1> instead. For any other domain, it prints the two records to create by hand. Either way it keeps working while the server boots, and waits for DNS before it requests certificates."
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Skip this step if you gave the installer a DuckDNS token. For a DuckDNS name without one, sign in at duckdns.org, put the IP address the script printed into the <0>current ip</0> box next to your name and click <1>update ip</1>. For any other domain, create two <2>A</2> records at your domain provider, pointing at that address:"
+msgstr ""
+
+#: ../portal/src/routes/docs/installation/oracle-cloud/+page.svelte
+msgid "Once the script reports that Nocturne is answering, open <0/> in a browser. You are taken to the setup page to name your first site and create the owner account, with a passkey or a sign-in provider. A passkey is your phone's or computer's built-in unlock. If you choose one, register a second device as soon as you can, because there is no password to fall back on."
 msgstr ""

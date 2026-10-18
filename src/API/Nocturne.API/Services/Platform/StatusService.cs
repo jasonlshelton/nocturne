@@ -917,8 +917,8 @@ public class StatusService : IStatusService
         return new Dictionary<string, bool>
         {
             ["v1"] = true,
-            ["v2"] = false, // Not implemented yet
-            ["v3"] = true, // Partially implemented
+            ["v2"] = true,
+            ["v3"] = true,
         };
     }
 

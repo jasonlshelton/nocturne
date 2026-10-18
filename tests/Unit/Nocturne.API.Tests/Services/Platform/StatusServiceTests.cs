@@ -474,7 +474,7 @@ public class StatusServiceTests
         result.Extended.ApiVersions.Should().ContainKey("v3");
         result.Extended.ApiVersions["v3"].Should().BeTrue();
         result.Extended.ApiVersions.Should().ContainKey("v2");
-        result.Extended.ApiVersions["v2"].Should().BeFalse();
+        result.Extended.ApiVersions["v2"].Should().BeTrue();
 
         result.Extended.UptimeMs.Should().BeGreaterThanOrEqualTo(0);
     }
