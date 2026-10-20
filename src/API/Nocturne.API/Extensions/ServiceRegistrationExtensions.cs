@@ -18,6 +18,8 @@ using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.CoachMarks;
+using Nocturne.Core.Clinical.Statistics;
+using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Content;
 using Nocturne.Core.Contracts.Translations;
 using Nocturne.API.Services.Timezones;
@@ -312,11 +314,6 @@ public static class ServiceRegistrationExtensions
                 break;
             case PredictionSource.OrefWasm:
                 services.AddScoped<IPredictionService, PredictionService>();
-                services.AddOrefService(options =>
-                {
-                    options.WasmPath = "oref.wasm";
-                    options.Enabled = true;
-                });
                 break;
             case PredictionSource.None:
             default:
@@ -659,6 +656,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IBatteryService, BatteryService>();
         services.AddScoped<IProfileWriteService, ProfileWriteService>();
         services.AddScoped<IActiveProfileResolver, ActiveProfileResolver>();
+        services.AddScoped<ProfileVersionCache>();
         services.AddScoped<IBasalRateResolver, BasalRateResolver>();
         services.AddScoped<IBasalSegmentService, BasalSegmentService>();
         services.AddScoped<ISensitivityResolver, SensitivityResolver>();
@@ -803,6 +801,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IPumpSnapshotRepository, PumpSnapshotRepository>();
         services.AddScoped<IUploaderSnapshotRepository, UploaderSnapshotRepository>();
         services.AddScoped<IDeviceStatusExtrasRepository, DeviceStatusExtrasRepository>();
+        services.AddScoped<IDeviceStatusGroupRepository, DeviceStatusGroupRepository>();
 
         // V4 Profile Repositories
         services.AddScoped<ITherapySettingsRepository, TherapySettingsRepository>();
