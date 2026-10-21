@@ -71,15 +71,10 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
     /// </remarks>
     public Task<V4Models.DecompositionResult> DecomposeBatchAsync(
         IReadOnlyList<Profile> profiles, WriteOrigin origin, CancellationToken ct = default)
-        => DecomposeCoreAsync(profiles, origin, settlesDefault: true, ct);
-
-    /// <inheritdoc />
-    public Task<V4Models.DecompositionResult> DecomposeProfileSwitchAsync(
-        Profile profile, WriteOrigin origin, CancellationToken ct = default)
-        => DecomposeCoreAsync([profile], origin, settlesDefault: false, ct);
+        => DecomposeCoreAsync(profiles, origin, ct);
 
     private async Task<V4Models.DecompositionResult> DecomposeCoreAsync(
-        IReadOnlyList<Profile> profiles, WriteOrigin origin, bool settlesDefault, CancellationToken ct)
+        IReadOnlyList<Profile> profiles, WriteOrigin origin, CancellationToken ct)
     {
         var firstMinted = Guid.CreateVersion7();
         var result = new V4Models.DecompositionResult { CorrelationId = firstMinted };
@@ -105,8 +100,8 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
         if (entries.Count == 0)
             return result;
 
-        var claim = settlesDefault ? await ResolveDefaultClaimAsync(entries, ct) : new DefaultClaim(false, null);
-        var storedDefaults = claim.Claims || !settlesDefault
+        var claim = await ResolveDefaultClaimAsync(entries, ct);
+        var storedDefaults = claim.Claims
             ? []
             : (await _therapySettingsRepo.GetDefaultsAsync(ct))
                 .Select(d => d.LegacyId).OfType<string>().ToHashSet(StringComparer.Ordinal);
@@ -151,7 +146,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
             groups.Select(g => MapToSensitivitySchedule(g.Entry.Profile, g.Entry.Data, g.Entry.StoreName, g.Entry.LegacyId, g.CorrelationId)).ToList(),
             origin, ct: ct));
         Record(result, await _targetRangeScheduleRepo.BulkUpsertByLegacyIdAsync(
-            groups.Select(g => MapToTargetRangeSchedule(g.Entry.Profile, g.Entry.Data, g.Entry.StoreName, g.Entry.LegacyId, g.CorrelationId)).ToList(),
+            groups.Select(g => MapToTargetRangeSchedule(g.Entry.Profile, g.Entry.Data, g.Entry.StoreName, g.Entry.LegacyId, g.CorrelationId, Logger)).ToList(),
             origin, ct: ct));
 
         return result;
@@ -309,14 +304,25 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
         ProfileData profileData,
         string storeName,
         string legacyId,
-        Guid? correlationId)
+        Guid? correlationId,
+        ILogger? logger = null)
     {
+        var entries = MergeTargets(
+            profileData.TargetLow, profileData.TargetHigh, profileData.Units ?? profile.Units, out var undone);
+        if (undone)
+        {
+            logger?.LogWarning(
+                "Profile store {StoreName} ({LegacyId}) is labelled mmol but its targets are mg/dL: stored them as mg/dL. Its ISF is stored as uploaded and may be 18 times too large",
+                storeName,
+                legacyId);
+        }
+
         return new V4Models.TargetRangeSchedule
         {
             LegacyId = legacyId,
             Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(profile.Mills).UtcDateTime,
             ProfileName = storeName,
-            Entries = MergeTargets(profileData.TargetLow, profileData.TargetHigh, profileData.Units ?? profile.Units),
+            Entries = entries,
             Device = profile.EnteredBy,
             CorrelationId = correlationId,
         };
@@ -387,12 +393,29 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
     /// <see cref="V4Models.TargetRangeEntry"/> contract is mg/dL — every reader (alert engine,
     /// <c>TargetRangeResolver</c>, report statistics) compares against mg/dL. mmol profiles are
     /// therefore normalised to mg/dL here at write time, so no reader has to know the source units.
+    /// A mmol store whose targets come out above any real target is a client's stale copy carrying
+    /// mg/dL labelled mmol, and is stored with that conversion undone
+    /// (<see cref="UndoRepeatedTargetConversions"/>). Its ISF is not: a correct mmol ISF can convert to
+    /// the same numbers.
     /// </remarks>
     /// <param name="lows">The low-target time-value entries from the profile store.</param>
     /// <param name="highs">The high-target time-value entries from the profile store.</param>
     /// <param name="units">The profile's glucose units ("mg/dl" or "mmol"); mmol values are converted to mg/dL.</param>
     /// <returns>A merged list of <see cref="V4Models.TargetRangeEntry"/> with <c>Low</c> and <c>High</c> fields in mg/dL.</returns>
-    internal static List<V4Models.TargetRangeEntry> MergeTargets(List<TimeValue> lows, List<TimeValue> highs, string? units)
+    internal static List<V4Models.TargetRangeEntry> MergeTargets(List<TimeValue> lows, List<TimeValue> highs, string? units) =>
+        MergeTargets(lows, highs, units, out _);
+
+    /// <param name="undone">Whether an extra conversion was undone.</param>
+    internal static List<V4Models.TargetRangeEntry> MergeTargets(
+        List<TimeValue> lows, List<TimeValue> highs, string? units, out bool undone)
+    {
+        var merged = MergeTargetsConverted(lows, highs, units);
+        var targets = IsMmol(units) ? UndoRepeatedTargetConversions(merged) : merged;
+        undone = !ReferenceEquals(targets, merged);
+        return targets;
+    }
+
+    private static List<V4Models.TargetRangeEntry> MergeTargetsConverted(List<TimeValue> lows, List<TimeValue> highs, string? units)
     {
         var toMgdl = IsMmol(units)
             ? (Func<double, double>)(value => Math.Round(value * GlucoseConstants.MgdlPerMmol))
@@ -419,6 +442,59 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
         units is not null
         && (units.Equals("mmol", StringComparison.OrdinalIgnoreCase)
             || units.Equals("mmol/l", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Converts a stored mg/dL glucose value back to the profile's display units: the inverse of the
+    /// write-time normalisation in <see cref="ConvertSensitivityValues"/> and <see cref="MergeTargets"/>.
+    /// mmol values are rounded to one decimal place, the precision Nightscout profiles use.
+    /// </summary>
+    internal static double FromMgdl(double mgdl, string? units) =>
+        IsMmol(units) ? Math.Round(mgdl / GlucoseConstants.MgdlPerMmol, 1) : mgdl;
+
+    /// <summary>The highest stored mg/dL target one mmol conversion of a real target reaches (22.2 mmol/L).</summary>
+    internal const double MaxSingleConversionMgdl = 400;
+
+    private const int MaxRepeatedConversions = 4;
+
+    /// <summary>
+    /// Mmol targets that took the mmol-to-mg/dL conversion more than once, undone: <c>round(v / 18.0182)</c>
+    /// per extra conversion while every target exceeds <see cref="MaxSingleConversionMgdl"/>, each step
+    /// only when every value is <c>round(m * 18.0182)</c> of a whole <c>m</c>. Migration
+    /// <c>RepairDoubleConvertedMmolProfiles</c> applies the same rule to stored rows.
+    /// </summary>
+    /// <returns>The targets undone, or as given when there is nothing it can undo.</returns>
+    internal static List<V4Models.TargetRangeEntry> UndoRepeatedTargetConversions(
+        List<V4Models.TargetRangeEntry> targets)
+    {
+        var current = targets;
+        var steps = 0;
+        while (current.Count > 0
+               && current.Min(t => Math.Min(t.Low, t.High)) > MaxSingleConversionMgdl
+               && steps < MaxRepeatedConversions)
+        {
+            if (!current.All(t => IsConversionImage(t.Low) && IsConversionImage(t.High)))
+                return targets;
+
+            current = current.Select(t => new V4Models.TargetRangeEntry
+            {
+                Time = t.Time,
+                Low = UndoConversion(t.Low),
+                High = UndoConversion(t.High),
+                TimeAsSeconds = t.TimeAsSeconds,
+            }).ToList();
+            steps++;
+        }
+
+        return steps > 0 && current.Max(t => Math.Max(t.Low, t.High)) <= MaxSingleConversionMgdl
+            ? current
+            : targets;
+    }
+
+    private static double UndoConversion(double mgdl) =>
+        Math.Round(mgdl / GlucoseConstants.MgdlPerMmol, MidpointRounding.AwayFromZero);
+
+    private static bool IsConversionImage(double mgdl) =>
+        Math.Abs(UndoConversion(mgdl) * GlucoseConstants.MgdlPerMmol - mgdl) <= 0.5;
 
     #endregion
 

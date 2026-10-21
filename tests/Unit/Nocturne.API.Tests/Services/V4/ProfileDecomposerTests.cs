@@ -233,45 +233,6 @@ public class ProfileDecomposerTests
         repos.SetDefaultCalls.Should().BeEmpty();
     }
 
-    /// <summary>
-    /// A profile switch carrying its profile inline (AAPS sends one on every switch) is not a
-    /// profile document: it must not take the default from the document before it, and its newer
-    /// snapshot must not stop that document from settling the default when it is re-synced.
-    /// </summary>
-    [Fact]
-    public async Task ProfileSwitchSnapshot_LeavesTheDocumentsDefault()
-    {
-        const string switchStore = "Day@@@@@1700000900000";
-        var repos = new Repositories(storedSettings:
-        [
-            new TherapySettings
-            {
-                LegacyId = "doc:Default", ProfileName = "Default", IsDefault = true,
-                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000).UtcDateTime,
-            },
-            new TherapySettings
-            {
-                LegacyId = $"switch:{switchStore}", ProfileName = switchStore,
-                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(1700000900000).UtcDateTime,
-            },
-        ]);
-
-        await repos.Decomposer.DecomposeProfileSwitchAsync(
-            BuildProfile(id: "switch", stores: [switchStore], mills: 1700000900000, defaultProfile: switchStore),
-            WriteOrigin.Live);
-
-        repos.Written.OfType<TherapySettings>().Should().ContainSingle()
-            .Which.IsDefault.Should().BeFalse();
-        repos.SetDefaultCalls.Should().BeEmpty();
-
-        await repos.Decomposer.DecomposeAsync(
-            BuildProfile(id: "doc", stores: ["Default"], mills: 1700000000000), WriteOrigin.Live);
-
-        var flagged = WrittenDefaults(repos).Should().ContainSingle().Subject;
-        flagged.LegacyId.Should().Be("doc:Default");
-        repos.SetDefaultCalls.Should().Equal([flagged.Id]);
-    }
-
     [Fact]
     public async Task DecomposeBatchAsync_WithNoStoreEntries_WritesNothing()
     {
@@ -446,5 +407,133 @@ public class ProfileDecomposerTests
 
         result.Should().ContainSingle();
         result[0].Value.Should().Be(50);
+    }
+
+    [Theory]
+    [InlineData("mmol", 63, 3.5)]
+    [InlineData("mmol/L", 58, 3.2)]
+    [InlineData("MMOL", 99, 5.5)]
+    [InlineData("mmol", 90, 5.0)]
+    public void FromMgdl_ConvertsMmolProfilesBackToOneDecimal(string units, double mgdl, double expected)
+    {
+        ProfileDecomposer.FromMgdl(mgdl, units).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("mg/dl")]
+    [InlineData("mg/dL")]
+    [InlineData(null)]
+    public void FromMgdl_LeavesMgdlProfilesUnchanged(string? units)
+    {
+        ProfileDecomposer.FromMgdl(99, units).Should().Be(99);
+    }
+
+    [Theory]
+    [InlineData(2.8)]
+    [InlineData(3.5)]
+    [InlineData(5.5)]
+    [InlineData(8.0)]
+    public void FromMgdl_RoundTripsWhatTheWriteSideStored(double mmol)
+    {
+        var stored = ProfileDecomposer.ConvertSensitivityValues(
+            [new TimeValue { Time = "00:00", Value = mmol }], "mmol")[0].Value;
+
+        ProfileDecomposer.FromMgdl(stored, "mmol").Should().Be(mmol);
+    }
+
+    private static List<TimeValue> At(params double[] values) =>
+        values.Select((v, i) => new TimeValue { Time = $"{i * 6:00}:00", Value = v }).ToList();
+
+    [Theory]
+    [InlineData("mmol", 90, 99, 108, 126)]
+    [InlineData("mmol/L", 1622, 1784, 1946, 2270)]
+    public void MmolTargetsThatConvertAboveAnyRealTarget_AreStoredWithTheExtraConversionUndone(
+        string units, double low1, double high1, double low2, double high2)
+    {
+        var targets = ProfileDecomposer.MergeTargets(At(low1, low2), At(high1, high2), units);
+
+        targets.Select(t => (t.Low, t.High)).Should().Equal((90.0, 99.0), (108.0, 126.0));
+    }
+
+    [Fact]
+    public void RealMmolTargets_AreConvertedOnce()
+    {
+        var target = ProfileDecomposer.MergeTargets(At(5.0), At(5.5), "mmol").Single();
+
+        (target.Low, target.High).Should().Be((90.0, 99.0));
+    }
+
+    [Fact]
+    public void MgdlTargets_AreStoredAsUploaded_HoweverLarge()
+    {
+        var target = ProfileDecomposer.MergeTargets(At(1622), At(1784), "mg/dl").Single();
+
+        (target.Low, target.High).Should().Be((1622.0, 1784.0));
+    }
+
+    [Theory]
+    [InlineData(90, 99, 1)]
+    [InlineData(5.0, 5.5, 0)]
+    public void UndoingAStoresTargets_IsLoggedAsAWarningNamingTheStore(double low, double high, int warnings)
+    {
+        var logger = new Mock<Microsoft.Extensions.Logging.ILogger>();
+        var profile = new Nocturne.Core.Models.Profile { Id = "doc", Mills = 0, Units = "mmol" };
+        var data = new Nocturne.Core.Models.ProfileData { Units = "mmol", TargetLow = At(low), TargetHigh = At(high) };
+
+        ProfileDecomposer.MapToTargetRangeSchedule(profile, data, "AAPS", "doc:AAPS", null, logger.Object);
+
+        logger.Verify(
+            l => l.Log(
+                Microsoft.Extensions.Logging.LogLevel.Warning,
+                It.IsAny<Microsoft.Extensions.Logging.EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("AAPS") && state.ToString()!.Contains("doc:AAPS")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Exactly(warnings));
+    }
+
+    [Theory]
+    [InlineData(23, 414)]
+    [InlineData(25, 450)]
+    [InlineData(63, 1135)]
+    public void AMmolIsf_IsConvertedAsUploaded(double mmol, double mgdl)
+    {
+        ProfileDecomposer.ConvertSensitivityValues(At(mmol), "mmol").Single().Value.Should().Be(mgdl);
+    }
+
+    /// <remarks>
+    /// Targets stop at 22.2 mmol/L, the highest one conversion keeps at or under 400 mg/dL; above it
+    /// <see cref="ProfileDecomposer.MergeTargets(List{TimeValue}, List{TimeValue}, string?)"/> reads
+    /// the values as mg/dL.
+    /// </remarks>
+    [Fact]
+    public void EveryOneDecimalMmolValue_SurvivesRepeatedReadAndReupload()
+    {
+        var drifted = new List<double>();
+        for (var tenths = 1; tenths <= 500; tenths++)
+        {
+            var uploaded = tenths / 10.0;
+            var value = uploaded;
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                var sens = ProfileDecomposer.ConvertSensitivityValues(
+                    [new TimeValue { Time = "00:00", Value = value }], "mmol")[0].Value;
+                if (uploaded <= 22.2)
+                {
+                    var target = ProfileDecomposer.MergeTargets(
+                        [new TimeValue { Time = "00:00", Value = value }],
+                        [new TimeValue { Time = "00:00", Value = value }],
+                        "mmol/L")[0];
+                    sens.Should().Be(target.Low).And.Be(target.High);
+                }
+
+                value = ProfileDecomposer.FromMgdl(sens, "mmol");
+            }
+
+            if (value != uploaded)
+                drifted.Add(uploaded);
+        }
+
+        drifted.Should().BeEmpty();
     }
 }

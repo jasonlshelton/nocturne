@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Nocturne.API.Attributes;
 using Nocturne.API.Services.Legacy;
 using Nocturne.API.Services.Platform;
+using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Contracts.Platform;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
@@ -164,6 +165,10 @@ public class TimeQueryController : ControllerBase
 
             return EntriesResult(entriesArray, format);
         }
+        catch (TimePatternRejectedException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(
@@ -278,23 +283,13 @@ public class TimeQueryController : ControllerBase
 
         try
         {
-            // Extract query parameters
-            var queryParameters = new Dictionary<string, object>();
-            foreach (var param in Request.Query)
-            {
-                if (param.Key != "storage" && param.Key != "field")
-                {
-                    queryParameters[param.Key] = param.Value.ToString() ?? "";
-                }
-            }
-
             // Generate debug information
             var echo = _timeQueryService.GenerateTimeQueryEcho(
                 prefix: prefix,
                 regex: regex,
                 storage: storage,
                 fieldName: field,
-                queryParameters: queryParameters
+                queryString: Request.QueryString.Value
             );
 
             _logger.LogDebug(
@@ -303,6 +298,10 @@ public class TimeQueryController : ControllerBase
             );
 
             return Ok(echo);
+        }
+        catch (TimePatternRejectedException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -553,6 +552,10 @@ public class TimeQueryController : ControllerBase
             );
 
             return EntriesResult(entriesArray, format);
+        }
+        catch (TimePatternRejectedException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {

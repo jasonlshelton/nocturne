@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Attributes;
+using Nocturne.API.Extensions;
+using Nocturne.API.Services.Caching;
 using Nocturne.API.Services.Devices;
 using Nocturne.Core.Contracts.Devices;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -46,7 +48,9 @@ public class PatientRecordController : ControllerBase
     private readonly ISensorGlucoseRepository _sensorGlucoseRepo;
     private readonly IDeviceReattributionService _reattribution;
     private readonly ISensorSessionInferenceRunner _sessionInference;
+    private readonly IDeviceTrackerProvisioner _trackerProvisioner;
     private readonly ITenantAccessor _tenantAccessor;
+    private readonly ITenantCache _tenantCache;
     private readonly ILogger<PatientRecordController> _logger;
 
     public PatientRecordController(
@@ -57,7 +61,9 @@ public class PatientRecordController : ControllerBase
         ISensorGlucoseRepository sensorGlucoseRepo,
         IDeviceReattributionService reattribution,
         ISensorSessionInferenceRunner sessionInference,
+        IDeviceTrackerProvisioner trackerProvisioner,
         ITenantAccessor tenantAccessor,
+        ITenantCache tenantCache,
         ILogger<PatientRecordController> logger)
     {
         _recordRepo = recordRepo;
@@ -67,7 +73,9 @@ public class PatientRecordController : ControllerBase
         _sensorGlucoseRepo = sensorGlucoseRepo;
         _reattribution = reattribution;
         _sessionInference = sessionInference;
+        _trackerProvisioner = trackerProvisioner;
         _tenantAccessor = tenantAccessor;
+        _tenantCache = tenantCache;
         _logger = logger;
     }
 
@@ -99,7 +107,10 @@ public class PatientRecordController : ControllerBase
         [FromBody] PatientRecord model,
         CancellationToken cancellationToken = default)
     {
+        var storedTimezone = (await _recordRepo.GetAsync(cancellationToken))?.Timezone;
         var updated = await _recordRepo.UpdateAsync(model, WriteOrigin.Live, cancellationToken);
+        if (!string.Equals(storedTimezone, updated.Timezone, StringComparison.Ordinal))
+            await _tenantCache.RemoveFamilyAsync(TenantCacheFamily.EHbA1c, cancellationToken);
         return Ok(updated);
     }
 
@@ -150,6 +161,8 @@ public class PatientRecordController : ControllerBase
         await _reattribution.ReattributeForDeviceAsync(created, cancellationToken);
         if (created.DeviceCategory == DeviceCategory.CGM)
             await InferSensorSessionHistoryAsync(created, cancellationToken);
+        if (HttpContext.GetSubjectIdString() is { } userId)
+            await _trackerProvisioner.ProvisionAsync(created, userId, cancellationToken);
         return CreatedAtAction(nameof(GetDevices), created);
     }
 

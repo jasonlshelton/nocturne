@@ -40,7 +40,6 @@ public class StatusService : IStatusService
     private readonly IConfiguration _configuration;
     private readonly ICacheService _cacheService;
     private readonly IDemoModeService _demoModeService;
-    private readonly NocturneDbContext _dbContext;
     private readonly INocturneDbContextFactory _dbContextFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ITenantAccessor _tenantAccessor;
@@ -71,7 +70,6 @@ public class StatusService : IStatusService
         IConfiguration configuration,
         ICacheService cacheService,
         IDemoModeService demoModeService,
-        NocturneDbContext dbContext,
         INocturneDbContextFactory dbContextFactory,
         IHttpContextAccessor httpContextAccessor,
         ITenantAccessor tenantAccessor,
@@ -85,7 +83,6 @@ public class StatusService : IStatusService
         _configuration = configuration;
         _cacheService = cacheService;
         _demoModeService = demoModeService;
-        _dbContext = dbContext;
         _dbContextFactory = dbContextFactory;
         _httpContextAccessor = httpContextAccessor;
         _tenantAccessor = tenantAccessor;
@@ -113,7 +110,7 @@ public class StatusService : IStatusService
             };
         }
 
-        // Include demo mode in cache key to ensure correct status is returned
+        // Not an ITenantCache key: the response varies by authentication, not by readable rows (CLAUDE.md, PHI cache invariant).
         var demoSuffix = _demoModeService.IsEnabled ? ":demo" : "";
         var rulesSuffix = ReadsAlertRules ? "" : ":defaults";
         var cacheKey = $"status:system:{TenantCacheId}" + demoSuffix + rulesSuffix;
@@ -502,7 +499,7 @@ public class StatusService : IStatusService
         // Default features
         settings["DEFAULT_FEATURES"] = GetDefaultFeatures();
         settings["alarmTypes"] = _configuration.GetSection("Alarms:Types").Get<string[]>() ?? new[] { "predict" };
-        settings["enable"] = GetEnabledFeaturesArray();
+        settings["enable"] = EnabledFeatures.Read(_configuration);
 
         return settings;
     }
@@ -561,42 +558,6 @@ public class StatusService : IStatusService
                 ["advanced"] = _configuration.GetValue<bool>("ExtendedSettings:DeviceStatus:Advanced", true),
                 ["days"] = _configuration.GetValue<int>("ExtendedSettings:DeviceStatus:Days", 1)
             }
-        };
-    }
-
-    /// <summary>
-    /// Get the list of enabled features/plugins as a space-separated string
-    /// </summary>
-    private string GetEnabledFeatures()
-    {
-        var enabledFeatures = _configuration[ServiceNames.ConfigKeys.FeaturesEnable];
-        if (!string.IsNullOrEmpty(enabledFeatures))
-        {
-            return enabledFeatures;
-        }
-
-        // Default enabled features to match Nightscout behavior
-        return "careportal basal dbsize rawbg iob maker bridge cob bwp cage iage sage boluscalc pushover treatmentnotify mmconnect loop pump profile food openaps bage alexa override cors";
-    }
-
-    /// <summary>
-    /// Get the list of enabled features/plugins as an array (Nightscout compatibility)
-    /// </summary>
-    private string[] GetEnabledFeaturesArray()
-    {
-        var enabledFeatures = _configuration[ServiceNames.ConfigKeys.FeaturesEnable];
-        if (!string.IsNullOrEmpty(enabledFeatures))
-        {
-            return enabledFeatures.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        }
-
-        // Default enabled features to match Nightscout behavior
-        return new[]
-        {
-            "careportal", "basal", "iob", "cob", "bwp", "cage", "sage", "iage", "bage",
-            "pump", "openaps", "loop", "treatmentnotify", "bgnow", "delta", "direction",
-            "timeago", "devicestatus", "upbat", "errorcodes", "profile", "bolus", "dbsize",
-            "runtimestate", "ar2"
         };
     }
 

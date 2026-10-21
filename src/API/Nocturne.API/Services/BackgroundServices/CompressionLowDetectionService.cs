@@ -300,7 +300,7 @@ public class CompressionLowDetectionService : BackgroundService, ICompressionLow
         // Get entries
         var entries = (await entryService.GetEntriesAsync(
             find: $"{{\"mills\":{{\"$gte\":{windowStart},\"$lte\":{windowEnd}}}}}",
-            count: 1000,
+            count: int.MaxValue,
             skip: 0,
             cancellationToken: cancellationToken))
             .Where(e => e.Sgv.HasValue)
@@ -346,11 +346,7 @@ public class CompressionLowDetectionService : BackgroundService, ICompressionLow
             }
         }
 
-        // Save suggestions
-        foreach (var suggestion in suggestions)
-        {
-            await repository.CreateAsync(suggestion, cancellationToken);
-        }
+        await repository.CreateManyAsync(suggestions, cancellationToken);
 
         // Create notification if any suggestions found.
         // Notification uses i18n keys so the frontend can render localized text.
@@ -389,7 +385,14 @@ public class CompressionLowDetectionService : BackgroundService, ICompressionLow
         int RecoveryMinutes,
         DateTime NadirTime);
 
-    internal List<VShapeCandidate> DetectVShapeCandidates(List<Entry> entries)
+    internal List<VShapeCandidate> DetectVShapeCandidates(List<Entry> entries) =>
+        entries
+            .GroupBy(e => (e.DataSource, e.Device))
+            .SelectMany(sensor => DetectVShapeCandidatesForSensor(sensor.ToList()))
+            .OrderBy(c => c.StartMills)
+            .ToList();
+
+    private List<VShapeCandidate> DetectVShapeCandidatesForSensor(List<Entry> entries)
     {
         var candidates = new List<VShapeCandidate>();
 

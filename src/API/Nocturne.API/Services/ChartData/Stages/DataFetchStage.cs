@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 using Nocturne.Core.Contracts.Health;
@@ -55,7 +56,9 @@ internal sealed class DataFetchStage(
     IDeviceEventRepository deviceEventRepository,
     ITempBasalRepository tempBasalRepository,
     IApsSnapshotRepository apsSnapshotRepository,
+    IPumpSnapshotRepository pumpSnapshotRepository,
     IStateSpanRepository stateSpanRepository,
+    IProfileActivationResolver profileActivationResolver,
     ISystemEventRepository systemEventRepository,
     ITrackerRepository trackerRepository,
     IBasalInjectionRepository basalInjectionRepository,
@@ -187,6 +190,11 @@ internal sealed class DataFetchStage(
             ct: cancellationToken
         );
 
+        var latestPumpSnapshotTask = pumpSnapshotRepository.GetLatestAsync(
+            asOf: MillsToDateTime(endTime),
+            ct: cancellationToken
+        );
+
         var sleepSessionTask = sleepService.GetSessionsAsync(
             from: MillsToDateTime(startTime),
             to: MillsToDateTime(endTime),
@@ -199,7 +207,6 @@ internal sealed class DataFetchStage(
             var stateSpanCategories = new[]
             {
                 StateSpanCategory.PumpMode,
-                StateSpanCategory.Profile,
                 StateSpanCategory.Override,
                 StateSpanCategory.Exercise,
                 StateSpanCategory.Illness,
@@ -212,6 +219,8 @@ internal sealed class DataFetchStage(
                 MillsToDateTime(endTime),
                 cancellationToken
             );
+
+            var profileSegments = await profileActivationResolver.GetRangeAsync(startTime, endTime, cancellationToken);
 
             var systemEventsResult = await systemEventRepository.GetSystemEventsAsync(
                 eventType: null,
@@ -256,6 +265,7 @@ internal sealed class DataFetchStage(
             return context with
             {
                 StateSpans = stateSpansReadOnly,
+                ProfileSegments = profileSegments,
                 SystemEvents = systemEventsResult?.ToList() ?? [],
                 TrackerDefinitions = trackerDefs?.ToList() ?? [],
                 TrackerInstances = trackerInstances?.ToList() ?? [],
@@ -267,7 +277,7 @@ internal sealed class DataFetchStage(
 
         await Task.WhenAll(
             sensorGlucoseTask, bolusTask, carbIntakeTask, bgCheckTask, deviceEventTask,
-            basalInjectionTask, tempBasalTask, apsSnapshotTask, sleepSessionTask, scopedTask);
+            basalInjectionTask, tempBasalTask, apsSnapshotTask, latestPumpSnapshotTask, sleepSessionTask, scopedTask);
 
         var sensorGlucoseList = await sensorGlucoseTask;
         var bolusList = (await bolusTask).ToList();
@@ -317,6 +327,7 @@ internal sealed class DataFetchStage(
             TempBasalList = tempBasalList,
             DisplayTempBasals = displayTempBasals,
             ApsSnapshotList = apsSnapshotList,
+            LatestPumpSnapshot = await latestPumpSnapshotTask,
             BasalInjectionList = basalInjectionList,
             SleepSessions = sleepSessionList,
         };

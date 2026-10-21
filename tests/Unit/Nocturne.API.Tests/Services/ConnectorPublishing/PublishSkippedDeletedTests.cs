@@ -80,7 +80,7 @@ public class PublishSkippedDeletedTests : IDisposable
             Mock.Of<IV4ToLegacyProjectionService>(), decomposer.Object, Mock.Of<IDecompositionPipeline>(),
             Mock.Of<ITempBasalRepository>(), Mock.Of<IBolusRepository>(), Mock.Of<ICarbIntakeRepository>(),
             Mock.Of<IBGCheckRepository>(), Mock.Of<INoteRepository>(), Mock.Of<IDeviceEventRepository>(),
-            Mock.Of<IBolusCalculationRepository>(), Mock.Of<IStateSpanService>(), NullLogger<TreatmentReadService>.Instance);
+            Mock.Of<IBolusCalculationRepository>(), Mock.Of<IProfileActivationRepository>(), Mock.Of<IStateSpanService>(), NullLogger<TreatmentReadService>.Instance);
         var service = new TreatmentService(
             store, decomposer.Object, Mock.Of<ITreatmentCache>(), Mock.Of<IDataEventSink<Treatment>>(),
             Mock.Of<IPatientInsulinRepository>(), NullLogger<TreatmentService>.Instance);
@@ -138,7 +138,7 @@ public class PublishSkippedDeletedTests : IDisposable
             .ReturnsAsync((GlucoseProcessing?)null);
 
         var decomposer = new EntryDecomposer(
-            _context, sensorGlucose, meterGlucose, calibration, new GlucoseProcessingResolver(config.Object),
+            sensorGlucose, meterGlucose, calibration, new GlucoseProcessingResolver(config.Object),
             Mock.Of<IPatientDeviceStamper>(), audit, NullLogger<EntryDecomposer>.Instance);
         var entryService = new EntryService(
             Mock.Of<IEntryStore>(), decomposer, Mock.Of<IEntryCache>(), Mock.Of<IDataEventSink<Entry>>(),

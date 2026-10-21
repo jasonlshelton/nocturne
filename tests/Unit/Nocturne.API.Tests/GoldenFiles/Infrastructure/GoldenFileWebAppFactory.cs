@@ -29,15 +29,12 @@ public class GoldenFileWebAppFactory : SqliteWebAppFactoryBase<Program>
         // live, as the pipeline resolves it.
         services.AddTransient<NocturneDbContextFactory>();
         services.AddTransient<INocturneDbContextFactory>(sp => sp.GetRequiredService<NocturneDbContextFactory>());
-        services.AddScoped(sp => sp.GetRequiredService<NocturneDbContextFactory>().Create());
 
         // DefaultValue.Empty so GetAsync<T>() returns a completed Task<T?> with default(T)
         // for any T, not just object.
         var mockCache = new Mock<ICacheService> { DefaultValue = DefaultValue.Empty };
         mockCache.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<object>(),
             It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        mockCache.Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         services.AddSingleton(mockCache.Object);
 

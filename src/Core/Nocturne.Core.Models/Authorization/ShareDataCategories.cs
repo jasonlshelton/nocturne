@@ -106,16 +106,19 @@ public static class ShareDataCategories
     /// <summary>
     /// End column per hidden table of spans, which a history-clamped member reads by overlap with the
     /// last 24 hours: a span still running (end null) or ended inside the window stays visible however
-    /// long ago it started. <c>state_spans</c> holds the profile switches, pump modes and overrides the
-    /// therapy resolvers read to find what is active now, so clamping it by start would leave a clamped
-    /// member's carb ratio, basal, sensitivity and targets on the default profile. It also holds the
-    /// overrides, temporary targets and profile switches the legacy treatment reads serve.
+    /// long ago it started. <c>profile_activations</c> and <c>state_spans</c> hold the profile
+    /// activations, pump modes and overrides the therapy resolvers read to find what is active now, so
+    /// clamping them by start would leave a clamped member's carb ratio, basal, sensitivity and targets on
+    /// the default profile. They also hold the profile switches, overrides and temporary targets the
+    /// legacy treatment reads serve.
     /// </summary>
-    /// <remarks>Every tenant-keyed cache over these tables bypasses a clamped request and a share.</remarks>
+    /// <remarks>A clamped request has no cache partition, so no cache serves it these rows; see
+    /// <c>IReaderCachePartition</c>.</remarks>
     public static readonly IReadOnlyDictionary<string, string> HiddenSpanEndColumns =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["state_spans"] = "end_timestamp",
+            ["profile_activations"] = "end_timestamp",
         };
 
     private static readonly IReadOnlyDictionary<string, string> TableToScope = BuildTableToScope();

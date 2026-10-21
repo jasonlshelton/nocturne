@@ -6,22 +6,16 @@ using Nocturne.Core.Models.Serializers;
 namespace Nocturne.Core.Models;
 
 /// <summary>
-/// Represents a Nightscout settings record.
+/// Nightscout settings record.
 /// Settings are configuration key-value pairs for the Nightscout instance,
 /// stored in the <c>settings</c> collection. Each record holds a single key/value pair.
 /// </summary>
 /// <seealso cref="ProcessableDocumentBase"/>
 public class Settings : ProcessableDocumentBase
 {
-    /// <summary>
-    /// Unique identifier for the setting record
-    /// </summary>
     [JsonPropertyName("_id")]
     public override string? Id { get; set; }
 
-    /// <summary>
-    /// The setting key/name
-    /// </summary>
     [JsonPropertyName("key")]
     [Required]
     [Sanitizable]
@@ -84,9 +78,6 @@ public class Settings : ProcessableDocumentBase
     [Sanitizable]
     public string? EnteredBy { get; set; }
 
-    /// <summary>
-    /// Version or revision number for this setting
-    /// </summary>
     [JsonPropertyName("version")]
     public int? Version { get; set; }
 
@@ -96,9 +87,6 @@ public class Settings : ProcessableDocumentBase
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
 
-    /// <summary>
-    /// Optional notes or description for this setting
-    /// </summary>
     [JsonPropertyName("notes")]
     [Sanitizable]
     public string? Notes { get; set; }

@@ -122,7 +122,7 @@ public class TrackersController : ControllerBase, IWriteScopedController
             startedAt,
             completionNotes: null,
             completeTreatmentId: null,
-            ct => _repository.StartInstanceAsync(
+            (tx, ct) => tx.StartInstanceAsync(
                 definition.Id,
                 userId,
                 startNotes,
@@ -717,7 +717,7 @@ public class TrackersController : ControllerBase, IWriteScopedController
         await _broadcast.BroadcastTrackerUpdateAsync(
             TrackerRealtimeAction.Complete,
             TrackerInstanceDto.FromEntity(completed),
-            existing.UserId,
+            existing.Definition.UserId,
             existing.Definition.Visibility
         );
 
@@ -761,7 +761,7 @@ public class TrackersController : ControllerBase, IWriteScopedController
                 await _broadcast.BroadcastTrackerUpdateAsync(
                     TrackerRealtimeAction.Ack,
                     TrackerInstanceDto.FromEntity(updated),
-                    updated.UserId,
+                    updated.Definition.UserId,
                     updated.Definition.Visibility
                 );
             }
@@ -796,7 +796,7 @@ public class TrackersController : ControllerBase, IWriteScopedController
         await _broadcast.BroadcastTrackerUpdateAsync(
             TrackerRealtimeAction.Delete,
             dto,
-            existing.UserId,
+            existing.Definition.UserId,
             existing.Definition.Visibility
         );
 

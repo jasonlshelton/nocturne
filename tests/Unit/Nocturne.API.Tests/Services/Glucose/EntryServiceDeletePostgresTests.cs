@@ -116,7 +116,7 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
             .ReturnsAsync((GlucoseProcessing?)null);
 
         var decomposer = new EntryDecomposer(
-            Context(tenant), sensorGlucose, meterGlucose, calibration, new GlucoseProcessingResolver(config.Object),
+            sensorGlucose, meterGlucose, calibration, new GlucoseProcessingResolver(config.Object),
             Mock.Of<IPatientDeviceStamper>(), audit, NullLogger<EntryDecomposer>.Instance);
         var store = new EntryReadService(
             sensorGlucose, meterGlucose, calibration, TestDoubles.CanonicalGlucosePassThrough.Create(),
@@ -128,8 +128,8 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
         documents.Setup(d => d.ProcessDocuments(It.IsAny<IEnumerable<Entry>>()))
             .Returns<IEnumerable<Entry>>(entries => entries);
         var controller = new EntriesController(
-            service, documents.Object, Mock.Of<IProcessingStatusService>(), Mock.Of<ICanonicalAlertEvaluator>(),
-            NullLogger<EntriesController>.Instance)
+            service, documents.Object, Mock.Of<ICanonicalAlertEvaluator>(),
+            TimeProvider.System, NullLogger<EntriesController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -148,7 +148,12 @@ public class EntryServiceDeletePostgresTests(EntryServiceDeletePostgresTests.Dat
     private static string ServedId(Entry entry) =>
         JsonDocument.Parse(JsonSerializer.Serialize(entry)).RootElement.GetProperty("_id").GetString()!;
 
-    private static long Mills() => DateTimeOffset.UtcNow.AddMinutes(-Random.Shared.Next(10, 10_000)).ToUnixTimeMilliseconds();
+    private static readonly DateTimeOffset TimeBase = DateTimeOffset.UtcNow.AddMinutes(-10);
+    private static int _timeSlot;
+
+    /// <summary>A time no other call in this run returns, a minute before the last.</summary>
+    private static long Mills() =>
+        TimeBase.AddMinutes(-Interlocked.Increment(ref _timeSlot)).ToUnixTimeMilliseconds();
 
     [Fact]
     public async Task An_entry_with_a_legacy_id_is_deleted_by_it_and_broadcast()

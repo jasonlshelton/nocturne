@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.Infrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -52,10 +53,12 @@ public class TreatmentDecomposerNotesTests : IDisposable
         var insulinRepoMock = new Mock<IPatientInsulinRepository>();
 
         _decomposer = new TreatmentDecomposer(
-            _context,
+            _context.AsFactory(),
             bolusRepo, tempBasalRepoMock.Object,
             carbIntakeRepo, bgCheckRepo, noteRepo, deviceEventRepo, bolusCalcRepo,
             stateSpanServiceMock.Object,
+            ProfileActivationTestDeps.Repository(_context),
+            ProfileActivationTestDeps.Writer(_context),
             treatmentFoodServiceMock.Object,
             deviceServiceMock.Object,
             Mock.Of<IPatientDeviceStamper>(),

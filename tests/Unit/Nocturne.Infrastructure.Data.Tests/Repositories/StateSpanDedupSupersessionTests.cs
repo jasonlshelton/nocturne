@@ -39,10 +39,10 @@ public class StateSpanDedupSupersessionTests : IDisposable
         var dedupContext = _db.CreateContext();
         dedupContext.TenantId = TestTenantId;
         _dedup = new DeduplicationService(
-            dedupContext, new Mock<IServiceScopeFactory>().Object, NullLogger<DeduplicationService>.Instance);
+            dedupContext.AsFactory(), new Mock<IServiceScopeFactory>().Object, NullLogger<DeduplicationService>.Instance);
 
         _repository = new StateSpanRepository(
-            _context, _dedup, new Mock<IAuditContext>().Object, NullLogger<StateSpanRepository>.Instance);
+            _context.AsFactory(), _dedup, new Mock<IAuditContext>().Object, NullLogger<StateSpanRepository>.Instance);
     }
 
     public void Dispose()
@@ -161,8 +161,6 @@ public class StateSpanDedupSupersessionTests : IDisposable
     [InlineData(StateSpanCategory.Override, true)]
     [InlineData(StateSpanCategory.TemporaryTarget, false)]
     [InlineData(StateSpanCategory.TemporaryTarget, true)]
-    [InlineData(StateSpanCategory.Profile, false)]
-    [InlineData(StateSpanCategory.Profile, true)]
     public async Task TwoPresetsWithinTheWindow_AreNotLinked_AndTheLaterSupersedesTheEarlier(
         StateSpanCategory category, bool laterFirst)
     {
@@ -189,7 +187,6 @@ public class StateSpanDedupSupersessionTests : IDisposable
     [Theory]
     [InlineData(StateSpanCategory.Override)]
     [InlineData(StateSpanCategory.TemporaryTarget)]
-    [InlineData(StateSpanCategory.Profile)]
     public async Task TheSamePresetReReportedWithinTheWindow_LeavesOneOpenPrimary(StateSpanCategory category)
     {
         await UpsertInOrderAsync([Preset(category, "first", 0, "N Night"), Preset(category, "repeat", 10, "N Night")]);
@@ -254,7 +251,7 @@ public class StateSpanDedupSupersessionTests : IDisposable
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
 
-        (await _dedup.MisplacedStateSpanPrimaries(DateTime.UtcNow - DeduplicationService.StateSpanRepairHorizon)
+        (await DeduplicationService.MisplacedStateSpanPrimaries(_context, DateTime.UtcNow - DeduplicationService.StateSpanRepairHorizon)
                 .ToListAsync())
             .Should().BeEmpty("the group's only live member is {0}, its primary", closed.Id);
     }

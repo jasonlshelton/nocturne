@@ -1,7 +1,11 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Nocturne.API.Attributes;
+using Nocturne.API.Configuration;
 using Nocturne.API.Extensions;
+using Nocturne.API.Filters;
+using Nocturne.Core.Contracts;
 using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Models;
 
@@ -18,11 +22,14 @@ namespace Nocturne.API.Controllers.V3;
 /// <seealso cref="V3CollectionResponse{T}"/>
 /// <seealso cref="V3FilterCriteria"/>
 [ApiController]
+[V3ParameterExceptionFilter]
 public abstract class BaseV3Controller<T> : ControllerBase
     where T : class
 {
     protected readonly IDocumentProcessingService _documentProcessingService;
     protected readonly ILogger _logger;
+
+    private static readonly JsonSerializerOptions DocumentOptions = NightscoutJsonOptions.Create();
 
     /// <summary>
     /// Initializes the base V3 controller with shared services.
@@ -43,14 +50,16 @@ public abstract class BaseV3Controller<T> : ControllerBase
     /// </summary>
     /// <returns>Parsed <see cref="V3QueryParameters"/> populated from the current request's query string.</returns>
     /// <exception cref="V3ParameterOutOfToleranceException">Thrown when limit is negative, matching Nightscout V3 behavior.</exception>
-    protected V3QueryParameters ParseV3QueryParameters()
+    /// <exception cref="V3SortConflictException">Thrown when both <c>sort</c> and <c>sort$desc</c> are given and <paramref name="readSort"/> is set.</exception>
+    /// <param name="readSort">Whether the request's sort and limit are read; a read of one document by identifier ignores both, as Nightscout does.</param>
+    protected V3QueryParameters ParseV3QueryParameters(bool readSort = true)
     {
         var query = HttpContext.Request.Query;
 
         var rawLimit = ParseIntParameter(query, "limit", 100);
 
         // Nightscout V3 API returns 400 for negative limit with "Parameter limit out of tolerance"
-        if (rawLimit < 0)
+        if (readSort && rawLimit < 0)
         {
             throw new V3ParameterOutOfToleranceException("limit");
         }
@@ -60,7 +69,7 @@ public abstract class BaseV3Controller<T> : ControllerBase
             Limit = rawLimit,
             Offset = ParseIntParameter(query, "offset", 0),
             Fields = ParseStringArrayParameter(query, "fields"),
-            Sort = ParseStringParameter(query, "sort"),
+            Sort = readSort ? ParseSort(query) : V3Sort.Default,
             Filter = ParseJsonParameter(query, "filter"),
             IfModifiedSince = ParseDateTimeParameter(query, "if-modified-since"),
             IfNoneMatch = ParseStringParameter(query, "if-none-match"),
@@ -84,21 +93,6 @@ public abstract class BaseV3Controller<T> : ControllerBase
             parameters.Offset = 0;
 
         return parameters;
-    }
-
-    /// <summary>
-    /// Exception thrown when a V3 API parameter is out of tolerance.
-    /// Matches the Nightscout V3 API behavior of returning 400 with "Parameter {name} out of tolerance".
-    /// </summary>
-    public class V3ParameterOutOfToleranceException : Exception
-    {
-        public string ParameterName { get; }
-
-        public V3ParameterOutOfToleranceException(string parameterName)
-            : base($"Parameter {parameterName} out of tolerance")
-        {
-            ParameterName = parameterName;
-        }
     }
 
     /// <summary>
@@ -259,6 +253,22 @@ public abstract class BaseV3Controller<T> : ControllerBase
     }
 
     /// <summary>
+    /// Serializes <paramref name="document"/> as the Nightscout wire shape and stamps the v3
+    /// <c>identifier</c>, also served as <c>_id</c>, as the 24-hex ObjectId a by-id read resolves.
+    /// </summary>
+    protected static JsonObject ToV3Document<TDocument>(TDocument document, string? id)
+    {
+        var node = JsonSerializer.SerializeToNode(document, DocumentOptions)!.AsObject();
+        if (MongoObjectId.Coerce(id) is { } identifier)
+        {
+            node["_id"] = identifier;
+            node["identifier"] = identifier;
+        }
+
+        return node;
+    }
+
+    /// <summary>
     /// Apply field selection to a collection of objects
     /// </summary>
     /// <param name="data">Data to filter</param>
@@ -307,15 +317,13 @@ public abstract class BaseV3Controller<T> : ControllerBase
     /// </summary>
     /// <param name="data">Response data</param>
     /// <param name="parameters">Query parameters</param>
-    /// <param name="totalCount">Total count of items (for pagination)</param>
     /// <param name="lastModified">
     /// Newest record timestamp when the caller already knows it (e.g. computed from domain
     /// models before mapping to DTOs the timestamp reflection can't read).
     /// </param>
     protected void SetV3ResponseHeaders<TItem>(
-        IEnumerable<TItem> data,
+        IReadOnlyCollection<TItem> data,
         V3QueryParameters parameters,
-        long totalCount,
         DateTimeOffset? lastModified = null
     )
     {
@@ -327,8 +335,6 @@ public abstract class BaseV3Controller<T> : ControllerBase
             effectiveLastModified.ToUnixTimeMilliseconds()
         );
 
-        // Set pagination headers
-        Response.Headers["X-Total-Count"] = totalCount.ToString();
         Response.Headers["X-Limit"] = parameters.Limit.ToString();
         Response.Headers["X-Offset"] = parameters.Offset.ToString();
 
@@ -342,7 +348,8 @@ public abstract class BaseV3Controller<T> : ControllerBase
             links.Add($"<{baseUrl}?limit={parameters.Limit}&offset={prevOffset}>; rel=\"prev\"");
         }
 
-        if (parameters.Offset + parameters.Limit < totalCount)
+        // A search does not count the collection; a full page is the only sign of another.
+        if (data.Count >= parameters.Limit)
         {
             var nextOffset = parameters.Offset + parameters.Limit;
             links.Add($"<{baseUrl}?limit={parameters.Limit}&offset={nextOffset}>; rel=\"next\"");
@@ -579,35 +586,19 @@ public abstract class BaseV3Controller<T> : ControllerBase
     /// Returns the Nightscout V3-compatible envelope: <c>{"status": 200, "result": [...]}</c>.
     /// </summary>
     /// <typeparam name="TItem">The type of items in the collection.</typeparam>
-    /// <returns>A <see cref="V3CollectionResponse{T}"/> wrapped in the Nightscout V3 envelope.</returns>
+    /// <returns>The Nightscout V3 envelope around <paramref name="data"/>.</returns>
     protected IActionResult CreateV3CollectionResponse<TItem>(
-        IEnumerable<TItem> data,
+        IReadOnlyCollection<TItem> data,
         V3QueryParameters parameters,
-        long totalCount,
         DateTimeOffset? lastModified = null
     )
     {
-        // Apply field selection
         var responseData =
             parameters.Fields != null
                 ? ApplyFieldSelection(data, parameters.Fields)
                 : data.Cast<object>();
 
-        var response = new V3CollectionResponse<object>
-        {
-            Data = responseData.ToList(),
-            Meta = new V3ResponseMetadata
-            {
-                TotalCount = (int)totalCount,
-                Limit = parameters.Limit,
-                Offset = parameters.Offset,
-                Timestamp = DateTimeOffset.UtcNow,
-                Version = "3.0",
-            },
-        };
-
-        // Set response headers
-        SetV3ResponseHeaders(data, parameters, totalCount, lastModified);
+        SetV3ResponseHeaders(data, parameters, lastModified);
 
         // Nightscout V3 API returns {"status": 200, "result": [...]}
         return Ok(
@@ -628,6 +619,28 @@ public abstract class BaseV3Controller<T> : ControllerBase
         }
         return defaultValue;
     }
+
+    private V3Sort ParseSort(IQueryCollection query)
+    {
+        var ascending = ParseStringParameter(query, "sort");
+        var descending = ParseStringParameter(query, "sort$desc");
+
+        return (ascending, descending) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => throw new V3SortConflictException(),
+            (_, { Length: > 0 }) => new V3Sort(descending, true),
+            ({ Length: > 0 }, _) => new V3Sort(ascending, false),
+            _ => V3Sort.Default,
+        };
+    }
+
+    /// <summary>The read-side sort field a request names; any field a store cannot order by is time.</summary>
+    protected static ReadSortField ReadSortFieldOf(V3Sort sort) => sort.Field switch
+    {
+        "srvModified" => ReadSortField.SrvModified,
+        "sgv" => ReadSortField.Sgv,
+        _ => ReadSortField.Time,
+    };
 
     private string? ParseStringParameter(IQueryCollection query, string key)
     {
@@ -706,26 +719,6 @@ public abstract class BaseV3Controller<T> : ControllerBase
     /// <param name="filter">V3 filter object</param>
     /// <returns>The filter's JSON text, or null when there is no filter</returns>
     protected static string? ConvertV3FilterToV1Find(JsonElement? filter) => filter?.GetRawText();
-
-    /// <summary>
-    /// Extract sort direction from V3 sort parameter
-    /// </summary>
-    /// <param name="sort">V3 sort parameter</param>
-    /// <returns>True for reverse sorting (ascending), false for default (descending)</returns>
-    protected bool ExtractSortDirection(string? sort)
-    {
-        if (string.IsNullOrEmpty(sort))
-            return true; // Nightscout defaults to Ascending (Oldest first)
-
-        // Check if sort starts with '-' (descending) or 'desc' (descending)
-        if (sort.StartsWith('-') || sort.StartsWith("desc", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // Default to ascending (true) if just field name is provided
-        return true;
-    }
 
     /// <summary>
     /// Extract type filter from V3 filter

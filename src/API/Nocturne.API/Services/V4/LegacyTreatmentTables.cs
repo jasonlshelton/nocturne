@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Nocturne.API.Services.ProfileActivations;
 using Nocturne.Connectors.Core.Constants;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
@@ -27,7 +28,9 @@ internal sealed record LegacyTreatmentRepositories(
     IBolusCalculationRepository BolusCalculations
 );
 
-/// <summary>The time window, page size and provenance filter of one time-range projection read.</summary>
+/// <summary>
+/// The time window, page size, direction and provenance filter of one time-range projection read.
+/// </summary>
 /// <remarks>
 /// When <paramref name="NativeOnly"/> is <see langword="true"/>, records that mirror a legacy
 /// v1/v2/v3 write (<c>LegacyId</c> set) are dropped. Treatments have no legacy table left to double
@@ -38,7 +41,8 @@ internal readonly record struct LegacyTreatmentRange(
     DateTime? From,
     DateTime? To,
     int Limit,
-    bool NativeOnly
+    bool NativeOnly,
+    bool Descending
 );
 
 /// <summary>
@@ -83,7 +87,8 @@ internal interface ILegacyTreatmentTable
     string RecordType { get; }
 
     /// <summary>
-    /// A page of records within the requested window, newest first.
+    /// A page of records within the requested window: the newest <see cref="LegacyTreatmentRange.Limit"/>
+    /// newest first, or the oldest oldest first when <see cref="LegacyTreatmentRange.Descending"/> is false.
     /// </summary>
     /// <remarks>
     /// <see cref="LegacyTreatmentRange.NativeOnly"/> is honoured after the page is taken, so for a
@@ -288,8 +293,10 @@ internal sealed class LegacyStateSpanTable(
         if (range.NativeOnly)
             return [];
 
-        var spans = await InWindow(context, range.From, range.To)
-            .OrderByDescending(s => s.StartTimestamp)
+        var window = InWindow(context, range.From, range.To);
+        var spans = await (range.Descending
+                ? window.OrderByDescending(s => s.StartTimestamp)
+                : window.OrderBy(s => s.StartTimestamp))
             .ThenBy(s => s.Id)
             .Take(range.Limit)
             .ToListAsync(ct);
@@ -338,6 +345,89 @@ internal sealed class LegacyStateSpanTable(
         treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
         return treatment;
     }
+}
+
+/// <summary>
+/// The <see cref="ProfileActivation"/>s <see cref="TreatmentDecomposer"/> wrote from a legacy
+/// treatment, read back as that treatment under the activation's own id. A connector's activations
+/// carry no legacy id and are not served, as the Profile spans they replace were not.
+/// </summary>
+internal sealed class LegacyProfileActivationTable : ILegacyTreatmentTable
+{
+    /// <inheritdoc />
+    public string RecordType => nameof(ProfileActivation);
+
+    internal static IQueryable<ProfileActivationEntity> Served(IQueryable<ProfileActivationEntity> rows) =>
+        rows.Where(a => a.LegacyId != null);
+
+    internal static IQueryable<ProfileActivationEntity> Rows(NocturneDbContext context) =>
+        Served(context.ProfileActivations.AsNoTracking());
+
+    /// <summary>Activations starting inside the window, bounds inclusive.</summary>
+    internal static IQueryable<ProfileActivationEntity> InWindow(NocturneDbContext context, DateTime? from, DateTime? to)
+    {
+        var rows = Rows(context);
+        if (from is { } lower)
+            rows = rows.Where(a => a.Timestamp >= lower);
+        if (to is { } upper)
+            rows = rows.Where(a => a.Timestamp <= upper);
+        return rows;
+    }
+
+    private FetchedRecord Fetched(ProfileActivationEntity entity) =>
+        new(this, ProfileActivationMapper.ToDomainModel(entity), entity.Id, entity.SysCreatedAt, entity.SysUpdatedAt,
+            entity.DeletedAt is not null);
+
+    /// <inheritdoc />
+    /// <remarks>Every activation served here mirrors a legacy write, so <see cref="LegacyTreatmentRange.NativeOnly"/> leaves none.</remarks>
+    public async Task<IReadOnlyList<FetchedRecord>> InRangeAsync(
+        LegacyTreatmentRepositories repositories,
+        NocturneDbContext context,
+        LegacyTreatmentRange range,
+        CancellationToken ct
+    )
+    {
+        if (range.NativeOnly)
+            return [];
+
+        var window = InWindow(context, range.From, range.To);
+        var rows = await (range.Descending
+                ? window.OrderByDescending(a => a.Timestamp)
+                : window.OrderBy(a => a.Timestamp))
+            .ThenBy(a => a.Id)
+            .Take(range.Limit)
+            .ToListAsync(ct);
+
+        return rows.Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
+        NocturneDbContext context,
+        long cursorMills,
+        int limit,
+        ILogger logger,
+        CancellationToken ct
+    )
+    {
+        var rows = await HistoryPage.GetAsync(
+            Served(context.ProfileActivations.IncludingDeleted().AsNoTracking()),
+            a => a.SysUpdatedAt, a => a.Id, cursorMills, limit, logger, RecordType, ct);
+
+        return rows.Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>An activation is never a meal's partner.</remarks>
+    public Task<IReadOnlyList<FetchedRecord>> LiveByCorrelationAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<Guid> correlationIds,
+        CancellationToken ct
+    ) => Task.FromResult<IReadOnlyList<FetchedRecord>>([]);
+
+    /// <inheritdoc />
+    public Treatment Project(object record, CarbFoodIndex foods) =>
+        LegacyTreatmentTables.ProjectProfileActivation((ProfileActivation)record);
 }
 
 /// <summary>
@@ -402,31 +492,22 @@ internal static class LegacyTreatmentTables
                 Reason = metadata.TryReadString("reason"),
                 Units = metadata.TryReadString("units"),
             }),
-        new(StateSpanCategory.Profile,
-            s => s.OriginalId != null
-                && EF.Functions.JsonExists(s.MetadataJson!, StateSpanMetadataExtensions.UtcOffsetKey),
-            // A later switch ends an open switch by supersession; the upload was permanent, and a
-            // non-zero duration would read as a temporary switch.
-            (s, metadata) => new Treatment
-            {
-                EventType = TreatmentTypes.ProfileSwitch,
-                Duration = s.SupersededById != null ? 0 : DurationMinutes(s),
-                Profile = metadata.TryReadString("profileName"),
-                ProfileJson = metadata.TryReadString("profileJson"),
-                Percentage = (double?)metadata.TryReadDecimal("percentage"),
-                Timeshift = (double?)metadata.TryReadDecimal("timeshift"),
-                Reason = metadata.TryReadString("reason"),
-            }),
     ];
 
-    /// <summary>The treatment ids of every state span <see cref="StateSpanTables"/> serves.</summary>
+    internal static readonly LegacyProfileActivationTable ProfileActivationTable = new();
+
+    /// <summary>
+    /// The treatment ids of every state span <see cref="StateSpanTables"/> serves, and of every
+    /// activation <see cref="ProfileActivationTable"/> serves.
+    /// </summary>
     internal static IQueryable<string> ServedStateSpanKeys(NocturneDbContext context) =>
         StateSpanTables
             .Select(table => table.Rows(context).Select(s => s.OriginalId!))
-            .Aggregate(Queryable.Concat);
+            .Aggregate(Queryable.Concat)
+            .Concat(LegacyProfileActivationTable.Rows(context).Select(a => a.LegacyId!));
 
     /// <summary>
-    /// The notes a served state span's treatment wrote as a Note of its own before
+    /// The notes a served state span's or activation's treatment wrote as a Note of its own before
     /// <see cref="NotesKey"/> was kept on the span: one treatment, served once, as the span.
     /// </summary>
     internal static IQueryable<NoteEntity> NotesWrittenBesideServedStateSpans(NocturneDbContext context)
@@ -464,54 +545,112 @@ internal static class LegacyTreatmentTables
         new LegacyTreatmentTable<Bolus, BolusEntity>(
             (repositories, range, ct) => repositories.Boluses.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
             c => c.Boluses, RecordType.Bolus, BolusMapper.ToDomainModel,
             (r, _) => ProjectCorrectionBolus(r)),
         new LegacyTreatmentTable<CarbIntake, CarbIntakeEntity>(
             (repositories, range, ct) => repositories.CarbIntakes.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
             c => c.CarbIntakes, RecordType.CarbIntake, CarbIntakeMapper.ToDomainModel,
             (r, foods) => ProjectCarbCorrection(r, foods.For(r.Id))),
         new LegacyTreatmentTable<BGCheck, BGCheckEntity>(
             (repositories, range, ct) => repositories.BGChecks.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
             c => c.BGChecks, RecordType.BGCheck, BGCheckMapper.ToDomainModel,
             (r, _) => ProjectBgCheck(r)),
         new LegacyTreatmentTable<Note, NoteEntity>(
             (repositories, range, ct) => repositories.Notes.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
             c => c.Notes, RecordType.Note, NoteMapper.ToDomainModel,
             (r, _) => ProjectNote(r)),
         new LegacyTreatmentTable<DeviceEvent, DeviceEventEntity>(
             (repositories, range, ct) => repositories.DeviceEvents.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, nativeOnly: range.NativeOnly, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, nativeOnly: range.NativeOnly, ct: ct),
             r => r.LegacyId,
             c => c.DeviceEvents, RecordType.DeviceEvent, DeviceEventMapper.ToDomainModel,
             (r, _) => ProjectDeviceEvent(r)),
         new LegacyTreatmentTable<TempBasal, TempBasalEntity>(
             (repositories, range, ct) => repositories.TempBasals.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, ct: ct),
             r => r.LegacyId,
             c => c.TempBasals, RecordType.TempBasal, TempBasalMapper.ToDomainModel,
             (r, _) => TempBasalToTreatmentMapper.ToTreatment(r)),
         new LegacyTreatmentTable<BolusCalculation, BolusCalculationEntity>(
             (repositories, range, ct) => repositories.BolusCalculations.GetAsync(
                 from: range.From, to: range.To, device: null, source: null,
-                limit: range.Limit, offset: 0, descending: true, ct: ct),
+                limit: range.Limit, offset: 0, descending: range.Descending, ct: ct),
             r => r.LegacyId,
             c => c.BolusCalculations, RecordType.BolusCalculation, BolusCalculationMapper.ToDomainModel,
             (r, _) => ProjectBolusCalculation(r)),
         .. StateSpanTables,
+        ProfileActivationTable,
     ];
+
+    /// <summary>
+    /// A <see cref="ProfileActivation"/> as the Profile Switch, or AAPS effective switch Note, it was
+    /// uploaded as, from the span metadata <see cref="ProfileActivationLegacyFields.ToSpanMetadata"/>
+    /// rebuilds.
+    /// </summary>
+    /// <remarks>
+    /// A permanent switch a later one ended is served with a duration of zero, never the length it ran:
+    /// a non-zero duration would read as a temporary switch. AAPS reads a v3 switch's length from
+    /// <c>durationInMilliseconds</c> before <c>duration</c> (<c>TreatmentMapper.kt</c>), so both are served.
+    /// </remarks>
+    internal static Treatment ProjectProfileActivation(ProfileActivation activation)
+    {
+        var metadata = ProfileActivationLegacyFields.ToSpanMetadata(activation);
+        var span = ProfileSpanMetadata.Parse(metadata);
+        Treatment treatment;
+        if (span.IsEffective)
+        {
+            treatment = EffectiveProfileSwitch.Project(span, activation.Mills);
+        }
+        else
+        {
+            var duration = UploadedDuration(metadata)
+                ?? (activation.RequestedDurationMs is > 0 and var requestedMs ? requestedMs / 60_000.0
+                    : activation.EndTimestamp is not null ? 0 : null);
+            treatment = new Treatment
+            {
+                EventType = TreatmentTypes.ProfileSwitch,
+                Duration = duration,
+                DurationInMilliseconds = span.DurationInMilliseconds
+                    ?? (duration is { } minutes ? (long)Math.Round(minutes * 60_000) : null),
+                Profile = span.ProfileName,
+                ProfileJson = span.ProfileJson,
+                Percentage = span.Percentage,
+                Timeshift = span.UploadedTimeshift,
+                Reason = metadata.TryReadString("reason"),
+                OriginalProfileName = span.OriginalProfileName,
+                OriginalDuration = (int?)span.OriginalDuration,
+            };
+        }
+
+        treatment.PumpId = span.PumpId;
+        treatment.PumpType = span.PumpType;
+        treatment.PumpSerial = span.PumpSerial;
+        if (span.App is { } app)
+            treatment.AdditionalProperties = new Dictionary<string, object> { [ProfileSpanMetadata.AppKey] = app };
+
+        treatment.Id = activation.Id.ToString();
+        treatment.Mills = activation.Mills;
+        treatment.RawTimestamp ??= TreatmentUploadedTimestamp.OfSpan(metadata);
+        treatment.EnteredBy = metadata.TryReadString(ProfileActivationLegacyFields.EnteredByKey);
+        treatment.Notes = metadata.TryReadString(NotesKey);
+        treatment.SyncIdentifier = metadata.TryReadString(SyncIdentifierKey);
+        treatment.InsulinType = metadata.TryReadString(InsulinTypeKey);
+        treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
+        return treatment;
+    }
 
     /// <summary>The tables whose records pair into a Meal Bolus.</summary>
     internal static readonly IReadOnlyList<ILegacyTreatmentTable> MealTables =
@@ -607,7 +746,7 @@ internal static class LegacyTreatmentTables
 
             var treatment = row.Table.Project(row.Record, foods);
             if (treatment.Notes is null
-                && row.Record is StateSpanEntity { OriginalId: { } key }
+                && ServedKey(row.Record) is { } key
                 && spanNotes?.GetValueOrDefault(key) is { } notes)
                 treatment.Notes = notes;
 
@@ -616,6 +755,17 @@ internal static class LegacyTreatmentTables
 
         return treatments;
     }
+
+    /// <summary>
+    /// The treatment id a served state span or activation was written under, which the Note its
+    /// treatment wrote beside it carries; see <see cref="NotesWrittenBesideServedStateSpans"/>.
+    /// </summary>
+    internal static string? ServedKey(object record) => record switch
+    {
+        StateSpanEntity span => span.OriginalId,
+        ProfileActivation activation => activation.LegacyId,
+        _ => null,
+    };
 
     /// <summary>
     /// Pairs boluses and carb intakes by CorrelationId. Under N:M a single correlation may have

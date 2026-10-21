@@ -16,8 +16,8 @@ namespace Nocturne.API.Services.Identity;
 /// subject-pinned factory context (same pattern as <see cref="TenantService.GetTenantsForSubjectAsync"/>),
 /// then fans out per tenant: a fresh DI scope pinned via <see cref="ITenantAccessor"/> for the
 /// canonical glucose read, and a context from <see cref="INocturneDbContextFactory.CreateForTenantAsync"/>
-/// for alert rules and active excursions. Never touches the request-scoped DbContext, so the
-/// endpoint works from the apex (tenantless) in multi-tenant deployments.
+/// for alert rules and active excursions. Never reads as the request's tenant, so the endpoint
+/// works from the apex (tenantless) in multi-tenant deployments.
 /// </summary>
 /// <seealso cref="ITenantOverviewService"/>
 public class TenantOverviewService : ITenantOverviewService
@@ -107,20 +107,20 @@ public class TenantOverviewService : ITenantOverviewService
         CancellationToken ct)
     {
         // Fresh scope per tenant: CanonicalGlucoseService caches per scope. The scope never passes
-        // through MemberScopeMiddleware, so the caller's clamp on this tenant is carried in here.
-        SensorGlucose? latest;
-        using (var scope = _scopeFactory.CreateScope())
-        {
-            scope.ServiceProvider.GetRequiredService<ITenantAccessor>()
-                .SetTenant(new TenantContext(tenant.Id, tenant.Slug, tenant.DisplayName, true, tenant.IsDemo));
-            if (historyClamped)
-                scope.ServiceProvider.GetRequiredService<ICategoryReadContext>().ClampMemberHistory();
-            latest = await scope.ServiceProvider
-                .GetRequiredService<ICanonicalGlucoseService>()
-                .GetLatestAsync(ct);
-        }
+        // through MemberScopeMiddleware, so the caller's clamp on this tenant is carried in here,
+        // and every read below goes through it so the clamp and the tenant pin travel together.
+        using var scope = _scopeFactory.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantAccessor>()
+            .SetTenant(new TenantContext(tenant.Id, tenant.Slug, tenant.DisplayName, true, tenant.IsDemo));
+        if (historyClamped)
+            scope.ServiceProvider.GetRequiredService<ICategoryReadContext>().ClampMemberHistory();
+        var latest = await scope.ServiceProvider
+            .GetRequiredService<ICanonicalGlucoseService>()
+            .GetLatestAsync(ct);
 
-        await using var db = await _factory.CreateForTenantAsync(tenant.Id, ct);
+        await using var db = await scope.ServiceProvider
+            .GetRequiredService<INocturneDbContextFactory>()
+            .CreateAsync(ct);
 
         int? activeAlertCount = null;
         AlertRuleSeverity? highestSeverity = null;

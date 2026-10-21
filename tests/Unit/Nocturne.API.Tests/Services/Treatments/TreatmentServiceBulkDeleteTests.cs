@@ -118,7 +118,7 @@ public class TreatmentServiceBulkDeleteTests
         var projection = new Mock<IV4ToLegacyProjectionService>();
         projection
             .Setup(p => p.GetProjectedTreatmentsAsync(
-                It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<int>(), false, It.IsAny<CancellationToken>()))
+                It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<int>(), false, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Treatment>
             {
                 new() { Id = "note-1", Mills = 3000, EventType = "Note" },
@@ -136,6 +136,7 @@ public class TreatmentServiceBulkDeleteTests
             new Mock<INoteRepository>().Object,
             new Mock<IDeviceEventRepository>().Object,
             new Mock<IBolusCalculationRepository>().Object,
+            Mock.Of<IProfileActivationRepository>(),
             Mock.Of<IStateSpanService>(),
             NullLogger<TreatmentReadService>.Instance);
         _store

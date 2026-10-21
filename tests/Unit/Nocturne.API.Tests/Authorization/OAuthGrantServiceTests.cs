@@ -64,7 +64,6 @@ public class OAuthGrantServiceTests : IDisposable
     private OAuthGrantService CreateService(NocturneDbContext dbContext)
     {
         return new OAuthGrantService(
-            dbContext,
             _db.ContextFactory.AsNocturneFactory(),
             _mockClientService.Object,
             _guestSessionCache,
@@ -244,6 +243,23 @@ public class OAuthGrantServiceTests : IDisposable
         Assert.NotNull(result);
         Assert.Contains("glucose.read", result.Scopes);
         Assert.Contains("treatments.readwrite", result.Scopes);
+    }
+
+    [Fact]
+    public async Task UpdateGrantAsync_ToNoScopes_IsRefusedAndLeavesTheGrant()
+    {
+        using var db = CreateDbContext();
+        await SeedClientAsync(db);
+        await SeedSubjectAsync(db, _ownerSubjectId, "Owner");
+        var grantId = await SeedGrantAsync(db, scopes: new List<string> { "glucose.read" });
+
+        var service = CreateService(db);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.UpdateGrantAsync(grantId, _ownerSubjectId, scopes: []));
+
+        var grant = await db.OAuthGrants.AsNoTracking().SingleAsync(g => g.Id == grantId);
+        Assert.Equal(["glucose.read"], grant.Scopes);
     }
 
     [Fact]

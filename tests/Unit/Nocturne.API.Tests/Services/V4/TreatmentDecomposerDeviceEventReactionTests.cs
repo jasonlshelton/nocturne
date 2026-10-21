@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.Infrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -53,7 +54,7 @@ public class TreatmentDecomposerDeviceEventReactionTests : IDisposable
             .Returns(Task.CompletedTask);
 
         _decomposer = new TreatmentDecomposer(
-            _context,
+            _context.AsFactory(),
             new BolusRepository(factory, dedup, audit, NullLogger<BolusRepository>.Instance),
             new TempBasalRepository(factory, dedup, audit, NullLogger<TempBasalRepository>.Instance),
             new CarbIntakeRepository(factory, dedup, audit, NullLogger<CarbIntakeRepository>.Instance),
@@ -62,6 +63,8 @@ public class TreatmentDecomposerDeviceEventReactionTests : IDisposable
             new DeviceEventRepository(factory, dedup, audit, NullLogger<DeviceEventRepository>.Instance),
             new BolusCalculationRepository(factory, dedup, audit, NullLogger<BolusCalculationRepository>.Instance),
             Mock.Of<IStateSpanService>(),
+            ProfileActivationTestDeps.Repository(_context),
+            ProfileActivationTestDeps.Writer(_context),
             Mock.Of<ITreatmentFoodService>(),
             Mock.Of<IDeviceService>(),
             Mock.Of<IPatientDeviceStamper>(),

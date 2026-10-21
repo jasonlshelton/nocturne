@@ -33,6 +33,7 @@ namespace Nocturne.API.Tests.Services.Platform;
 /// Tests system status functionality with Nightscout compatibility and caching
 /// </summary>
 [Parity("api.status.test.js")]
+[Collection(ProcessEnvironmentCollection.Name)]
 public class StatusServiceTests
 {
     private readonly Mock<ICacheService> _mockCacheService;
@@ -208,7 +209,6 @@ public class StatusServiceTests
             _configuration,
             _mockCacheService.Object,
             _mockDemoModeService.Object,
-            ctx,
             tenantFactory.Object,
             _httpContextAccessor,
             MockTenantAccessor.Create(tenantId: tenantId, slug: "t", isDemo: isDemo).Object,
@@ -1062,6 +1062,7 @@ public class StatusServiceTests
         enabledFeatures.Should().Contain("careportal");
         enabledFeatures.Should().Contain("basal");
         enabledFeatures.Should().Contain("dbsize");
+        enabledFeatures.Should().NotContain(EnabledFeatures.Cors, "the legacy API answers foreign origins only when the instance enables cors");
     }
 
     #endregion
@@ -1392,7 +1393,6 @@ public class StatusServiceTests
             configuration,
             _mockCacheService.Object,
             _mockDemoModeService.Object,
-            ctx,
             mockTenantDbContextFactory.Object,
             httpContextAccessor ?? _httpContextAccessor,
             tenantAccessor ?? _mockTenantAccessor.Object,

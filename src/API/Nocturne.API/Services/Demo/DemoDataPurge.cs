@@ -10,8 +10,8 @@ namespace Nocturne.API.Services.Demo;
 /// <summary>
 /// The one owner of "everything the demo service wrote": the table list and the delete that empties
 /// it, for every caller that clears demo data. Takes the context so a caller may bring either
-/// tenant-scoping pattern — an injected scoped context, or a factory context with
-/// <see cref="NocturneDbContext.TenantId"/> pinned from the demo tenant lookup.
+/// tenant-scoping pattern — a context reading as the scope's tenant, or one pinned to the demo
+/// tenant the caller looked up.
 /// </summary>
 /// <remarks>
 /// Hard delete (<see cref="PurgeExtensions.PurgeAsync{TEntity}"/>), unlike the audited soft-delete
@@ -44,6 +44,7 @@ internal static class DemoDataPurge
         deleted += await db.DeviceEvents.PurgeAsync(SourceFilter.For<DeviceEventEntity>(DataSources.DemoService), ct);
         deleted += await db.BolusCalculations.PurgeAsync(SourceFilter.For<BolusCalculationEntity>(DataSources.DemoService), ct);
         deleted += await db.TempBasals.PurgeAsync(SourceFilter.For<TempBasalEntity>(DataSources.DemoService), ct);
+        deleted += await db.ProfileActivations.PurgeAsync(SourceFilter.For<ProfileActivationEntity>(DataSources.DemoService), ct);
         var demoAcceptedSpanIds = (await db.StateSpans
                 .Where(s => s.Source == "compression-low-detection" && s.MetadataJson != null)
                 .Select(s => new { s.Id, s.MetadataJson })

@@ -40,17 +40,14 @@ public interface ITotpService
     /// </summary>
     Task<TotpLoginResult?> VerifyStepUpAsync(string stepUpToken, string code);
 
-    /// <summary>Returns all registered TOTP credentials for the specified subject.</summary>
     Task<List<TotpCredentialInfo>> GetCredentialsAsync(Guid subjectId);
 
-    /// <summary>Removes a TOTP credential from the specified subject.</summary>
     Task RemoveCredentialAsync(Guid credentialId, Guid subjectId);
 
     /// <summary>Returns the number of TOTP credentials registered to the specified subject.</summary>
     Task<int> GetCredentialCountAsync(Guid subjectId);
 }
 
-/// <summary>Result of generating a TOTP setup challenge.</summary>
 /// <param name="ProvisioningUri">otpauth:// URI for scanning by an authenticator app.</param>
 /// <param name="Base32Secret">Base32-encoded TOTP secret for manual entry.</param>
 /// <param name="ChallengeToken">Opaque token used to correlate the challenge on completion.</param>

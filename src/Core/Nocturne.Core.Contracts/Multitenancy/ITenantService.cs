@@ -20,7 +20,6 @@ public interface ITenantService
     /// <summary>Re-seeds roles, public membership, and OAuth clients for an existing tenant after a data purge.</summary>
     Task SeedAfterResetAsync(Guid tenantId, CancellationToken ct = default);
 
-    /// <summary>Returns all tenants on the platform.</summary>
     Task<List<TenantDto>> GetAllAsync(CancellationToken ct = default);
 
     /// <summary>Returns the tenant with its member list, or null if not found.</summary>
@@ -36,7 +35,6 @@ public interface ITenantService
     /// <summary>Permanently deletes a tenant and all associated data.</summary>
     Task DeleteAsync(Guid id, CancellationToken ct = default);
 
-    /// <summary>Adds a subject as a member of the specified tenant with the given roles and permissions.</summary>
     Task AddMemberAsync(Guid tenantId, Guid subjectId, List<Guid> roleIds, List<string>? directPermissions = null, string? label = null, bool limitTo24Hours = false, CancellationToken ct = default);
 
     /// <summary>
@@ -92,9 +90,6 @@ public record TenantMemberDto(
 /// </summary>
 public record TenantMemberRoleDto(Guid RoleId, string Name, string Slug);
 
-/// <summary>
-/// Result of a tenant slug validation check.
-/// </summary>
 public record SlugValidationResult(bool IsValid, string? Message = null);
 
 /// <summary>

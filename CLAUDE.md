@@ -282,6 +282,16 @@ request's state, and nothing reads `HttpContext` for it. A write that outlives i
 never the request's factory: that one reads the request's scope after it is disposed. The raw
 `IDbContextFactory<NocturneDbContext>` stays registered for Infrastructure's own use only.
 
+No `NocturneDbContext` is registered in DI. Each method opens its own
+(`await using var db = await _contexts.CreateAsync(ct)`), and nothing tracked and no
+`IQueryable` leaves it. Writes that must commit together, or share an advisory lock or a
+transaction, share a caller-owned `DbUnitOfWork`: the owner opens it and hands it to each
+writer taking part (`AlertTrackerRepository`/`TrackerRepository` take one in their
+constructor; `AlertRuleRearm.SaveAndClearAsync` takes one). `PerOperationContextGuardTests`
+keeps contexts and the raw factory out of constructors and scope lookups outside
+Infrastructure, and `ServiceProviderValidationTests` builds the real API registrations with
+`ValidateOnBuild` and `ValidateScopes`, which `Program.cs` enables only in Development.
+
 Background work opens its scope with `TenantJobScope.Open(provider, tenant, actor)`
 (`Nocturne.API.Multitenancy`): the tenant (or none) set on the scope's `ITenantAccessor` and
 the audit actor system-attributed. Everything the scope resolves or creates follows it. A
@@ -374,16 +384,18 @@ Design notes:
   cache; headers a controller writes by hand are outside what it checks. Hand-set
   `Cache-Control` headers follow the same rule: a tenant data read is never `public`
   (V3 reads send `private, max-age=60`, pinned by `V3CacheControlTests`).
-- **PHI cache invariant.** The same holds for the tenant-keyed application caches of
-  time-series data and of values derived from it (`EntryCacheAdapter`,
-  `TreatmentCacheAdapter`, the multi-period statistics, the eHbA1c timeline, IOB/COB, the
-  active-profile and basal-assignment resolvers): their keys carry the tenant, not the
-  history window or the share's categories, so a history-clamped request or any share
-  (`ICategoryReadContext.BypassesTenantCaches`) neither reads nor writes them. A
-  full-history share still differs from the owner: every table no granted scope governs
-  is hidden from it. Do not key them by clamp or share instead. A read that fans out
-  in a fresh DI scope (`TenantOverviewService`) carries the caller's clamp into that
-  scope's `ICategoryReadContext`.
+- **PHI cache invariant.** The same holds for application caches. Every cross-request
+  cache of data read under RLS goes through `ITenantCache`, which keys it
+  `tenant:partition:demo:key`. The partition (`IReaderCachePartition`) names the readers
+  who see exactly the same rows: owners and unclamped members share `full`, each
+  full-history share's category set is its own partition, and a history-clamped reader
+  has none, so it neither reads nor writes. No cache reads the clamp or builds a tenant
+  key itself, and invalidation clears a key family across every partition. What a value
+  in `full` may contain is stated on `ITenantCache`. The one exception is
+  `StatusService`'s `status:system` key, which varies by whether the caller is
+  authenticated rather than by the rows it can read. A read that fans out in a fresh DI
+  scope (`TenantOverviewService`) carries the caller's clamp into that scope's
+  `ICategoryReadContext` and reads through it.
 
 ## Testing
 

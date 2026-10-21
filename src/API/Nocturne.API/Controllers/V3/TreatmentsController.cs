@@ -24,18 +24,15 @@ namespace Nocturne.API.Controllers.V3;
 [Authorize(Policy = PolicyNames.HasPermissions)]
 public class TreatmentsController : BaseV3Controller<Treatment>
 {
-    private readonly ITreatmentStore _treatmentStore;
     private readonly ITreatmentService _treatmentService;
 
     public TreatmentsController(
-        ITreatmentStore treatmentStore,
         IDocumentProcessingService documentProcessingService,
         ITreatmentService treatmentService,
         ILogger<TreatmentsController> logger
     )
         : base(documentProcessingService, logger)
     {
-        _treatmentStore = treatmentStore;
         _treatmentService = treatmentService;
     }
 
@@ -79,25 +76,19 @@ public class TreatmentsController : BaseV3Controller<Treatment>
                 ConvertFilterCriteriaToFindQuery(parameters.FilterCriteria)
                 ?? ConvertV3FilterToV1Find(parameters.Filter);
 
-            // Determine sort direction from sort$desc query parameter
-            // Nightscout V3: sort$desc=field means descending (newest first)
-            // reverseResults=false means descending, reverseResults=true means ascending
-            var hasSortDesc = HttpContext?.Request.Query.ContainsKey("sort$desc") ?? false;
-            var reverseResults = !hasSortDesc && ExtractSortDirection(parameters.Sort);
-
-            // Get treatments using existing backend with V3 parameters
-            var treatments = await _treatmentService.GetTreatmentsWithAdvancedFilterAsync(
-                count: parameters.Limit,
-                skip: parameters.Offset,
-                findQuery: findQuery,
-                reverseResults: reverseResults,
-                cancellationToken: cancellationToken
+            var treatments = await _treatmentService.QueryTreatmentsAsync(
+                new TreatmentQuery
+                {
+                    Find = findQuery,
+                    Count = parameters.Limit,
+                    Skip = parameters.Offset,
+                    ReverseResults = !parameters.Sort.Descending,
+                    SortField = ReadSortFieldOf(parameters.Sort),
+                },
+                cancellationToken
             );
 
             var treatmentsList = treatments.ToList();
-
-            // Get total count for pagination
-            var totalCount = await GetTotalCountAsync(findQuery, cancellationToken);
 
             // Check for conditional requests (304 Not Modified)
             var lastModified = GetLastModified(treatmentsList);
@@ -527,23 +518,6 @@ public class TreatmentsController : BaseV3Controller<Treatment>
 
     #region Helper Methods
 
-    private async Task<long> GetTotalCountAsync(
-        string? findQuery,
-        CancellationToken cancellationToken
-    )
-    {
-        try
-        {
-            // Use the count endpoint to get total
-            return await _treatmentStore.CountAsync(findQuery, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get total count for V3 treatments, using estimate");
-            // Return a reasonable estimate if count fails
-            return 1000;
-        }
-    }
 
     private DateTimeOffset GetLastModified(List<Treatment> treatments)
     {
