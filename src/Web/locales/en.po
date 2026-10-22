@@ -196,10 +196,8 @@ msgstr "<0/> Device authorized successfully. Waiting for data..."
 msgid "<0/> Authorization denied. The device will not be granted access."
 msgstr "<0/> Authorization denied. The device will not be granted access."
 
-#: src/lib/components/PreludeQuickConnect.svelte
-#: src/lib/components/XdripQuickConnect.svelte
-msgid "<0/> wants access"
-msgstr "<0/> wants access"
+#~ msgid "<0/> wants access"
+#~ msgstr "<0/> wants access"
 
 #: src/lib/components/PreludeQuickConnect.svelte
 #: src/lib/components/XdripQuickConnect.svelte
@@ -230,6 +228,7 @@ msgstr "<0/> Approve"
 #: src/lib/components/XdripQuickConnect.svelte
 #: src/routes/(authenticated)/oauth/device/+page.svelte
 #: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 msgid "<0/> Continue"
 msgstr "<0/> Continue"
 
@@ -271,16 +270,15 @@ msgstr "UrgentHigh"
 #: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/ChartLegend.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/GlucoseInspectionDialog.svelte
+#: src/lib/components/food/GiLabel.svelte
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/lib/components/reports/sleep/single-night/OvernightLowsCard.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
 #: src/lib/stores/alarm-state.svelte.ts
 #: src/lib/stores/alarm-state.svelte.ts
 #: src/lib/stores/alarm-state.svelte.ts
 #: src/lib/stores/alarm-state.svelte.ts
-#: src/routes/(authenticated)/food/GiLabel.svelte
 #: src/routes/(authenticated)/reports/data-quality/compression-lows/+page.svelte
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -292,13 +290,12 @@ msgstr "Low"
 #: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/ChartLegend.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/GlucoseInspectionDialog.svelte
+#: src/lib/components/food/GiLabel.svelte
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
 #: src/lib/stores/alarm-state.svelte.ts
 #: src/lib/stores/alarm-state.svelte.ts
-#: src/routes/(authenticated)/food/GiLabel.svelte
 #: src/routes/(authenticated)/reports/data-quality/compression-lows/+page.svelte
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -555,7 +552,6 @@ msgstr "Verification code"
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentDisambiguationDialog.svelte
 #: src/lib/components/entries/EntryEditDialog.svelte
 #: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
 #: src/lib/components/meal-matching/MealMatchReviewDialog.svelte
 #: src/lib/components/meals/MealBolusDialog.svelte
 #: src/lib/components/meals/MealBolusDialog.svelte
@@ -572,6 +568,7 @@ msgstr "Verification code"
 #: src/lib/components/patient/PatientInsulinManager.svelte
 #: src/lib/components/profile/ProfileCreateDialog.svelte
 #: src/lib/components/profile/ProfileEditDialog.svelte
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/schedule/TargetRangeCard.svelte
 #: src/lib/components/settings/AlarmProfileDialog.svelte
 #: src/lib/components/settings/ApiTokens.svelte
@@ -843,12 +840,9 @@ msgstr "Update role details and permissions."
 #: src/lib/components/admin/OidcProviderDialog.svelte
 #: src/lib/components/admin/RoleDialog.svelte
 #: src/lib/components/admin/SubjectEditDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
 #: src/lib/components/members/RolesSection.svelte
 #: src/lib/components/members/RolesSection.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
 #: src/routes/(authenticated)/alerts/[id]/+page.svelte
 #: src/routes/(authenticated)/settings/translations/[locale]/+page.svelte
 msgid "Name"
@@ -879,9 +873,9 @@ msgstr "Custom Permission"
 
 #: ../cms/src/editor/ComponentPropsEditor.svelte
 #: src/lib/components/admin/RoleDialog.svelte
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/patient/PatientDeviceManager.svelte
 #: src/lib/components/patient/PatientInsulinManager.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 #: src/routes/(authenticated)/tools/packing/list/+page.svelte
 #: src/routes/(authenticated)/tools/packing/list/+page.svelte
 msgid "Add"
@@ -1161,6 +1155,7 @@ msgid "Started"
 msgstr "Started"
 
 #: src/lib/components/alerts/AlertHistoryCard.svelte
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/reports/sensor-integrity/ClusterTable.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/lib/components/trackers/tracker-notification-editor.svelte
@@ -1252,6 +1247,8 @@ msgstr "{0} reading{1}"
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/integrations/discord/+page.svelte
+#: src/routes/(authenticated)/settings/profile/+page.svelte
+#: src/routes/(authenticated)/settings/profile/+page.svelte
 #: src/routes/(authenticated)/settings/profile/+page.svelte
 msgid "Default"
 msgstr "Default"
@@ -1412,6 +1409,7 @@ msgstr "Timezone"
 #: ../cms/src/editor/ComponentPropsEditor.svelte
 #: ../cms/src/lib/components/edra/shadcn/components/SlashCommandList.svelte
 #: src/lib/components/dashboard/RecentTreatmentsCard.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/sleep/SleepCompositionChart.svelte
 #: src/routes/(authenticated)/food/Composer.svelte
 #: src/routes/(authenticated)/food/FoodRow.svelte
@@ -1628,7 +1626,6 @@ msgstr "<0/> Continue with {0}"
 #: src/lib/components/auth/LoginForm.svelte
 #: src/lib/components/auth/LoginForm.svelte
 #: src/lib/components/auth/PasskeyRegistrationForm.svelte
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 msgid "<0/> Waiting for passkey..."
@@ -1656,7 +1653,6 @@ msgstr "Or continue with"
 #: src/lib/components/auth/LoginForm.svelte
 #: src/lib/components/auth/LoginForm.svelte
 #: src/lib/components/auth/PasskeyRegistrationForm.svelte
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 msgid "Username"
@@ -1701,7 +1697,6 @@ msgstr "<0/> Verify"
 #: src/lib/components/auth/PasskeyRegistrationForm.svelte
 #: src/routes/(authenticated)/settings/admin/tenants/+page.svelte
 #: src/routes/(authenticated)/settings/integrations/discord/+page.svelte
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 msgid "Display name"
 msgstr "Display name"
@@ -1709,7 +1704,6 @@ msgstr "Display name"
 #: ../portal/src/routes/studio/+page.svelte
 #: src/lib/components/auth/PasskeyRegistrationForm.svelte
 #: src/routes/(authenticated)/settings/translations/[locale]/+page.svelte
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 msgid "Your name"
 msgstr "Your name"
@@ -1790,6 +1784,7 @@ msgid "{0}g"
 msgstr "{0}g"
 
 #: src/lib/components/calendar/CalendarDayCell.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 msgid "Bolus:"
 msgstr "Bolus:"
 
@@ -1823,6 +1818,7 @@ msgid "{0}U"
 msgstr "{0}U"
 
 #: src/lib/components/calendar/CalendarDayCell.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 msgid "Basal:"
 msgstr "Basal:"
 
@@ -1840,7 +1836,6 @@ msgid "Calendar"
 msgstr "Calendar"
 
 #: src/lib/components/calendar/CalendarHeader.svelte
-#: src/lib/components/dashboard/widgets/TddWidget.svelte
 #: src/lib/components/layout/ReportsFilterSidebar.svelte
 #: src/lib/components/ui/date-range-picker.svelte
 #: src/routes/(authenticated)/reports/+layout.svelte
@@ -1963,7 +1958,6 @@ msgstr "<0/> Complete"
 
 #: src/lib/components/auth/RecoveryCodes.svelte
 #: src/lib/components/connectors/UploaderSetupView.svelte
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 msgid "Continue"
 msgstr "Continue"
 
@@ -2084,6 +2078,7 @@ msgstr "Show units"
 
 #: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/clock-builder/ElementInspector.svelte
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/trackers/tracker-notification-editor.svelte
 msgid "Hours"
 msgstr "Hours"
@@ -2225,8 +2220,7 @@ msgstr "Weight"
 
 #: ../cms/src/lib/components/edra/shadcn/components/toolbar/FontSize.svelte
 #: src/lib/components/clock-builder/TextStyleControls.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-#: src/routes/(authenticated)/food/GiLabel.svelte
+#: src/lib/components/food/GiLabel.svelte
 #: src/routes/(authenticated)/reports/data-quality/compression-lows/+page.svelte
 #: src/routes/(authenticated)/settings/nightscout-transition/+page.svelte
 msgid "Medium"
@@ -2573,6 +2567,7 @@ msgstr "Select a date range to re-sync specific data."
 #: ../portal/src/lib/components/docs/alert-simulator/ConditionEditor.svelte
 #: src/lib/components/connectors/ConnectorDetailsDialog.svelte
 #: src/routes/(authenticated)/alerts/dnd/+page.svelte
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
 #: src/routes/(authenticated)/settings/audit/+page.svelte
 #: src/routes/(authenticated)/settings/audit/+page.svelte
 msgid "From"
@@ -2679,8 +2674,6 @@ msgstr "No server-side connectors are registered in this installation."
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/migration/+page.svelte
-#: src/routes/(authenticated)/settings/profile/+page.svelte
-#: src/routes/(authenticated)/settings/profile/+page.svelte
 #: src/routes/(authenticated)/settings/support/+page.svelte
 msgid "Active"
 msgstr "Active"
@@ -2917,6 +2910,7 @@ msgstr "<0/> Phone Apps"
 
 #: src/lib/components/connectors/DataSourceSelectionView.svelte
 #: src/lib/components/meals/MealsFilterBar.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/treatments/TreatmentCategoryTabs.svelte
 #: src/routes/(authenticated)/compatibility/+page.svelte
 #: src/routes/(authenticated)/compatibility/+page.svelte
@@ -3351,15 +3345,12 @@ msgstr "The device will not be granted access."
 msgid "Authorize Application"
 msgstr "Authorize Application"
 
-#: src/lib/components/connectors/UploaderSetupView.svelte
 #: src/routes/(authenticated)/oauth/consent/+page.svelte
-#: src/routes/(authenticated)/oauth/device/+page.svelte
 msgid "<0/> wants to access your Nocturne data."
 msgstr "<0/> wants to access your Nocturne data."
 
-#: src/lib/components/connectors/UploaderSetupView.svelte
-msgid "This application is not in the Nocturne known app directory. Only approve if you trust it."
-msgstr "This application is not in the Nocturne known app directory. Only approve if you trust it."
+#~ msgid "This application is not in the Nocturne known app directory. Only approve if you trust it."
+#~ msgstr "This application is not in the Nocturne known app directory. Only approve if you trust it."
 
 #: src/lib/components/connectors/UploaderSetupView.svelte
 #: src/routes/(authenticated)/oauth/consent/+page.svelte
@@ -3580,7 +3571,7 @@ msgstr "Last 24 hours"
 #: src/lib/components/dashboard/glucose-chart/ChartTooltip.svelte
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
 #: src/lib/components/icons/TreatmentTypeIcon.svelte
-#: src/lib/components/reports/InsulinDeliveryChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/year-overview/YearHeatmap.svelte
 #: src/lib/components/treatments/TreatmentEditDialog.svelte
@@ -3594,10 +3585,10 @@ msgstr "Bolus"
 
 #: src/lib/components/dashboard/glucose-chart/ChartLegend.svelte
 #: src/lib/components/dashboard/glucose-chart/ChartTooltip.svelte
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/meals/MealsTable.svelte
 #: src/lib/components/reports/year-overview/YearHeatmap.svelte
 #: src/lib/components/treatments/TreatmentStatsCard.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
@@ -3648,6 +3639,7 @@ msgstr "Add Food"
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/lib/components/treatments/TreatmentEditDialog.svelte
+#: src/routes/(authenticated)/settings/profile/+page.svelte
 msgid "Saving..."
 msgstr "Saving..."
 
@@ -3674,68 +3666,42 @@ msgstr "Update the food's nutritional information."
 msgid "Create a new food with nutritional information."
 msgstr "Create a new food with nutritional information."
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Category & Subcategory"
-msgstr "Category & Subcategory"
+#~ msgid "Category & Subcategory"
+#~ msgstr "Category & Subcategory"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-msgid "Key Nutritional Info"
-msgstr "Key Nutritional Info"
+#~ msgid "Key Nutritional Info"
+#~ msgstr "Key Nutritional Info"
 
 #: src/lib/components/entries/CarbIntakeSection.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
 #: src/lib/components/meal-matching/MealMatchReviewDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
 #: src/lib/components/treatments/TreatmentFoodEntryEditDialog.svelte
 #: src/lib/components/treatments/TreatmentPortionsForm.svelte
 msgid "Carbs (g)"
 msgstr "Carbs (g)"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Glycemic Index"
 msgstr "Glycemic Index"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
 #: src/routes/(authenticated)/food/FoodListHeader.svelte
 msgid "Portion"
 msgstr "Portion"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Unit"
 msgstr "Unit"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-msgid "Additional Macros"
-msgstr "Additional Macros"
+#~ msgid "Additional Macros"
+#~ msgstr "Additional Macros"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Fat (g)"
-msgstr "Fat (g)"
+#~ msgid "Fat (g)"
+#~ msgstr "Fat (g)"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Protein (g)"
-msgstr "Protein (g)"
+#~ msgid "Protein (g)"
+#~ msgstr "Protein (g)"
 
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/food/AddFoodDialog.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Energy (kJ)"
-msgstr "Energy (kJ)"
+#~ msgid "Energy (kJ)"
+#~ msgstr "Energy (kJ)"
 
 #: src/lib/components/food/CategorySubcategoryCombobox.svelte
 msgid "Select category/subcategory..."
@@ -3786,34 +3752,23 @@ msgstr "<0/> Create \"{0}\" as new category"
 msgid "<0/> Add to {0}"
 msgstr "<0/> Add to {0}"
 
-#: src/lib/components/food/GiCombobox.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Select GI..."
-msgstr "Select GI..."
+#~ msgid "Select GI..."
+#~ msgstr "Select GI..."
 
-#: src/lib/components/food/GiCombobox.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Search GI..."
-msgstr "Search GI..."
+#~ msgid "Search GI..."
+#~ msgstr "Search GI..."
 
-#: src/lib/components/food/GiCombobox.svelte
-msgid "No GI level found."
-msgstr "No GI level found."
+#~ msgid "No GI level found."
+#~ msgstr "No GI level found."
 
-#: src/lib/components/food/UnitCombobox.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Select unit..."
-msgstr "Select unit..."
+#~ msgid "Select unit..."
+#~ msgstr "Select unit..."
 
-#: src/lib/components/food/UnitCombobox.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Search units..."
-msgstr "Search units..."
+#~ msgid "Search units..."
+#~ msgstr "Search units..."
 
-#: src/lib/components/food/UnitCombobox.svelte
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "No unit found."
-msgstr "No unit found."
+#~ msgid "No unit found."
+#~ msgstr "No unit found."
 
 #: src/lib/components/entries/BGCheckSection.svelte
 msgid "Finger"
@@ -3916,7 +3871,7 @@ msgstr "Link foods to this carb intake."
 #. 0: foodEntry.carbs
 #. 0: d.linkedCarbs
 #. 0: food.carbs
-#. 0: foodCarbs
+#. 0: draft.carbs
 #. 0: food.carbs
 #. 0: food.carbs
 #. 0: food.carbs
@@ -4064,6 +4019,7 @@ msgstr "Event Type"
 #: src/lib/components/entries/DeviceEventSection.svelte
 #: src/lib/components/patient/InsulinFormFields.svelte
 #: src/lib/components/patient/PatientDeviceManager.svelte
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/status-pills/COBPill.svelte
 #: src/lib/components/status-pills/IOBPill.svelte
 #: src/lib/components/treatments/edit-dialog/BasalInjectionFormFields.svelte
@@ -4234,6 +4190,7 @@ msgstr "Automatic"
 #: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
 #: src/lib/components/icons/PumpModeIcon.svelte
 #: src/lib/components/meals/MealBolusDialog.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/routes/(authenticated)/alerts/dnd/+page.svelte
 #: src/routes/(authenticated)/reports/sleep/+page.svelte
 msgid "Manual"
@@ -4308,6 +4265,8 @@ msgstr "Snack"
 #: src/lib/components/icons/TreatmentTypeIcon.svelte
 #: src/lib/components/profile/ProfileEditDialog.svelte
 #: src/lib/components/reports/InsulinDeliveryChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
 #: src/lib/components/reports/sleep/single-night/Hypnogram.svelte
 #: src/lib/components/reports/sleep/single-night/Hypnogram.svelte
@@ -5002,11 +4961,11 @@ msgstr "How you'd like to be addressed"
 msgid "Pronouns"
 msgstr "Pronouns"
 
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/patient/InsulinFormFields.svelte
 #: src/lib/components/patient/PatientDeviceManager.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/routes/(authenticated)/food/+page.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 msgid "Category"
 msgstr "Category"
 
@@ -5711,10 +5670,8 @@ msgstr "Loading data..."
 msgid "Basal (U)"
 msgstr "Basal (U)"
 
-#: src/lib/components/reports/BasalBolusRatioChart.svelte
-#: src/lib/components/reports/BasalBolusRatioChart.svelte
-msgid "Bolus (U)"
-msgstr "Bolus (U)"
+#~ msgid "Bolus (U)"
+#~ msgstr "Bolus (U)"
 
 #: src/lib/components/reports/BasalBolusRatioChart.svelte
 msgid "No insulin data available"
@@ -6015,6 +5972,7 @@ msgstr "No data available"
 #~ msgid "No glucose readings found for percentile visualization"
 #~ msgstr "No glucose readings found for percentile visualization"
 
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/reports/HourlyGlucoseDistributionChart.svelte
 msgid "Percentage"
 msgstr "Percentage"
@@ -6047,9 +6005,8 @@ msgstr "Morning (6am-12pm)"
 msgid "Afternoon (12pm-6pm)"
 msgstr "Afternoon (12pm-6pm)"
 
-#: src/lib/components/reports/InsulinDeliveryChart.svelte
-msgid "Evening/Night"
-msgstr "Evening/Night"
+#~ msgid "Evening/Night"
+#~ msgstr "Evening/Night"
 
 #: src/lib/components/reports/InsulinDeliveryChart.svelte
 msgid "No insulin delivery data"
@@ -6067,7 +6024,7 @@ msgstr "No treatments found in this period"
 msgid "Source: {0}"
 msgstr "Source: {0}"
 
-#. 0: bolusTime ? ` @ ${bolusTime}` \\: ""
+#. 0: time ? ` @ ${time}` \\: ""
 #: src/lib/components/reports/InsulinDonutChart.svelte
 msgid "Bolus{0}"
 msgstr "Bolus{0}"
@@ -6164,10 +6121,10 @@ msgstr "Basal: {0}U"
 msgid "COB"
 msgstr "COB"
 
+#: src/lib/components/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 msgid "g"
 msgstr "g"
 
@@ -6346,6 +6303,7 @@ msgstr "No site change data available"
 msgid "Site changes are required to analyze glucose patterns"
 msgstr "Site changes are required to analyze glucose patterns"
 
+#: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/ChartLegend.svelte
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -6353,6 +6311,7 @@ msgstr "Site changes are required to analyze glucose patterns"
 msgid "Very Low"
 msgstr "Very Low"
 
+#: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/ChartLegend.svelte
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -6767,9 +6726,8 @@ msgstr "Delete \"{0}\"? This cannot be undone."
 msgid "Failed to delete sound"
 msgstr "Failed to delete sound"
 
-#: src/lib/components/settings/CustomSoundUpload.svelte
-msgid "Upload your own alarm sounds (MP3, WAV, OGG, up to 5MB)"
-msgstr "Upload your own alarm sounds (MP3, WAV, OGG, up to 5MB)"
+#~ msgid "Upload your own alarm sounds (MP3, WAV, OGG, up to 5MB)"
+#~ msgstr "Upload your own alarm sounds (MP3, WAV, OGG, up to 5MB)"
 
 #: src/lib/components/settings/CustomSoundUpload.svelte
 msgid "<0/> Upload Sound"
@@ -6840,8 +6798,10 @@ msgstr "<0/> Stale"
 msgid "<0/> Inactive"
 msgstr "<0/> Inactive"
 
+#. 0: rejectedCount
 #. 0: formatNumber(allRows.length)
 #. 0: formatCount(col.migrated)
+#: src/routes/(authenticated)/reports/data-quality/+page.svelte
 #: src/routes/(authenticated)/reports/treatments/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/ImportProgress.svelte
 msgid "{0} records"
@@ -7897,6 +7857,7 @@ msgstr "Search records..."
 #: src/lib/components/treatments/DataTableToolbar.svelte
 #: src/lib/components/treatments/DataTableToolbar.svelte
 #: src/routes/(authenticated)/compatibility/+page.svelte
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
 msgid "Clear"
 msgstr "Clear"
 
@@ -7970,28 +7931,24 @@ msgstr "<0/> Log without saving food"
 msgid "No additional matches found."
 msgstr "No additional matches found."
 
-#. 0: foodFat; 1: foodProtein
+#. 0: draft.fat ?? 0; 1: draft.protein ?? 0
 #: src/lib/components/treatments/FoodNutritionalForm.svelte
 msgid "{0}g fat • {1}g protein"
 msgstr "{0}g fat • {1}g protein"
 
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Nutritional Details"
-msgstr "Nutritional Details"
+#~ msgid "Nutritional Details"
+#~ msgstr "Nutritional Details"
 
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "Portion Size"
-msgstr "Portion Size"
+#~ msgid "Portion Size"
+#~ msgstr "Portion Size"
 
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
 #: src/routes/(authenticated)/food/+page.svelte
 #: src/routes/(authenticated)/food/FoodListHeader.svelte
 msgid "GI"
 msgstr "GI"
 
-#: src/lib/components/treatments/FoodNutritionalForm.svelte
-msgid "No GI found."
-msgstr "No GI found."
+#~ msgid "No GI found."
+#~ msgstr "No GI found."
 
 #. 0: activeCategory.name.toLowerCase()
 #: src/lib/components/treatments/TreatmentEditDialog.svelte
@@ -8596,15 +8553,15 @@ msgstr "Add food"
 #~ msgid "Per"
 #~ msgstr "Per"
 
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/members/GuestLinksSection.svelte
 #: src/lib/components/settings/alarm-profile/AlarmAudioTab.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
 msgid "Hide"
 msgstr "Hide"
 
 #. 0: showDetails ? "Hide" \\: "Add"
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "<0/> {0} fat, protein, category..."
 msgstr "<0/> {0} fat, protein, category..."
 
@@ -8614,17 +8571,14 @@ msgstr "<0/> {0} fat, protein, category..."
 #~ msgid "Protein"
 #~ msgstr "Protein"
 
-#: src/routes/(authenticated)/food/FoodListHeader.svelte
-msgid "Energy"
-msgstr "Energy"
+#~ msgid "Energy"
+#~ msgstr "Energy"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
-msgid "kcal"
-msgstr "kcal"
+#~ msgid "kcal"
+#~ msgstr "kcal"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
-msgid "Subcategory"
-msgstr "Subcategory"
+#~ msgid "Subcategory"
+#~ msgstr "Subcategory"
 
 #: src/routes/(authenticated)/food/Composer.svelte
 msgid "Save & add another <0>⌘+Enter</0>"
@@ -8668,7 +8622,7 @@ msgstr "Food deleted"
 msgid "Failed to delete food"
 msgstr "Failed to delete food"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 #: src/routes/(authenticated)/food/FoodListHeader.svelte
 msgid "Name <0/>"
 msgstr "Name <0/>"
@@ -8699,15 +8653,13 @@ msgstr "Add to favorites"
 
 #. 0: draft.portion ?? 100; 1: draft.unit ?? "g"
 #. 0: food.portion ?? 0; 1: food.unit ?? 'g'
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 #: src/routes/(authenticated)/food/FoodRow.svelte
 msgid "per {0} {1}"
 msgstr "per {0} {1}"
 
-#. 0: food.energy ?? 0
-#: src/routes/(authenticated)/food/FoodRow.svelte
-msgid "{0} kcal"
-msgstr "{0} kcal"
+#~ msgid "{0} kcal"
+#~ msgstr "{0} kcal"
 
 #. 0: attributionCount; 1: 'treatment' + (attributionCount === 1 ? '' \\: 's')
 #: src/routes/(authenticated)/food/InlineEditor.svelte
@@ -8733,15 +8685,11 @@ msgstr "Delete <0/>? <1/>"
 #~ msgid "auto"
 #~ msgstr "auto"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
-msgid "No category"
-msgstr "No category"
+#~ msgid "No category"
+#~ msgstr "No category"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
-msgid "No subcategory"
-msgstr "No subcategory"
+#~ msgid "No subcategory"
+#~ msgstr "No subcategory"
 
 #: src/routes/(authenticated)/food/InlineEditor.svelte
 msgid "<0/> Save changes"
@@ -10013,7 +9961,6 @@ msgid "{0} readings"
 msgstr "{0} readings"
 
 #: src/lib/components/dashboard/widgets/DailySummaryWidget.svelte
-#: src/lib/components/dashboard/widgets/TddWidget.svelte
 msgid "No data today"
 msgstr "No data today"
 
@@ -10052,6 +9999,7 @@ msgstr "Blood Glucose <0/>"
 msgid "Trackers"
 msgstr "Trackers"
 
+#: src/lib/components/dashboard/widgets/TddWidget.svelte
 #: src/lib/components/dashboard/widgets/TirChartWidget.svelte
 msgid "Last 24h"
 msgstr "Last 24h"
@@ -10968,6 +10916,7 @@ msgid "Selected Target"
 msgstr "Selected Target"
 
 #: src/routes/(authenticated)/compatibility/[id]/+page.svelte
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
 msgid "Reason"
 msgstr "Reason"
 
@@ -11034,17 +10983,15 @@ msgstr "Sidebar"
 msgid "Displays the mobile sidebar."
 msgstr "Displays the mobile sidebar."
 
-#. 0: appName
-#: src/routes/(authenticated)/oauth/device/+page.svelte
-msgid "Authorize {0}"
-msgstr "Authorize {0}"
+#~ msgid "Authorize {0}"
+#~ msgstr "Authorize {0}"
 
 #: src/routes/(authenticated)/oauth/device/+page.svelte
 #: src/routes/(authenticated)/oauth/device/+page.svelte
 msgid "Link a Device"
 msgstr "Link a Device"
 
-#. 0: deviceInfo ? `Authorize ${appName}` \\: "Link a Device"
+#. 0: deviceInfo ? "Authorize a Device" \\: "Link a Device"
 #. 0: dateDisplay ? `${dateDisplay} - Sleep Report` \\: "Sleep Report"
 #: src/routes/(authenticated)/oauth/device/+page.svelte
 #: src/routes/(authenticated)/reports/sleep/[date]/+page.svelte
@@ -11139,11 +11086,8 @@ msgstr "GMI"
 msgid "CV"
 msgstr "CV"
 
-#: src/routes/(authenticated)/reports/agp/+page.svelte
-#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
-#: src/routes/(authenticated)/reports/idp/+page.svelte
-msgid "Target: ≤33%"
-msgstr "Target: ≤33%"
+#~ msgid "Target: ≤33%"
+#~ msgstr "Target: ≤33%"
 
 #~ msgid "Below Range"
 #~ msgstr "Below Range"
@@ -11356,10 +11300,8 @@ msgstr "Insulin Delivery Report <0/>"
 msgid "Treatment Log"
 msgstr "Treatment Log"
 
-#. 0: formatNumber(insulinStats.bolusCount); 1: formatNumericDate(startDate); 2: formatNumericDate(endDate)
-#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
-msgid "Report generated from {0} boluses between {1} and {2}"
-msgstr "Report generated from {0} boluses between {1} and {2}"
+#~ msgid "Report generated from {0} boluses between {1} and {2}"
+#~ msgstr "Report generated from {0} boluses between {1} and {2}"
 
 #: src/routes/(authenticated)/reports/battery/+page.svelte
 msgid "Error Loading Battery Report"
@@ -11726,6 +11668,7 @@ msgid "90th %ile"
 msgstr "90th %ile"
 
 #: src/routes/(authenticated)/reports/data-quality/cgm-comparison/+page.svelte
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
 #: src/routes/(authenticated)/reports/data-quality/sensor-integrity/+page.svelte
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 msgid "<0/> Data Quality"
@@ -11917,9 +11860,8 @@ msgstr "Your <0>Total Daily Dose (TDD)</0> is split between two types of insulin
 msgid "<0>Basal insulin:</0> Continuous background insulin that covers your body's baseline needs"
 msgstr "<0>Basal insulin:</0> Continuous background insulin that covers your body's baseline needs"
 
-#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
-msgid "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose"
-msgstr "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose"
+#~ msgid "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose"
+#~ msgstr "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose"
 
 #~ msgid "units/day"
 #~ msgstr "units/day"
@@ -11958,9 +11900,8 @@ msgstr "See how your insulin was split each day"
 msgid "<0/> Hourly Insulin Delivery"
 msgstr "<0/> Hourly Insulin Delivery"
 
-#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
-msgid "Average insulin delivered by hour of day, split by basal and bolus"
-msgstr "Average insulin delivered by hour of day, split by basal and bolus"
+#~ msgid "Average insulin delivered by hour of day, split by basal and bolus"
+#~ msgstr "Average insulin delivered by hour of day, split by basal and bolus"
 
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 msgid "<0/> Bolus Breakdown"
@@ -11985,8 +11926,8 @@ msgstr "Over {0} days"
 msgid "Meal Boluses"
 msgstr "Meal Boluses"
 
-#. 0: (insulinStats.bolusCount ?? 0) > 0 ? ( ((insulinStats.mealBoluses ?? 0) / (insulinStats.bolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
-#. 0: (insulinStats.bolusCount ?? 0) > 0 ? ( ((insulinStats.correctionBoluses ?? 0) / (insulinStats.bolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
+#. 0: (insulinStats.manualBolusCount ?? 0) > 0 ? ( ((insulinStats.mealBoluses ?? 0) / (insulinStats.manualBolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
+#. 0: (insulinStats.manualBolusCount ?? 0) > 0 ? ( ((insulinStats.correctionBoluses ?? 0) / (insulinStats.manualBolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 msgid "{0}% of boluses"
@@ -14251,22 +14192,18 @@ msgstr "Recovery Mode - Nocturne"
 msgid "Recovery Mode"
 msgstr "Recovery Mode"
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "This instance has accounts that need a passkey registered. Enter your username and register a passkey to restore access."
-msgstr "This instance has accounts that need a passkey registered. Enter your username and register a passkey to restore access."
+#~ msgid "This instance has accounts that need a passkey registered. Enter your username and register a passkey to restore access."
+#~ msgstr "This instance has accounts that need a passkey registered. Enter your username and register a passkey to restore access."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Optional. Updates your display name if provided."
-msgstr "Optional. Updates your display name if provided."
+#~ msgid "Optional. Updates your display name if provided."
+#~ msgstr "Optional. Updates your display name if provided."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 msgid "<0/> Register passkey"
 msgstr "<0/> Register passkey"
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Passkey registered successfully."
-msgstr "Passkey registered successfully."
+#~ msgid "Passkey registered successfully."
+#~ msgstr "Passkey registered successfully."
 
 #~ msgid "Save these recovery codes in a safe place. Each code can only be used once."
 #~ msgstr "Save these recovery codes in a safe place. Each code can only be used once."
@@ -14274,13 +14211,11 @@ msgstr "Passkey registered successfully."
 #~ msgid "Copy your recovery codes before continuing."
 #~ msgstr "Copy your recovery codes before continuing."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Passkey registered successfully. Recovery mode has been deactivated."
-msgstr "Passkey registered successfully. Recovery mode has been deactivated."
+#~ msgid "Passkey registered successfully. Recovery mode has been deactivated."
+#~ msgstr "Passkey registered successfully. Recovery mode has been deactivated."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Register a passkey to restore normal access."
-msgstr "Register a passkey to restore normal access."
+#~ msgid "Register a passkey to restore normal access."
+#~ msgstr "Register a passkey to restore normal access."
 
 #~ msgid "Invalid or expired code"
 #~ msgstr "Invalid or expired code"
@@ -15125,6 +15060,7 @@ msgid "Missing state token."
 msgstr "Missing state token."
 
 #: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+#: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
 msgid "This link is expired or invalid. Please run /connect in your chat app again."
 msgstr "This link is expired or invalid. Please run /connect in your chat app again."
 
@@ -15172,17 +15108,14 @@ msgstr "<0/> Connect"
 msgid "Your chat account is now linked to Nocturne. You can close this tab and head back to your chat app."
 msgstr "Your chat account is now linked to Nocturne. You can close this tab and head back to your chat app."
 
-#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
-msgid "We couldn't complete the Discord link. The token may have expired. Please try again from Settings."
-msgstr "We couldn't complete the Discord link. The token may have expired. Please try again from Settings."
+#~ msgid "We couldn't complete the Discord link. The token may have expired. Please try again from Settings."
+#~ msgstr "We couldn't complete the Discord link. The token may have expired. Please try again from Settings."
 
-#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
-msgid "Missing Token"
-msgstr "Missing Token"
+#~ msgid "Missing Token"
+#~ msgstr "Missing Token"
 
-#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
-msgid "Missing token parameter."
-msgstr "Missing token parameter."
+#~ msgid "Missing token parameter."
+#~ msgstr "Missing token parameter."
 
 #: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
 msgid "Discord account linked"
@@ -15197,9 +15130,8 @@ msgstr "Your Discord account is now linked as <0/> (label <1/>). Run <2/> in Dis
 msgid "Back to Settings"
 msgstr "Back to Settings"
 
-#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
-msgid "Link failed"
-msgstr "Link failed"
+#~ msgid "Link failed"
+#~ msgstr "Link failed"
 
 #: src/routes/(authenticated)/alerts/[id]/+page.svelte
 msgid "Condition"
@@ -16203,8 +16135,10 @@ msgstr "Remove this connector's configuration. The connector will need to be set
 msgid "Total: {0} records deleted"
 msgstr "Total: {0} records deleted"
 
+#. 0: (point.profileBasalRate ?? 0).toFixed(2)
 #. 0: d.basalRate.toFixed(2)
 #. 0: d.scheduledBasalRate.toFixed(2)
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
 #: src/lib/components/reports/sleep/single-night/Hypnogram.svelte
 #: src/lib/components/reports/sleep/single-night/Hypnogram.svelte
 msgid "{0} U/h"
@@ -16597,10 +16531,7 @@ msgstr "Prelude displays a short code after it scans. Enter it here to approve."
 msgid "<0/> Device authorized successfully. Prelude is now connected."
 msgstr "<0/> Device authorized successfully. Prelude is now connected."
 
-#: src/lib/components/PreludeQuickConnect.svelte
-#: src/lib/components/XdripQuickConnect.svelte
 #: src/routes/(authenticated)/oauth/consent/+page.svelte
-#: src/routes/(authenticated)/oauth/device/+page.svelte
 msgid "This application is not in the Nocturne known app directory. Only approve if you trust this application."
 msgstr "This application is not in the Nocturne known app directory. Only approve if you trust this application."
 
@@ -18241,9 +18172,8 @@ msgstr "Percentage of time in your target zone ({0})"
 #~ msgid "Calculated using the Nathan formula: eA1C = (GMI + 2.59) / 1.59. Based on mean glucose of {0} {1} over {2} days."
 #~ msgstr "Calculated using the Nathan formula: eA1C = (GMI + 2.59) / 1.59. Based on mean glucose of {0} {1} over {2} days."
 
-#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
-msgid "Target: ≤33%. Lower means steadier glucose with fewer ups and downs."
-msgstr "Target: ≤33%. Lower means steadier glucose with fewer ups and downs."
+#~ msgid "Target: ≤33%. Lower means steadier glucose with fewer ups and downs."
+#~ msgstr "Target: ≤33%. Lower means steadier glucose with fewer ups and downs."
 
 #. 0: bg(70); 1: bgLabel()
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
@@ -18577,13 +18507,11 @@ msgstr "{0} years ago"
 msgid "Profiles are typically uploaded from your diabetes management app (like AAPS, Loop, or xDrip+). They contain your basal rates, insulin sensitivity factors, and carb ratios."
 msgstr "Profiles are typically uploaded from your diabetes management app (like AAPS, Loop, or xDrip+). They contain your basal rates, insulin sensitivity factors, and carb ratios."
 
-#: src/routes/(authenticated)/settings/profile/+page.svelte
-msgid "Switching..."
-msgstr "Switching..."
+#~ msgid "Switching..."
+#~ msgstr "Switching..."
 
-#: src/routes/(authenticated)/settings/profile/+page.svelte
-msgid "Set as active"
-msgstr "Set as active"
+#~ msgid "Set as active"
+#~ msgstr "Set as active"
 
 #: src/routes/(authenticated)/settings/members/+page.svelte
 msgid "Members only"
@@ -18846,9 +18774,7 @@ msgstr "Request membership"
 msgid "Enter the code shared with you to view health data. The code works once — this device stays signed in for 48 hours."
 msgstr "Enter the code shared with you to view health data. The code works once — this device stays signed in for 48 hours."
 
-#. 0: displayName.trim() || username.trim()
 #. 0: username
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 msgid "{0}'s passkey"
 msgstr "{0}'s passkey"
@@ -20972,8 +20898,8 @@ msgstr "Try it on the demo <0/>"
 msgid "Error Loading Test Report"
 msgstr "Error Loading Test Report"
 
+#: src/lib/components/food/FoodFields.svelte
 #: src/lib/forms/FormField.svelte
-#: src/routes/(authenticated)/food/FoodFields.svelte
 msgid "(required)"
 msgstr "(required)"
 
@@ -21516,9 +21442,8 @@ msgstr "Your browser does not support passkeys. Use a recovery code, or try a di
 msgid "Or continue with a passkey"
 msgstr "Or continue with a passkey"
 
-#: src/lib/components/auth/LoginForm.svelte
-msgid "Your passkey was accepted. Enter the current code from your authenticator app to finish signing in."
-msgstr "Your passkey was accepted. Enter the current code from your authenticator app to finish signing in."
+#~ msgid "Your passkey was accepted. Enter the current code from your authenticator app to finish signing in."
+#~ msgstr "Your passkey was accepted. Enter the current code from your authenticator app to finish signing in."
 
 #: src/lib/components/clock/ClockFacePreview.svelte
 msgid "Failed to load preview"
@@ -22208,9 +22133,8 @@ msgstr "No recovery codes yet"
 msgid "Generate recovery codes"
 msgstr "Generate recovery codes"
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "We couldn't register a passkey for that username. This page only works for an account that has no passkey and no linked sign-in provider — otherwise sign in with a recovery code."
-msgstr "We couldn't register a passkey for that username. This page only works for an account that has no passkey and no linked sign-in provider — otherwise sign in with a recovery code."
+#~ msgid "We couldn't register a passkey for that username. This page only works for an account that has no passkey and no linked sign-in provider — otherwise sign in with a recovery code."
+#~ msgstr "We couldn't register a passkey for that username. This page only works for an account that has no passkey and no linked sign-in provider — otherwise sign in with a recovery code."
 
 #: src/routes/(unauthenticated)/auth/handoff/+page.svelte
 msgid "Signing you in - Nocturne"
@@ -23199,10 +23123,12 @@ msgid "{0} color scale from {1} to {2} {3}"
 msgstr "{0} color scale from {1} to {2} {3}"
 
 #: src/lib/components/reports/year-overview/ColorFocusRange.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
 msgid "<0/> Low"
 msgstr "<0/> Low"
 
 #: src/lib/components/reports/year-overview/ColorFocusRange.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
 msgid "<0/> High"
 msgstr "<0/> High"
 
@@ -23270,6 +23196,7 @@ msgid "{0}: color {1} {2} {3}"
 msgstr "{0}: color {1} {2} {3}"
 
 #: src/lib/components/reports/year-overview/HeatmapLegend.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
 msgid "Theme"
 msgstr "Theme"
 
@@ -23711,11 +23638,11 @@ msgstr "<0/> Stop"
 msgid "<0/> Play Preview"
 msgstr "<0/> Play Preview"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Fat <0>optional</0>"
 msgstr "Fat <0>optional</0>"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Protein <0>optional</0>"
 msgstr "Protein <0>optional</0>"
 
@@ -23775,6 +23702,8 @@ msgstr "Color theme"
 msgid "Remove element"
 msgstr "Remove element"
 
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/status-pills/LoopPill.svelte
 msgid "Automatic Bolus"
 msgstr "Automatic Bolus"
@@ -23843,20 +23772,14 @@ msgstr "<0/> {0} · GRI {1}"
 msgid "Points beyond the axes are drawn at the edge."
 msgstr "Points beyond the axes are drawn at the edge."
 
-#. 0: totalBolus.toFixed(1)
-#: src/lib/components/reports/InsulinDonutChart.svelte
-msgid "Bolus {0}U"
-msgstr "Bolus {0}U"
+#~ msgid "Bolus {0}U"
+#~ msgstr "Bolus {0}U"
 
-#. 0: scheduledBasal.toFixed(1)
-#: src/lib/components/reports/InsulinDonutChart.svelte
-msgid "Scheduled basal {0}U"
-msgstr "Scheduled basal {0}U"
+#~ msgid "Scheduled basal {0}U"
+#~ msgstr "Scheduled basal {0}U"
 
-#. 0: additionalBasal.toFixed(1)
-#: src/lib/components/reports/InsulinDonutChart.svelte
-msgid "Additional basal {0}U"
-msgstr "Additional basal {0}U"
+#~ msgid "Additional basal {0}U"
+#~ msgstr "Additional basal {0}U"
 
 #: src/lib/components/reports/ScheduleFooter.svelte
 msgid "<0/> Changed during this period"
@@ -24259,6 +24182,7 @@ msgstr "Consensus target: at least 70% of time in range."
 #~ msgstr "Estimated A1C"
 
 #: src/routes/(authenticated)/reports/+page.svelte
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 msgid "Coefficient of variation"
 msgstr "Coefficient of variation"
 
@@ -26402,10 +26326,8 @@ msgstr "Use % (NGSP) or mmol/mol (IFCC) for measured and estimated {0}. Blood gl
 msgid "Target: <{0}"
 msgstr "Target: <{0}"
 
-#. 0: formatA1c(variability?.a1cTarget)
-#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
-msgid "Target: below {0}. Your care team sets your individual target."
-msgstr "Target: below {0}. Your care team sets your individual target."
+#~ msgid "Target: below {0}. Your care team sets your individual target."
+#~ msgstr "Target: below {0}. Your care team sets your individual target."
 
 #. 0: a1cLabel(true); 1: bgOr(stats?.mean); 2: bgLabel(); 3: dayCount
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
@@ -27165,11 +27087,11 @@ msgstr "Records this source sends again are imported, including any of its recor
 msgid "Deleted records are never imported again, even if this source sends them."
 msgstr "Deleted records are never imported again, even if this source sends them."
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Energy <0>optional</0>"
 msgstr "Energy <0>optional</0>"
 
-#: src/routes/(authenticated)/food/FoodFields.svelte
+#: src/lib/components/food/FoodFields.svelte
 msgid "Portion <0/>"
 msgstr "Portion <0/>"
 
@@ -27217,3 +27139,595 @@ msgstr "Shown in this person's Nocturne notification centre."
 #: src/lib/components/alerts/ChannelsSection.svelte
 msgid "Recipient"
 msgstr "Recipient"
+
+#: src/lib/components/alerts/AlertRuleRow.svelte
+msgid "Needs review"
+msgstr "Needs review"
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "Part of this rule's conditions is malformed, so the rule may not alert as set. Edit its conditions and save it."
+msgstr "Part of this rule's conditions is malformed, so the rule may not alert as set. Edit its conditions and save it."
+
+#. 0: needsReview
+#: src/routes/(authenticated)/alerts/+page.svelte
+msgid "{0} alert rules need review."
+msgstr "{0} alert rules need review."
+
+#. 0: needsReview === 1 ? "1 alert rule needs review." \\: `${needsReview} alert rules need review.`
+#: src/routes/(authenticated)/alerts/+page.svelte
+msgid "{0} An update changed or turned off rules set up in an older format, or their conditions may not alert as set. They are marked below."
+msgstr "{0} An update changed or turned off rules set up in an older format, or their conditions may not alert as set. They are marked below."
+
+#: src/lib/components/shared/SkippedRecordsNote.svelte
+msgid "1 record could not be stored. It is listed under"
+msgstr "1 record could not be stored. It is listed under"
+
+#. 0: formatNumber(refused)
+#: src/lib/components/shared/SkippedRecordsNote.svelte
+msgid "{0} records could not be stored. They are listed under"
+msgstr "{0} records could not be stored. They are listed under"
+
+#: src/lib/components/shared/SkippedRecordsNote.svelte
+#: src/routes/(authenticated)/reports/data-quality/+page.svelte
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Rejected Uploads"
+msgstr "Rejected Uploads"
+
+#: src/routes/(authenticated)/reports/data-quality/+page.svelte
+msgid "Records an uploader sent that Nocturne could not store"
+msgstr "Records an uploader sent that Nocturne could not store"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Error Loading Rejected Uploads"
+msgstr "Error Loading Rejected Uploads"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Rejected Uploads - Nocturne"
+msgstr "Rejected Uploads - Nocturne"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Records an uploader sent that Nocturne answered but could not store, because a value in them could not be stored as sent. Most uploaders treat them as saved, so they are not in your data. Each is listed once, with how many times it was sent. Long text in a record is shortened here."
+msgstr "Records an uploader sent that Nocturne answered but could not store, because a value in them could not be stored as sent. Most uploaders treat them as saved, so they are not in your data. Each is listed once, with how many times it was sent. Long text in a record is shortened here."
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "<0/> Export this page"
+msgstr "<0/> Export this page"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "<0/> Clear this page"
+msgstr "<0/> Clear this page"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "No rejected uploads."
+msgstr "No rejected uploads."
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Last sent"
+msgstr "Last sent"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Times sent"
+msgstr "Times sent"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Record"
+msgstr "Record"
+
+#. 0: formatDateTime(row.firstSeenAt)
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "First {0}"
+msgstr "First {0}"
+
+#. 0: formatNumber(row.payloadBytes ?? 0)
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Shortened from {0} bytes."
+msgstr "Shortened from {0} bytes."
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "<0/> Newer"
+msgstr "<0/> Newer"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Older <0/>"
+msgstr "Older <0/>"
+
+#. 0: formatNumber(offset + 1); 1: formatNumber(offset + rows.length); 2: formatNumber(total)
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "{0}–{1} of {2}"
+msgstr "{0}–{1} of {2}"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Clear rejected uploads"
+msgstr "Clear rejected uploads"
+
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Clearing..."
+msgstr "Clearing..."
+
+#. 0: formatNumber(rows.length)
+#: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
+msgid "Remove the {0} rejected uploads on this page? Export them first to keep a copy. They are not in your data and cannot be recovered once cleared. Uploads not on this page are kept."
+msgstr "Remove the {0} rejected uploads on this page? Export them first to keep a copy. They are not in your data and cannot be recovered once cleared. Uploads not on this page are kept."
+
+#: src/lib/components/PreludeQuickConnect.svelte
+#: src/lib/components/XdripQuickConnect.svelte
+msgid "A device wants access"
+msgstr "A device wants access"
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "Telegram webhook calls are refused until one is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>), save it here with the bot enabled, then register the webhook again with the same value:"
+msgstr "Telegram webhook calls are refused until one is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>), save it here with the bot enabled, then register the webhook again with the same value:"
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "A webhook secret token is required"
+msgstr "A webhook secret token is required"
+
+#: src/lib/components/auth/DeviceAppClaimNotice.svelte
+msgid "This request says it is from <0/>, but a device sign-in cannot prove which app started it. Only approve if you started this sign-in yourself on a device you trust."
+msgstr "This request says it is from <0/>, but a device sign-in cannot prove which app started it. Only approve if you started this sign-in yourself on a device you trust."
+
+#: src/lib/components/auth/LoginForm.svelte
+msgid "Enter the current code from your authenticator app to finish signing in."
+msgstr "Enter the current code from your authenticator app to finish signing in."
+
+#: src/lib/components/connectors/UploaderSetupView.svelte
+#: src/routes/(authenticated)/oauth/device/+page.svelte
+msgid "A device wants to access your Nocturne data."
+msgstr "A device wants to access your Nocturne data."
+
+#: src/lib/components/settings/ConnectedApps.svelte
+msgid "Unverified"
+msgstr "Unverified"
+
+#: src/routes/(authenticated)/oauth/device/+page.svelte
+msgid "Authorize a Device"
+msgstr "Authorize a Device"
+
+#: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+msgid "Link the <0/> account <1/> to your Nocturne account? It will be able to read your glucose and acknowledge your alerts."
+msgstr "Link the <0/> account <1/> to your Nocturne account? It will be able to read your glucose and acknowledge your alerts."
+
+#: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+msgid "Only continue if you started this link yourself."
+msgstr "Only continue if you started this link yourself."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "We couldn't complete the Discord link. It may have expired. Please try again from Settings."
+msgstr "We couldn't complete the Discord link. It may have expired. Please try again from Settings."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Missing link details"
+msgstr "Missing link details"
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Start linking your Discord account again from Settings."
+msgstr "Start linking your Discord account again from Settings."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Can't complete this link"
+msgstr "Can't complete this link"
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "This link has expired, or was started from another browser or account. Start linking your Discord account again from Settings."
+msgstr "This link has expired, or was started from another browser or account. Start linking your Discord account again from Settings."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Link the Discord account <0/> to your Nocturne account?"
+msgstr "Link the Discord account <0/> to your Nocturne account?"
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Link the Discord account you just signed in with to your Nocturne account?"
+msgstr "Link the Discord account you just signed in with to your Nocturne account?"
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "Link Discord account"
+msgstr "Link Discord account"
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "<0/> It will be able to read your glucose and acknowledge your alerts."
+msgstr "<0/> It will be able to read your glucose and acknowledge your alerts."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "<0/> Link account"
+msgstr "<0/> Link account"
+
+#: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+msgid "This chat account is already linked to another member."
+msgstr "This chat account is already linked to another member."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "This Discord account is already linked to another member."
+msgstr "This Discord account is already linked to another member."
+
+#: src/routes/(unauthenticated)/auth/bot/discord/finalize/+page.svelte
+msgid "This link is expired or invalid. Please try again from Settings."
+msgstr "This link is expired or invalid. Please try again from Settings."
+
+#. 0: activation.timeshiftHours > 0 ? "+" \\: ""; 1: activation.timeshiftHours
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "{0}{1}h"
+msgstr "{0}{1}h"
+
+#. 0: activation.enteredBy ?? "a person"
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "<0/> Recorded by {0}"
+msgstr "<0/> Recorded by {0}"
+
+#. 0: profileActivationSource(activation) ?? "a connector"
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "<0/> Reported by {0}"
+msgstr "<0/> Reported by {0}"
+
+#. 0: profileActivationSource(activation) ?? activation.enteredBy ?? "an uploader"
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "<0/> Uploaded by {0}"
+msgstr "<0/> Uploaded by {0}"
+
+#. 0: formatDateTimeCompact(activation.endMills)
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "· Until {0}"
+msgstr "· Until {0}"
+
+#. 0: formatDateTimeCompact(activation.startMills)
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "<0/> · Since {0} <1/>"
+msgstr "<0/> · Since {0} <1/>"
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "<0/> Active profile switch"
+msgstr "<0/> Active profile switch"
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "The active switch could not be loaded."
+msgstr "The active switch could not be loaded."
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "No switch is active. The default profile applies."
+msgstr "No switch is active. The default profile applies."
+
+#. 0: profileActivationSource(status.reported) ?? "your AID system"
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "This switch is recorded, but Nocturne's calculations follow the profile {0} reports while it does."
+msgstr "This switch is recorded, but Nocturne's calculations follow the profile {0} reports while it does."
+
+#. 0: recorded.baseProfileName
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "{0} has changed since this switch was recorded. The switch keeps the schedules it was recorded with."
+msgstr "{0} has changed since this switch was recorded. The switch keeps the schedules it was recorded with."
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "The switch was not recorded again."
+msgstr "The switch was not recorded again."
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "Switch again"
+msgstr "Switch again"
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "The switch was not ended."
+msgstr "The switch was not ended."
+
+#: src/lib/components/profile/ActiveProfileActivation.svelte
+msgid "End switch"
+msgstr "End switch"
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "The switch was not recorded."
+msgstr "The switch was not recorded."
+
+#. 0: profileName
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Switch to {0}"
+msgstr "Switch to {0}"
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Starts now. Scales the profile by a percentage and shifts its schedule by whole hours."
+msgstr "Starts now. Scales the profile by a percentage and shifts its schedule by whole hours."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "The switch is recorded in Nocturne only. It is not sent to your pump, and AAPS and Nightscout followers never see it."
+msgstr "The switch is recorded in Nocturne only. It is not sent to your pump, and AAPS and Nightscout followers never see it."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "An AID system"
+msgstr "An AID system"
+
+#. 0: profileActivationSource(reported) ?? "An AID system"
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "{0} is reporting the profile your pump runs. The switch will be recorded, but Nocturne's calculations follow the reported profile while it does."
+msgstr "{0} is reporting the profile your pump runs. The switch will be recorded, but Nocturne's calculations follow the reported profile while it does."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Enter a whole number from 30 to 250."
+msgstr "Enter a whole number from 30 to 250."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Enter a whole number from -23 to 23."
+msgstr "Enter a whole number from -23 to 23."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Timeshift (hours)"
+msgstr "Timeshift (hours)"
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Temporary"
+msgstr "Temporary"
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Minutes"
+msgstr "Minutes"
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Enter a length from 1 minute to 7 days."
+msgstr "Enter a length from 1 minute to 7 days."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "Runs until another switch replaces it or it is ended."
+msgstr "Runs until another switch replaces it or it is ended."
+
+#: src/lib/components/profile/ProfileSwitchDialog.svelte
+msgid "<0/> Record switch"
+msgstr "<0/> Record switch"
+
+#. 0: FORMATS
+#: src/lib/components/settings/CustomSoundUpload.svelte
+msgid "Choose one of these formats: {0}"
+msgstr "Choose one of these formats: {0}"
+
+#. 0: MAX_CUSTOM_SOUND_SIZE_MB
+#: src/lib/components/settings/CustomSoundUpload.svelte
+msgid "The file is larger than {0} MB"
+msgstr "The file is larger than {0} MB"
+
+#: src/lib/components/settings/CustomSoundUpload.svelte
+msgid "This file could not be played. Check that it is a valid audio file."
+msgstr "This file could not be played. Check that it is a valid audio file."
+
+#: src/lib/components/settings/CustomSoundUpload.svelte
+msgid "The audio file took too long to load"
+msgstr "The audio file took too long to load"
+
+#. 0: FORMATS; 1: MAX_CUSTOM_SOUND_SIZE_MB
+#: src/lib/components/settings/CustomSoundUpload.svelte
+msgid "Upload your own alarm sounds ({0}, up to {1} MB)"
+msgstr "Upload your own alarm sounds ({0}, up to {1} MB)"
+
+#: src/routes/(authenticated)/settings/profile/+page.svelte
+msgid "Make default"
+msgstr "Make default"
+
+#: src/routes/(authenticated)/settings/profile/+page.svelte
+#: src/routes/(authenticated)/settings/profile/+page.svelte
+msgid "Switch…"
+msgstr "Switch…"
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Too many attempts. Wait a minute, then try again."
+msgstr "Too many attempts. Wait a minute, then try again."
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "That recovery code has expired or was already used. Ask an administrator for a new one."
+msgstr "That recovery code has expired or was already used. Ask an administrator for a new one."
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Some accounts here have no way to sign in. If yours is one of them, sign in with one of your own recovery codes, or ask an administrator for a one-time recovery code."
+msgstr "Some accounts here have no way to sign in. If yours is one of them, sign in with one of your own recovery codes, or ask an administrator for a one-time recovery code."
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Recovery code from your administrator"
+msgstr "Recovery code from your administrator"
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "<0/> Checking code..."
+msgstr "<0/> Checking code..."
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Sign in with your own recovery code instead"
+msgstr "Sign in with your own recovery code instead"
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Couldn't create a recovery link."
+msgstr "Couldn't create a recovery link."
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Members who can't sign in"
+msgstr "Members who can't sign in"
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Send a member a one-time recovery link so they can register a new passkey. It works once and expires after 24 hours."
+msgstr "Send a member a one-time recovery link so they can register a new passkey. It works once and expires after 24 hours."
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Only the operator can recover this account"
+msgstr "Only the operator can recover this account"
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "<0/> Create link"
+msgstr "<0/> Create link"
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "They still have recovery codes of their own. If they've lost them, a link cancels those codes once it is used."
+msgstr "They still have recovery codes of their own. If they've lost them, a link cancels those codes once it is used."
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Recovery link"
+msgstr "Recovery link"
+
+#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+msgid "Copy recovery link"
+msgstr "Copy recovery link"
+
+#: src/lib/components/reports/BasalBolusRatioChart.svelte
+#: src/lib/components/reports/BasalBolusRatioChart.svelte
+msgid "Manual bolus (U)"
+msgstr "Manual bolus (U)"
+
+#: src/lib/components/reports/BasalBolusRatioChart.svelte
+#: src/lib/components/reports/BasalBolusRatioChart.svelte
+msgid "Automatic bolus (U)"
+msgstr "Automatic bolus (U)"
+
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
+#: src/lib/components/reports/InsulinDonutChart.svelte
+msgid "Manual Bolus"
+msgstr "Manual Bolus"
+
+#~ msgid "Manual bolus {0}U"
+#~ msgstr "Manual bolus {0}U"
+
+#~ msgid "Automatic bolus {0}U"
+#~ msgstr "Automatic bolus {0}U"
+
+#. 0: (insulinStats?.manualBolus ?? 0).toFixed(1); 1: (insulinStats?.automaticBolus ?? 0).toFixed(1)
+#: src/routes/(authenticated)/reports/idp/+page.svelte
+msgid "Bolus total: manual {0} U / automatic {1} U"
+msgstr "Bolus total: manual {0} U / automatic {1} U"
+
+#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
+msgid "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose, plus automatic boluses delivered by a loop"
+msgstr "<0>Bolus insulin:</0> Insulin taken for meals and to correct high glucose, plus automatic boluses delivered by a loop"
+
+#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
+msgid "Average insulin delivered by hour of day, split by basal, manual bolus and automatic bolus"
+msgstr "Average insulin delivered by hour of day, split by basal, manual bolus and automatic bolus"
+
+#. 0: formatNumber(insulinStats.manualBolusCount); 1: formatNumericDate(startDate); 2: formatNumericDate(endDate)
+#: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
+msgid "Report generated from {0} manual boluses between {1} and {2}"
+msgstr "Report generated from {0} manual boluses between {1} and {2}"
+
+#: src/lib/components/calendar/CalendarDayCell.svelte
+msgid "Very High:"
+msgstr "Very High:"
+
+#: src/lib/components/calendar/CalendarDayCell.svelte
+msgid "Very Low:"
+msgstr "Very Low:"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Glucose range colors"
+msgstr "Glucose range colors"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "The range colors of the selected color theme"
+msgstr "The range colors of the selected color theme"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Distinct"
+msgstr "Distinct"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Maroon, red, yellow and orange for the four out-of-range bands on every theme"
+msgstr "Maroon, red, yellow and orange for the four out-of-range bands on every theme"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Range color preview"
+msgstr "Range color preview"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "<0/> Very high"
+msgstr "<0/> Very high"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "<0/> In range"
+msgstr "<0/> In range"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "<0/> Very low"
+msgstr "<0/> Very low"
+
+#. 0: getEnergyUnit()
+#: src/lib/stores/appearance-ssr-reader.svelte
+msgid "energy:{0}"
+msgstr "energy:{0}"
+
+#: src/routes/(authenticated)/food/FoodListHeader.svelte
+msgid "Energy <0/>"
+msgstr "Energy <0/>"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Kilojoules (kJ)"
+msgstr "Kilojoules (kJ)"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Calories (kcal)"
+msgstr "Calories (kcal)"
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Food energy units"
+msgstr "Food energy units"
+
+#: src/lib/components/reports/InsulinDonutChart.svelte
+msgid "Manual:"
+msgstr "Manual:"
+
+#: src/lib/components/reports/InsulinDonutChart.svelte
+msgid "Click to expand"
+msgstr "Click to expand"
+
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+msgid "Total"
+msgstr "Total"
+
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+msgid "Scheduled basal rate"
+msgstr "Scheduled basal rate"
+
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+msgid "Evening/Night (6pm-6am)"
+msgstr "Evening/Night (6pm-6am)"
+
+#. 0: (periods.dailyTotal ?? 0).toFixed(2)
+#: src/lib/components/reports/InsulinDeliveryChart.svelte
+msgid "Daily total {0} U"
+msgstr "Daily total {0} U"
+
+#: src/lib/components/dashboard/widgets/TddWidget.svelte
+msgid "No data in the last 24h"
+msgstr "No data in the last 24h"
+
+#: src/lib/components/calendar/CalendarHeader.svelte
+msgid "Show TIR %"
+msgstr "Show TIR %"
+
+#. 0: variability.coefficientOfVariationTarget
+#. 0: variability.coefficientOfVariationTarget
+#. 0: variability.coefficientOfVariationTarget
+#. 0: variability.coefficientOfVariationTarget
+#: src/routes/(authenticated)/reports/agp/+page.svelte
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+#: src/routes/(authenticated)/reports/idp/+page.svelte
+msgid "Target: ≤{0}%"
+msgstr "Target: ≤{0}%"
+
+#. 0: variability.coefficientOfVariationTarget
+#: src/routes/(authenticated)/reports/agp/+page.svelte
+msgid "{0}% or below"
+msgstr "{0}% or below"
+
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+msgid "<0/> Target met"
+msgstr "<0/> Target met"
+
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+msgid "<0/> Target not met"
+msgstr "<0/> Target not met"
+
+#. 0: formatA1c(variability.a1cTarget)
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+msgid "Target: below {0}"
+msgstr "Target: below {0}"
+
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+msgid "Your care team sets your individual target."
+msgstr "Your care team sets your individual target."
+
+#: src/routes/(authenticated)/reports/executive-summary/+page.svelte
+msgid "Lower means steadier glucose with fewer ups and downs."
+msgstr "Lower means steadier glucose with fewer ups and downs."

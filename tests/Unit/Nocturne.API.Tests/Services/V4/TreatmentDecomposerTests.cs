@@ -34,6 +34,7 @@ public class TreatmentDecomposerTests : IDisposable
     private readonly Mock<IProfileDecomposer> _profileDecomposerMock;
     private readonly Mock<IActiveProfileResolver> _activeProfileResolverMock;
     private readonly Mock<IPatientInsulinRepository> _insulinRepoMock;
+    private readonly Mock<IBasalRateResolver> _basalRateResolverMock = new();
     private readonly TreatmentDecomposer _decomposer;
 
     public TreatmentDecomposerTests()
@@ -75,6 +76,7 @@ public class TreatmentDecomposerTests : IDisposable
             _profileDecomposerMock.Object,
             _activeProfileResolverMock.Object,
             _insulinRepoMock.Object,
+            TempBasalTestDeps.Rates(_basalRateResolverMock.Object),
             Mock.Of<IAuditContext>(),
             NullLogger<TreatmentDecomposer>.Instance);
     }
@@ -468,6 +470,244 @@ public class TreatmentDecomposerTests : IDisposable
 
         result.CreatedRecords.Should().BeEmpty();
         result.SkippedDeleted.Should().Be(1);
+    }
+
+    private void GivenScheduledBasal(double? rate)
+    {
+        _basalRateResolverMock
+            .Setup(r => r.FindBasalRateAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rate);
+    }
+
+    private async Task<V4Models.TempBasal> DecomposeTempBasalAsync(Treatment treatment)
+    {
+        _tempBasalRepoMock
+            .Setup(r => r.GetByLegacyIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((V4Models.TempBasal?)null);
+        _tempBasalRepoMock
+            .Setup(r => r.CreateAsync(It.IsAny<V4Models.TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((V4Models.TempBasal tb, WriteOrigin _, CancellationToken _) => tb);
+
+        var result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
+        return result.CreatedRecords.OfType<V4Models.TempBasal>().Single();
+    }
+
+    private static Treatment AapsPercentTemp() => new()
+    {
+        Id = "aaps-percent-temp",
+        EventType = "Temp Basal",
+        Mills = 1700000000000,
+        Duration = 30,
+        Percent = -30,
+        Rate = 0.7,
+    };
+
+    [Theory]
+    [InlineData(-50, 0.4)]
+    [InlineData(50, 1.2)]
+    [InlineData(-100, 0)]
+    [InlineData(0, 0.8)]
+    public async Task DecomposeAsync_PercentOnlyTempBasal_ResolvesRateAgainstScheduledBasal(double percent, double expectedRate)
+    {
+        GivenScheduledBasal(0.8);
+
+        var tempBasal = await DecomposeTempBasalAsync(new Treatment
+        {
+            Id = "percent-temp",
+            EventType = "Temp Basal",
+            Mills = 1700000000000,
+            Duration = 30,
+            Percent = percent,
+        });
+
+        tempBasal.Percent.Should().Be(percent);
+        tempBasal.ScheduledRate.Should().Be(0.8);
+        tempBasal.Rate.Should().BeApproximately(expectedRate, 1e-9);
+        tempBasal.RateFromSchedule.Should().BeTrue();
+        _basalRateResolverMock.Verify(r => r.FindBasalRateAsync(1700000000000, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// AAPS sends its own conversion, profile switch percentage included, as <c>rate</c> next to
+    /// <c>percent</c>, and may upload the temp before the switch: the rate it sent is the one delivered.
+    /// </summary>
+    [Fact]
+    public async Task DecomposeAsync_AapsPercentTempBasal_KeepsItsRateVerbatim()
+    {
+        GivenScheduledBasal(1.2);
+
+        var tempBasal = await DecomposeTempBasalAsync(AapsPercentTemp());
+
+        tempBasal.Percent.Should().Be(-30);
+        tempBasal.Rate.Should().Be(0.7);
+        tempBasal.RateFromSchedule.Should().BeFalse();
+        tempBasal.ScheduledRate.Should().BeApproximately(1.0, 1e-9);
+        _basalRateResolverMock.Verify(
+            r => r.FindBasalRateAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var served = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(tempBasal);
+        served.Percent.Should().Be(-30);
+        served.Rate.Should().Be(0.7);
+        served.Absolute.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_AapsPercentTempBasalResend_DoesNotOverwriteItsRate()
+    {
+        GivenScheduledBasal(2.0);
+        var stored = TreatmentDecomposer.MapToTempBasal(AapsPercentTemp(), correlationId: null);
+        _tempBasalRepoMock
+            .Setup(r => r.GetByLegacyIdAsync("aaps-percent-temp", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stored);
+        V4Models.TempBasal? written = null;
+        _tempBasalRepoMock
+            .Setup(r => r.UpdateAsync(stored.Id, It.IsAny<V4Models.TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid _, V4Models.TempBasal tb, WriteOrigin _, CancellationToken _) => written = tb)
+            .ReturnsAsync((Guid _, V4Models.TempBasal tb, WriteOrigin _, CancellationToken _) => tb);
+
+        await _decomposer.DecomposeAsync(AapsPercentTemp(), WriteOrigin.Live);
+
+        written.Should().NotBeNull();
+        written!.Rate.Should().Be(0.7);
+        written.Percent.Should().Be(-30);
+    }
+
+    /// <summary>
+    /// The basal resolver answers a hardcoded default where no schedule is in force; a rate taken from
+    /// it would be invented, and 0 would read as a suspension.
+    /// </summary>
+    [Fact]
+    public async Task DecomposeAsync_PercentOnlyTempBasalWithNoScheduleInForce_LeavesRateUnknown()
+    {
+        GivenScheduledBasal(null);
+
+        var tempBasal = await DecomposeTempBasalAsync(new Treatment
+        {
+            Id = "unscheduled-percent-temp",
+            EventType = "Temp Basal",
+            Mills = 1700000000000,
+            Duration = 30,
+            Percent = -30,
+        });
+
+        tempBasal.Percent.Should().Be(-30);
+        tempBasal.Rate.Should().BeNull();
+        tempBasal.ScheduledRate.Should().BeNull();
+
+        var served = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(tempBasal);
+        served.Percent.Should().Be(-30);
+        served.Absolute.Should().BeNull();
+        served.Rate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_AbsoluteBesidePercent_TakesAbsolute()
+    {
+        GivenScheduledBasal(0.8);
+
+        var tempBasal = await DecomposeTempBasalAsync(new Treatment
+        {
+            Id = "absolute-and-percent-temp",
+            EventType = "Temp Basal",
+            Mills = 1700000000000,
+            Duration = 30,
+            Percent = -50,
+            Absolute = 1.5,
+        });
+
+        tempBasal.Rate.Should().Be(1.5);
+        tempBasal.Percent.Should().BeNull();
+        tempBasal.ScheduledRate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_PercentTempBasal_ReadsBackAndReDecomposesAsUploaded()
+    {
+        GivenScheduledBasal(0.8);
+
+        var tempBasal = await DecomposeTempBasalAsync(new Treatment
+        {
+            Id = "percent-temp-readback",
+            EventType = "Temp Basal",
+            Mills = 1700000000000,
+            Duration = 30,
+            Percent = -50,
+        });
+
+        var served = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(tempBasal);
+
+        served.Percent.Should().Be(-50);
+        served.Absolute.Should().BeNull();
+        served.Rate.Should().BeNull("Nightscout reads back only the percent it was sent");
+        served.DeliveredRate.Should().BeApproximately(0.4, 1e-9);
+
+        var edited = TreatmentDecomposer.MapToTempBasal(served, correlationId: null);
+        edited.Percent.Should().Be(-50);
+        edited.Rate.Should().BeNull();
+    }
+
+    private async Task<V4Models.TempBasal> EditStoredTempBasalAsync(V4Models.TempBasal stored, double newPercent)
+    {
+        var edit = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(stored);
+        edit.Id = stored.LegacyId;
+        edit.Percent = newPercent;
+        _tempBasalRepoMock
+            .Setup(r => r.GetByLegacyIdAsync(stored.LegacyId!, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stored);
+        V4Models.TempBasal? written = null;
+        _tempBasalRepoMock
+            .Setup(r => r.UpdateAsync(stored.Id, It.IsAny<V4Models.TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid _, V4Models.TempBasal tb, WriteOrigin _, CancellationToken _) => written = tb)
+            .ReturnsAsync((Guid _, V4Models.TempBasal tb, WriteOrigin _, CancellationToken _) => tb);
+
+        await _decomposer.DecomposeAsync(edit, WriteOrigin.Live);
+        return written!;
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_EditingTheReadBackOfAResolvedPercentTemp_ResolvesTheNewPercent()
+    {
+        GivenScheduledBasal(0.8);
+        var stored = await DecomposeTempBasalAsync(new Treatment
+        {
+            Id = "careportal-percent-temp", EventType = "Temp Basal", Mills = 1700000000000, Duration = 30, Percent = -50,
+        });
+
+        var written = await EditStoredTempBasalAsync(stored, -20);
+
+        written.Percent.Should().Be(-20);
+        written.Rate.Should().BeApproximately(0.64, 1e-9);
+        written.ScheduledRate.Should().Be(0.8);
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_EditingThePercentOfAnUploadedRate_DropsTheEchoedRate()
+    {
+        GivenScheduledBasal(0.8);
+        var stored = TreatmentDecomposer.MapToTempBasal(AapsPercentTemp(), correlationId: null);
+
+        var written = await EditStoredTempBasalAsync(stored, -10);
+
+        written.Percent.Should().Be(-10);
+        written.Rate.Should().BeApproximately(0.72, 1e-9);
+        written.RateFromSchedule.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// <see cref="Treatment.Absolute"/> stopped reading through <c>rate</c> beside a percent; the ids
+    /// and fingerprints of identifier-less uploads already stored are computed as they were.
+    /// </summary>
+    [Fact]
+    public void HashInputs_OfAPercentTempWithRate_AreThoseItWasStoredUnder()
+    {
+        var upload = AapsPercentTemp();
+        upload.Id = null;
+        var asBefore = AapsPercentTemp();
+        asBefore.Id = null;
+        asBefore.Absolute = asBefore.Rate;
+
+        TreatmentDecomposer.ComputeSyntheticId(upload).Should().Be(TreatmentDecomposer.ComputeSyntheticId(asBefore));
+        TreatmentDecomposer.UpstreamFingerprint(upload).Should().Be(TreatmentDecomposer.UpstreamFingerprint(asBefore));
     }
 
     #endregion
@@ -1112,17 +1352,108 @@ public class TreatmentDecomposerTests : IDisposable
         TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null).Origin.Should().Be(expected);
     }
 
-    // Documents the current fallback: algorithm uploads that omit the automatic flag read as Manual
-    // because there is no Unknown origin to record them under.
     [Theory]
-    [InlineData("openaps://AndroidAPS")]
-    [InlineData("Trio")]
-    public void MapToTempBasal_AlgorithmUploadWithoutAutomaticFlag_CurrentlyFallsBackToManual(string enteredBy)
+    [InlineData("Trio", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("iAPS", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("freeaps-x", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("openaps://Lotus", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("openaps://AndroidAPS", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("loop://Test Phone", null, V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData(null, "AAPS", V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData("xdrip", null, V4Models.TempBasalOrigin.Manual)]
+    [InlineData(null, null, V4Models.TempBasalOrigin.Manual)]
+    public void MapToTempBasal_UnflaggedTempDefaultsByUploaderAndAwaitsCorroboration(
+        string? enteredBy, string? app, V4Models.TempBasalOrigin expected)
     {
         var treatment = TempBasalForOrigin(reason: null, automatic: null, basalOrigin: null, enteredBy);
+        if (app is not null)
+            treatment.AdditionalProperties = new Dictionary<string, object> { ["app"] = app };
 
-        TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null).Origin
-            .Should().Be(V4Models.TempBasalOrigin.Manual);
+        var tempBasal = TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null);
+
+        tempBasal.Origin.Should().Be(expected);
+        tempBasal.OriginEvidence.Should().Be(V4Models.TempBasalOriginEvidence.Uploader);
+    }
+
+    [Theory]
+    [InlineData("suspend", null, null)]
+    [InlineData(null, true, null)]
+    [InlineData(null, false, null)]
+    [InlineData(null, null, "PUMP_SUSPEND")]
+    [InlineData(null, null, "EMULATED_PUMP_SUSPEND")]
+    public void MapToTempBasal_OriginTheUploadStatesIsReported(string? reason, bool? automatic, string? type)
+    {
+        var treatment = TempBasalForOrigin(reason, automatic, basalOrigin: null, "openaps://AndroidAPS");
+        treatment.BolusType = type;
+
+        TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null).OriginEvidence
+            .Should().Be(V4Models.TempBasalOriginEvidence.Reported);
+    }
+
+    [Theory]
+    [InlineData("PUMP_SUSPEND", V4Models.TempBasalOrigin.Suspended)]
+    [InlineData("EMULATED_PUMP_SUSPEND", V4Models.TempBasalOrigin.Suspended)]
+    [InlineData("NORMAL", V4Models.TempBasalOrigin.Algorithm)]
+    public void MapToTempBasal_AapsTypeNamesItsSuspends(string type, V4Models.TempBasalOrigin expected)
+    {
+        var treatment = TempBasalForOrigin(reason: null, automatic: null, basalOrigin: null, "openaps://AndroidAPS");
+        treatment.BolusType = type;
+
+        TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null).Origin.Should().Be(expected);
+    }
+
+    [Fact]
+    public void MapToTempBasal_KeepsTheAapsFieldsAndServesThemBack()
+    {
+        var upload = TempBasalForOrigin(reason: null, automatic: null, basalOrigin: null, "openaps://AndroidAPS");
+        upload.BolusType = "NORMAL";
+        upload.IsValid = true;
+        upload.PumpType = "OMNIPOD_DASH";
+        upload.PumpSerial = "4241";
+
+        var record = TreatmentDecomposer.MapToTempBasal(upload, correlationId: null);
+        record.AdditionalProperties = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            JsonSerializer.Serialize(record.AdditionalProperties));
+        var served = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(record);
+
+        served.BolusType.Should().Be("NORMAL");
+        served.IsValid.Should().BeTrue();
+        served.PumpType.Should().Be("OMNIPOD_DASH");
+        served.PumpSerial.Should().Be("4241");
+    }
+
+    [Theory]
+    [InlineData(V4Models.TempBasalOrigin.Manual, null, "Trio", V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData(V4Models.TempBasalOrigin.Manual, null, "loop://Test Phone", V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData(V4Models.TempBasalOrigin.Manual, V4Models.TempBasalOriginEvidence.Uploader, "Trio", V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData(V4Models.TempBasalOrigin.Manual, V4Models.TempBasalOriginEvidence.Snapshot, "Trio", V4Models.TempBasalOrigin.Algorithm)]
+    [InlineData(V4Models.TempBasalOrigin.Algorithm, V4Models.TempBasalOriginEvidence.Uncorroborated, "xdrip", V4Models.TempBasalOrigin.Manual)]
+    [InlineData(V4Models.TempBasalOrigin.Manual, V4Models.TempBasalOriginEvidence.Reported, "Trio", V4Models.TempBasalOrigin.Manual)]
+    public void MapToTempBasal_AnEditLocksInOnlyAReportedOrigin(
+        V4Models.TempBasalOrigin stored,
+        V4Models.TempBasalOriginEvidence? evidence,
+        string app,
+        V4Models.TempBasalOrigin expected)
+    {
+        var tempBasal = new V4Models.TempBasal
+        {
+            Id = Guid.CreateVersion7(),
+            StartTimestamp = new DateTime(2026, 9, 20, 12, 0, 0, DateTimeKind.Utc),
+            EndTimestamp = new DateTime(2026, 9, 20, 12, 30, 0, DateTimeKind.Utc),
+            Rate = 0.4,
+            Origin = stored,
+            OriginEvidence = evidence,
+            App = app,
+        };
+        var mapped = Nocturne.Infrastructure.Data.Mappers.TempBasalToTreatmentMapper.ToTreatment(tempBasal);
+        var treatment = JsonSerializer.Deserialize<Treatment>(JsonSerializer.Serialize(mapped))!;
+
+        var edited = TreatmentDecomposer.MapToTempBasal(treatment, correlationId: null);
+
+        edited.Origin.Should().Be(expected);
+        edited.OriginEvidence.Should().Be(evidence == V4Models.TempBasalOriginEvidence.Reported
+            ? V4Models.TempBasalOriginEvidence.Reported
+            : V4Models.TempBasalOriginEvidence.Uploader);
     }
 
     [Theory]
@@ -1169,7 +1500,7 @@ public class TreatmentDecomposerTests : IDisposable
     [InlineData(V4Models.TempBasalOrigin.Scheduled, "loop://Test Phone")]
     [InlineData(V4Models.TempBasalOrigin.Suspended, "Glooko")]
     [InlineData(V4Models.TempBasalOrigin.Inferred, "loop://Test Phone")]
-    public void MapToTempBasal_OriginSurvivesTreatmentRoundTrip(V4Models.TempBasalOrigin origin, string app)
+    public void MapToTempBasal_ReportedOriginSurvivesTreatmentRoundTrip(V4Models.TempBasalOrigin origin, string app)
     {
         var tempBasal = new V4Models.TempBasal
         {
@@ -1178,6 +1509,7 @@ public class TreatmentDecomposerTests : IDisposable
             EndTimestamp = new DateTime(2025, 10, 15, 12, 30, 0, DateTimeKind.Utc),
             Rate = origin == V4Models.TempBasalOrigin.Suspended ? 0 : 0.4,
             Origin = origin,
+            OriginEvidence = V4Models.TempBasalOriginEvidence.Reported,
             App = app,
         };
 
@@ -1680,6 +2012,50 @@ public class TreatmentDecomposerTests : IDisposable
         bolus.Insulin.Should().Be(0.4);
         bolus.Kind.Should().Be(V4Models.BolusKind.Algorithm);
         bolus.Automatic.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_AutomaticCorrectionBolus_ProducesAlgorithmBolus()
+    {
+        var treatment = new Treatment
+        {
+            Id = "loop-auto",
+            EventType = "Correction Bolus",
+            Mills = 1700000000000,
+            Insulin = 0.35,
+            Automatic = true,
+            EnteredBy = "loop://iPhone"
+        };
+
+        var result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
+
+        var bolus = result.CreatedRecords.Should().ContainSingle()
+            .Which.Should().BeOfType<V4Models.Bolus>().Subject;
+        bolus.Kind.Should().Be(V4Models.BolusKind.Algorithm);
+        bolus.Automatic.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task DecomposeAsync_NonAutomaticCorrectionBolus_StaysManual(bool? automatic)
+    {
+        var treatment = new Treatment
+        {
+            Id = "loop-manual",
+            EventType = "Correction Bolus",
+            Mills = 1700000000000,
+            Insulin = 1.5,
+            Automatic = automatic,
+            EnteredBy = "loop://iPhone"
+        };
+
+        var result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
+
+        var bolus = result.CreatedRecords.Should().ContainSingle()
+            .Which.Should().BeOfType<V4Models.Bolus>().Subject;
+        bolus.Kind.Should().Be(V4Models.BolusKind.Manual);
+        bolus.Automatic.Should().BeFalse();
     }
 
     [Fact]
@@ -2504,9 +2880,9 @@ public class TreatmentDecomposerTests : IDisposable
         // Act
         var result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
 
-        // Assert — DeviceEvent + Note (because Notes is non-empty)
+        // Assert — the device event keeps its notes itself, with no Note beside it
         result.CreatedRecords.OfType<V4Models.DeviceEvent>().Should().HaveCount(1);
-        result.CreatedRecords.OfType<V4Models.Note>().Should().HaveCount(1);
+        result.CreatedRecords.OfType<V4Models.Note>().Should().BeEmpty();
         var deviceEvent = result.CreatedRecords.OfType<V4Models.DeviceEvent>().Single();
         deviceEvent.LegacyId.Should().Be(treatment.Id);
         deviceEvent.Mills.Should().Be(1700000000000);
@@ -2516,10 +2892,6 @@ public class TreatmentDecomposerTests : IDisposable
         deviceEvent.DataSource.Should().Be("manual");
         deviceEvent.UtcOffset.Should().Be(-300);
         deviceEvent.CorrelationId.Should().Be(result.CorrelationId);
-
-        var note = result.CreatedRecords.OfType<V4Models.Note>().Single();
-        note.Text.Should().Be("Test device event");
-        note.CorrelationId.Should().Be(result.CorrelationId);
     }
 
     [Fact]
@@ -2534,11 +2906,9 @@ public class TreatmentDecomposerTests : IDisposable
             Notes = "Right arm"
         };
 
-        // Act - first call creates DeviceEvent + Note (because Notes is non-empty)
+        // Act - first call creates the DeviceEvent, which keeps its notes itself
         var firstResult = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
-        firstResult.CreatedRecords.Should().HaveCount(2);
-        firstResult.CreatedRecords.OfType<V4Models.DeviceEvent>().Should().HaveCount(1);
-        firstResult.CreatedRecords.OfType<V4Models.Note>().Should().HaveCount(1);
+        firstResult.CreatedRecords.Should().ContainSingle().Which.Should().BeOfType<V4Models.DeviceEvent>();
         firstResult.UpdatedRecords.Should().BeEmpty();
 
         // Modify notes
@@ -2547,9 +2917,9 @@ public class TreatmentDecomposerTests : IDisposable
         // Act - second call should update both
         var secondResult = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
 
-        // Assert — both DeviceEvent and Note updated
+        // Assert — the DeviceEvent updated
         secondResult.CreatedRecords.Should().BeEmpty();
-        secondResult.UpdatedRecords.Should().HaveCount(2);
+        secondResult.UpdatedRecords.Should().ContainSingle();
 
         var updated = secondResult.UpdatedRecords.OfType<V4Models.DeviceEvent>().Single();
         updated.LegacyId.Should().Be("idempotent-site-change");
@@ -2609,12 +2979,12 @@ public class TreatmentDecomposerTests : IDisposable
         // Act
         var result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live);
 
-        // Assert — DeviceEvent + Note + StateSpan
+        // Assert — DeviceEvent + StateSpan; the device event keeps its notes itself
         var deviceEvent = result.CreatedRecords.OfType<V4Models.DeviceEvent>().Single();
         deviceEvent.EventType.Should().Be(DeviceEventType.PumpSuspend);
         deviceEvent.LegacyId.Should().Be("pump-suspend-1");
 
-        result.CreatedRecords.OfType<V4Models.Note>().Should().HaveCount(1);
+        result.CreatedRecords.OfType<V4Models.Note>().Should().BeEmpty();
 
         _stateSpanServiceMock.Verify(
             s => s.UpsertStateSpanAsync(

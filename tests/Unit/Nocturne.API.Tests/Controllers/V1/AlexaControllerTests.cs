@@ -191,7 +191,7 @@ public class AlexaControllerTests
             Mock.Of<IPropertiesService>(),
             Mock.Of<IDDataService>(),
             new HttpContextAccessor(),
-            Mock.Of<IShareAppearanceReader>(),
+            Mock.Of<ITenantAppearanceReader>(),
             Mock.Of<ITenantAccessor>(),
             TimeProvider.System,
             Mock.Of<ILogger<AlexaService>>()

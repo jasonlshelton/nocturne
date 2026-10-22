@@ -116,7 +116,7 @@ public class StatisticsServiceTDDTests
         result.TotalBolus.Should().Be(6.8);
         result.TotalBasal.Should().Be(0);
         result.TotalInsulin.Should().Be(6.8);
-        result.BolusCount.Should().Be(3);
+        result.ManualBolusCount.Should().Be(3);
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public class StatisticsServiceTDDTests
         // Bolus should be meal boluses + SMBs
         delivery.TotalBolus.Should().BeGreaterThan(0);
         delivery.TotalBasal.Should().BeGreaterThan(0);
-        delivery.BolusCount.Should().Be(11, "3 meals + 8 SMBs = 11 boluses");
+        delivery.ManualBolusCount.Should().Be(11, "the 8 automatic-flagged records are stored as manual until #2412, so 3 meals + 8 = 11");
     }
 
     #region LoopSystem Overlap

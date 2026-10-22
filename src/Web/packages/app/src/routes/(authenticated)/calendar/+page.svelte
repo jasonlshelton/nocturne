@@ -9,7 +9,7 @@
   import type { TrackerInstanceDto, TrackerDefinitionDto } from "$api";
   import { reachedUrgency } from "$lib/components/trackers/schedule";
   import { Button } from "$lib/components/ui/button";
-  import { glucoseUnits } from "$lib/stores/appearance-store.svelte";
+  import { calendarShowTirPercent, glucoseUnits } from "$lib/stores/appearance-store.svelte";
   import { getUnitLabel, formatLocale, formatMediumDateTime, time } from "$lib/utils/formatting";
   import {
     leadingBlankDays,
@@ -367,6 +367,8 @@
         {nextMonth}
         {goToToday}
         {setViewMode}
+        showTirPercent={calendarShowTirPercent.current}
+        setShowTirPercent={(show) => (calendarShowTirPercent.current = show)}
       />
     </div>
 
@@ -415,6 +417,7 @@
                       <CalendarDayCell
                       {day}
                       {viewMode}
+                      showTirPercent={calendarShowTirPercent.current}
                       {currentYear}
                       {currentMonth}
                       {trackerEvents}

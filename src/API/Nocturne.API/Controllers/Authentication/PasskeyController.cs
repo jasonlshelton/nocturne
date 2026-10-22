@@ -32,7 +32,7 @@ namespace Nocturne.API.Controllers.Authentication;
 ///   <item><description><b>Discoverable login</b> (no username): <c>POST /login/discoverable/options</c> → <c>POST /login/complete</c></description></item>
 ///   <item><description><b>Non-discoverable login</b> (with username): <c>POST /login/options</c> → <c>POST /login/complete</c></description></item>
 ///   <item><description><b>Recovery:</b> <c>POST /recovery/verify</c> issues a 10-minute restricted token allowing passkey management only.</description></item>
-///   <item><description><b>Recovery mode:</b> <c>POST /recovery-mode/options</c> → <c>POST /recovery-mode/complete</c> (only for a member that has no passkey and no linked provider).</description></item>
+///   <item><description><b>Recovery mode:</b> <c>POST /recovery-mode/redeem</c> spends an administrator-issued code for the same restricted session, for a member with no sign-in method left.</description></item>
 ///   <item><description><b>Initial setup:</b> handled by the setup controller under <c>/api/v4/setup/</c>, not here.</description></item>
 ///   <item><description><b>Invite acceptance:</b> <c>POST /invite/options</c> → <c>POST /invite/complete</c> using a pre-issued invite token.</description></item>
 /// </list>
@@ -76,13 +76,6 @@ public class PasskeyController : ControllerBase
     /// The authority a recovery session confers: enrol a replacement passkey, nothing else.
     /// </summary>
     private const string RecoverySessionPermission = "passkey:manage";
-
-    /// <summary>
-    /// Shown for every recovery-mode refusal so the response never distinguishes an unknown
-    /// username from an account that still has a working sign-in method.
-    /// </summary>
-    private const string RecoveryModeUnavailable =
-        "That username can't have a passkey registered this way. Sign in with a recovery code instead.";
 
     private readonly IPasskeyService _passkeyService;
     private readonly ITotpService _totpService;
@@ -235,15 +228,32 @@ public class PasskeyController : ControllerBase
     };
 
     /// <summary>
+    /// Sets the short-lived cookie that lets <paramref name="subject"/> enrol one passkey, read
+    /// back by <see cref="TryReadRecoverySessionSubject"/>.
+    /// </summary>
+    private void StartRecoverySession(SubjectEntity subject)
+    {
+        var recoveryToken = _jwtService.GenerateAccessToken(
+            new SubjectInfo { Id = subject.Id, Name = subject.Name, Email = subject.Email },
+            permissions: [RecoverySessionPermission],
+            roles: [],
+            scopes: [RecoverySessionScope],
+            lifetime: RecoverySessionLifetime);
+
+        var cookieOptions = RecoveryCookieOptions();
+        cookieOptions.MaxAge = RecoverySessionLifetime;
+        Response.Cookies.Append(RecoveryCookieName, recoveryToken, cookieOptions);
+    }
+
+    /// <summary>
     /// Complete passkey registration with attestation response
     /// </summary>
     /// <remarks>
     /// The challenge must have been issued for the subject the caller's credentials resolve to,
     /// so a challenge minted by another flow cannot be redeemed as an enrolment onto it.
     /// <para>
-    /// Declares no invalidation, like the other enrolment a recovery session reaches
-    /// (<see cref="RecoveryModeComplete"/>): the generated command would refresh
-    /// <see cref="ListCredentials"/>, which needs a session, and its 401 would surface as a
+    /// Declares no invalidation because a recovery session reaches it: the generated command would
+    /// refresh <see cref="ListCredentials"/>, which needs a session, and its 401 would surface as a
     /// failure on an enrolment that in fact succeeded. Callers holding a session refresh their
     /// own list.
     /// </para>
@@ -273,152 +283,101 @@ public class PasskeyController : ControllerBase
 
         var tenantId = _tenantAccessor.TenantId;
 
+        PasskeyCredentialResult result;
         try
         {
-            var result = await _passkeyService.CompleteRegistrationAsync(
+            result = await _passkeyService.CompleteRegistrationAsync(
                 request.AttestationResponseJson, request.ChallengeToken, tenantId,
                 expectedSubjectId: subjectId.Value, request.Label);
-
-            // One spent recovery code buys one enrolment: the credential it authorized now exists,
-            // so the session that authorized it is over even though its token has time left.
-            Response.Cookies.Delete(RecoveryCookieName, RecoveryCookieOptions());
-
-            return Ok(new PasskeyRegisterCompleteResponse
-            {
-                CredentialId = result.CredentialId,
-                SubjectId = result.SubjectId,
-            });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Passkey registration completion failed");
             return Problem(detail: "Passkey registration failed", statusCode: 400, title: "Bad Request");
         }
-    }
 
-    /// <summary>
-    /// Generate passkey registration options for an account that has no sign-in method left,
-    /// while the tenant is in recovery mode.
-    /// </summary>
-    /// <remarks>
-    /// Unauthenticated by necessity — the target account cannot sign in. The server resolves the
-    /// subject from the username and refuses unless that subject has zero primary auth factors,
-    /// so this can only restore access to an account that is already locked out, never take over
-    /// an account that still has a passkey or a linked provider.
-    /// </remarks>
-    [HttpPost("recovery-mode/options")]
-    [AllowAnonymous]
-    [EnableRateLimiting("passkey-register")]
-    [RemoteCommand]
-    [ProducesResponseType(typeof(PasskeyOptionsResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PasskeyOptionsResponse>> RecoveryModeOptions(
-        [FromBody] PasskeyLoginOptionsRequest request)
-    {
-        await using var db = await _dbContextFactory.CreateAsync();
-        if (this.PasskeyHostRefusal(_passkeyService) is { } refusal)
-            return refusal;
+        // One spent recovery code buys one enrolment: the credential it authorized now exists,
+        // so the session that authorized it is over even though its token has time left.
+        Response.Cookies.Delete(RecoveryCookieName, RecoveryCookieOptions());
 
-        var subject = await ResolveRecoveryModeSubjectAsync(db, request.Username);
-        if (subject == null)
+        // The passkey exists whatever happens here, so a failure is logged rather than reported:
+        // a code left outstanding is refused at redemption anyway, since the member can sign in.
+        try
         {
-            return Problem(detail: RecoveryModeUnavailable, statusCode: 400, title: "Bad Request");
+            await using var db = await _dbContextFactory.CreateAsync();
+            await LoginCodeService.VoidRecoveryCodesAsync(db, subjectId.Value, HttpContext.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not void outstanding recovery codes for {SubjectId}", subjectId.Value);
         }
 
-        var result = await _passkeyService.GenerateRegistrationOptionsAsync(
-            subject.Id, subject.Username ?? subject.Name);
-
-        return Ok(new PasskeyOptionsResponse
+        return Ok(new PasskeyRegisterCompleteResponse
         {
-            Options = result.OptionsJson,
-            ChallengeToken = result.ChallengeToken,
+            CredentialId = result.CredentialId,
+            SubjectId = result.SubjectId,
         });
     }
 
     /// <summary>
-    /// Complete recovery-mode passkey registration. Re-checks the recovery-mode conditions so a
-    /// challenge issued while the tenant was in recovery mode cannot be redeemed afterwards.
-    /// </summary>
-    [HttpPost("recovery-mode/complete")]
-    [AllowAnonymous]
-    [EnableRateLimiting("passkey-register")]
-    [RemoteCommand]
-    [ProducesResponseType(typeof(PasskeyRegisterCompleteResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PasskeyRegisterCompleteResponse>> RecoveryModeComplete(
-        [FromBody] RecoveryModeCompleteRequest request)
-    {
-        await using var db = await _dbContextFactory.CreateAsync();
-        if (string.IsNullOrEmpty(request.ChallengeToken))
-        {
-            return Problem(detail: "Challenge token not found or expired", statusCode: 400, title: "Bad Request");
-        }
-
-        var subject = await ResolveRecoveryModeSubjectAsync(db, request.Username);
-        if (subject == null)
-        {
-            return Problem(detail: RecoveryModeUnavailable, statusCode: 400, title: "Bad Request");
-        }
-
-        try
-        {
-            var result = await _passkeyService.CompleteRegistrationAsync(
-                request.AttestationResponseJson, request.ChallengeToken, _tenantAccessor.TenantId,
-                expectedSubjectId: subject.Id, request.Label);
-
-            return Ok(new PasskeyRegisterCompleteResponse
-            {
-                CredentialId = result.CredentialId,
-                SubjectId = result.SubjectId,
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Recovery-mode passkey registration failed");
-            return Problem(detail: "Passkey registration failed", statusCode: 400, title: "Bad Request");
-        }
-    }
-
-    /// <summary>
-    /// Returns the subject named by <paramref name="username"/> when the tenant is in recovery
-    /// mode and that subject has no primary auth factor, otherwise <see langword="null"/>.
+    /// Spends a recovery code an administrator issued for a member and starts the same restricted
+    /// session <see cref="RecoveryVerify"/> does: one passkey enrolment through
+    /// <see cref="RegisterOptions"/>, nothing else.
     /// </summary>
     /// <remarks>
-    /// The subject lookup reads as the request's reader (<see cref="INocturneDbContextFactory.CreateAsync"/>),
-    /// deliberately, unlike the two preconditions above it. A recovery ceremony enrols a credential, so
-    /// on a share host — where the reader is a share and membership is denied — it must resolve nobody
-    /// and fail closed. Pinning it would make the ceremony reachable there.
+    /// The code is the whole proof. It is single-use, bound to one subject on one tenant, minted
+    /// for <see cref="LoginCodePurpose.Recovery"/>, and only someone with authority over that
+    /// member can mint it: a member administrator
+    /// (<see cref="V4.Identity.MemberRecoveryController.IssueRecoveryCode"/>) or the operator
+    /// (<see cref="V4.PlatformAdmin.TenantController.IssueRecoveryCode"/>), which is how a tenant
+    /// whose only owner is locked out gets back in. The code is a bearer link that outlives the
+    /// moment it was minted, so the member must still be one its issuer may recover
+    /// (<see cref="MemberRecoveryEligibility.AllowsRedemption"/>). Unknown, spent, expired,
+    /// other-tenant, login and no-longer-applicable codes fail alike.
     /// </remarks>
-    private async Task<SubjectEntity?> ResolveRecoveryModeSubjectAsync(NocturneDbContext db, string? username)
+    [HttpPost("recovery-mode/redeem")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login-handoff")]
+    [RemoteCommand]
+    [ProducesResponseType(typeof(RecoveryModeRedeemResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<RecoveryModeRedeemResponse>> RecoveryModeRedeem(
+        [FromBody] RecoveryModeRedeemRequest request,
+        [FromServices] ILoginCodeService loginCodeService,
+        [FromServices] MemberRecoveryEligibility eligibility)
     {
-        if (string.IsNullOrWhiteSpace(username))
+        if (string.IsNullOrWhiteSpace(request.Code))
         {
-            return null;
+            return Problem(detail: "A recovery code is required", statusCode: 400, title: "Bad Request");
         }
 
-        var tenantId = _tenantAccessor.TenantId;
+        await using var db = await _dbContextFactory.CreateAsync();
+        var redeemed = await loginCodeService.RedeemAsync(
+            db, request.Code.Trim(), LoginCodeService.RecoveryPurposes,
+            HttpContext.Connection.RemoteIpAddress?.ToString(),
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.RequestAborted);
 
-        // Recovery mode only exists once the tenant has at least one working sign-in method:
-        // before that the tenant is in first-run setup, which has its own owner-creation flow.
-        if (!await TenantHasCredentialsAsync(tenantId) || !await HasOrphanedSubjectAsync(tenantId))
+        var subject = redeemed is not null
+            && MemberRecoveryEligibility.AllowsRedemption(
+                await eligibility.CheckAsync(db, _tenantAccessor.TenantId, redeemed.SubjectId, HttpContext.RequestAborted),
+                redeemed.Purpose)
+            ? await db.Subjects.AsNoTracking().FirstOrDefaultAsync(s => s.Id == redeemed.SubjectId)
+            : null;
+        if (subject is null)
         {
-            return null;
+            return Problem(
+                detail: "This recovery code has expired or was already used.",
+                statusCode: 400,
+                title: "Bad Request");
         }
 
-        var subject = await db.TenantMembers
-            .Where(tm => tm.TenantId == tenantId)
-            .Select(tm => tm.Subject!)
-            .FirstOrDefaultAsync(s =>
-                s.Username == username && s.IsActive && !s.IsSystemSubject);
+        // Whoever held the member's own recovery codes, the member's way back in is now this
+        // enrolment, so codes they may have lost stop working.
+        await _recoveryCodeService.InvalidateAllAsync(subject.Id);
+        StartRecoverySession(subject);
 
-        if (subject == null)
-        {
-            return null;
-        }
-
-        // Fail closed: an account that still has a passkey or a linked provider is not locked
-        // out and must never be enrollable without a session.
-        return await _subjectService.CountPrimaryAuthFactorsAsync(subject.Id) == 0 ? subject : null;
+        return Ok(new RecoveryModeRedeemResponse { Username = subject.Username ?? subject.Name });
     }
 
     /// <summary>
@@ -576,12 +535,15 @@ public class PasskeyController : ControllerBase
                     ipAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
                     userAgent: Request.Headers.UserAgent.ToString(),
                     detailsJson: JsonSerializer.Serialize(new { method = "passkey", secondFactorPending = true }));
+                Response.SetLastSignInCookie(
+                    SessionCookieExtensions.SignInMethods.Passkey, providerId: null, _oidcOptions);
 
                 return Ok(new PasskeyLoginCompleteResponse
                 {
                     Success = true,
                     TotpRequired = true,
-                    StepUpToken = await _totpService.CreateStepUpTokenAsync(assertionResult.SubjectId),
+                    StepUpToken = await _totpService.CreateStepUpTokenAsync(
+                        assertionResult.SubjectId, tenantId, admittedByInvite: false),
                 });
             }
 
@@ -667,24 +629,7 @@ public class PasskeyController : ControllerBase
             userAgent: Request.Headers.UserAgent.ToString(),
             detailsJson: JsonSerializer.Serialize(new { method = "recovery_code" }));
 
-        // Issue a restricted recovery session (short-lived)
-        var subjectInfo = new SubjectInfo
-        {
-            Id = subjectId,
-            Name = subjectEntity.Name,
-            Email = subjectEntity.Email,
-        };
-
-        var recoveryToken = _jwtService.GenerateAccessToken(
-            subjectInfo,
-            permissions: [RecoverySessionPermission],
-            roles: [],
-            scopes: [RecoverySessionScope],
-            lifetime: RecoverySessionLifetime);
-
-        var cookieOptions = RecoveryCookieOptions();
-        cookieOptions.MaxAge = RecoverySessionLifetime;
-        Response.Cookies.Append(RecoveryCookieName, recoveryToken, cookieOptions);
+        StartRecoverySession(subjectEntity);
 
         return Ok(new RecoveryVerifyResponse
         {
@@ -1253,15 +1198,20 @@ public class PasskeyRegisterOptionsRequest
 }
 
 /// <summary>
-/// Request to complete a recovery-mode passkey registration. The username is re-checked against
-/// the recovery-mode conditions rather than trusted.
+/// A recovery code an administrator issued for a member with no sign-in method left.
 /// </summary>
-public class RecoveryModeCompleteRequest
+public class RecoveryModeRedeemRequest
 {
+    public string Code { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A spent recovery-mode code. The account it names can now enrol one passkey.
+/// </summary>
+public class RecoveryModeRedeemResponse
+{
+    /// <summary>The account the code was issued for, for labelling the new passkey.</summary>
     public string Username { get; set; } = string.Empty;
-    public string AttestationResponseJson { get; set; } = string.Empty;
-    public string ChallengeToken { get; set; } = string.Empty;
-    public string? Label { get; set; }
 }
 
 /// <summary>

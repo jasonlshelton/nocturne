@@ -10,6 +10,7 @@ using Nocturne.API.Services.Auth;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Models.Configuration;
 using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Controllers.Authentication;
@@ -68,10 +69,10 @@ public class LoginHandoffController : ControllerBase
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         var userAgent = Request.Headers.UserAgent.ToString();
 
-        var subjectId = await _loginCodeService.RedeemAsync(
-            db, request.Code, ipAddress, userAgent, ct);
+        var redeemed = await _loginCodeService.RedeemAsync(
+            db, request.Code, [LoginCodePurpose.Login], ipAddress, userAgent, ct);
 
-        if (subjectId is null)
+        if (redeemed is null)
         {
             return Problem(
                 detail: "This sign-in link has expired or was already used.",
@@ -80,7 +81,7 @@ public class LoginHandoffController : ControllerBase
         }
 
         var session = await _sessionService.IssueSessionAsync(
-            subjectId.Value,
+            redeemed.SubjectId,
             new SessionContext(
                 DeviceDescription: "Login handoff", IpAddress: ipAddress, UserAgent: userAgent),
             ct);

@@ -171,11 +171,11 @@ public class DataOverviewServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Australia/Sydney", "2024-02-28T12:59:00Z", "2024-02-28T13:00:00Z", "2024-02-28,2024-02-29", 1, 2.34, 0.21, 2.55, 30.2)]
-    [InlineData("America/New_York", "2024-11-03T05:30:00Z", "2024-11-03T06:30:00Z", "2024-11-03", 2, 4.68, 0.42, 5.1, 60.5)]
-    [InlineData("America/New_York", "2024-03-10T06:30:00Z", "2024-03-10T07:30:00Z", "2024-03-10", 2, 4.68, 0.42, 5.1, 60.5)]
-    [InlineData("Asia/Kathmandu", "2024-02-28T18:14:00Z", "2024-02-28T18:15:00Z", "2024-02-28,2024-02-29", 1, 2.34, 0.21, 2.55, 30.2)]
-    [InlineData("Australia/Sydney", "2023-12-31T12:59:00Z", "2023-12-31T13:00:00Z", "2024-01-01", 1, 2.34, 0.21, 2.55, 30.2)]
+    [InlineData("Australia/Sydney", "2024-02-28T12:59:00Z", "2024-02-28T13:00:00Z", "2024-02-28,2024-02-29", 1, 2.45, 0.1, 2.55, 30.2)]
+    [InlineData("America/New_York", "2024-11-03T05:30:00Z", "2024-11-03T06:30:00Z", "2024-11-03", 2, 4.9, 0.2, 5.1, 60.5)]
+    [InlineData("America/New_York", "2024-03-10T06:30:00Z", "2024-03-10T07:30:00Z", "2024-03-10", 2, 4.9, 0.2, 5.1, 60.5)]
+    [InlineData("Asia/Kathmandu", "2024-02-28T18:14:00Z", "2024-02-28T18:15:00Z", "2024-02-28,2024-02-29", 1, 2.45, 0.1, 2.55, 30.2)]
+    [InlineData("Australia/Sydney", "2023-12-31T12:59:00Z", "2023-12-31T13:00:00Z", "2024-01-01", 1, 2.45, 0.1, 2.55, 30.2)]
     public async Task DailySummary_GroupsEveryRecordTypeAndMetricByLocalDay(
         string timezone, string first, string second, string dates, int count,
         double bolus, double basal, double tdd, double carbs)
@@ -1185,9 +1185,9 @@ public class DataOverviewServiceTests : IDisposable
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetDailySummaryAsync_BasalFromAlgorithmBoluses_CalculatedCorrectly()
+    public async Task GetDailySummaryAsync_AlgorithmBoluses_CountAsBolusNotBasal()
     {
-        // Two algorithm boluses: 0.3U + 0.5U = 0.8U total basal
+        // Two algorithm boluses: 0.3U + 0.5U = 0.8U total bolus
         _dbContext.Boluses.Add(new BolusEntity
         {
             Id = Guid.NewGuid(),
@@ -1212,7 +1212,8 @@ public class DataOverviewServiceTests : IDisposable
 
         result.Days.Should().ContainSingle();
         var day = result.Days[0];
-        day.TotalBasalUnits.Should().Be(0.8);
+        day.TotalBolusUnits.Should().Be(0.8);
+        day.TotalBasalUnits.Should().BeNull();
         day.TotalDailyDose.Should().Be(0.8);
     }
 
@@ -1276,9 +1277,9 @@ public class DataOverviewServiceTests : IDisposable
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetDailySummaryAsync_AlgorithmBolusAndTempBasal_CombinedForTotalBasal()
+    public async Task GetDailySummaryAsync_AlgorithmBolusAndTempBasal_SplitIntoBolusAndBasal()
     {
-        // Algorithm Bolus: 0.5U + TempBasal: 1.0 U/hr for 1hr = 1.0U -> Total basal = 1.5U
+        // Algorithm bolus: 0.5U is bolus; TempBasal: 1.0 U/hr for 1hr = 1.0U is basal
         _dbContext.Boluses.Add(new BolusEntity
         {
             Id = Guid.NewGuid(),
@@ -1303,7 +1304,8 @@ public class DataOverviewServiceTests : IDisposable
 
         result.Days.Should().ContainSingle();
         var day = result.Days[0];
-        day.TotalBasalUnits.Should().Be(1.5);
+        day.TotalBolusUnits.Should().Be(0.5);
+        day.TotalBasalUnits.Should().Be(1.0);
         day.TotalDailyDose.Should().Be(1.5);
     }
 
@@ -1387,9 +1389,9 @@ public class DataOverviewServiceTests : IDisposable
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetDailySummaryAsync_BasalFromAlgorithmBoluses_CombinedWithBolusForTdd()
+    public async Task GetDailySummaryAsync_AlgorithmBoluses_AddToManualBolusForTdd()
     {
-        // Bolus: 5U, Algorithm Bolus basal: 2.5U -> TDD = 7.5U
+        // Bolus: 5U, Algorithm bolus: 2.5U -> bolus 7.5U, TDD = 7.5U
         _dbContext.Boluses.Add(new BolusEntity
         {
             Id = Guid.NewGuid(),
@@ -1412,8 +1414,8 @@ public class DataOverviewServiceTests : IDisposable
 
         result.Days.Should().ContainSingle();
         var day = result.Days[0];
-        day.TotalBolusUnits.Should().Be(5.0);
-        day.TotalBasalUnits.Should().Be(2.5);
+        day.TotalBolusUnits.Should().Be(7.5);
+        day.TotalBasalUnits.Should().BeNull();
         day.TotalDailyDose.Should().Be(7.5);
     }
 
@@ -1451,7 +1453,7 @@ public class DataOverviewServiceTests : IDisposable
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetDailySummaryAsync_BasalAlgorithmBoluses_FilteredByDataSource()
+    public async Task GetDailySummaryAsync_AlgorithmBoluses_FilteredByDataSource()
     {
         _dbContext.Boluses.Add(new BolusEntity
         {
@@ -1476,7 +1478,7 @@ public class DataOverviewServiceTests : IDisposable
         var result = await _service.GetDailySummaryAsync(2024, ["glooko"]);
 
         result.Days.Should().ContainSingle();
-        result.Days[0].TotalBasalUnits.Should().Be(0.5);
+        result.Days[0].TotalBolusUnits.Should().Be(0.5);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using Nocturne.Core.Clinical.Schedules;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Basal;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.Core.Clinical.Statistics;
@@ -235,7 +236,8 @@ public class StatisticsService : IStatisticsService
     /// zero: every maximum target is met at zero, so a window with no readings would otherwise
     /// report its below-range, above-range and variability targets as met. The time-in-range
     /// targets need a reading (<see cref="BasicGlucoseStats.Count"/>), the CV target a
-    /// <see cref="GlucoseAnalytics.GlycemicVariability"/>, and the overall grade all six.
+    /// <see cref="GlucoseAnalytics.GlycemicVariability"/>, and the overall grade all six. The CV is
+    /// judged as a whole percent, the way the summary reports print it.
     /// </remarks>
     public ClinicalTargetAssessment AssessAgainstTargets(
         GlucoseAnalytics analytics,
@@ -245,7 +247,9 @@ public class StatisticsService : IStatisticsService
         var targets = ClinicalTargets.ForPopulation(population);
         TimeInRangePercentages? tir =
             analytics.BasicStats.Count > 0 ? analytics.TimeInRange.Percentages : null;
-        var cv = analytics.GlycemicVariability?.CoefficientOfVariation;
+        var cv = analytics.GlycemicVariability is { } variability
+            ? Math.Round(variability.CoefficientOfVariation, MidpointRounding.AwayFromZero)
+            : (double?)null;
 
         var assessment = new ClinicalTargetAssessment
         {
@@ -262,7 +266,7 @@ public class StatisticsService : IStatisticsService
 
         assessment.TBRAssessment = AssessMaximumTarget(
             "Time Below Range",
-            tir?.VeryLow + tir?.Low,
+            tir?.BelowRange,
             targets.MaxTBR
         );
 
@@ -274,7 +278,7 @@ public class StatisticsService : IStatisticsService
 
         assessment.TARAssessment = AssessMaximumTarget(
             "Time Above Range",
-            tir?.VeryHigh + tir?.High,
+            tir?.AboveRange,
             targets.MaxTAR
         );
 
@@ -766,8 +770,7 @@ public class StatisticsService : IStatisticsService
         var median = GlucoseStatistics.Median(sorted);
         var min = sorted[0];
         var max = sorted[count - 1];
-        var standardDeviation = GlucoseStatistics.StandardDeviation(
-            values, mean, VarianceMode.Sample);
+        var standardDeviation = GlucoseStatistics.StandardDeviation(values, mean);
 
         // Percentiles
         var percentiles = new GlucosePercentiles
@@ -854,6 +857,7 @@ public class StatisticsService : IStatisticsService
     /// </summary>
     /// <param name="values">Collection of glucose values</param>
     /// <param name="entries">Collection of glucose entries with timestamps</param>
+    /// <param name="timeZone">Tenant zone that bounds the days of <see cref="CalculateADRR"/>; null is UTC.</param>
     /// <returns>
     /// Comprehensive glycemic variability metrics, or null for fewer than two plausible readings.
     /// The individual metrics have differing data floors; this one governs all of them. Values
@@ -862,7 +866,8 @@ public class StatisticsService : IStatisticsService
     /// </returns>
     public GlycemicVariability? CalculateGlycemicVariability(
         IEnumerable<double> values,
-        IEnumerable<SensorGlucose> entries
+        IEnumerable<SensorGlucose> entries,
+        TimeZoneInfo? timeZone
     )
     {
         var valuesList = values.Where(IsPlausibleReading).ToList();
@@ -872,13 +877,12 @@ public class StatisticsService : IStatisticsService
             return null;
 
         var mean = valuesList.Average();
-        var standardDeviation = GlucoseStatistics.StandardDeviation(
-            valuesList, mean, VarianceMode.Sample);
+        var standardDeviation = GlucoseStatistics.StandardDeviation(valuesList, mean);
         var coefficientOfVariation = (standardDeviation / mean) * 100;
 
         var mage = CalculateMAGE(valuesList);
         var conga = CalculateCONGA(valuesList, 2);
-        var adrr = CalculateADRR(valuesList);
+        var adrr = CalculateADRR(entriesList, timeZone);
         var labilityIndex = CalculateLabilityIndex(entriesList);
         var jIndex = CalculateJIndex(valuesList, mean);
         var hbgi = CalculateHBGI(valuesList);
@@ -983,7 +987,7 @@ public class StatisticsService : IStatisticsService
         if (valuesList.Count < 3)
             return 0;
 
-        var sd = GlucoseStatistics.StandardDeviation(valuesList, VarianceMode.Population);
+        var sd = GlucoseStatistics.StandardDeviation(valuesList);
 
         var excursions = new List<double>();
         string? currentDirection = null;
@@ -1042,14 +1046,24 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <summary>
-    /// Calculate ADRR (Average Daily Risk Range)
+    /// Average Daily Risk Range (Kovatchev et al., Diabetes Care 2006;29:2433): for each tenant-local
+    /// day, the largest hypoglycaemic risk plus the largest hyperglycaemic risk, averaged over every
+    /// day with at least one plausible reading. Zero when there is no such day.
     /// </summary>
-    /// <param name="values">Collection of glucose values</param>
-    /// <returns>ADRR value, or 0 if no data</returns>
-    public double CalculateADRR(IEnumerable<double> values)
+    /// <param name="entries">Glucose entries with timestamps.</param>
+    /// <param name="timeZone">Tenant zone the days are bounded in; null is UTC.</param>
+    public double CalculateADRR(IEnumerable<SensorGlucose> entries, TimeZoneInfo? timeZone)
     {
-        var logTransformed = values.Select(val => Math.Log(val)).ToList();
-        return GlucoseStatistics.StandardDeviation(logTransformed, VarianceMode.Population) * 100;
+        var tz = timeZone ?? TimeZoneInfo.Utc;
+        var dailyRanges = entries
+            .Where(entry => entry.Mills > 0 && IsPlausibleReading(entry))
+            .GroupBy(entry => LocalDay(entry.Mills, tz))
+            .Select(day =>
+                day.Max(entry => KovatchevSidedRisk(entry.Mgdl, keepPositive: false))
+                + day.Max(entry => KovatchevSidedRisk(entry.Mgdl, keepPositive: true)))
+            .ToList();
+
+        return dailyRanges.Count == 0 ? 0 : dailyRanges.Average();
     }
 
     /// <summary>
@@ -1075,7 +1089,7 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <summary>
-    /// Calculate J-Index
+    /// J-Index (Wojcicki, Horm Metab Res 1995;27:41): <c>0.001 * (mean + SD)^2</c> in mg/dL.
     /// </summary>
     /// <param name="values">Collection of glucose values</param>
     /// <param name="mean">Mean glucose value</param>
@@ -1086,12 +1100,8 @@ public class StatisticsService : IStatisticsService
         if (valuesList.Count == 0)
             return 0;
 
-        const double targetMean = 112; // Target glucose level in mg/dL
-        var meanComponent = 0.324 * Math.Pow(mean - targetMean, 2);
-        var variance = GlucoseStatistics.Variance(valuesList, mean, VarianceMode.Population);
-        var variabilityComponent = 0.0018 * variance;
-
-        return meanComponent + variabilityComponent;
+        var sd = GlucoseStatistics.StandardDeviation(valuesList, mean);
+        return 0.001 * Math.Pow(mean + sd, 2);
     }
 
     /// <summary>
@@ -1135,16 +1145,20 @@ public class StatisticsService : IStatisticsService
         if (valuesList.Count == 0)
             return 0;
 
-        var riskSum = valuesList.Sum(glucose =>
-        {
-            var logBG = Math.Log(Math.Max(glucose, KovatchevFloorMgdl));
-            var fBG = 1.509 * (Math.Pow(logBG, 1.084) - 5.381);
+        return valuesList.Sum(glucose => KovatchevSidedRisk(glucose, keepPositive)) / valuesList.Count;
+    }
 
-            var onSide = keepPositive ? fBG > 0 : fBG < 0;
-            return onSide ? 10 * Math.Pow(fBG, 2) : 0;
-        });
+    /// <summary>
+    /// The risk <c>10 * f(BG)^2</c> of one reading in mg/dL when its <c>f(BG)</c> falls on the side
+    /// <paramref name="keepPositive"/> names, else zero. See <see cref="KovatchevRisk"/>.
+    /// </summary>
+    private static double KovatchevSidedRisk(double glucose, bool keepPositive)
+    {
+        var logBG = Math.Log(Math.Max(glucose, KovatchevFloorMgdl));
+        var fBG = 1.509 * (Math.Pow(logBG, 1.084) - 5.381);
 
-        return riskSum / valuesList.Count;
+        var onSide = keepPositive ? fBG > 0 : fBG < 0;
+        return onSide ? 10 * Math.Pow(fBG, 2) : 0;
     }
 
     /// <summary>
@@ -1499,7 +1513,7 @@ public class StatisticsService : IStatisticsService
 
         var mean = values.Average();
         var median = GlucoseStatistics.Median(GlucoseStatistics.Ascending(values));
-        var stdDev = GlucoseStatistics.StandardDeviation(values, mean, VarianceMode.Sample);
+        var stdDev = GlucoseStatistics.StandardDeviation(values, mean);
 
         return new PeriodMetrics
         {
@@ -1547,46 +1561,6 @@ public class StatisticsService : IStatisticsService
 
         return list;
     }
-
-    /// <summary>
-    /// Two sensors worn at once are one stretch of elapsed time, so the windows they were worn in
-    /// are merged rather than added up.
-    /// </summary>
-    private static List<(DateTime Start, DateTime End)> MergeWindows(
-        List<(DateTime Start, DateTime End)> windows)
-    {
-        var merged = new List<(DateTime Start, DateTime End)>();
-        foreach (var window in windows.OrderBy(w => w.Start))
-        {
-            if (merged.Count == 0 || window.Start > merged[^1].End)
-                merged.Add(window);
-            else if (window.End > merged[^1].End)
-                merged[^1] = (merged[^1].Start, window.End);
-        }
-
-        return merged;
-    }
-
-    /// <summary>
-    /// The minutes a set of readings covers when only the readings themselves say how often they
-    /// should arrive: each stream credited its own count of readings at its own cadence. Streams
-    /// are told apart on the identity <c>CanonicalGlucoseStream.Select</c> selects on, because a
-    /// window spanning a switch from a one-minute sensor to a five-minute one holds two cadences.
-    /// A stream's cadence comes from all of its readings even when only some are
-    /// <paramref name="credited"/>, since the gap between two survivors of a filter says nothing
-    /// about how often the sensor reported.
-    /// </summary>
-    private static double DerivedCoverageMinutes(
-        IEnumerable<SensorGlucose> readings,
-        Func<SensorGlucose, bool>? credited = null) =>
-        readings
-            .GroupBy(CanonicalGlucoseStream.StreamKey, StringComparer.Ordinal)
-            .Sum(stream =>
-            {
-                var ordered = InTimeOrder(stream);
-                var count = credited is null ? ordered.Count : ordered.Count(credited);
-                return count * GlucoseCadence.SeriesCadenceMinutes(GlucoseCadence.ReadingIntervals(ordered));
-            });
 
     #endregion
 
@@ -2115,55 +2089,41 @@ public class StatisticsService : IStatisticsService
 
     /// <summary>
     /// Internal building block: calculates bolus-only stats.
-    /// Called by the public StateSpan-inclusive overload which adds basal data on top.
+    /// Called by the public overload which adds basal data on top.
     /// </summary>
     private InsulinDeliveryStatistics CalculateBolusDeliveryStatistics(
         IEnumerable<Bolus> boluses,
+        IEnumerable<Bolus> algorithmBoluses,
         IEnumerable<CarbIntake> carbIntakes,
         DateTime startDate,
         DateTime endDate
     )
     {
-        var bolusList = boluses.ToList();
+        var manualList = CountedBoluses(boluses).ToList();
+        var automaticList = CountedBoluses(algorithmBoluses).ToList();
         var carbList = carbIntakes.ToList();
 
         var dayCount = WindowDays(startDate, endDate);
 
-        // All Bolus records are bolus insulin; basal comes from TempBasals.
-        // This overload only has bolus data, so basal stats will be 0.
-        // Use the TempBasal overload for complete basal/bolus analysis.
-        double totalBolus = 0;
-        int bolusCount = 0;
+        double manualBolus = 0;
         int correctionBoluses = 0;
         int mealBoluses = 0;
         int carbBolusCount = 0;
 
-        // Build a set of bolus Mills that are within 15 minutes of a carb entry
-        // to classify meal vs correction boluses
-        const long mealWindowMs = 15 * 60 * 1000; // 15 minutes
+        const long mealWindowMs = 15 * 60 * 1000;
         var carbTimestamps = carbList.Select(c => c.Mills).ToList();
 
-        foreach (var bolus in CountedBoluses(bolusList))
-        {
-            totalBolus += bolus.Insulin;
-            bolusCount++;
-
-            // Check if this bolus is linked to a carb entry by CorrelationId or time proximity
-            bool isMealBolus = false;
-
-            if (
+        bool IsMealBolus(Bolus bolus) =>
+            (
                 bolus.CorrelationId.HasValue
                 && carbList.Any(c => c.CorrelationId == bolus.CorrelationId)
-            )
-            {
-                isMealBolus = true;
-            }
-            else if (carbTimestamps.Any(ct => Math.Abs(bolus.Mills - ct) <= mealWindowMs))
-            {
-                isMealBolus = true;
-            }
+            ) || carbTimestamps.Any(ct => Math.Abs(bolus.Mills - ct) <= mealWindowMs);
 
-            if (isMealBolus)
+        foreach (var bolus in manualList)
+        {
+            manualBolus += bolus.Insulin;
+
+            if (IsMealBolus(bolus))
             {
                 mealBoluses++;
                 carbBolusCount++;
@@ -2174,41 +2134,36 @@ public class StatisticsService : IStatisticsService
             }
         }
 
-        // Calculate carb totals
+        var automaticBolus = automaticList.Sum(b => b.Insulin);
+        var totalBolus = manualBolus + automaticBolus;
+
         double totalCarbs = carbList.Sum(c => c.Carbs);
         int carbCount = carbList.Count;
 
-        // I:C ratio = grams carbs per unit bolus insulin used for meals
-        double icRatio =
-            mealBoluses > 0 && totalCarbs > 0
-                ? totalCarbs
-                    / bolusList
-                        .Where(b => b.Insulin > 0)
-                        .Where(b =>
-                            (
-                                b.CorrelationId.HasValue
-                                && carbList.Any(c => c.CorrelationId == b.CorrelationId)
-                            ) || carbTimestamps.Any(ct => Math.Abs(b.Mills - ct) <= mealWindowMs)
-                        )
-                        .Sum(b => b.Insulin)
-                : 0;
+        var mealWindowInsulin = manualList.Concat(automaticList).Where(IsMealBolus).Sum(b => b.Insulin);
+        double icRatio = mealWindowInsulin > 0 && totalCarbs > 0 ? totalCarbs / mealWindowInsulin : 0;
 
-        // Without StateSpans, we can only report bolus data
-        var bolusesPerDay = (double)bolusCount / dayCount;
+        var manualCount = manualList.Count;
+        var bolusesPerDay = (double)manualCount / dayCount;
 
         return new InsulinDeliveryStatistics
         {
             TotalBolus = Math.Round(totalBolus * 100) / 100,
-            TotalBasal = 0, // Basal requires TempBasals
+            ManualBolus = Math.Round(manualBolus * 100) / 100,
+            AutomaticBolus = Math.Round(automaticBolus * 100) / 100,
+            TotalBasal = 0,
             TotalInsulin = Math.Round(totalBolus * 100) / 100,
             TotalCarbs = Math.Round(totalCarbs * 10) / 10,
-            BolusCount = bolusCount,
+            ManualBolusCount = manualCount,
+            AutomaticBolusCount = automaticList.Count,
             BasalCount = 0,
-            InsulinEventCount = bolusCount,
+            InsulinEventCount = manualCount + automaticList.Count,
             BasalPercent = 0,
             BolusPercent = totalBolus > 0 ? 100 : 0,
             Tdd = Math.Round(totalBolus / dayCount * 10) / 10,
-            AvgBolus = bolusCount > 0 ? Math.Round(totalBolus / bolusCount * 100) / 100 : 0,
+            ManualBolusPerDay = Math.Round(manualBolus / dayCount * 100) / 100,
+            AutomaticBolusPerDay = Math.Round(automaticBolus / dayCount * 100) / 100,
+            AvgBolus = manualCount > 0 ? Math.Round(manualBolus / manualCount * 100) / 100 : 0,
             MealBoluses = mealBoluses,
             CorrectionBoluses = correctionBoluses,
             IcRatio = Math.Round(icRatio * 10) / 10,
@@ -2222,8 +2177,8 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <summary>
-    /// The boluses that <see cref="InsulinDeliveryStatistics.TotalBolus"/> and
-    /// <see cref="InsulinDeliveryStatistics.BolusCount"/> count: those that delivered insulin.
+    /// The boluses that <see cref="InsulinDeliveryStatistics.TotalBolus"/> and the bolus counts
+    /// count: those that delivered insulin.
     /// </summary>
     public static IEnumerable<Bolus> CountedBoluses(IEnumerable<Bolus> boluses) =>
         boluses.Where(b => b.Insulin > 0);
@@ -2292,9 +2247,9 @@ public class StatisticsService : IStatisticsService
     /// Calculate the insulin delivered (units) for a single TempBasal record.
     /// When <paramref name="effectiveEndMills"/> is provided (from
     /// <see cref="ClipOverlappingTempBasals"/>), it overrides the record's declared end.
-    /// Otherwise falls back to <c>EndMills ?? StartMills + 5 min</c>.
+    /// Otherwise falls back to <c>EndMills ?? StartMills + 5 min</c>. Null when the rate is unknown.
     /// </summary>
-    internal static double GetTempBasalInsulin(TempBasal tb, long? effectiveEndMills = null)
+    internal static double? GetTempBasalInsulin(TempBasal tb, long? effectiveEndMills = null)
     {
         var endMills = effectiveEndMills ?? tb.EndMills ?? tb.StartMills + (5 * 60 * 1000);
         var durationHours = (endMills - tb.StartMills) / (1000.0 * 60 * 60);
@@ -2302,7 +2257,8 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <summary>
-    /// Calculate comprehensive insulin delivery statistics using TempBasals and algorithm boluses for basal data.
+    /// Calculate comprehensive insulin delivery statistics. Algorithm boluses are bolus insulin;
+    /// basal comes from TempBasals and basal injections.
     /// </summary>
     public InsulinDeliveryStatistics CalculateInsulinDeliveryStatistics(
         IEnumerable<Bolus> boluses,
@@ -2314,8 +2270,8 @@ public class StatisticsService : IStatisticsService
         IEnumerable<BasalInjection>? basalInjections = null
     )
     {
-        // Start with bolus-based calculation (includes carb stats)
-        var stats = CalculateBolusDeliveryStatistics(boluses, carbIntakes, startDate, endDate);
+        var stats = CalculateBolusDeliveryStatistics(
+            boluses, algorithmBoluses, carbIntakes, startDate, endDate);
 
         // Delivered basal splits into scheduled and additional. A temp below the scheduled rate
         // reduces the scheduled part only; a temp above it contributes the excess to additional.
@@ -2326,8 +2282,7 @@ public class StatisticsService : IStatisticsService
         var tempBasalCount = 0;
         foreach (var (tb, effectiveEndMills) in ClipOverlappingTempBasals(tempBasals))
         {
-            var insulin = GetTempBasalInsulin(tb, effectiveEndMills);
-            if (insulin <= 0)
+            if (GetTempBasalInsulin(tb, effectiveEndMills) is not { } insulin || insulin <= 0)
                 continue;
             tempBasalInsulin += insulin;
             tempBasalCount++;
@@ -2351,12 +2306,6 @@ public class StatisticsService : IStatisticsService
             }
         }
 
-        var algorithmBolusList = algorithmBoluses.ToList();
-        var algorithmBolusInsulin = algorithmBolusList.Sum(ab => ab.Insulin);
-
-        // Algorithm (micro) boluses are additional basal above scheduled
-        additionalBasalInsulin += algorithmBolusInsulin;
-
         // Sum basal injections (MDI long-acting insulin) — these are scheduled baseline coverage
         var basalInjectionInsulin = 0.0;
         var basalInjectionCount = 0;
@@ -2373,7 +2322,7 @@ public class StatisticsService : IStatisticsService
         }
         scheduledBasalInsulin += basalInjectionInsulin;
 
-        var totalBasal = tempBasalInsulin + algorithmBolusInsulin + basalInjectionInsulin;
+        var totalBasal = tempBasalInsulin + basalInjectionInsulin;
         var totalInsulin = stats.TotalBolus + totalBasal;
 
         stats.TotalBasal = Math.Round(totalBasal * 100) / 100;
@@ -2381,22 +2330,22 @@ public class StatisticsService : IStatisticsService
         stats.AdditionalBasal = Math.Round(additionalBasalInsulin * 100) / 100;
         stats.TotalInsulin = Math.Round(totalInsulin * 100) / 100;
         stats.Tdd = Math.Round(totalInsulin / stats.WindowDays * 10) / 10;
+        stats.TotalBasalPerDay = Math.Round(totalBasal / stats.WindowDays * 100) / 100;
         stats.BasalPercent =
             totalInsulin > 0 ? Math.Round(totalBasal / totalInsulin * 100 * 10) / 10 : 0;
         stats.BolusPercent =
             totalInsulin > 0 ? Math.Round(stats.TotalBolus / totalInsulin * 100 * 10) / 10 : 0;
-        stats.MicroBolusCount = algorithmBolusList.Count;
-        stats.MicroBolusInsulin = Math.Round(algorithmBolusInsulin * 100) / 100;
         stats.BasalInjectionInsulin = Math.Round(basalInjectionInsulin * 100) / 100;
         stats.BasalInjectionCount = basalInjectionCount;
         stats.BasalCount = tempBasalCount + basalInjectionCount;
-        stats.InsulinEventCount = stats.BolusCount + stats.MicroBolusCount + stats.BasalCount;
+        stats.InsulinEventCount =
+            stats.ManualBolusCount + stats.AutomaticBolusCount + stats.BasalCount;
 
         return stats;
     }
 
     /// <summary>
-    /// Calculate daily basal/bolus ratio breakdown using TempBasals and algorithm boluses for basal data
+    /// Calculate daily basal/bolus ratio breakdown. Algorithm boluses count as bolus, alongside manual boluses.
     /// </summary>
     public DailyBasalBolusRatioResponse CalculateDailyBasalBolusRatios(
         IEnumerable<Bolus> boluses,
@@ -2408,41 +2357,41 @@ public class StatisticsService : IStatisticsService
     {
         var tz = userTimeZone ?? TimeZoneInfo.Utc;
         var bolusList = boluses.ToList();
-        var dailyData = new Dictionary<string, (double Basal, double Bolus)>();
+        var dailyData = new Dictionary<string, (double Basal, double Manual, double Automatic)>();
 
-        void Accumulate(long mills, double basal, double bolus)
+        void Accumulate(long mills, double basal, double manual, double automatic)
         {
             var dateKey = MillsToLocalDateString(mills, tz);
             dailyData.TryGetValue(dateKey, out var current);
-            dailyData[dateKey] = (current.Basal + basal, current.Bolus + bolus);
+            dailyData[dateKey] = (
+                current.Basal + basal,
+                current.Manual + manual,
+                current.Automatic + automatic);
         }
 
-        // Process boluses (all Bolus records are bolus insulin)
         foreach (var bolus in bolusList)
         {
             if (bolus.Insulin <= 0 || bolus.Mills <= 0)
                 continue;
 
-            Accumulate(bolus.Mills, 0, bolus.Insulin);
+            Accumulate(bolus.Mills, 0, bolus.Insulin, 0);
         }
 
         // Process TempBasals — clip overlapping records (loop systems write every ~5 min with longer declared duration)
         foreach (var (tb, effectiveEndMills) in ClipOverlappingTempBasals(tempBasals))
         {
-            var basalInsulin = GetTempBasalInsulin(tb, effectiveEndMills);
-            if (basalInsulin <= 0)
+            if (GetTempBasalInsulin(tb, effectiveEndMills) is not { } basalInsulin || basalInsulin <= 0)
                 continue;
 
-            Accumulate(tb.StartMills, basalInsulin, 0);
+            Accumulate(tb.StartMills, basalInsulin, 0, 0);
         }
 
-        // Process algorithm boluses (basal side)
         foreach (var ab in algorithmBoluses)
         {
             if (ab.Insulin <= 0 || ab.Mills <= 0)
                 continue;
 
-            Accumulate(ab.Mills, ab.Insulin, 0);
+            Accumulate(ab.Mills, 0, 0, ab.Insulin);
         }
 
         // Process basal injections (MDI long-acting insulin — treated as basal)
@@ -2453,7 +2402,7 @@ public class StatisticsService : IStatisticsService
                 if (bi.Units <= 0)
                     continue;
 
-                Accumulate(bi.Mills, bi.Units, 0);
+                Accumulate(bi.Mills, bi.Units, 0, 0);
             }
         }
 
@@ -2470,7 +2419,8 @@ public class StatisticsService : IStatisticsService
 
         foreach (var dateKey in sortedDates)
         {
-            var (basal, bolus) = dailyData[dateKey];
+            var (basal, manual, automatic) = dailyData[dateKey];
+            var bolus = manual + automatic;
             var total = basal + bolus;
             var basalPercent = total > 0 ? (basal / total) * 100 : 0;
             var bolusPercent = total > 0 ? (bolus / total) * 100 : 0;
@@ -2486,6 +2436,8 @@ public class StatisticsService : IStatisticsService
                     DisplayDate = displayDate,
                     Basal = Math.Round(basal * 100) / 100,
                     Bolus = Math.Round(bolus * 100) / 100,
+                    ManualBolus = Math.Round(manual * 100) / 100,
+                    AutomaticBolus = Math.Round(automatic * 100) / 100,
                     Total = Math.Round(total * 100) / 100,
                     BasalPercent = Math.Round(basalPercent * 10) / 10,
                     BolusPercent = Math.Round(bolusPercent * 10) / 10,
@@ -2508,7 +2460,7 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <summary>
-    /// Calculate comprehensive basal analysis statistics using TempBasals and algorithm boluses.
+    /// Calculate comprehensive basal analysis statistics from TempBasals.
     /// Hourly percentiles are computed by duration-weighted overlap of each TempBasal's interval
     /// with each <paramref name="userTimeZone"/>-local hour-of-day bucket: a TempBasal that runs
     /// 13:55–14:25 local contributes 5 minutes to bucket 13 and 25 minutes to bucket 14. When
@@ -2516,7 +2468,6 @@ public class StatisticsService : IStatisticsService
     /// </summary>
     public BasalAnalysisResponse CalculateBasalAnalysis(
         IEnumerable<TempBasal> tempBasals,
-        IEnumerable<Bolus> algorithmBoluses,
         DateTime startDate,
         DateTime endDate,
         TimeZoneInfo? userTimeZone = null
@@ -2543,9 +2494,10 @@ public class StatisticsService : IStatisticsService
             if (effectiveEndMills <= tb.StartMills)
                 continue;
 
-            var rate = tb.Rate;
+            if (tb.Rate is not { } rate)
+                continue;
             allRates.Add(rate);
-            totalDelivered += GetTempBasalInsulin(tb, effectiveEndMills);
+            totalDelivered += GetTempBasalInsulin(tb, effectiveEndMills) ?? 0;
 
             DistributeAcrossHourOfDay(tb.StartMills, effectiveEndMills, rate, tz, hourlyRates);
 
@@ -2564,9 +2516,6 @@ public class StatisticsService : IStatisticsService
                 }
             }
         }
-
-        foreach (var ab in algorithmBoluses)
-            totalDelivered += ab.Insulin;
 
         var basalStats = new BasalStats
         {
@@ -2628,13 +2577,15 @@ public class StatisticsService : IStatisticsService
         DateTime startDate,
         DateTime endDate,
         TimeZoneInfo? userTimeZone = null,
-        IEnumerable<BasalInjection>? basalInjections = null)
+        IEnumerable<BasalInjection>? basalInjections = null,
+        IEnumerable<BasalSegment>? profileBasalSegments = null)
     {
         var tz = userTimeZone ?? TimeZoneInfo.Utc;
 
         var scheduledBasal = new double[24];
         var tempBasal = new double[24];
-        var bolus = new double[24];
+        var manualBolus = new double[24];
+        var automaticBolus = new double[24];
         var counts = new int[24];
 
         // Basal and bolus averages get separate denominators: profile-derived
@@ -2645,7 +2596,7 @@ public class StatisticsService : IStatisticsService
 
         foreach (var (tb, effectiveEndMills) in ClipOverlappingTempBasals(tempBasals))
         {
-            if (effectiveEndMills <= tb.StartMills)
+            if (effectiveEndMills <= tb.StartMills || tb.Rate is not { } rate)
                 continue;
 
             // Categorize whole segments by origin: what was delivered while a
@@ -2655,25 +2606,24 @@ public class StatisticsService : IStatisticsService
                 : tempBasal;
 
             DistributeInsulinAcrossHourOfDay(
-                tb.StartMills, effectiveEndMills, tb.Rate, tz, target, basalDays);
+                tb.StartMills, effectiveEndMills, rate, tz, target, basalDays);
             counts[LocalHourOfDay(tb.StartMills, tz)]++;
         }
 
         foreach (var b in boluses.Where(b => b.Insulin > 0))
         {
             var hour = LocalHourOfDay(b.Mills, tz);
-            bolus[hour] += b.Insulin;
+            manualBolus[hour] += b.Insulin;
             counts[hour]++;
             bolusDays.Add(LocalDay(b.Mills, tz));
         }
 
-        // Algorithm micro-boluses are basal-replacement doses above schedule
         foreach (var ab in algorithmBoluses.Where(ab => ab.Insulin > 0))
         {
             var hour = LocalHourOfDay(ab.Mills, tz);
-            tempBasal[hour] += ab.Insulin;
+            automaticBolus[hour] += ab.Insulin;
             counts[hour]++;
-            basalDays.Add(LocalDay(ab.Mills, tz));
+            bolusDays.Add(LocalDay(ab.Mills, tz));
         }
 
         // Long-acting basal injections (MDI) provide baseline coverage across their duration
@@ -2693,6 +2643,17 @@ public class StatisticsService : IStatisticsService
             counts[LocalHourOfDay(bi.Mills, tz)]++;
         }
 
+        var profileUnits = new double[24];
+        var profileHours = new double[24];
+        foreach (var segment in profileBasalSegments ?? [])
+        {
+            DistributeAcrossLocalHours(segment.StartMills, segment.EndMills, tz, (localStart, sliceMs) =>
+            {
+                profileUnits[localStart.Hour] += segment.UnitsPerHour * sliceMs / HourMs;
+                profileHours[localStart.Hour] += (double)sliceMs / HourMs;
+            });
+        }
+
         // Average each component over the days that actually have its data, not
         // the requested window: a period extending before the first record must
         // not dilute (or, combined with gap-fill, distort) the daily pattern.
@@ -2700,20 +2661,30 @@ public class StatisticsService : IStatisticsService
         var bolusDayCount = Math.Max(1, bolusDays.Count);
 
         var hours = new List<HourlyInsulinDeliveryPoint>(24);
+        var exactBasal = new double[24];
+        var exactTotal = new double[24];
         for (int hour = 0; hour < 24; hour++)
         {
+            exactBasal[hour] = (scheduledBasal[hour] + tempBasal[hour]) / basalDayCount;
+            exactTotal[hour] = exactBasal[hour]
+                + (manualBolus[hour] + automaticBolus[hour]) / bolusDayCount;
             var avgScheduled = Math.Round(scheduledBasal[hour] / basalDayCount * 100) / 100;
             var avgTemp = Math.Round(tempBasal[hour] / basalDayCount * 100) / 100;
-            var avgBolus = Math.Round(bolus[hour] / bolusDayCount * 100) / 100;
+            var avgManual = Math.Round(manualBolus[hour] / bolusDayCount * 100) / 100;
+            var avgAutomatic = Math.Round(automaticBolus[hour] / bolusDayCount * 100) / 100;
             hours.Add(new HourlyInsulinDeliveryPoint
             {
                 Hour = hour,
                 ScheduledBasal = avgScheduled,
                 TempBasal = avgTemp,
                 Basal = Math.Round((avgScheduled + avgTemp) * 100) / 100,
-                Bolus = avgBolus,
-                Total = Math.Round((avgScheduled + avgTemp + avgBolus) * 100) / 100,
+                ManualBolus = avgManual,
+                AutomaticBolus = avgAutomatic,
+                Total = Math.Round((avgScheduled + avgTemp + avgManual + avgAutomatic) * 100) / 100,
                 Count = counts[hour],
+                ProfileBasalRate = profileHours[hour] > 0
+                    ? Math.Round(profileUnits[hour] / profileHours[hour] * 100) / 100
+                    : 0,
             });
         }
 
@@ -2723,9 +2694,37 @@ public class StatisticsService : IStatisticsService
         return new HourlyInsulinDeliveryResponse
         {
             Hours = hours,
+            TotalDeliveryPeriods = BuildPeriodBreakdown(exactTotal),
+            BasalPeriods = BuildPeriodBreakdown(exactBasal),
             DaysWithData = allDays.Count,
             StartDate = startDate.ToString("yyyy-MM-dd"),
             EndDate = endDate.ToString("yyyy-MM-dd"),
+        };
+    }
+
+    /// <summary>
+    /// Takes the unrounded hourly averages: summing the rounded points would drift by up to half a
+    /// hundredth per hour. Rounds once, at each block.
+    /// </summary>
+    private static InsulinDeliveryPeriodBreakdown BuildPeriodBreakdown(double[] hourly)
+    {
+        var morning = hourly[6..12].Sum();
+        var afternoon = hourly[12..18].Sum();
+        var eveningNight = hourly[18..].Sum() + hourly[..6].Sum();
+        var daily = morning + afternoon + eveningNight;
+
+        static InsulinDeliveryPeriodTotal Period(double units, double daily) => new()
+        {
+            Units = Math.Round(units * 100) / 100,
+            Percent = daily > 0 ? Math.Round(units / daily * 1000) / 10 : 0,
+        };
+
+        return new InsulinDeliveryPeriodBreakdown
+        {
+            Morning = Period(morning, daily),
+            Afternoon = Period(afternoon, daily),
+            EveningNight = Period(eveningNight, daily),
+            DailyTotal = Math.Round(daily * 100) / 100,
         };
     }
 
@@ -2990,7 +2989,7 @@ public class StatisticsService : IStatisticsService
 
         var basicStats = CalculateBasicStats(glucoseValues);
         var timeInRange = CalculateTimeInRange(sortedEntries, config.Thresholds);
-        var glycemicVariability = CalculateGlycemicVariability(glucoseValues, sortedEntries);
+        var glycemicVariability = CalculateGlycemicVariability(glucoseValues, sortedEntries, timeZone);
         var dataQuality = AssessDataQuality(sortedEntries, startDate, endDate, deviceEvents);
 
         var timeStart = sortedEntries.FirstOrDefault()?.Mills ?? 0;
@@ -3036,7 +3035,7 @@ public class StatisticsService : IStatisticsService
         double streamSpanMinutes = 0;
 
         // A gap is owed against the cadence of the stream it falls in, told apart as
-        // DerivedCoverageMinutes tells streams apart.
+        // CalculateCgmActivePercent tells streams apart.
         foreach (var stream in entries.GroupBy(CanonicalGlucoseStream.StreamKey, StringComparer.Ordinal))
         {
             var readings = stream.ToList();
@@ -3105,14 +3104,11 @@ public class StatisticsService : IStatisticsService
         var periodStart = reportStart ?? entries.Min(reading => reading.Timestamp);
         var periodEnd = reportEnd ?? entries.Max(reading => reading.Timestamp);
 
-        double coveredMinutes;
-        double periodMinutes;
+        var cadences = new Dictionary<Guid, double>();
+        var windows = new List<(DateTime Start, DateTime End)>();
 
         if (cgmDevices is { Count: > 0 })
         {
-            var cadences = new Dictionary<Guid, double>();
-            var windows = new List<(DateTime Start, DateTime End)>();
-
             foreach (var device in cgmDevices)
             {
                 var windowStart =
@@ -3124,38 +3120,43 @@ public class StatisticsService : IStatisticsService
                 windows.Add((windowStart, windowEnd));
                 cadences[device.DeviceId] = device.CadenceMinutes ?? GlucoseCadence.DefaultCadenceMinutes;
             }
-
-            var period = MergeWindows(windows);
-            periodMinutes = period.Sum(window => (window.End - window.Start).TotalMinutes);
-
-            bool InPeriod(SensorGlucose reading) =>
-                period.Any(window =>
-                    reading.Timestamp >= window.Start && reading.Timestamp <= window.End);
-
-            coveredMinutes =
-                entries.Sum(reading =>
-                    InPeriod(reading)
-                    && reading.PatientDeviceId is { } id
-                    && cadences.TryGetValue(id, out var cadence)
-                        ? cadence
-                        : 0)
-                + DerivedCoverageMinutes(
-                    entries.Where(reading =>
-                        reading.PatientDeviceId is not { } id || !cadences.ContainsKey(id)),
-                    InPeriod);
         }
         else
         {
-            periodMinutes = (periodEnd - periodStart).TotalMinutes;
-            coveredMinutes = DerivedCoverageMinutes(entries);
+            windows.Add((periodStart, periodEnd));
         }
 
+        var period = IntervalUnion.Merge(windows);
+        var periodMinutes = period.Sum(window => (window.End - window.Start).TotalMinutes);
         if (periodMinutes <= 0)
             return null;
 
-        // A reading credited a cadence longer than the gap it stood for — a catalogue figure the
-        // device beats, or a median read low — can carry coverage past the period.
-        return Math.Min(coveredMinutes / periodMinutes * 100.0, 100.0);
+        var credited = new List<(DateTime Start, DateTime End)>(entries.Count);
+        foreach (var stream in entries.GroupBy(CanonicalGlucoseStream.StreamKey, StringComparer.Ordinal))
+        {
+            var ordered = InTimeOrder(stream);
+            var cadence = TimeSpan.FromMinutes(
+                ordered[0].PatientDeviceId is { } id && cadences.TryGetValue(id, out var registered)
+                    ? registered
+                    : GlucoseCadence.SeriesCadenceMinutes(GlucoseCadence.ReadingIntervals(ordered)));
+
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var start = ordered[i].Timestamp;
+                var end = start + cadence;
+                if (i + 1 < ordered.Count && ordered[i + 1].Timestamp < end)
+                    end = ordered[i + 1].Timestamp;
+
+                foreach (var window in period)
+                {
+                    credited.Add((
+                        start > window.Start ? start : window.Start,
+                        end < window.End ? end : window.End));
+                }
+            }
+        }
+
+        return IntervalUnion.Length(credited).TotalMinutes / periodMinutes * 100.0;
     }
 
     #endregion
@@ -3305,7 +3306,7 @@ public class StatisticsService : IStatisticsService
 
             var sorted = GlucoseStatistics.Ascending(values);
             var mean = values.Average();
-            var stdDev = GlucoseStatistics.StandardDeviation(values, mean, VarianceMode.Population);
+            var stdDev = GlucoseStatistics.StandardDeviation(values, mean);
 
             dataPoints.Add(
                 new SiteChangeImpactDataPoint
@@ -3350,16 +3351,8 @@ public class StatisticsService : IStatisticsService
                 (double)afterValues.Count(v => v >= GlucoseConstants.TargetBottomMgdl && v <= GlucoseConstants.TargetTopMgdl) / afterValues.Count * 100;
 
             // Calculate CV (coefficient of variation)
-            var stdDevBefore = GlucoseStatistics.StandardDeviation(
-                beforeValues,
-                avgBefore,
-                VarianceMode.Population
-            );
-            var stdDevAfter = GlucoseStatistics.StandardDeviation(
-                afterValues,
-                avgAfter,
-                VarianceMode.Population
-            );
+            var stdDevBefore = GlucoseStatistics.StandardDeviation(beforeValues, avgBefore);
+            var stdDevAfter = GlucoseStatistics.StandardDeviation(afterValues, avgAfter);
             var cvBefore = avgBefore > 0 ? (stdDevBefore / avgBefore) * 100 : 0;
             var cvAfter = avgAfter > 0 ? (stdDevAfter / avgAfter) * 100 : 0;
 

@@ -39,7 +39,6 @@
   } from "$lib/utils/metric-color-focus";
   import { onMount, untrack, tick } from "svelte";
   import { fade } from "svelte/transition";
-  import { getWeekColumns } from "$lib/components/reports/year-overview/week-columns";
   import { YearLoader } from "$lib/components/reports/year-overview/year-loader";
   import { toggled } from "$lib/utils/collections";
   import {
@@ -795,7 +794,6 @@
             {transformYearData}
             {getCellFill}
             {getCellHatch}
-            {getWeekColumns}
             {navigateToDayInReview}
             {glucoseColorScale}
             {units}

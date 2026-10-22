@@ -86,6 +86,7 @@ const pageData: HarnessProps["data"] = {
   displayPreferences: [],
   displayLanguage: "en",
   serverPreferences: null,
+  tenantPreferences: null,
   user: {
     subjectId: "subject-1",
     name: "Test User",

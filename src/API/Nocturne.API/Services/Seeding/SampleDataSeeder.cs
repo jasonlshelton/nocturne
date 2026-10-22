@@ -641,6 +641,22 @@ public class SampleDataSeeder
         return (rulesCreated, excursionsCreated);
     }
 
+    internal static FoodEntity BuildFood(DemoLifestyleSeeds.FoodSeed seed, Guid tenantId, int position) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        TenantId = tenantId,
+        Name = seed.Name,
+        Category = seed.Category,
+        Subcategory = seed.Subcategory,
+        Portion = seed.Portion,
+        Unit = seed.Unit,
+        Carbs = seed.Carbs,
+        Protein = seed.Protein,
+        Fat = seed.Fat,
+        Energy = seed.EnergyKilojoules,
+        Position = position,
+    };
+
     /// <summary>
     /// The food library (found-or-created by name), favorites for the owner,
     /// and per-meal food attribution lines linking library foods to the carb
@@ -661,21 +677,7 @@ public class SampleDataSeeder
             var food = await db.Foods.FirstOrDefaultAsync(f => f.Name == seed.Name, ct);
             if (food is null)
             {
-                food = new FoodEntity
-                {
-                    Id = Guid.CreateVersion7(),
-                    TenantId = db.TenantId,
-                    Name = seed.Name,
-                    Category = seed.Category,
-                    Subcategory = seed.Subcategory,
-                    Portion = seed.Portion,
-                    Unit = seed.Unit,
-                    Carbs = seed.Carbs,
-                    Protein = seed.Protein,
-                    Fat = seed.Fat,
-                    Energy = seed.Energy,
-                    Position = position,
-                };
+                food = BuildFood(seed, db.TenantId, position);
                 db.Foods.Add(food);
                 created++;
             }

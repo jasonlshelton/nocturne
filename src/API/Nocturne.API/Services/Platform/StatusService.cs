@@ -44,7 +44,7 @@ public class StatusService : IStatusService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ITenantAccessor _tenantAccessor;
     private readonly PublicAccessCacheService _publicAccessCacheService;
-    private readonly IShareAppearanceReader _appearanceReader;
+    private readonly ITenantAppearanceReader _appearanceReader;
     private readonly IGlucoseStatusClassifier _thresholdClassifier;
     private readonly ICategoryReadContext _categoryReadContext;
     private readonly ILogger<StatusService> _logger;
@@ -74,7 +74,7 @@ public class StatusService : IStatusService
         IHttpContextAccessor httpContextAccessor,
         ITenantAccessor tenantAccessor,
         PublicAccessCacheService publicAccessCacheService,
-        IShareAppearanceReader appearanceReader,
+        ITenantAppearanceReader appearanceReader,
         IGlucoseStatusClassifier thresholdClassifier,
         ICategoryReadContext categoryReadContext,
         ILogger<StatusService> logger
@@ -417,7 +417,7 @@ public class StatusService : IStatusService
         var settings = new Dictionary<string, object>();
 
         // Core display settings
-        var appearance = await _appearanceReader.GetSharedAppearanceAsync(_tenantAccessor.TenantId);
+        var appearance = await _appearanceReader.GetTenantAppearanceAsync(_tenantAccessor.TenantId);
         settings["units"] = appearance.GlucoseUnits ?? "mg/dl";
         settings["timeFormat"] = _configuration.GetValue<int>("Display:TimeFormat", 12);
         settings["dayStart"] = _configuration.GetValue<int>("Display:DayStart", 7);

@@ -29,7 +29,7 @@ public class AlexaService : IAlexaService
     private readonly IPropertiesService _properties;
     private readonly IDDataService _ddata;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IShareAppearanceReader _appearanceReader;
+    private readonly ITenantAppearanceReader _appearanceReader;
     private readonly ITenantAccessor _tenantAccessor;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AlexaService> _logger;
@@ -115,7 +115,7 @@ public class AlexaService : IAlexaService
         IPropertiesService properties,
         IDDataService ddata,
         IHttpContextAccessor httpContextAccessor,
-        IShareAppearanceReader appearanceReader,
+        ITenantAppearanceReader appearanceReader,
         ITenantAccessor tenantAccessor,
         TimeProvider timeProvider,
         ILogger<AlexaService> logger

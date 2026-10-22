@@ -1,3 +1,4 @@
+using Nocturne.Core.Constants;
 using Nocturne.Core.Models;
 
 namespace Nocturne.Services.Demo.Services;
@@ -13,7 +14,10 @@ public static class DemoLifestyleSeeds
     /// <summary>A food library item; carbs/fat/protein per portion in grams.</summary>
     public sealed record FoodSeed(
         string Name, string Category, string Subcategory,
-        double Portion, string Unit, double Carbs, double Protein, double Fat, double Energy);
+        double Portion, string Unit, double Carbs, double Protein, double Fat, double EnergyKcal)
+    {
+        public double EnergyKilojoules => Math.Round(EnergyKcal * NutritionConstants.KilojoulesPerKilocalorie);
+    }
 
     /// <summary>Foods referenced by generated meals, plus a few browsables.</summary>
     public static readonly IReadOnlyList<FoodSeed> FoodLibrary =

@@ -196,9 +196,9 @@ public class ServiceCacheTests
         tenantDbContextFactory
             .Setup(f => f.CreateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => TestDbContextFactory.CreateInMemoryContext());
-        var appearanceReader = new Mock<IShareAppearanceReader>();
+        var appearanceReader = new Mock<ITenantAppearanceReader>();
         appearanceReader
-            .Setup(r => r.GetSharedAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetTenantAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UserDisplayPreferences());
         var statusService = new StatusService(
             mockConfiguration,
@@ -286,9 +286,9 @@ public class ServiceCacheTests
         tenantDbContextFactory
             .Setup(f => f.CreateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => TestDbContextFactory.CreateInMemoryContext());
-        var appearanceReader = new Mock<IShareAppearanceReader>();
+        var appearanceReader = new Mock<ITenantAppearanceReader>();
         appearanceReader
-            .Setup(r => r.GetSharedAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetTenantAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UserDisplayPreferences());
         var statusService = new StatusService(
             mockConfiguration,

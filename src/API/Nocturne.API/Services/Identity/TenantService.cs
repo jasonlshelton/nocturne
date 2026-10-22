@@ -491,14 +491,10 @@ public partial class TenantService : ITenantService
             // Seed bundled known OAuth clients (Trio, xDrip+, etc.)
             await SeedKnownOAuthClientsAsync(context, tenant.Id, token);
 
-            // 2. Resolve the owner subject.
-            // An OAuth account maps to a single subject reused across tenants, so if
-            // this OIDC identity is already linked (a prior signup with the same
-            // account), that subject IS the owner — even when the checkout email
-            // differs from the OAuth email (e.g. a differing Apple Pay email).
-            // Resolving by email first would create a fresh, credential-less owner
-            // and leave the tenant inaccessible. Fall back to an existing subject
-            // with the owner email, then to a new subject.
+            // 2. Resolve the owner subject. An OIDC account maps to one subject reused across
+            // tenants, so an already-linked identity names the owner even when the checkout email
+            // differs. Nothing else does: the owner email is never matched to an existing subject,
+            // since a subject's email proves nothing about who holds the new credential.
             var normalizedIssuer = oidcIdentity?.Issuer.TrimEnd('/');
             var existingIdentity = oidcIdentity is null
                 ? null
@@ -506,16 +502,21 @@ public partial class TenantService : ITenantService
                     x.OidcSubjectId == oidcIdentity.OidcSubjectId
                     && x.Issuer == normalizedIssuer, token);
 
-            var identitySubject = existingIdentity is null
+            var subject = existingIdentity is null
                 ? null
                 : await context.Subjects.FirstOrDefaultAsync(s => s.Id == existingIdentity.SubjectId, token);
-            var emailSubject = await context.Subjects.FirstOrDefaultAsync(s => s.Email == ownerEmail, token);
-            var subject = ChooseOwnerSubject(identitySubject, emailSubject);
             if (subject is null)
             {
+                var ownerId = credential?.SubjectId ?? oidcIdentity?.SubjectId ?? Guid.CreateVersion7();
+                if (await context.Subjects.AnyAsync(s => s.Id == ownerId, token))
+                {
+                    throw new ProvisionConflictException(
+                        $"Subject {ownerId} already exists; a provisioned owner is always a new subject.");
+                }
+
                 subject = new SubjectEntity
                 {
-                    Id = credential?.SubjectId ?? oidcIdentity?.SubjectId ?? Guid.CreateVersion7(),
+                    Id = ownerId,
                     Name = ownerUsername,
                     Username = ownerUsername.ToLowerInvariant(),
                     Email = ownerEmail,
@@ -631,22 +632,6 @@ public partial class TenantService : ITenantService
             _logger.LogWarning("Public system subject not found — skipping public access membership for tenant {TenantId}", tenantId);
         }
     }
-
-
-    /// <summary>
-    /// Chooses the owner subject for a provision from the candidates already resolved
-    /// from the database. An OAuth account maps to a single subject reused across
-    /// tenants, so a subject that already owns the incoming OIDC identity wins over one
-    /// merely matching the owner email — the two can differ (e.g. the checkout uses an
-    /// Apple Pay email while the OAuth account uses another). Preferring the email match
-    /// here would make the tenant owner a fresh, credential-less subject and lock the
-    /// user out of their own instance. Returns null when neither exists, i.e. the caller
-    /// must create a new subject.
-    /// </summary>
-    public static SubjectEntity? ChooseOwnerSubject(
-        SubjectEntity? existingOidcIdentitySubject,
-        SubjectEntity? existingEmailSubject)
-        => existingOidcIdentitySubject ?? existingEmailSubject;
 
     private static TenantDto ToDto(TenantEntity t) =>
         new(t.Id, t.Slug, t.DisplayName, t.IsActive, t.SysCreatedAt);

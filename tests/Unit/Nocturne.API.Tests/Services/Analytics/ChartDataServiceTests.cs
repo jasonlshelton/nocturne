@@ -1684,4 +1684,23 @@ public class ChartDataServiceTests
 
     #endregion
 
+    public class MapTempBasalSpansTests
+    {
+        [Theory]
+        [InlineData(TempBasalOrigin.Manual, 1)]
+        [InlineData(TempBasalOrigin.Algorithm, 0)]
+        public void Only_a_manual_temp_draws_a_temp_basal_band(TempBasalOrigin origin, int bands)
+        {
+            var tempBasal = new TempBasal
+            {
+                Id = Guid.CreateVersion7(),
+                StartTimestamp = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc),
+                EndTimestamp = new DateTime(2026, 8, 1, 12, 30, 0, DateTimeKind.Utc),
+                Rate = 1.2,
+                Origin = origin,
+            };
+
+            ChartDataService.MapTempBasalSpans([tempBasal]).Should().HaveCount(bands);
+        }
+    }
 }

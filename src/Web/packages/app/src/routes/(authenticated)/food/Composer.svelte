@@ -2,9 +2,9 @@
 	import type { Food } from '$api';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import { DEFAULT_PORTION, DEFAULT_GI } from '$lib/components/food';
+	import { DEFAULT_PORTION, DEFAULT_GI, FoodFields } from '$lib/components/food';
 	import { Button } from '$lib/components/ui/button';
-	import FoodFields from './FoodFields.svelte';
+	import { getFoodState } from './food-context.js';
 
 	interface Props {
 		onadd: (food: Food) => Promise<void> | void;
@@ -12,6 +12,7 @@
 	}
 
 	const { onadd, onclose }: Props = $props();
+	const foodState = getFoodState();
 
 	function emptyDraft(): Food {
 		return {
@@ -106,7 +107,7 @@
 		<Button type="button" variant="ghost" size="icon-sm" class="ml-auto" onclick={onclose}><X class="h-3.5 w-3.5" /></Button>
 	</div>
 
-	<FoodFields bind:draft bind:nameRef={nameInput} collapseDetails>
+	<FoodFields bind:draft categories={foodState.categoryMap} bind:nameRef={nameInput} collapseDetails>
 		{#snippet actions()}
 			<div class="flex items-center gap-2">
 				<Button type="submit" variant="outline" size="sm" disabled={!canSave}>Save</Button>

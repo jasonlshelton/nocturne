@@ -78,6 +78,7 @@ function layoutData(overrides: Partial<LayoutData> = {}): LayoutData {
     displayPreferences: [],
     displayLanguage: "en",
     serverPreferences: null,
+    tenantPreferences: null,
     user: {
       subjectId: "subject-1",
       name: "Test User",

@@ -239,7 +239,7 @@ public class DataOverviewService : IDataOverviewService
             cancellationToken
         );
 
-        // Insulin totals (Bolus from Boluses table + Basal from algorithm boluses & TempBasals)
+        // Insulin totals (Bolus from manual and algorithm boluses + Basal from TempBasals)
         await CollectInsulinTotals(
             context,
             startUtc,
@@ -272,7 +272,7 @@ public class DataOverviewService : IDataOverviewService
 
             if (day.TotalBolusUnits.HasValue || day.TotalBasalUnits.HasValue)
             {
-                day.TotalDailyDose = (day.TotalBolusUnits ?? 0) + (day.TotalBasalUnits ?? 0);
+                day.TotalDailyDose = Math.Round((day.TotalBolusUnits ?? 0) + (day.TotalBasalUnits ?? 0), 2);
             }
         }
 
@@ -357,7 +357,7 @@ public class DataOverviewService : IDataOverviewService
             r => r.Timestamp, r => r.Insulin, manualBolusByMonth, tz,
             "Failed to collect manual bolus totals for GRI year {Year}", year, cancellationToken, reads, YearMetricSource.ManualBolus);
 
-        // Algorithm boluses (APS SMBs -> basal)
+        // Algorithm boluses (APS SMBs)
         var algorithmBolusByMonth = new Dictionary<int, double>();
         await AccumulateMonthlyTotalsAsync(
             context.Boluses
@@ -376,7 +376,7 @@ public class DataOverviewService : IDataOverviewService
                 .Where(e => e.Timestamp >= startUtc && e.Timestamp < endUtc && e.Rate > 0)
                 .Where(e => !hasFilter || dataSources!.Contains(e.DataSource!))
                 .ExcludeNonPrimary(context, RecordType.TempBasal)
-                .Select(e => new { StartTimestamp = e.Timestamp, e.Rate, e.EndTimestamp }),
+                .Select(e => new { StartTimestamp = e.Timestamp, Rate = e.Rate ?? 0, e.EndTimestamp }),
             r => r.StartTimestamp,
             r => r.Rate * (r.EndTimestamp.HasValue
                 ? (r.EndTimestamp.Value - r.StartTimestamp).TotalHours
@@ -557,8 +557,9 @@ public class DataOverviewService : IDataOverviewService
             return response;
 
         var isCurrentYear = year == localNow.Year;
-        // Only V4 sensor and meter glucose writes clear a completed year (EHbA1cCacheFamilies);
-        // any other glucose writer's backfill shows once the 14 days run out.
+        // A sensor or meter glucose write through the V4 repositories clears the years its readings
+        // reach (EHbA1cCacheFamilies). Delete-by-source, and the year an update moves a reading out
+        // of, do not clear, so the expiry bounds those.
         var expiry = isCurrentYear ? DateTime.UtcNow.AddHours(1) : DateTime.UtcNow.AddDays(14);
         await _cache.SetAsync(cacheKey, response, expiry, cancellationToken);
 
@@ -838,10 +839,10 @@ public class DataOverviewService : IDataOverviewService
         var daysInMonth = (localMonthEnd - localMonthStart).TotalDays;
 
         double? totalDailyDose = null;
-        manualBolusByMonth.TryGetValue(month, out var totalBolusUnits);
-        algorithmBolusByMonth.TryGetValue(month, out var algorithmBasalUnits);
-        tempBasalByMonth.TryGetValue(month, out var tempBasalUnits);
-        var totalBasalUnits = algorithmBasalUnits + tempBasalUnits;
+        manualBolusByMonth.TryGetValue(month, out var manualBolusUnits);
+        algorithmBolusByMonth.TryGetValue(month, out var algorithmBolusUnits);
+        tempBasalByMonth.TryGetValue(month, out var totalBasalUnits);
+        var totalBolusUnits = manualBolusUnits + algorithmBolusUnits;
 
         if (totalBolusUnits > 0 || totalBasalUnits > 0)
         {
@@ -1018,8 +1019,8 @@ public class DataOverviewService : IDataOverviewService
     }
 
     /// <summary>
-    /// Collects insulin totals from the Boluses table (bolus insulin) and from
-    /// algorithm boluses + TempBasals tables (basal insulin delivery).
+    /// Collects insulin totals from the Boluses table (manual and algorithm boluses) and from
+    /// the TempBasals table (basal insulin delivery).
     /// </summary>
     private async Task CollectInsulinTotals(
         NocturneDbContext context,
@@ -1033,7 +1034,7 @@ public class DataOverviewService : IDataOverviewService
         CancellationToken cancellationToken
     )
     {
-        // Manual bolus records — only user-initiated boluses count as bolus insulin
+        // Manual bolus records
         try
         {
             var bolusRecords = await context
@@ -1070,7 +1071,7 @@ public class DataOverviewService : IDataOverviewService
             _logger.LogWarning(ex, "Failed to collect bolus insulin totals");
         }
 
-        // Algorithm bolus records (APS-delivered SMBs that contribute to basal insulin)
+        // Algorithm bolus records (APS-delivered SMBs)
         try
         {
             var algorithmBolusRecords = await context
@@ -1087,7 +1088,7 @@ public class DataOverviewService : IDataOverviewService
             {
                 var grouped = algorithmBolusRecords
                     .GroupBy(r => TimestampToDate(r.Timestamp, tz))
-                    .Select(g => new { Date = g.Key.ToString("yyyy-MM-dd"), TotalBasal = g.Sum(r => r.Insulin) });
+                    .Select(g => new { Date = g.Key.ToString("yyyy-MM-dd"), BolusUnits = g.Sum(r => r.Insulin) });
 
                 foreach (var group in grouped)
                 {
@@ -1097,8 +1098,8 @@ public class DataOverviewService : IDataOverviewService
                         dayMap[group.Date] = day;
                     }
 
-                    day.TotalBasalUnits = Math.Round(
-                        (day.TotalBasalUnits ?? 0) + group.TotalBasal,
+                    day.TotalBolusUnits = Math.Round(
+                        (day.TotalBolusUnits ?? 0) + group.BolusUnits,
                         2
                     );
                 }
@@ -1106,7 +1107,7 @@ public class DataOverviewService : IDataOverviewService
         }
         catch (Exception ex) when (IsSourceFailure(ex, cancellationToken))
         {
-            _logger.LogWarning(ex, "Failed to collect basal insulin from algorithm boluses");
+            _logger.LogWarning(ex, "Failed to collect bolus insulin from algorithm boluses");
         }
 
         // TempBasal records (pump basal delivery with rate x duration)
@@ -1121,7 +1122,7 @@ public class DataOverviewService : IDataOverviewService
                 .Select(e => new
                 {
                     StartTimestamp = e.Timestamp,
-                    e.Rate,
+                    Rate = e.Rate ?? 0,
                     e.EndTimestamp,
                 })
                 .ReadMetricRowsAsync(reads, YearMetricSource.TempBasal, cancellationToken);

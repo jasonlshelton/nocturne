@@ -119,4 +119,18 @@ public class ProfileActivationLegacyFieldsTests
         activation.RequestedDurationMs.Should().Be(1_800_000);
         activation.TimeshiftMs.Should().Be(-7_200_000);
     }
+
+    [Fact]
+    public void TheMomentAPersonEndedACareportalSwitchIsNotServedAsATreatmentField()
+    {
+        var activation = ProfileActivationLegacyFields.FromSpanMetadata(Stored(
+            """{"profileName":"Rhys","percentage":100,"enteredBy":"Rhys","notes":"sick day"}"""), Start);
+        activation.EndedAt = Start.AddHours(1);
+        activation.EndedBy = "Rhys";
+
+        var metadata = ProfileActivationLegacyFields.ToSpanMetadata(activation);
+
+        metadata.Keys.Should().NotContain(k => k.StartsWith("ended", StringComparison.OrdinalIgnoreCase));
+        metadata.Should().ContainKey(LegacyTreatmentTables.NotesKey);
+    }
 }

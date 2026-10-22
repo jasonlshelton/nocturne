@@ -29,6 +29,12 @@ public abstract class BaseV3Controller<T> : ControllerBase
     protected readonly IDocumentProcessingService _documentProcessingService;
     protected readonly ILogger _logger;
 
+    /// <summary>
+    /// The most documents a V3 search returns, and the page size when no <c>limit</c> is given,
+    /// as Nightscout's <c>API3_MAX_LIMIT</c> does.
+    /// </summary>
+    protected const int MaxLimit = 1_000;
+
     private static readonly JsonSerializerOptions DocumentOptions = NightscoutJsonOptions.Create();
 
     /// <summary>
@@ -56,7 +62,7 @@ public abstract class BaseV3Controller<T> : ControllerBase
     {
         var query = HttpContext.Request.Query;
 
-        var rawLimit = ParseIntParameter(query, "limit", 100);
+        var rawLimit = ParseIntParameter(query, "limit", MaxLimit);
 
         // Nightscout V3 API returns 400 for negative limit with "Parameter limit out of tolerance"
         if (readSort && rawLimit < 0)
@@ -84,11 +90,10 @@ public abstract class BaseV3Controller<T> : ControllerBase
         }
 
         // Validate limits to prevent abuse
-        const int MaxEntriesLimit = 1_000; // Align with Nightscout API v3 legacy limit
         if (parameters.Limit < 1)
             parameters.Limit = 1;
-        if (parameters.Limit > MaxEntriesLimit)
-            parameters.Limit = MaxEntriesLimit;
+        if (parameters.Limit > MaxLimit)
+            parameters.Limit = MaxLimit;
         if (parameters.Offset < 0)
             parameters.Offset = 0;
 

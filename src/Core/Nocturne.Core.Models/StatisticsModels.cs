@@ -134,7 +134,15 @@ public class GlycemicVariability
     public double EstimatedA1c { get; set; }
 
     public A1cDisplayValue EstimatedA1cDisplay => A1cDisplayValue.FromPercent(EstimatedA1c);
-    public A1cDisplayValue A1cTarget => A1cDisplayValue.FromPercent(7);
+    public A1cDisplayValue A1cTarget => A1cDisplayValue.FromPercent(GlucoseConstants.A1cTargetPercent);
+
+    /// <summary>
+    /// Judged per unit on the value as displayed in that unit, so each state agrees with the figure
+    /// shown in its own unit.
+    /// </summary>
+    public A1cTargetState EstimatedA1cMeetsTarget => A1cTargetState.Below(EstimatedA1cDisplay, A1cTarget);
+
+    public double CoefficientOfVariationTarget => GlucoseConstants.CoefficientOfVariationTargetPercent;
 
     /// <summary>
     /// Glucose Management Indicator - modern replacement for estimated A1c
@@ -182,9 +190,9 @@ public class GlycemicThresholds
     public double TightTargetBottom { get; set; } = GlucoseConstants.TargetBottomMgdl;
 
     /// <summary>
-    /// Tight target range top threshold (default: 140 mg/dL)
+    /// Tight target range top threshold (defaults to <see cref="GlucoseConstants.TightTargetTopMgdl"/>)
     /// </summary>
-    public double TightTargetTop { get; set; } = 140;
+    public double TightTargetTop { get; set; } = GlucoseConstants.TightTargetTopMgdl;
 
     /// <summary>
     /// Threshold for high glucose (defaults to <see cref="GlucoseConstants.TargetTopMgdl"/>)
@@ -277,6 +285,16 @@ public class TimeInRangePercentages
     /// Percentage of time in very high range (greater than 250 mg/dL)
     /// </summary>
     public double VeryHigh { get; set; }
+
+    /// <summary>
+    /// Percentage of time below the target range: very low plus low
+    /// </summary>
+    public double BelowRange => VeryLow + Low;
+
+    /// <summary>
+    /// Percentage of time above the target range: high plus very high
+    /// </summary>
+    public double AboveRange => High + VeryHigh;
 }
 
 /// <summary>
@@ -1075,7 +1093,7 @@ public class ClinicalTargets
                 MaxTBRVeryLow = 1,
                 MaxTAR = 25,
                 MaxTARVeryHigh = 5,
-                TargetCV = 36,
+                TargetCV = GlucoseConstants.CoefficientOfVariationTargetPercent,
                 TargetLow = GlucoseConstants.TargetBottomMgdl,
                 TargetHigh = GlucoseConstants.TargetTopMgdl,
             },
@@ -1086,7 +1104,7 @@ public class ClinicalTargets
                 MaxTBRVeryLow = 1,
                 MaxTAR = 25,
                 MaxTARVeryHigh = 5,
-                TargetCV = 36,
+                TargetCV = GlucoseConstants.CoefficientOfVariationTargetPercent,
                 TargetLow = GlucoseConstants.TargetBottomMgdl,
                 TargetHigh = GlucoseConstants.TargetTopMgdl,
             },
@@ -1097,7 +1115,7 @@ public class ClinicalTargets
                 MaxTBRVeryLow = 0,
                 MaxTAR = 50,
                 MaxTARVeryHigh = 10,
-                TargetCV = 36,
+                TargetCV = GlucoseConstants.CoefficientOfVariationTargetPercent,
                 TargetLow = GlucoseConstants.TargetBottomMgdl,
                 TargetHigh = GlucoseConstants.TargetTopMgdl,
             },
@@ -1108,7 +1126,7 @@ public class ClinicalTargets
                 MaxTBRVeryLow = 1,
                 MaxTAR = 25,
                 MaxTARVeryHigh = 5,
-                TargetCV = 36,
+                TargetCV = GlucoseConstants.CoefficientOfVariationTargetPercent,
                 TargetLow = 63,
                 TargetHigh = 140,
             },
@@ -1119,7 +1137,7 @@ public class ClinicalTargets
                 MaxTBRVeryLow = 1,
                 MaxTAR = 25,
                 MaxTARVeryHigh = 5,
-                TargetCV = 36,
+                TargetCV = GlucoseConstants.CoefficientOfVariationTargetPercent,
                 TargetLow = 63,
                 TargetHigh = 140,
             },
@@ -1533,12 +1551,24 @@ public class SiteChangeImpactSummary
 public class InsulinDeliveryStatistics
 {
     /// <summary>
-    /// Total bolus insulin in units for the period
+    /// Total bolus insulin in units for the period: <see cref="ManualBolus"/> plus
+    /// <see cref="AutomaticBolus"/>.
     /// </summary>
     public double TotalBolus { get; set; }
 
     /// <summary>
-    /// Total basal insulin in units for the period (scheduled + additional)
+    /// Insulin in units from user-initiated boluses for the period.
+    /// </summary>
+    public double ManualBolus { get; set; }
+
+    /// <summary>
+    /// Insulin in units from algorithm-delivered boluses (SMBs) for the period.
+    /// </summary>
+    public double AutomaticBolus { get; set; }
+
+    /// <summary>
+    /// Total basal insulin in units for the period: temp basal delivery plus long-acting basal
+    /// injections. Algorithm boluses are bolus insulin and are not included.
     /// </summary>
     public double TotalBasal { get; set; }
 
@@ -1548,12 +1578,12 @@ public class InsulinDeliveryStatistics
     public double ScheduledBasal { get; set; }
 
     /// <summary>
-    /// Additional basal insulin above scheduled rate (TBR - scheduled) for the period
+    /// Temp basal insulin above the scheduled rate (temp - scheduled) for the period
     /// </summary>
     public double AdditionalBasal { get; set; }
 
     /// <summary>
-    /// Total insulin (bolus + basal) for the period
+    /// Total insulin for the period: <see cref="TotalBolus"/> plus <see cref="TotalBasal"/>
     /// </summary>
     public double TotalInsulin { get; set; }
 
@@ -1563,10 +1593,10 @@ public class InsulinDeliveryStatistics
     public double TotalCarbs { get; set; }
 
     /// <summary>
-    /// Number of manually initiated boluses in the period. Algorithm-delivered micro-boluses
-    /// are excluded and counted by <see cref="MicroBolusCount"/>.
+    /// Number of manually initiated boluses in the period. Algorithm-delivered boluses
+    /// are excluded and counted by <see cref="AutomaticBolusCount"/>.
     /// </summary>
-    public int BolusCount { get; set; }
+    public int ManualBolusCount { get; set; }
 
     /// <summary>
     /// Number of basal delivery records in the period: TempBasal segments plus discrete
@@ -1575,27 +1605,42 @@ public class InsulinDeliveryStatistics
     public int BasalCount { get; set; }
 
     /// <summary>
-    /// Total insulin events in the period: manual boluses, micro-boluses, and basal deliveries.
+    /// Total insulin events in the period: manual boluses, automatic boluses, and basal deliveries.
     /// </summary>
     public int InsulinEventCount { get; set; }
 
     /// <summary>
-    /// Percentage of total insulin that is basal (0-100)
+    /// <see cref="TotalBasal"/> as a percentage of <see cref="TotalInsulin"/> (0-100)
     /// </summary>
     public double BasalPercent { get; set; }
 
     /// <summary>
-    /// Percentage of total insulin that is bolus (0-100)
+    /// <see cref="TotalBolus"/>, manual and automatic, as a percentage of <see cref="TotalInsulin"/> (0-100)
     /// </summary>
     public double BolusPercent { get; set; }
 
     /// <summary>
-    /// Average Total Daily Dose (units per day)
+    /// Average Total Daily Dose (units per day): <see cref="TotalInsulin"/> over <see cref="WindowDays"/>
     /// </summary>
     public double Tdd { get; set; }
 
     /// <summary>
-    /// Average bolus size (units)
+    /// Units per day of <see cref="ManualBolus"/>, over <see cref="WindowDays"/>
+    /// </summary>
+    public double ManualBolusPerDay { get; set; }
+
+    /// <summary>
+    /// Units per day of <see cref="AutomaticBolus"/>, over <see cref="WindowDays"/>
+    /// </summary>
+    public double AutomaticBolusPerDay { get; set; }
+
+    /// <summary>
+    /// Units per day of <see cref="TotalBasal"/>, over <see cref="WindowDays"/>
+    /// </summary>
+    public double TotalBasalPerDay { get; set; }
+
+    /// <summary>
+    /// Average manual bolus size (units): <see cref="ManualBolus"/> over <see cref="ManualBolusCount"/>
     /// </summary>
     public double AvgBolus { get; set; }
 
@@ -1610,12 +1655,13 @@ public class InsulinDeliveryStatistics
     public int CorrectionBoluses { get; set; }
 
     /// <summary>
-    /// Insulin to carb ratio (grams of carbs per unit of insulin)
+    /// Insulin to carb ratio: grams of carbs per unit of the bolus insulin, manual and automatic,
+    /// delivered within the meal window of a carb entry
     /// </summary>
     public double IcRatio { get; set; }
 
     /// <summary>
-    /// Average number of boluses per day
+    /// Average number of manual boluses per day
     /// </summary>
     public double BolusesPerDay { get; set; }
 
@@ -1646,14 +1692,9 @@ public class InsulinDeliveryStatistics
     public int CarbBolusCount { get; set; }
 
     /// <summary>
-    /// Number of algorithm-delivered micro-boluses (SMBs) in the period
+    /// Number of algorithm-delivered boluses (SMBs) in the period
     /// </summary>
-    public int MicroBolusCount { get; set; }
-
-    /// <summary>
-    /// Total insulin delivered via micro-boluses (SMBs) in units
-    /// </summary>
-    public double MicroBolusInsulin { get; set; }
+    public int AutomaticBolusCount { get; set; }
 
     /// <summary>
     /// Total insulin from discrete long-acting basal injections (MDI) in units.
@@ -1667,7 +1708,7 @@ public class InsulinDeliveryStatistics
     public int BasalInjectionCount { get; set; }
 
     /// <summary>
-    /// The manual boluses that make up <see cref="TotalBolus"/>, one record per counted bolus.
+    /// The manual boluses that make up <see cref="ManualBolus"/>, one record per counted bolus.
     /// Filled only when the caller asks for them and holds treatments.read; null otherwise.
     /// </summary>
     public List<Bolus>? ManualBoluses { get; set; }
@@ -1691,14 +1732,24 @@ public class DailyBasalBolusRatioData
     public string DisplayDate { get; set; } = string.Empty;
 
     /// <summary>
-    /// Basal insulin delivered in units
+    /// Basal insulin delivered in units: temp basal and long-acting injections, no algorithm boluses
     /// </summary>
     public double Basal { get; set; }
 
     /// <summary>
-    /// Bolus insulin delivered in units
+    /// Bolus insulin delivered in units: <see cref="ManualBolus"/> plus <see cref="AutomaticBolus"/>
     /// </summary>
     public double Bolus { get; set; }
+
+    /// <summary>
+    /// Insulin from user-initiated boluses in units
+    /// </summary>
+    public double ManualBolus { get; set; }
+
+    /// <summary>
+    /// Insulin from algorithm-delivered boluses (SMBs) in units
+    /// </summary>
+    public double AutomaticBolus { get; set; }
 
     /// <summary>
     /// Total insulin (basal + bolus) in units
@@ -1711,7 +1762,7 @@ public class DailyBasalBolusRatioData
     public double BasalPercent { get; set; }
 
     /// <summary>
-    /// Bolus as percentage of total (0-100)
+    /// Bolus, manual and automatic, as percentage of total (0-100)
     /// </summary>
     public double BolusPercent { get; set; }
 }
@@ -1831,7 +1882,7 @@ public class BasalStats
     public double MaxRate { get; set; }
 
     /// <summary>
-    /// Total basal insulin delivered in units
+    /// Total basal insulin delivered in units, from temp basal records only
     /// </summary>
     public double TotalDelivered { get; set; }
 }
@@ -1879,7 +1930,6 @@ public class HourlyInsulinDeliveryPoint
 
     /// <summary>
     /// Average insulin from temp adjustments (Algorithm/Manual/Suspended origin)
-    /// and algorithm micro-boluses
     /// </summary>
     public double TempBasal { get; set; }
 
@@ -1889,12 +1939,17 @@ public class HourlyInsulinDeliveryPoint
     public double Basal { get; set; }
 
     /// <summary>
-    /// Average insulin from user boluses
+    /// Average insulin from user-initiated boluses
     /// </summary>
-    public double Bolus { get; set; }
+    public double ManualBolus { get; set; }
 
     /// <summary>
-    /// Average total insulin delivered during this hour
+    /// Average insulin from algorithm-delivered boluses (SMBs)
+    /// </summary>
+    public double AutomaticBolus { get; set; }
+
+    /// <summary>
+    /// Average total insulin delivered during this hour: basal plus manual and automatic bolus
     /// </summary>
     public double Total { get; set; }
 
@@ -1902,6 +1957,48 @@ public class HourlyInsulinDeliveryPoint
     /// Number of delivery records contributing to this hour
     /// </summary>
     public int Count { get; set; }
+
+    /// <summary>
+    /// Rate (U/h) the profile schedules for this hour, averaged over the requested range weighted by
+    /// the time each schedule was in effect. Independent of delivery: a zero temp basal leaves it
+    /// unchanged. <see cref="ScheduledBasal"/> is the scheduled-origin insulin actually delivered.
+    /// </summary>
+    public double ProfileBasalRate { get; set; }
+}
+
+/// <summary>
+/// One of the three parts the day is split into for <see cref="HourlyInsulinDeliveryResponse"/>:
+/// morning (06:00 to 12:00), afternoon (12:00 to 18:00) and evening/night (18:00 to 06:00 the next
+/// morning), in the user's profile timezone.
+/// </summary>
+public class InsulinDeliveryPeriodTotal
+{
+    /// <summary>
+    /// Units over the period's hours, summed from the hourly averages
+    /// </summary>
+    public double Units { get; set; }
+
+    /// <summary>
+    /// Percentage (0-100) of the daily total
+    /// </summary>
+    public double Percent { get; set; }
+}
+
+/// <summary>
+/// The three day periods and their sum, for one measure of delivery
+/// </summary>
+public class InsulinDeliveryPeriodBreakdown
+{
+    public InsulinDeliveryPeriodTotal Morning { get; set; } = new();
+
+    public InsulinDeliveryPeriodTotal Afternoon { get; set; } = new();
+
+    public InsulinDeliveryPeriodTotal EveningNight { get; set; } = new();
+
+    /// <summary>
+    /// Units over all 24 hours
+    /// </summary>
+    public double DailyTotal { get; set; }
 }
 
 /// <summary>
@@ -1914,6 +2011,16 @@ public class HourlyInsulinDeliveryResponse
     /// One entry per hour of day (0-23)
     /// </summary>
     public List<HourlyInsulinDeliveryPoint> Hours { get; set; } = new();
+
+    /// <summary>
+    /// Periods over <see cref="HourlyInsulinDeliveryPoint.Total"/>, what the stacked chart plots
+    /// </summary>
+    public InsulinDeliveryPeriodBreakdown TotalDeliveryPeriods { get; set; } = new();
+
+    /// <summary>
+    /// Periods over <see cref="HourlyInsulinDeliveryPoint.Basal"/>, what the basal-only chart plots
+    /// </summary>
+    public InsulinDeliveryPeriodBreakdown BasalPeriods { get; set; } = new();
 
     /// <summary>
     /// Distinct local days this response attributes delivered insulin to. Not the length of the

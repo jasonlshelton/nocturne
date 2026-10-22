@@ -188,6 +188,7 @@ public class V4WriteScopeGatingTests
             // the class.
             ["CompatibilityController"] = NotDataCategory.SuperuserAttribute,
             ["ServicesController"] = NotDataCategory.TenantSettingsScope,
+            ["RejectedUploadsController"] = NotDataCategory.TenantSettingsScope,
 
             ["ChatIdentityDirectoryController"] = NotDataCategory.InstanceKey,
 
@@ -203,6 +204,7 @@ public class V4WriteScopeGatingTests
             ["ConnectedAppsController"] = NotDataCategory.IdentityAndDelegation,
             ["GuestLinkController"] = NotDataCategory.IdentityAndDelegation,
             ["MemberInviteController"] = NotDataCategory.IdentityAndDelegation,
+            ["MemberRecoveryController"] = NotDataCategory.IdentityAndDelegation,
             ["MembershipRequestController"] = NotDataCategory.IdentityAndDelegation,
             ["RoleController"] = NotDataCategory.IdentityAndDelegation,
             ["SessionsController"] = NotDataCategory.IdentityAndDelegation,
@@ -341,6 +343,9 @@ public class V4WriteScopeGatingTests
             // schedules are the therapy category (therapy.read on the read side); v1 and v3 profile
             // writes require therapy.readwrite.
             ["ProfileController"] = Scope.TherapyReadWrite,
+            // therapy: an activation runs a stored profile, so recording, ending and deleting a
+            // person's profile switch takes therapy.readwrite, as writing the profile does.
+            ["ProfileActivationsController"] = Scope.TherapyReadWrite,
 
             // treatments: carb_intakes sits under treatments.read, POST /meals also writes a bolus,
             // and treatment_foods is keyed by carb intake (the food catalog is only read).

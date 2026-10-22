@@ -74,4 +74,37 @@ public class ProfileActivationWriterTests
         settled.Confirms.Should().BeEmpty();
         settled.Ends[written.Id].Should().Be(T0.AddHours(2), "the next permanent request ends it");
     }
+
+    [Fact]
+    public void ARequestAPersonEndedBringsThatEndWithIt()
+    {
+        var written = Activation(0, phase: ProfileActivationPhase.Requested, durationMs: 3 * 3_600_000, dataSource: "manual");
+        written.EndedAt = T0.AddHours(1);
+
+        ProfileActivationWriter.Settle(written, [], [], []).Ends[written.Id].Should().Be(T0.AddHours(1));
+    }
+
+    [Fact]
+    public void ARequestsOwnLengthStillEndsItWhenItRunsOutBeforeAPersonEndedIt()
+    {
+        var written = Activation(0, phase: ProfileActivationPhase.Requested, durationMs: 3_600_000, dataSource: "manual");
+        written.EndedAt = T0.AddHours(2);
+
+        ProfileActivationWriter.Settle(written, [], [], []).Ends[written.Id].Should().Be(T0.AddHours(1));
+    }
+
+    [Fact]
+    public void AnEndedPermanentRequestIsBoundedSoItLeavesThePermanentOneBeforeItRunning()
+    {
+        var earlier = Activation(0, phase: ProfileActivationPhase.Requested, dataSource: "manual");
+        var ended = Activation(1, phase: ProfileActivationPhase.Requested, dataSource: "manual");
+        ended.EndedAt = T0.AddHours(2);
+
+        var settled = ProfileActivationWriter.Settle(ended, [earlier], [], []);
+
+        settled.Ends.Should().NotContainKey(earlier.Id);
+        settled.Ends[ended.Id].Should().Be(T0.AddHours(2));
+        ProfileActivationWriter.Settle(earlier, [], [ended], []).Ends[earlier.Id].Should().BeNull(
+            "an ended activation is passed over as the next unbounded one");
+    }
 }

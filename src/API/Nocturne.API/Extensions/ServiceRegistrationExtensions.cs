@@ -381,6 +381,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IDirectGrantService, DirectGrantService>();
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<ILoginCodeService, LoginCodeService>();
+        services.AddScoped<MemberRecoveryEligibility>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddSingleton<IRotationSuccessorCache, RotationSuccessorCache>();
         services.AddScoped<IFirstPartyTokenRepository, EfFirstPartyTokenRepository>();
@@ -414,7 +415,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IShareTokenResolver>(sp => sp.GetRequiredService<ShareTokenCacheService>());
         services.AddSingleton<IShareTokenGenerator, ShareTokenGenerator>();
         services.AddScoped<IShareLinkService, ShareLinkService>();
-        services.AddScoped<IShareAppearanceReader>(sp => sp.GetRequiredService<IShareLinkService>());
+        services.AddScoped<ITenantAppearanceReader>(sp => sp.GetRequiredService<IShareLinkService>());
         // Singleton because its consumer runs at startup outside any request scope; it creates its
         // own scope per notification.
         services.AddSingleton<IShareLinkRotatedNotifier, ShareLinkRotatedNotifier>();
@@ -608,6 +609,8 @@ public static class ServiceRegistrationExtensions
         // Core domain services
         services.AddScoped<ITreatmentService, TreatmentService>();
         services.AddScoped<ITreatmentStore, Nocturne.API.Services.Treatments.TreatmentReadService>();
+        services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadStore, Nocturne.Infrastructure.Data.Repositories.RejectedUploadRepository>();
+        services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadRecorder, Nocturne.API.Services.Uploads.RejectedUploadRecorder>();
         services.AddScoped<ITreatmentCache, Nocturne.API.Services.Treatments.TreatmentCacheAdapter>();
         services.AddScoped<SignalRTreatmentEventSink>();
         services.AddScoped<IDataEventSink<Treatment>>(sp =>
@@ -658,8 +661,10 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IProfileWriteService, ProfileWriteService>();
         services.AddScoped<IProfileActivationResolver, Services.ProfileActivations.ProfileActivationResolver>();
         services.AddScoped<Services.ProfileActivations.ProfileActivationWriter>();
+        services.AddScoped<Services.ProfileActivations.NativeProfileSwitches>();
         services.AddScoped<IActiveProfileResolver, ActiveProfileResolver>();
         services.AddScoped<ProfileVersionCache>();
+        services.AddScoped<ProfileStoreTimelineSource>();
         services.AddScoped<IBasalRateResolver, BasalRateResolver>();
         services.AddScoped<IBasalSegmentService, BasalSegmentService>();
         services.AddScoped<ISensitivityResolver, SensitivityResolver>();
@@ -668,7 +673,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ITherapySettingsResolver, TherapySettingsResolver>();
         services.AddScoped<ITherapyTimelineResolver, TherapyTimelineResolver>();
         services.AddScoped<Services.Glucose.IProfileSnapshotService, Services.Glucose.ProfileSnapshotService>();
-        services.AddScoped<ITempBasalResolver, TempBasalResolver>();
         services.AddScoped<IProfileProjectionService, ProfileProjectionService>();
         services.AddScoped<IDataEventSink<Profile>>(sp =>
         {
@@ -832,9 +836,13 @@ public static class ServiceRegistrationExtensions
 
         // V4 Decomposers
         services.AddScoped<IEntryDecomposer, EntryDecomposer>();
+        services.AddScoped<RelativeTempBasalRates>();
+        services.AddScoped<ITempBasalRateReresolver, TempBasalRateReresolver>();
+        services.AddHostedService<TempBasalRateSweepService>();
         services.AddScoped<ITreatmentDecomposer, TreatmentDecomposer>();
         services.AddScoped<IDeviceStatusDecomposer, DeviceStatusDecomposer>();
         services.AddHostedService<ApsSnapshotCurvesBackfillService>();
+        services.AddHostedService<TempBasalOriginCorroborationService>();
         services.AddScoped<IActivityDecomposer, ActivityDecomposer>();
         services.AddScoped<IProfileDecomposer, ProfileDecomposer>();
 
@@ -876,6 +884,9 @@ public static class ServiceRegistrationExtensions
         // of that itself, since it reads the credential out of HttpContext.Items.
         services.AddSignalR(options =>
         {
+            // One call at a time per connection, so the reader and actor an in-band grant records
+            // reach every later call and never race one in flight (TenantHubFilter).
+            options.MaximumParallelInvocationsPerClient = 1;
             Microsoft.AspNetCore.SignalR.HubOptionsExtensions
                 .AddFilter<Nocturne.API.Hubs.TenantHubFilter>(options);
             Microsoft.AspNetCore.SignalR.HubOptionsExtensions
@@ -948,9 +959,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ICompressionLowRepository, CompressionLowRepository>();
         services.AddScoped<ICompressionLowService, CompressionLowService>();
         services.AddSingleton<CompressionLowDetectionService>();
-        services.AddSingleton<ICompressionLowDetectionService>(sp =>
-            sp.GetRequiredService<CompressionLowDetectionService>()
-        );
+        services.AddScoped<ICompressionLowDetectionService, CompressionLowDetection>();
         services.AddHostedService(sp => sp.GetRequiredService<CompressionLowDetectionService>());
 
         // Webhook infrastructure (reused by new alert engine)

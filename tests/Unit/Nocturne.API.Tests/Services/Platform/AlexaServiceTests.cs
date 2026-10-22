@@ -36,7 +36,7 @@ public class AlexaServiceTests
     private readonly Mock<IEntryStore> _mockEntryStore = new();
     private readonly Mock<IPropertiesService> _mockProperties = new();
     private readonly Mock<IDDataService> _mockDData = new();
-    private readonly Mock<IShareAppearanceReader> _mockAppearance = new();
+    private readonly Mock<ITenantAppearanceReader> _mockAppearance = new();
     private readonly HttpContextAccessor _httpContextAccessor = new();
     private readonly AlexaService _alexaService;
 
@@ -63,7 +63,7 @@ public class AlexaServiceTests
 
     private void Units(string? glucoseUnits) =>
         _mockAppearance
-            .Setup(x => x.GetSharedAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetTenantAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UserDisplayPreferences { GlucoseUnits = glucoseUnits });
 
     private void Grant(params string[] scopes) =>
