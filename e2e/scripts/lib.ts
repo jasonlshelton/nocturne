@@ -89,7 +89,10 @@ export function imageExists(ref: string): boolean {
   return spawnSync("docker", ["image", "inspect", ref], { env, stdio: "ignore" }).status === 0;
 }
 
-const API_INPUTS = ["src", ":!src/Web", ":!src/Portal", ":!src/Desktop", "Directory.Packages.props", "global.json"];
+const API_INPUTS = [
+  "src", ":!src/Web", ":!src/Portal", ":!src/Desktop", "crates", "scripts/Shared",
+  "scripts/alerts-native-build.cs", "Directory.Packages.props", "global.json",
+];
 const WEB_INPUTS = ["src/Web", "Dockerfile.web"];
 const GENERATED_CLIENT = join(REPO_ROOT, "src/Web/packages/app/src/lib/api");
 const CLIENT_STAMP = join(E2E_DIR, ".state", "client-generated-from");
@@ -110,8 +113,14 @@ function dockerArch(): "amd64" | "arm64" {
 async function buildApi(ref: string) {
   const [repository, tag] = ref.split(":");
   const rid = dockerArch() === "arm64" ? "linux-arm64" : "linux-x64";
+  // The API refuses to start without the nocturne_alerts native library, which the publish packs
+  // only when it has been built.
+  const nativeProperties = join(E2E_DIR, ".state", "alerts-native-properties");
+  mkdirSync(dirname(nativeProperties), { recursive: true });
+  await mustRun("dotnet", ["run", "scripts/alerts-native-build.cs", rid, nativeProperties]);
   await mustRun("dotnet", [
     "publish", "src/API/Nocturne.API/Nocturne.API.csproj",
+    ...readFileSync(nativeProperties, "utf8").split(/\r?\n/).filter(Boolean),
     "-c", "Release",
     "-r", rid,
     "-p:PublishProfile=DefaultContainer",

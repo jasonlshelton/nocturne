@@ -44,7 +44,6 @@
 </script>
 
 <svelte:head>
-  <title>Site Change Impact - Nocturne Reports</title>
   <meta
     name="description"
     content="Analyze how pump site changes affect your glucose control"
@@ -110,7 +109,7 @@
         Glucose Pattern Around Site Changes
       </CardTitle>
       <CardDescription>
-        Average glucose levels in the hours before and after each site change
+        Median glucose in the hours before and after each site change, with the 25th to 75th and 10th to 90th percentile bands
       </CardDescription>
     </CardHeader>
     <CardContent>
@@ -142,7 +141,8 @@
     <CardContent size="sm" class="space-y-4">
       <p>
         <strong>What this shows:</strong>
-        This report averages your glucose readings across all your site changes to
+        This report takes the median of your glucose readings across all your site
+        changes, with the 25th to 75th and 10th to 90th percentile bands, to
         reveal patterns in how your glucose control changes as your infusion site
         ages.
       </p>

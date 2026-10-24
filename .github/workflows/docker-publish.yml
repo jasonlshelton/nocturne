@@ -147,8 +147,8 @@ jobs:
             done
           done
 
-      # The API csproj silently skips packing the cdylib when it is missing, and
-      # Alerts:Engine=rust refuses to start without it, so load it in every platform's image.
+      # The API csproj silently skips packing the cdylib when it is missing, and the API
+      # refuses to start without it, so load it in every platform's image.
       - name: Verify the API image loads the nocturne_alerts native library
         run: |
           set -euo pipefail
@@ -202,6 +202,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
           cache: "pnpm"
           cache-dependency-path: src/Web/pnpm-lock.yaml
 

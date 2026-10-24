@@ -23,6 +23,11 @@ public abstract class ProcessableDocumentBase : IProcessableDocument
     public abstract string? Id { get; set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Ignored for the same reason as <see cref="Id"/>: it would be written as a camelCase
+    /// <c>createdAt</c> beside every override's <c>created_at</c>.
+    /// </remarks>
+    [JsonIgnore]
     public abstract string? CreatedAt { get; set; }
 
     /// <inheritdoc />

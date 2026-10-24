@@ -93,6 +93,22 @@ describe("buildAppNavigation", () => {
     );
   });
 
+  it("offers Alerts to a member holding alerts.read or alerts.readwrite", () => {
+    for (const scope of ["alerts.read", "alerts.readwrite"]) {
+      expect(titles({ ...MEMBER, grantedScopes: [scope] })).toContain("Alerts");
+    }
+  });
+
+  it("withholds Alerts from a member holding neither alerts scope", () => {
+    const viewer = titles({
+      ...MEMBER,
+      grantedScopes: ["glucose.read", "reports.read"],
+    });
+
+    expect(viewer).not.toContain("Alerts");
+    expect(viewer).toContain("Settings");
+  });
+
   it("offers the tenant switcher only to a member holding more than one", () => {
     expect(titles({ ...MEMBER, tenantCount: 2 })).toContain("Tenants");
     expect(titles({ ...REPORTING_SHARE, tenantCount: 2 })).not.toContain(

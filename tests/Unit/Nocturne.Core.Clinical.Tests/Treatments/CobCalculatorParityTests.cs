@@ -65,8 +65,8 @@ public class CobCalculatorParityTests
         // Real IobCalculator (not mocked) — COB calculation calls IOB internally for activity
         var basalRateResolver = new Mock<IBasalRateResolver>();
         basalRateResolver
-            .Setup(b => b.GetBasalRateAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DefaultBasalRate);
+            .Setup(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Func<long, double>)(_ => DefaultBasalRate));
 
         var iobApsRepo = new Mock<IApsSnapshotRepository>();
         iobApsRepo

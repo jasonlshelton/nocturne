@@ -302,16 +302,15 @@
 
   async function handleQuickAccept(match: SuggestedMealMatch) {
     try {
+      // Awaited so the row's pending state covers the refresh too, not just the
+      // command; otherwise the row is clickable again before it disappears.
       await acceptMatch({
         foodEntryId: match.foodEntryId!,
         carbIntakeId: match.carbIntakeId!,
         carbs: match.carbs ?? 0,
         timeOffsetMinutes: 0,
-      });
+      }).updates(getMealMatchingSuggestions, getMeals);
       toast.success("Meal match accepted");
-      // Awaited so the row's pending state covers the refresh too, not just the
-      // command; otherwise the row is clickable again before it disappears.
-      await Promise.all([mealsQuery.refresh(), suggestionsQuery.refresh()]);
     } catch (err) {
       console.error("Failed to accept match:", err);
       toast.error(describeSubmitError(err, "Failed to accept match"));
@@ -320,9 +319,10 @@
 
   async function handleDismiss(match: SuggestedMealMatch) {
     try {
-      await dismissMatch({ foodEntryId: match.foodEntryId! });
+      await dismissMatch({ foodEntryId: match.foodEntryId! }).updates(
+        getMealMatchingSuggestions
+      );
       toast.success("Match dismissed");
-      await suggestionsQuery.refresh();
     } catch (err) {
       console.error("Failed to dismiss match:", err);
       toast.error(describeSubmitError(err, "Failed to dismiss match"));

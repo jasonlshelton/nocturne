@@ -199,17 +199,21 @@ export function buildAppNavigation(viewer: NavViewer): NavItem[] {
   );
 
   items.push(
-    {
-      id: "alerts",
-      title: "Alerts",
-      icon: Bell,
-      children: [
-        { title: "Rules", href: "/alerts", icon: Bell, strict: true },
-        { title: "Simulator", href: "/alerts/simulator", icon: PlayCircle },
-        { title: "Do Not Disturb", href: "/alerts/dnd", icon: BellOff },
-        { title: "History", href: "/alerts/history", icon: HistoryIcon },
-      ],
-    },
+    ...(satisfiesScope(viewer.grantedScopes, "alerts.read")
+      ? [
+          {
+            id: "alerts" as const,
+            title: "Alerts",
+            icon: Bell,
+            children: [
+              { title: "Rules", href: "/alerts", icon: Bell, strict: true },
+              { title: "Simulator", href: "/alerts/simulator", icon: PlayCircle },
+              { title: "Do Not Disturb", href: "/alerts/dnd", icon: BellOff },
+              { title: "History", href: "/alerts/history", icon: HistoryIcon },
+            ],
+          },
+        ]
+      : []),
     {
       id: "dev-tools",
       title: "Dev Tools",

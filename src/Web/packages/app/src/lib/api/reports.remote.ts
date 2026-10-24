@@ -4,11 +4,12 @@
  */
 import { z } from "zod";
 import { getRequestEvent, query } from "$app/server";
-import { ClusterConfidence } from "$lib/api";
+import { ClusterConfidence, SleepSource } from "$lib/api";
 import { fetchAllGlucose } from "./glucose-pagination";
 import { DateRangeSchema, resolveReportRange } from "./report-range";
 import { readable } from "$lib/server/patient-timezone";
 import { compare } from "$api/generated/cgmComparisons.generated.remote";
+import { getTrends } from "$api/generated/sleepReports.generated.remote";
 
 export type { DateRangeInput } from "./report-range";
 
@@ -148,6 +149,19 @@ export const getReportsAnalysis = query(
 );
 
 /**
+ * Insulin and carbohydrate delivery over a date range, with the per-day figures the API takes
+ * over the window's calendar days.
+ */
+export const getReportsInsulinDelivery = query(
+  DateRangeSchema.optional(),
+  async (input) => {
+    const { apiClient } = getRequestEvent().locals;
+    const { startDate, endDate } = await resolveReportRange(input);
+    return apiClient.statistics.getInsulinDeliveryStatistics(startDate, endDate);
+  }
+);
+
+/**
  * Two of the patient's CGMs time-paired over a date range, with the agreement measures
  * over that pairing. Both devices come from the contributing-devices list on
  * {@link getReportsAnalysis} for the same range.
@@ -168,6 +182,19 @@ export const getCgmComparison = query(
       endDate,
       toleranceMinutes: input.toleranceMinutes,
     });
+  }
+);
+
+/**
+ * Multi-night sleep trends over a date range. The bounds are the patient's days, as the API
+ * counts them against its span limit.
+ */
+export const getSleepTrends = query(
+  DateRangeSchema.extend({ source: z.enum(SleepSource).optional() }),
+  async (input) => {
+    const { startDate, endDate } = await resolveReportRange(input);
+
+    return getTrends({ from: startDate, to: endDate, source: input.source });
   }
 );
 

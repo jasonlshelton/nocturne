@@ -93,6 +93,21 @@ describe("CommandPalette", () => {
     await expect.element(item("Audit")).not.toBeInTheDocument();
   });
 
+  it("offers Alerts to a viewer holding alerts.readwrite", async () => {
+    pageState.data = { effectivePermissions: ["alerts.readwrite"] };
+    render(CommandPalette, { open: true });
+
+    await expect.element(item("Alerts")).toBeVisible();
+  });
+
+  it("withholds Alerts from a viewer holding neither alerts scope", async () => {
+    pageState.data = { effectivePermissions: ["glucose.read"] };
+    render(CommandPalette, { open: true });
+
+    await expect.element(item("Dashboard")).toBeVisible();
+    await expect.element(item("Alerts")).not.toBeInTheDocument();
+  });
+
   it("offers Grants to a viewer holding sharing.manage", async () => {
     pageState.data = { effectivePermissions: ["sharing.manage"] };
     render(CommandPalette, { open: true });

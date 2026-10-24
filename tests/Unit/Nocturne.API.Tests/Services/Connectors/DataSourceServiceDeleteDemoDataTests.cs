@@ -58,7 +58,6 @@ public class DataSourceServiceDeleteDemoDataTests : IDisposable
         _calibrations.Object,
         Mock.Of<IAuditContext>(),
         _connectorConfig.Object,
-        Mock.Of<Nocturne.Core.Contracts.V4.ITreatmentDecomposer>(),
         Nocturne.API.Tests.Infrastructure.ProfileActivationTestDeps.Writer(context),
         NullLogger<DataSourceService>.Instance);
 

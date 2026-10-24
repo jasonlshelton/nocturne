@@ -76,10 +76,6 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Data Quality - Nocturne</title>
-</svelte:head>
-
 {#if suggestionsResource.current}
 	<div class="@container space-y-6">
 		<div class="flex items-center gap-3">

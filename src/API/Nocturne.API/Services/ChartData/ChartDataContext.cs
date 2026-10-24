@@ -84,6 +84,9 @@ public sealed record ChartDataContext
     /// IOB/COB the AID system reported, which the IOB/COB series prefers over its own recomputation.
     /// </summary>
     public IReadOnlyList<ApsIobCobPoint> ApsSnapshotList { get; init; } = [];
+
+    /// <summary>Pump snapshot IOB points covering the buffer window, ascending by timestamp.</summary>
+    public IReadOnlyList<PumpIobPoint> PumpIobPointList { get; init; } = [];
     public IReadOnlyList<BasalInjection> BasalInjectionList { get; init; } = [];
 
     /// <summary>The newest pump status at or before <see cref="EndTime"/>.</summary>
@@ -104,6 +107,7 @@ public sealed record ChartDataContext
 
     public List<TimeSeriesPoint> IobSeries { get; init; } = [];
     public List<TimeSeriesPoint> CobSeries { get; init; } = [];
+    public double MinIob { get; init; }
     public double MaxIob { get; init; }
     public double MaxCob { get; init; }
     public List<BasalPoint> BasalSeries { get; init; } = [];

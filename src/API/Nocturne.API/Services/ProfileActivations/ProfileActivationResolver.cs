@@ -21,7 +21,6 @@ internal sealed class ProfileActivationResolver : IProfileActivationResolver
 {
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(1);
     private const long MillisPerMinute = 60_000;
-    private const long MillisPerDay = 86_400_000;
     private const int MaxActivationsPerRead = 5_000;
 
     private readonly IProfileActivationRepository _activations;
@@ -92,7 +91,7 @@ internal sealed class ProfileActivationResolver : IProfileActivationResolver
     {
         var name = activation.BaseProfileName;
         var snapshot = activation.Snapshot is { HasSchedules: true } schedules ? schedules : null;
-        var scaling = new CircadianAdjustment(activation.Percentage, activation.TimeshiftMs % MillisPerDay);
+        var scaling = CircadianAdjustment.Of(activation);
 
         if (snapshot is { HasEverySchedule: true } && activation.SnapshotIsCustomized)
             return new ResolvedProfileActivation(activation, name, ProfileScheduleSource.CustomizedSnapshot, snapshot, null);

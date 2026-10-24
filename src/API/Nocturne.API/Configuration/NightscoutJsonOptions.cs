@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Attributes;
+using Nocturne.Core.Models.Serializers;
 
 namespace Nocturne.API.Configuration;
 
@@ -26,7 +27,7 @@ public static class NightscoutJsonOptions
             WriteIndented = false,
             TypeInfoResolver = new DefaultJsonTypeInfoResolver
             {
-                Modifiers = { ExcludeNocturneOnlyProperties, RemoveDuplicateIdProperty, OmitIndefiniteDuration }
+                Modifiers = { UploaderIdJsonModifier.RemoveIgnoredBaseProperties, ExcludeNocturneOnlyProperties, RemoveDuplicateIdProperty, OmitIndefiniteDuration }
             }
         };
     }

@@ -1,31 +1,45 @@
 using System.Reflection;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 namespace Nocturne.Core.Models.Serializers;
 
 /// <summary>
-/// Keeps an uploader's lowercase <c>id</c> out of a document's <c>_id</c> identity when reading.
+/// Keeps an uploader's lowercase <c>id</c> and camelCase <c>createdAt</c> out of a document's
+/// <c>_id</c> and <c>created_at</c> when reading.
 /// </summary>
 /// <remarks>
-/// A document overrides <see cref="ProcessableDocumentBase.Id"/> under <c>[JsonPropertyName("_id")]</c>.
-/// System.Text.Json still lists the abstract base declaration as a second property named <c>Id</c>.
-/// It is <c>[JsonIgnore]</c>d so it is never written beside <c>_id</c>, but an ignored property
-/// keeps its name: under case-insensitive matching it swallows an uploader's <c>id</c>, which is
-/// then lost. Removing it sends <c>id</c> to the extension data, where <see cref="TreatmentClientId"/>
-/// reads it as the plain field it is.
+/// A document overrides <see cref="ProcessableDocumentBase.Id"/> and
+/// <see cref="ProcessableDocumentBase.CreatedAt"/> under <c>[JsonPropertyName("_id")]</c> and
+/// <c>[JsonPropertyName("created_at")]</c>. System.Text.Json still lists each abstract base declaration
+/// as a second property, named <c>Id</c> and <c>CreatedAt</c>, and <see cref="Treatment"/> ignores its own
+/// <c>CreatedAt</c> override the same way.
+/// They are <c>[JsonIgnore]</c>d so they are never written beside the renamed members, but an ignored
+/// property keeps its name: under case-insensitive matching it swallows an uploader's <c>id</c> or
+/// <c>createdAt</c>, which is then lost. Removing them sends both to the extension data, where
+/// <see cref="TreatmentClientId"/> reads <c>id</c> as the plain field it is.
 /// </remarks>
 public static class UploaderIdJsonModifier
 {
-    public static void RemoveBaseIdProperty(JsonTypeInfo typeInfo)
+    private static readonly string[] IgnoredMembers =
+    [
+        nameof(ProcessableDocumentBase.Id),
+        nameof(ProcessableDocumentBase.CreatedAt),
+    ];
+
+    public static void RemoveIgnoredBaseProperties(JsonTypeInfo typeInfo)
     {
         if (typeInfo.Kind != JsonTypeInfoKind.Object || !typeof(ProcessableDocumentBase).IsAssignableFrom(typeInfo.Type))
             return;
 
-        var baseId = typeInfo.Properties.FirstOrDefault(p =>
-            p.AttributeProvider is MemberInfo { Name: nameof(ProcessableDocumentBase.Id) } member
-            && member.DeclaringType == typeof(ProcessableDocumentBase));
-
-        if (baseId is not null)
-            typeInfo.Properties.Remove(baseId);
+        for (var i = typeInfo.Properties.Count - 1; i >= 0; i--)
+        {
+            if (typeInfo.Properties[i].AttributeProvider is MemberInfo member
+                && IgnoredMembers.Contains(member.Name)
+                && member.GetCustomAttribute<JsonIgnoreAttribute>(inherit: false) is { Condition: JsonIgnoreCondition.Always })
+            {
+                typeInfo.Properties.RemoveAt(i);
+            }
+        }
     }
 }

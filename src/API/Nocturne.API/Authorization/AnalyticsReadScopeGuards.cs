@@ -77,6 +77,7 @@ internal static class ChartDataReadScopeGuard
             data.BasalDeliverySpans = [];
             data.DefaultBasalRate = 0;
             data.MaxBasalRate = 0;
+            data.MinIob = 0;
             data.MaxIob = 0;
             data.MaxCob = 0;
         }

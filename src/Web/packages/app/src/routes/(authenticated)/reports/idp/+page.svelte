@@ -25,6 +25,7 @@
   import ScheduledBasalRateChart from "$lib/components/reports/ScheduledBasalRateChart.svelte";
   import HourlyBolusChart from "$lib/components/reports/HourlyBolusChart.svelte";
   import ScheduleFooter from "$lib/components/reports/ScheduleFooter.svelte";
+  import ActiveProfileHeading from "$lib/components/reports/ActiveProfileHeading.svelte";
   import AidSystemUseCard from "$lib/components/reports/AidSystemUseCard.svelte";
   import TextureSwatch from "$lib/components/charts/print/TextureSwatch.svelte";
   import { bgPatternClass } from "$lib/components/charts/print/chart-print-patterns";
@@ -48,7 +49,7 @@
     entries: reportsResource.current?.entries ?? [],
     boluses: reportsResource.current?.boluses ?? [],
     insulinDeliveryStats: reportsResource.current?.insulinDeliveryStats,
-    profileSummary: reportsResource.current?.profileSummary,
+    activeSchedules: reportsResource.current?.activeSchedules ?? [],
     analysis: reportsResource.current?.analysis,
     averagedStats: reportsResource.current?.averagedStats,
     aidSystemMetrics: reportsResource.current?.aidSystemMetrics,
@@ -69,7 +70,6 @@
 </script>
 
 <svelte:head>
-  <title>Insulin Dosing Profile - Nocturne Reports</title>
   <meta
     name="description"
     content="Insulin Dosing Profile report with delivery statistics, glucose metrics, basal analysis, and bolus distribution"
@@ -259,14 +259,19 @@
     </CardHeader>
     <CardContent class="space-y-6">
       <div class="h-80 w-full @2xl:h-96">
-        <AmbulatoryGlucoseProfile averagedStats={data.averagedStats} />
+        <AmbulatoryGlucoseProfile averagedStats={data.averagedStats} thresholds={analysis?.timeInRange?.thresholds} />
       </div>
 
       <div>
         <h4 class="text-sm font-semibold text-muted-foreground mb-1">Scheduled Basal Rate</h4>
-        <div class="h-24 w-full">
-          <ScheduledBasalRateChart entries={data.profileSummary?.basalSchedules?.[0]?.entries ?? []} />
-        </div>
+        {#each data.activeSchedules as profile (profile.profileName)}
+          <ActiveProfileHeading {profile} multiple={data.activeSchedules.length > 1} />
+          <div class="h-24 w-full">
+            <ScheduledBasalRateChart entries={profile.basal ?? []} />
+          </div>
+        {:else}
+          <div class="h-24 w-full"></div>
+        {/each}
       </div>
 
       <div class="w-full">
@@ -274,7 +279,7 @@
         <HourlyBolusChart {boluses} {dayCount} />
       </div>
 
-      <ScheduleFooter profile={data.profileSummary} />
+      <ScheduleFooter profiles={data.activeSchedules} />
     </CardContent>
   </Card>
 

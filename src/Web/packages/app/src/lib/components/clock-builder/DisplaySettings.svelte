@@ -10,6 +10,8 @@
   import Settings from "@lucide/svelte/icons/settings";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { ClockSettings } from "$lib/api";
+  import { page } from "$app/state";
+  import { satisfiesScope } from "$lib/authorization/scopes";
 
   interface Props {
     settings: ClockSettings;
@@ -28,6 +30,12 @@
     onSettingsChange,
     onReset,
   }: Props = $props();
+
+  // A face that shows alerts hands them to anyone with its link, so only a
+  // member who may read alerts can turn it on.
+  const canShareAlerts = $derived(
+    satisfiesScope(page.data.effectivePermissions ?? [], "alerts.read")
+  );
 
   function updateSetting<K extends keyof ClockSettings>(
     key: K,
@@ -136,6 +144,28 @@
           onCheckedChange={(v: boolean) => updateSetting("alwaysShowTime", !!v)}
         />
       </div>
+      {#if canShareAlerts}
+        <div class="flex items-center justify-between">
+          <Label>Show firing alerts</Label>
+          <Checkbox
+            checked={settings.showAlerts ?? false}
+            onCheckedChange={(v: boolean) =>
+              onSettingsChange({
+                ...settings,
+                showAlerts: !!v,
+                allowMarkSeen: v ? settings.allowMarkSeen : false,
+              })}
+          />
+        </div>
+        <div class="flex items-center justify-between">
+          <Label>Let viewers mark alerts as seen</Label>
+          <Checkbox
+            checked={settings.allowMarkSeen ?? false}
+            onCheckedChange={(v: boolean) => updateSetting("allowMarkSeen", !!v)}
+            disabled={!settings.showAlerts}
+          />
+        </div>
+      {/if}
       <div class="flex items-center justify-between">
         <Label>Screensaver mode (bouncing)</Label>
         <Checkbox

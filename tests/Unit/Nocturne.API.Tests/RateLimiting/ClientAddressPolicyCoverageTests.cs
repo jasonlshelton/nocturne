@@ -31,6 +31,9 @@ public class ClientAddressPolicyCoverageTests
             // Keys on the hashed credential rather than the connection, which is what this test
             // is protecting against; see ServiceRegistrationExtensions.TranslationDraftPartitionKey.
             .Append(ServiceRegistrationExtensions.TranslationDraftsRateLimitPolicy)
+            // Keys on the tenant host and the credential or clock face;
+            // see ServiceRegistrationExtensions.NoAccountAlertsPartitionKey.
+            .Append(ServiceRegistrationExtensions.NoAccountAlertsRateLimitPolicy)
             .ToList();
 
         applied.Except(tableAndHostKeyed).Should().BeEmpty(

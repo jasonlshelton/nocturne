@@ -197,7 +197,7 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>Returns `204 No Content` on success, or `404 Not Found` if no record with the given <paramref name="id"/> exists.</remarks>
     [HttpDelete("{id:guid}")]
-    [RemoteCommand]
+    [RemoteCommand(Invalidates = ["GetAll", "ListDeleted"])]
     [RequireDeclaredWriteScope]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -253,7 +253,7 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     /// never replaces it.
     /// </remarks>
     [HttpPost("{id:guid}/restore")]
-    [RemoteCommand]
+    [RemoteCommand(Invalidates = ["GetAll", "ListDeleted"])]
     [RequireDeclaredWriteScope]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -285,7 +285,7 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     /// refused with `409 Conflict`.
     /// </remarks>
     [HttpPost("restore")]
-    [RemoteCommand]
+    [RemoteCommand(Invalidates = ["GetAll", "ListDeleted"])]
     [RequireDeclaredWriteScope]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

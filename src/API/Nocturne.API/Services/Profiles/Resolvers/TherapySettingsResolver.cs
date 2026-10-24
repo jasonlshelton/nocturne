@@ -57,20 +57,15 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(timeMills).UtcDateTime;
         var settings = await GetCachedSettingsAsync(profileName, timestamp, ct);
 
-        if (settings is null)
-            return DefaultDia;
+        // An AID that manages the profile owns the DIA, so it outranks a recorded insulin.
+        if (settings is { IsExternallyManaged: true, Dia: > 0 })
+            return settings.Dia;
 
-        // Priority 1: ExternallyManaged profiles use TherapySettings.Dia directly
-        if (settings.IsExternallyManaged)
-            return settings.Dia > 0 ? settings.Dia : DefaultDia;
+        // A recorded insulin applies before any therapy settings exist.
+        if (await _insulinRepo.GetPrimaryBolusInsulinAsync(ct) is { Dia: > 0 } primaryBolus)
+            return primaryBolus.Dia;
 
-        // Priority 2: PatientInsulin primary bolus DIA
-        var primaryBolus = await _insulinRepo.GetPrimaryBolusInsulinAsync(ct);
-        if (primaryBolus is not null)
-            return primaryBolus.Dia > 0 ? primaryBolus.Dia : DefaultDia;
-
-        // Priority 3: TherapySettings.Dia
-        return settings.Dia > 0 ? settings.Dia : DefaultDia;
+        return settings is { Dia: > 0 } ? settings.Dia : DefaultDia;
     }
 
     /// <summary>

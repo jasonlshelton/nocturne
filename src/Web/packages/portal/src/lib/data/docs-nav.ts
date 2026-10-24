@@ -74,7 +74,14 @@ export const DOCS_NAV_SECTIONS: DocsNavSection[] = [
     {
         id: "reports",
         title: "Reports",
-        items: [{ href: "/docs/reports/loop-analysis", label: "Loop Analysis" }],
+        items: [
+            { href: "/docs/reports/loop-analysis", label: "Loop Analysis" },
+            { href: "/docs/reports/loop-analysis/daily-profile", label: "Daily profile" },
+            { href: "/docs/reports/loop-analysis/meals-and-events", label: "Meals and events" },
+            { href: "/docs/reports/loop-analysis/prediction-accuracy", label: "Prediction accuracy" },
+            { href: "/docs/reports/loop-analysis/loop-health", label: "Loop health" },
+            { href: "/docs/reports/loop-analysis/settings-evidence", label: "Settings evidence" },
+        ],
     },
     {
         id: "trackers",

@@ -328,7 +328,6 @@
 </script>
 
 <svelte:head>
-  <title>Treatment Log - Nocturne</title>
   <meta
     name="description"
     content="View and manage your diabetes treatments, insulin doses, and carb entries"

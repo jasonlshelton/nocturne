@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.Infrastructure;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -31,11 +32,6 @@ public class PropertiesServiceTests
     {
         _mockDDataService = new Mock<IDDataService>();
         _mockLogger = new Mock<ILogger<PropertiesService>>();
-        var mockIobCalculator = new Mock<IIobCalculator>();
-        var mockCobCalculator = new Mock<ICobCalculator>();
-        var mockBolusRepo = new Mock<IBolusRepository>();
-        var mockCarbIntakeRepo = new Mock<ICarbIntakeRepository>();
-        var mockTempBasalRepo = new Mock<ITempBasalRepository>();
         var mockAr2Service = new Mock<IAr2Service>();
 
         _mockDeviceAgeService = new Mock<IDeviceAgeService>();
@@ -55,11 +51,7 @@ public class PropertiesServiceTests
         _service = new PropertiesService(
             _mockDDataService.Object,
             _mockLogger.Object,
-            mockIobCalculator.Object,
-            mockCobCalculator.Object,
-            mockBolusRepo.Object,
-            mockCarbIntakeRepo.Object,
-            mockTempBasalRepo.Object,
+            TestIobCobReader.Empty(),
             mockAr2Service.Object,
             _mockDeviceAgeService.Object
         );
@@ -333,11 +325,7 @@ public class PropertiesServiceTests
         var service = new PropertiesService(
             _mockDDataService.Object,
             _mockLogger.Object,
-            Mock.Of<IIobCalculator>(),
-            Mock.Of<ICobCalculator>(),
-            Mock.Of<IBolusRepository>(),
-            Mock.Of<ICarbIntakeRepository>(),
-            Mock.Of<ITempBasalRepository>(),
+            TestIobCobReader.Empty(),
             ar2Service.Object,
             _mockDeviceAgeService.Object
         );

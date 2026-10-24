@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Nocturne.API.Tests.Infrastructure;
 using Microsoft.Extensions.Options;
 using Moq;
+using Nocturne.Core.Contracts.Alerts;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Platform;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -205,6 +206,7 @@ public class ServiceCacheTests
             TestPublicAccessCache.Create(),
             appearanceReader.Object,
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
+            NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
             _mockStatusLogger.Object
         );
@@ -295,6 +297,7 @@ public class ServiceCacheTests
             TestPublicAccessCache.Create(),
             appearanceReader.Object,
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
+            NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
             _mockStatusLogger.Object
         );
@@ -322,5 +325,13 @@ public class ServiceCacheTests
                 ),
             Times.Once
         );
+    }
+
+    private static IAlertRepository NoAlertRules()
+    {
+        var alerts = new Mock<IAlertRepository>();
+        alerts.Setup(a => a.GetEnabledRulesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        return alerts.Object;
     }
 }

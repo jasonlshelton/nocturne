@@ -40,8 +40,7 @@ public sealed class GoogleHealthAuthTokenProvider(
         : throw new InvalidOperationException("Google Health token storage requires a resolved tenant context");
 
     /// <summary>
-    /// Drops a cached access token minted for a refresh token or grant the tenant no longer
-    /// stores, such as one another replica has since rotated.
+    /// Drops a cached access token minted for a refresh token or grant the tenant no longer stores.
     /// </summary>
     public async Task DiscardStaleCacheAsync(GoogleHealthConnectorConfiguration configuration)
     {

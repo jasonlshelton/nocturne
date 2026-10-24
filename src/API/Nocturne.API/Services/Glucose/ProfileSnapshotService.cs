@@ -82,7 +82,7 @@ public sealed class ProfileSnapshotService : IProfileSnapshotService
             {
                 StartMills = nowMills,
                 EndMills = windowEnd,
-                Dia = bolus?.Dia ?? DefaultDia,
+                Dia = bolus is { Dia: > 0 } ? bolus.Dia : DefaultDia,
                 Basal = DefaultBasal,
                 Sens = DefaultSens,
                 CarbRatio = DefaultCarbRatio,

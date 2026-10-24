@@ -50,7 +50,6 @@
   const subtitleDetail = $derived([durationLabel, sourceLabel].filter(Boolean).join(" · "));
 
   setReportPrintMeta(() => ({
-    title: "Sleep Night Report",
     period: printedDate && timeSpan ? { label: `${printedDate}, ${timeSpan}` } : undefined,
   }));
 
@@ -89,10 +88,6 @@
     };
   });
 </script>
-
-<svelte:head>
-  <title>{dateDisplay ? `${dateDisplay} - Sleep Report` : "Sleep Report"} - Nocturne</title>
-</svelte:head>
 
 {#if report && session}
   <div class="@container space-y-6">

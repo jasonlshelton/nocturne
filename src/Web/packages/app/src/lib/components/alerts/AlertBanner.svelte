@@ -5,6 +5,7 @@
   import {
     getActiveAlerts,
     acknowledgeExcursion,
+    markSeen,
   } from "$api/generated/alerts.generated.remote";
   import { Button } from "$lib/components/ui/button";
   import AlertTriangle from "@lucide/svelte/icons/triangle-alert";
@@ -13,6 +14,8 @@
   import { time } from "$lib/utils/formatting";
   import { formatTimeSince } from "./alertTime";
   import { severity, severityLabel } from "./severity";
+  import { seenBy } from "./receipts";
+  import { markSeenOnThisDevice, seenHere } from "./seen-here.svelte";
 
   // Reactive query: reading `.current` subscribes this component, so an
   // optimistic withOverride from any acknowledge (here or the fresh-fire
@@ -27,12 +30,20 @@
     satisfiesScope(page.data.effectivePermissions ?? [], "alerts.readwrite")
   );
 
-  // Acknowledging or muting is the only way off this surface. The X that used
-  // to sit here hid a live, unacknowledged alert for the rest of the session
-  // while recording nothing server-side and halting no escalation.
+  // A share or guest link cannot acknowledge or mute; it records that it saw
+  // the alarm, which takes it off this device and changes nothing elsewhere.
+  const hasAccount = $derived(!!page.data.hasAccount);
+  const viewer = $derived({
+    hasAccount,
+    isShareHost: !!page.data.isShareHost,
+  });
+
+  // Acknowledging or muting is the only way off this surface for a member. The
+  // X that used to sit here hid a live, unacknowledged alert for the rest of
+  // the session while recording nothing server-side and halting no escalation.
   const visibleAlerts = $derived(
     (activeAlerts.current ?? []).filter(
-      (a) => !a.acknowledgedAt && !a.mutedByCaller
+      (a) => !a.acknowledgedAt && !a.mutedByCaller && !seenHere(a, viewer)
     )
   );
 
@@ -50,6 +61,20 @@
         return "Composite Alert";
       default:
         return conditionType ?? "Alert";
+    }
+  }
+
+  async function handleSeen(id: string) {
+    acknowledgingId = id;
+    try {
+      await markSeen(id);
+      markSeenOnThisDevice(id);
+    } catch {
+      // The alarm closed, or the press was throttled: the next poll shows
+      // which, and the banner stays up until it does.
+      await activeAlerts.refresh();
+    } finally {
+      acknowledgingId = null;
     }
   }
 
@@ -118,9 +143,24 @@
               Snoozed until {time(alert.snoozedUntil)}
             </span>
           {/if}
+          {#if hasAccount && seenBy(alert.receipts)}
+            <span class="ml-2 text-xs text-muted-foreground">
+              {seenBy(alert.receipts)}
+            </span>
+          {/if}
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          {#if !alert.acknowledgedAt}
+          {#if !hasAccount}
+            <Button
+              variant="outline"
+              size="xs"
+              onclick={() => handleSeen(alert.id ?? "")}
+              disabled={acknowledgingId === alert.id}
+            >
+              <Check class="h-3 w-3 mr-1" />
+              Seen
+            </Button>
+          {:else if !alert.acknowledgedAt}
             <Button
               variant="outline"
               size="xs"

@@ -7,6 +7,7 @@ import { applyPreferences } from "$lib/stores/appearance-store.svelte";
 const report = vi.hoisted(() => ({
   variability: null as GlycemicVariability | null,
   cvStatus: undefined as TargetStatus | undefined,
+  thresholds: { veryLow: 54, low: 63, targetBottom: 63, targetTop: 140, high: 140, veryHigh: 250 },
 }));
 
 vi.mock("$api/reports.remote", () => ({ getReportsData: vi.fn() }));
@@ -22,7 +23,10 @@ vi.mock("$lib/hooks/resource-context.svelte", () => ({
         basicStats: { mean: 154 },
         glycemicVariability: report.variability,
         clinicalAssessment: { cvAssessment: { status: report.cvStatus } },
-        timeInRange: { percentages: { target: 70, low: 3, veryLow: 1, belowRange: 4, aboveRange: 26 } },
+        timeInRange: {
+          thresholds: report.thresholds,
+          percentages: { target: 70, low: 3, veryLow: 1, belowRange: 4, aboveRange: 26 },
+        },
       },
     },
   }),
@@ -42,6 +46,16 @@ beforeEach(() => {
   report.variability = null;
   report.cvStatus = undefined;
   applyPreferences({ a1cName: "HbA1c", a1cUnits: "percent" });
+});
+
+it("names the consensus target range and the edges the API measured", async () => {
+  applyPreferences({ glucoseUnits: "mg/dl" });
+  render(ExecutiveSummary);
+  await expect
+    .element(page.getByText("Percentage of time in the consensus target range (63-140 mg/dL)"))
+    .toBeVisible();
+  await expect.element(page.getByText("Time spent below 63 mg/dL (target: <4%)")).toBeVisible();
+  await expect.element(page.getByText("Time spent above 140 mg/dL (target: <25%)")).toBeVisible();
 });
 
 it.each(["percent", "mmol/mol"] as const)(

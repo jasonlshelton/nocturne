@@ -42,6 +42,7 @@
   const entries = $derived(reportsResource.current?.entries ?? []);
   const analysis = $derived(reportsResource.current?.analysis);
   const averagedStats = $derived(reportsResource.current?.averagedStats);
+  const edges = $derived(analysis?.timeInRange?.thresholds);
   const lastUpdated = $derived(reportsResource.current?.dateRange?.lastUpdated);
   const startDate = $derived(reportsResource.date.from);
   const endDate = $derived(reportsResource.date.to);
@@ -49,7 +50,6 @@
 </script>
 
 <svelte:head>
-  <title>Ambulatory Glucose Profile - Nocturne Reports</title>
   <meta
     name="description"
     content="Standard AGP report with glucose pattern overlay, percentile bands, and time-in-range analysis"
@@ -63,7 +63,7 @@
     <div class="flex items-center justify-between flex-wrap gap-4">
       <div class="print:hidden">
         <p class="text-muted-foreground">
-          Your typical daily glucose pattern — a standardized clinical report
+          Your typical daily glucose pattern: a standardized clinical report
         </p>
       </div>
       <div class="flex items-center gap-2 print:hidden">
@@ -112,7 +112,7 @@
         <div class="mt-2 space-y-2 pl-4 border-l border-info/30">
           <p>
             <strong>The dark line</strong>
-            is your median (middle) glucose at each hour — what happens most often.
+            is your median (middle) glucose at each hour. It shows what happens most often.
           </p>
           <p>
             <strong>The darker shaded area</strong>
@@ -124,8 +124,11 @@
           </p>
           <p>
             <strong>The shaded band</strong>
-            ({bgRange(70, 180)}) is the consensus target range. The consensus target
-            is at least 70% of time in this zone.
+            {#if edges?.targetBottom != null && edges.targetTop != null}
+              ({bgRange(edges.targetBottom, edges.targetTop)})
+            {/if}
+            is the consensus target range. The consensus target
+            is at least 70% of time in this range.
           </p>
         </div>
       </details>
@@ -164,7 +167,7 @@
         </CardDescription>
       </CardHeader>
       <CardContent class="h-80 @lg:h-96 w-full">
-        <AmbulatoryGlucoseProfile {averagedStats} />
+        <AmbulatoryGlucoseProfile {averagedStats} thresholds={edges} />
       </CardContent>
     </Card>
 
@@ -215,7 +218,7 @@
                   : undefined,
             },
             {
-              label: `Time below ${bg(70)} ${bgLabel()}`,
+              label: edges?.low != null ? `Time below ${bg(edges.low)} ${bgLabel()}` : "Time below range",
               value:
                 tir.low != null || tir.veryLow != null
                   ? (tir.low ?? 0) + (tir.veryLow ?? 0)

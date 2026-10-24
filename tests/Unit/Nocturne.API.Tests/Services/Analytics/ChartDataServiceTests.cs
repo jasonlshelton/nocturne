@@ -1793,6 +1793,65 @@ public class ChartDataServiceTests
 
     #endregion
 
+    #region GetBasalDeliverySpansAsync Tests
+
+    public class GetBasalDeliverySpansAsyncTests
+    {
+        private const long Start = TestMills;
+        private const long End = TestMills + 60 * 60 * 1000;
+        private const long Minute = 60 * 1000;
+
+        private static TempBasal Span(long startMills, long endMills, TempBasalOrigin origin, double rate) => new()
+        {
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(startMills).UtcDateTime,
+            EndTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(endMills).UtcDateTime,
+            Rate = rate,
+            Origin = origin,
+        };
+
+        [Fact]
+        public async Task ReadsFromBufferAndReturnsEveryOriginWithSuspendedAtZero()
+        {
+            var rows = new[]
+            {
+                Span(Start - 20 * Minute, Start + 10 * Minute, TempBasalOrigin.Manual, 0.4),
+                Span(Start + 10 * Minute, Start + 20 * Minute, TempBasalOrigin.Suspended, 0.9),
+                Span(Start + 20 * Minute, Start + 30 * Minute, TempBasalOrigin.Inferred, 1.1),
+                Span(Start - 5 * 60 * Minute, Start - 4 * 60 * Minute, TempBasalOrigin.Algorithm, 2.0),
+            };
+            var repository = new Mock<ITempBasalRepository>();
+            DateTime? requestedFrom = null;
+            repository
+                .Setup(r => r.GetAsync(
+                    It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                    It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .Callback<DateTime?, DateTime?, string?, string?, int, int, bool, CancellationToken>(
+                    (from, _, _, _, _, _, _, _) => requestedFrom = from)
+                .ReturnsAsync(rows);
+
+            var service = new ChartDataService(
+                [],
+                Mock.Of<IChartDataAssembler>(),
+                new BasalSeriesBuilder(Mock.Of<ITherapySettingsResolver>(), Mock.Of<IBasalSegmentService>(), NullLogger<BasalSeriesBuilder>.Instance),
+                repository.Object,
+                Mock.Of<ITherapySettingsResolver>(),
+                Mock.Of<IBasalRateResolver>(),
+                new FakeTimeProvider(DateTimeOffset.FromUnixTimeMilliseconds(End)),
+                NullLogger<ChartDataService>.Instance);
+
+            var spans = await service.GetBasalDeliverySpansAsync(Start, End);
+
+            requestedFrom.Should().Be(DateTimeOffset.FromUnixTimeMilliseconds(Start - ChartDataService.BufferMs).UtcDateTime);
+            spans.Select(s => (s.Origin, s.Rate)).Should().Equal(
+                (BasalDeliveryOrigin.Manual, 0.4),
+                (BasalDeliveryOrigin.Suspended, 0.0),
+                (BasalDeliveryOrigin.Inferred, 1.1));
+            spans[0].StartMills.Should().Be(Start - 20 * Minute);
+        }
+    }
+
+    #endregion
+
     public class MapTempBasalSpansTests
     {
         [Theory]

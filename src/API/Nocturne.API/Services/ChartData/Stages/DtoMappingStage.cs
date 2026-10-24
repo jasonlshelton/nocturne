@@ -52,13 +52,10 @@ internal sealed class DtoMappingStage(ITreatmentFoodService treatmentFoodService
             ? MapStateSpans(overrideRaw, StateSpanCategory.Override)
             : [];
 
-        var activitySpans = new List<ChartStateSpanDto>();
-        if (context.StateSpans.TryGetValue(StateSpanCategory.Exercise, out var exerciseRaw))
-            activitySpans.AddRange(MapStateSpans(exerciseRaw, StateSpanCategory.Exercise));
-        if (context.StateSpans.TryGetValue(StateSpanCategory.Illness, out var illnessRaw))
-            activitySpans.AddRange(MapStateSpans(illnessRaw, StateSpanCategory.Illness));
-        if (context.StateSpans.TryGetValue(StateSpanCategory.Travel, out var travelRaw))
-            activitySpans.AddRange(MapStateSpans(travelRaw, StateSpanCategory.Travel));
+        var activitySpans = StateSpanCategories.DrawnActivities
+            .Where(context.StateSpans.ContainsKey)
+            .SelectMany(category => MapStateSpans(context.StateSpans[category], category))
+            .ToList();
 
         // Project sleep sessions into activity spans
         activitySpans.AddRange(MapSleepSessions(context.SleepSessions));
@@ -132,9 +129,7 @@ internal sealed class DtoMappingStage(ITreatmentFoodService treatmentFoodService
                 {
                     StateSpanCategory.PumpMode => ChartColorMapper.FromPumpMode(span.State ?? ""),
                     StateSpanCategory.Override => ChartColorMapper.FromOverride(span.State ?? ""),
-                    StateSpanCategory.Exercise
-                    or StateSpanCategory.Illness
-                    or StateSpanCategory.Travel => ChartColorMapper.FromActivity(category),
+                    _ when StateSpanCategories.DrawnActivities.Contains(category) => ChartColorMapper.FromActivity(category),
                     _ => ChartColor.MutedForeground,
                 },
                 Metadata = span.Metadata,

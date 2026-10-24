@@ -242,6 +242,7 @@ export interface ChartDataEngine {
   readonly basalData: ChartBasalPoint[];
   readonly scheduledBasalData: ScheduledBasalPoint[];
   readonly maxIOB: number;
+  readonly minIOB: number;
   readonly maxBasalRate: number;
 
   // Thresholds
@@ -360,6 +361,7 @@ export function createChartDataView(
   const cobData = $derived(serverChartData?.cobSeries ?? []);
   const basalData = $derived(serverChartData?.basalSeries ?? []);
   const maxIOB = $derived(serverChartData?.maxIob ?? 3);
+  const minIOB = $derived(serverChartData?.minIob ?? 0);
   const maxBasalRate = $derived(serverChartData?.maxBasalRate ?? 3.0);
 
   const scheduledBasalData = $derived(
@@ -702,6 +704,9 @@ export function createChartDataView(
     },
     get maxIOB() {
       return maxIOB;
+    },
+    get minIOB() {
+      return minIOB;
     },
     get maxBasalRate() {
       return maxBasalRate;

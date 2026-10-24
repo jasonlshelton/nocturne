@@ -2,18 +2,17 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Attributes;
 using Nocturne.API.Controllers.V4.Base;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Monitoring;
 using Nocturne.Core.Contracts.Alerts;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Abstractions;
-using Nocturne.Infrastructure.Data.Services;
 using Nocturne.API.Services.Realtime;
 
 namespace Nocturne.API.Controllers.V4.Monitoring;
@@ -44,7 +43,8 @@ public class TrackersController : ControllerBase, IWriteScopedController
     private readonly ITrackerRepository _repository;
     private readonly ISignalRBroadcastService _broadcast;
     private readonly ITrackerAlertRuleSyncService _ruleSync;
-    private readonly INocturneDbContextFactory _contextFactory;
+    private readonly IAlertRepository _alerts;
+    private readonly ITenantAccessor _tenantAccessor;
     private readonly IAlertAcknowledgementService _acknowledgementService;
     private readonly ILogger<TrackersController> _logger;
 
@@ -54,14 +54,16 @@ public class TrackersController : ControllerBase, IWriteScopedController
     /// <param name="repository">Repository for tracker definition and log persistence.</param>
     /// <param name="broadcast">Service for broadcasting real-time tracker updates via SignalR.</param>
     /// <param name="ruleSync">Synthesises managed alert rules from notification thresholds.</param>
-    /// <param name="contextFactory">Tenant-scoped database context factory (managed-rule lookups).</param>
+    /// <param name="alerts">Finds the open excursions of a definition's managed rules.</param>
+    /// <param name="tenantAccessor">The request's tenant.</param>
     /// <param name="acknowledgementService">Acknowledges alert excursions when a tracker is acked.</param>
     /// <param name="logger">Logger instance.</param>
     public TrackersController(
         ITrackerRepository repository,
         ISignalRBroadcastService broadcast,
         ITrackerAlertRuleSyncService ruleSync,
-        INocturneDbContextFactory contextFactory,
+        IAlertRepository alerts,
+        ITenantAccessor tenantAccessor,
         IAlertAcknowledgementService acknowledgementService,
         ILogger<TrackersController> logger
     )
@@ -69,7 +71,8 @@ public class TrackersController : ControllerBase, IWriteScopedController
         _repository = repository;
         _broadcast = broadcast;
         _ruleSync = ruleSync;
-        _contextFactory = contextFactory;
+        _alerts = alerts;
+        _tenantAccessor = tenantAccessor;
         _acknowledgementService = acknowledgementService;
         _logger = logger;
     }
@@ -212,23 +215,14 @@ public class TrackersController : ControllerBase, IWriteScopedController
     private async Task AcknowledgeManagedRuleExcursionsAsync(
         Guid definitionId, string userId, CancellationToken ct)
     {
-        await using var db = await _contextFactory.CreateAsync(ct);
-        var tag = TrackerAlertRuleSyncService.ManagedByTag(definitionId);
-
-        var excursions = await db.AlertExcursions
-            .AsNoTracking()
-            .Where(e => e.EndedAt == null && e.AcknowledgedAt == null)
-            .Join(
-                db.AlertRules.Where(r => r.ManagedBy == tag),
-                e => e.AlertRuleId,
-                r => r.Id,
-                (e, r) => e.Id)
-            .ToListAsync(ct);
+        var tenantId = _tenantAccessor.TenantId;
+        var excursions = await _alerts.GetUnacknowledgedExcursionIdsAsync(
+            tenantId, TrackerAlertRuleSyncService.ManagedByTag(definitionId), ct);
 
         foreach (var excursionId in excursions)
         {
             await _acknowledgementService.AcknowledgeExcursionAsync(
-                db.TenantId, excursionId, userId, HttpContext.GetAlertAcknowledgementAuthority(),
+                tenantId, excursionId, userId, HttpContext.GetAlertAcknowledgementAuthority(),
                 broadcast: true, ct);
         }
     }

@@ -167,7 +167,7 @@ public class DemoDataGenerator : IDemoDataGenerator
             yield break;
         }
 
-        var glucose = entry.Sgv ?? entry.Mgdl;
+        var glucose = entry.GlucoseMgdl();
         var delta = entry.Delta ?? 0;
         var targetGlucose = _config.TargetGlucose;
 
@@ -1313,7 +1313,7 @@ public class DemoDataGenerator : IDemoDataGenerator
             var iob = Math.Max(0, _realtimeSimulator.CalculateIob(nowUtc));
             var cob = Math.Max(0, _realtimeSimulator.CalculateCob(nowUtc));
 
-            var glucose = entry.Sgv ?? entry.Mgdl;
+            var glucose = entry.GlucoseMgdl();
             double? requestedRate = tempRate > _config.BasalRate
                 ? HighTempRate(glucose - _config.TargetGlucose).Requested
                 : null;

@@ -930,7 +930,7 @@ public class SampleDataSeeder
                     count: 1000,
                     skip: 0,
                     cancellationToken: ct);
-                var candidateReadings = readings.Where(entry => entry.Sgv.HasValue).ToList();
+                var candidateReadings = readings.Where(entry => entry.GlucoseMgdl() > 0).ToList();
                 if (candidateReadings.Count == 0 || candidateReadings.Any(entry =>
                         entry.DataSource != Nocturne.Core.Constants.DataSources.DemoService))
                     continue;

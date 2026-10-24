@@ -24,11 +24,7 @@ public class PropertiesService : IPropertiesService
 {
     private readonly IDDataService _ddataService;
     private readonly ILogger<PropertiesService> _logger;
-    private readonly IIobCalculator _iobCalculator;
-    private readonly ICobCalculator _cobCalculator;
-    private readonly IBolusRepository _bolusRepository;
-    private readonly ICarbIntakeRepository _carbIntakeRepository;
-    private readonly ITempBasalRepository _tempBasalRepository;
+    private readonly IIobCobReader _iobCobReader;
     private readonly IAr2Service _ar2Service;
     private readonly IDeviceAgeService _deviceAgeService;
 
@@ -51,22 +47,14 @@ public class PropertiesService : IPropertiesService
     public PropertiesService(
         IDDataService ddataService,
         ILogger<PropertiesService> logger,
-        IIobCalculator iobCalculator,
-        ICobCalculator cobCalculator,
-        IBolusRepository bolusRepository,
-        ICarbIntakeRepository carbIntakeRepository,
-        ITempBasalRepository tempBasalRepository,
+        IIobCobReader iobCobReader,
         IAr2Service ar2Service,
         IDeviceAgeService deviceAgeService
     )
     {
         _ddataService = ddataService;
         _logger = logger;
-        _iobCalculator = iobCalculator;
-        _cobCalculator = cobCalculator;
-        _bolusRepository = bolusRepository;
-        _carbIntakeRepository = carbIntakeRepository;
-        _tempBasalRepository = tempBasalRepository;
+        _iobCobReader = iobCobReader;
         _ar2Service = ar2Service;
         _deviceAgeService = deviceAgeService;
     }
@@ -185,11 +173,14 @@ public class PropertiesService : IPropertiesService
             // Direction properties
             SetDirectionProperties(properties, ddata);
 
-            // IOB properties (Insulin on Board) - requires treatments and profile data
-            await SetIobPropertiesAsync(properties, ddata);
-
-            // COB properties (Carbs on Board) - requires treatments and profile data
-            await SetCobPropertiesAsync(properties, ddata);
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var iobCob = await ReadIobCobAsync(now);
+            if (iobCob is not null)
+            {
+                SetIobProperties(properties, iobCob.Iob, now);
+                if (iobCob.Cob is not null)
+                    SetCobProperties(properties, iobCob.Cob, now);
+            }
 
             // Device status properties
             SetDeviceStatusProperties(properties, ddata);
@@ -244,7 +235,7 @@ public class PropertiesService : IPropertiesService
         if (currentSgv == null)
             return;
 
-        var mgdlValue = DirectionService.MgdlOf(currentSgv);
+        var mgdlValue = currentSgv.GlucoseMgdl();
         var bgnow = BucketProperties(DirectionService.BuildBuckets(ddata.Sgvs!)[0]);
         bgnow["mgdl"] = mgdlValue;
         bgnow["scaled"] = currentSgv.Scaled ?? mgdlValue;
@@ -260,7 +251,7 @@ public class PropertiesService : IPropertiesService
         if (bucket.Last != null)
         {
             result["mean"] = bucket.Mean!.Value;
-            result["last"] = DirectionService.MgdlOf(bucket.Last);
+            result["last"] = bucket.Last.GlucoseMgdl();
             result["mills"] = bucket.Last.Mills;
         }
 
@@ -320,104 +311,62 @@ public class PropertiesService : IPropertiesService
         };
     }
 
-    /// <summary>
-    /// Set IOB (Insulin on Board) properties using v4 calculator
-    /// </summary>
-    private async Task SetIobPropertiesAsync(Dictionary<string, object> properties, DData ddata)
+    private async Task<IobCobReading?> ReadIobCobAsync(long now)
     {
         try
         {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var diaHoursAgo = DateTime.UtcNow.AddHours(-8);
-
-            var boluses = (await _bolusRepository.GetAsync(
-                from: diaHoursAgo, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false
-            )).ToList();
-            var tempBasals = (await _tempBasalRepository.GetAsync(
-                from: diaHoursAgo, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false
-            )).ToList();
-
-            // Emit the property even with no insulin on board: legacy clients treat a
-            // missing `iob` as "server doesn't support it" rather than "zero".
-            var iobResult = boluses.Any() || tempBasals.Any()
-                ? await _iobCalculator.CalculateTotalAsync(boluses, tempBasals, now)
-                : null;
-
-            var iob = Math.Round(iobResult?.Iob ?? 0, 2);
-            var display = iobResult?.Display ?? iob.ToString(CultureInfo.InvariantCulture);
-
-            properties["iob"] = new Dictionary<string, object?>
-            {
-                ["iob"] = iob,
-                ["display"] = display,
-                ["displayLine"] = iobResult?.DisplayLine ?? $"IOB: {display}U",
-                ["timestamp"] = now,
-                ["source"] = iobResult?.Source ?? "Care Portal",
-                // Legacy calcTotal reports zeros rather than nulls for the numeric parts.
-                ["activity"] = iobResult?.Activity ?? 0,
-                ["lastBolus"] = iobResult?.LastBolus?.Mills,
-                ["basalIob"] = iobResult?.BasalIob ?? 0,
-                ["treatmentIob"] = iobResult?.TreatmentIob ?? 0,
-            };
+            return await _iobCobReader.ReadTotalAsync(now, live: true);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error setting IOB properties");
-            // Don't throw, just skip setting IOB properties
+            _logger.LogError(ex, "Error reading IOB and COB; leaving both properties out");
+            return null;
         }
     }
 
     /// <summary>
-    /// Set COB (Carbs on Board) properties using v4 calculator
+    /// Set IOB (Insulin on Board) properties. Emitted even with no insulin on board: legacy
+    /// clients treat a missing <c>iob</c> as "server doesn't support it" rather than "zero".
     /// </summary>
-    private async Task SetCobPropertiesAsync(Dictionary<string, object> properties, DData ddata)
+    private static void SetIobProperties(Dictionary<string, object> properties, IobResult iobResult, long now)
     {
-        try
+        var iob = Math.Round(iobResult.Iob, 2);
+        var display = IobResult.FormatDisplay(iob);
+
+        // NIGHTSCOUT-COMPAT: Nightscout derives iob and activity from boluses alone. Here both
+        // include the net basal IOB of temp basals, as the chart does, so they can go negative.
+        properties["iob"] = new Dictionary<string, object?>
         {
-            _logger.LogDebug("SetCobProperties: Starting");
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var cobHoursAgo = DateTime.UtcNow.AddHours(-6);
-            var diaHoursAgo = DateTime.UtcNow.AddHours(-8);
+            ["iob"] = iob,
+            ["display"] = display,
+            ["displayLine"] = iobResult.DisplayLine ?? $"IOB: {display}U",
+            ["timestamp"] = now,
+            ["source"] = iobResult.Source ?? "Care Portal",
+            // Legacy calcTotal reports zeros rather than nulls for the numeric parts.
+            ["activity"] = iobResult.Activity ?? 0,
+            ["lastBolus"] = iobResult.LastBolus?.Mills,
+            ["basalIob"] = iobResult.BasalIob ?? 0,
+            ["treatmentIob"] = iobResult.TreatmentIob ?? 0,
+        };
+    }
 
-            var carbIntakes = (await _carbIntakeRepository.GetAsync(
-                from: cobHoursAgo, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false
-            )).ToList();
-            var boluses = (await _bolusRepository.GetAsync(
-                from: diaHoursAgo, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false
-            )).ToList();
-            var tempBasals = (await _tempBasalRepository.GetAsync(
-                from: diaHoursAgo, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false
-            )).ToList();
+    /// <summary>
+    /// Set COB (Carbs on Board) properties, emitted even with no carbs on board, as IOB is.
+    /// </summary>
+    private static void SetCobProperties(Dictionary<string, object> properties, CobResult cobResult, long now)
+    {
+        var cob = Math.Round(cobResult.Cob);
+        var display = cobResult.Display ?? cob.ToString(CultureInfo.InvariantCulture);
 
-            // Emit the property even with no carbs on board: legacy clients treat a
-            // missing `cob` as "server doesn't support it" rather than "zero".
-            var cobResult = carbIntakes.Any()
-                ? await _cobCalculator.CalculateTotalAsync(carbIntakes, boluses, tempBasals, now)
-                : null;
-
-            var cob = Math.Round(cobResult?.Cob ?? 0);
-            var display = cobResult?.Display ?? cob.ToString(CultureInfo.InvariantCulture);
-
-            properties["cob"] = new Dictionary<string, object?>
-            {
-                ["cob"] = cob,
-                ["display"] = display,
-                ["displayLine"] = cobResult?.DisplayLine ?? $"COB: {display}g",
-                ["timestamp"] = now,
-                ["source"] = cobResult?.Source ?? "Care Portal",
-                ["activity"] = cobResult?.Activity ?? 0,
-            };
-        }
-        catch (Exception ex)
+        properties["cob"] = new Dictionary<string, object?>
         {
-            _logger.LogError(ex, "SetCobProperties failed");
-            // Don't throw, just skip setting COB properties
-        }
+            ["cob"] = cob,
+            ["display"] = display,
+            ["displayLine"] = cobResult.DisplayLine ?? $"COB: {display}g",
+            ["timestamp"] = now,
+            ["source"] = cobResult.Source ?? "Care Portal",
+            ["activity"] = cobResult.Activity ?? 0,
+        };
     }
 
     /// <summary>
@@ -526,7 +475,7 @@ public class PropertiesService : IPropertiesService
         if (rawEntry == null)
             return;
 
-        var mgdlValue = rawEntry.Mgdl != 0 ? rawEntry.Mgdl : rawEntry.Sgv ?? 0;
+        var mgdlValue = rawEntry.GlucoseMgdl();
 
         properties["rawbg"] = new Dictionary<string, object?>
         {

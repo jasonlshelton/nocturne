@@ -17,9 +17,9 @@ namespace Nocturne.API.Services.Health.GoogleHealth;
 /// <c>google_health_grant_holders</c>, one row per tenant whose state has been recorded.
 /// </summary>
 /// <remarks>
-/// A token stored before the table existed, or by a replica on an older image, has no row. Before
-/// its first answer each process therefore adopts the token of every tenant that has no row,
-/// reading it from that tenant's secrets. A tenant with a row is never adopted: its row, even one
+/// A token stored before the table existed has no row. Before its first answer the process
+/// therefore adopts the token of every tenant that has no row, reading it from that tenant's
+/// secrets. A tenant with a row is never adopted: its row, even one
 /// recording a release, is newer than anything adoption reads. A tenant whose secrets cannot be
 /// read is skipped, since it cannot use its token either; only a failure to list the tenants
 /// leaves adoption to the next question, and the answer meanwhile is

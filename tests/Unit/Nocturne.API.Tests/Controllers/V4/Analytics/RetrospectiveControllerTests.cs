@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Nocturne.API.Tests.Infrastructure;
+using Nocturne.Core.Clinical.Treatments;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -29,6 +32,7 @@ public class RetrospectiveControllerTests
     private readonly Mock<ICarbIntakeRepository> _carbIntakeRepoMock = new();
     private readonly Mock<ITempBasalRepository> _tempBasalRepoMock = new();
     private readonly Mock<IBasalRateResolver> _basalRateResolverMock = new();
+    private readonly Mock<ITherapyTimelineResolver> _therapyTimelineResolverMock = new();
     private readonly Mock<ILogger<RetrospectiveController>> _loggerMock = new();
 
     private static DeviceStatusProjectionService CreateProjectionService()
@@ -57,6 +61,11 @@ public class RetrospectiveControllerTests
             _tempBasalRepoMock.Object,
             CreateProjectionService(),
             _basalRateResolverMock.Object,
+            _therapyTimelineResolverMock.Object,
+            Mock.Of<IApsSnapshotRepository>(),
+            Mock.Of<IPumpSnapshotRepository>(),
+            new IobCobReader(_iobCalculatorMock.Object, _cobCalculatorMock.Object, _bolusRepoMock.Object,
+                _tempBasalRepoMock.Object, _carbIntakeRepoMock.Object, TestTenantCache.Create(partition: null), NullLogger<IobCobReader>.Instance),
             _loggerMock.Object);
 
         controller.ControllerContext = new ControllerContext
@@ -103,15 +112,10 @@ public class RetrospectiveControllerTests
             .Setup(r => r.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((long _) => 0.8);
 
-        _iobCalculatorMock
-            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<long?>()))
-            .Returns(new IobResult());
-
-        _cobCalculatorMock
-            .Setup(s => s.FromCarbIntakes(
-                It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>>(),
-                It.IsAny<List<TempBasal>>(), It.IsAny<long>()))
-            .Returns(new CobResult());
+        _therapyTimelineResolverMock
+            .Setup(r => r.BuildAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((long from, long to, string? _, CancellationToken _) => new TherapyTimeline(
+                [new TherapySegment(from, to, new TherapySnapshot(3.0, 75, 30.0, null, null, 0, null, null, null))]));
 
         _entryServiceMock
             .Setup(s => s.QueryEntriesAsync(It.IsAny<EntryQuery>(), It.IsAny<CancellationToken>()))
@@ -226,6 +230,8 @@ public class RetrospectiveControllerTests
                 It.IsAny<List<Bolus>>(),
                 It.IsAny<List<TempBasal>?>(),
                 It.IsAny<long>(),
+                It.IsAny<long?>(),
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new IobResult());
 
@@ -235,6 +241,7 @@ public class RetrospectiveControllerTests
                 It.IsAny<List<Bolus>?>(),
                 It.IsAny<List<TempBasal>?>(),
                 It.IsAny<long>(),
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CobResult());
 

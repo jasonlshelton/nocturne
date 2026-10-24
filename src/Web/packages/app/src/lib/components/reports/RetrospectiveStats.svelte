@@ -153,9 +153,11 @@
               <span class="text-sm text-muted-foreground">U</span>
             </div>
             <div class="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Bolus: {(data.iob.bolus ?? 0).toFixed(1)}U</span>
-              {#if (data.iob.basal ?? 0) > 0}
-                <span>Basal: {(data.iob.basal ?? 0).toFixed(1)}U</span>
+              {#if data.iob.bolus != null}
+                <span>Bolus: {data.iob.bolus.toFixed(1)}U</span>
+              {/if}
+              {#if data.iob.basal}
+                <span>Basal: {data.iob.basal.toFixed(1)}U</span>
               {/if}
             </div>
           {:else}

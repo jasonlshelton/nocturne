@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Services.Alerts;
-using Nocturne.API.Services.Alerts.Evaluators;
+using Nocturne.API.Services.Alerts.Conditions;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Infrastructure.Data;
@@ -301,7 +301,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
         if (definition.Category != TrackerCategory.Reservoir || definition.LowReservoirUnits is not { } units)
             return;
 
-        // Snake_case to match the evaluators' shared JSON options (ReservoirCondition).
+        // Snake_case, the condition models' wire form (ReservoirCondition).
         var conditionParams = JsonSerializer.Serialize(new { @operator = "<", value = units });
         var name = Truncate($"{definition.Name}: below {units} U", 128);
         var severity = MapSeverity(definition.LowReservoirUrgency);

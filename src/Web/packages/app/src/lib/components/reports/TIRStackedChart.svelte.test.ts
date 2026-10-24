@@ -94,4 +94,24 @@ describe("TIRStackedChart", () => {
       }
     });
   });
+
+  it("captions the served consensus target range", async () => {
+    render(TIRStackedChart, {
+      props: {
+        percentages: { veryLow: 2, low: 3, target: 70, high: 15, veryHigh: 10 },
+        thresholds: { low: 63, high: 140 },
+      },
+    });
+
+    await expect.element(page.getByText("Consensus target range:")).toBeVisible();
+    await expect.element(page.getByText(/63\D+140 mg\/dL/)).toBeVisible();
+  });
+
+  it("shows no range caption when no thresholds are served", async () => {
+    render(TIRStackedChart, {
+      props: { percentages: { veryLow: 2, low: 3, target: 70, high: 15, veryHigh: 10 } },
+    });
+
+    await expect.element(page.getByText("Consensus target range:")).not.toBeInTheDocument();
+  });
 });

@@ -847,10 +847,9 @@ public class StatisticsServiceTests
     }
 
     [Fact]
-    public void CalculateTimeInRange_AverageDailyMinutes_AddToAWholeDayThroughAGap()
+    public void CalculateTimeInRange_AverageDailyMinutes_AreTheZoneTimeOverTheDaysCovered()
     {
-        // Five-minute readings, a two-hour gap the sensor did not cover, then two more. The
-        // percentages count readings, so they still sum to 100 and the zones still fill a day.
+        // Five-minute readings, a two-hour gap the sensor did not cover, then two more.
         var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
         var entries = new[]
         {
@@ -863,11 +862,172 @@ public class StatisticsServiceTests
 
         var result = _statisticsService.CalculateTimeInRange(entries);
 
-        var average = result.AverageDailyMinutes;
-        (average.Target + average.Low + average.High).Should().BeApproximately(1440, 1);
-        average.Target.Should().BeApproximately(result.Percentages.Target / 100 * 1440, 0.001);
-        average.Low.Should().BeApproximately((result.Percentages.Low + result.Percentages.VeryLow) / 100 * 1440, 0.001);
-        average.High.Should().BeApproximately((result.Percentages.High + result.Percentages.VeryHigh) / 100 * 1440, 0.001);
+        // 25 minutes are covered, of which 15 are above range, 5 target and 5 below.
+        var coveredDays = 25.0 / 1440;
+        result.AverageDailyMinutes.High.Should().BeApproximately(15 / coveredDays, 0.001);
+        result.AverageDailyMinutes.Target.Should().BeApproximately(5 / coveredDays, 0.001);
+        result.AverageDailyMinutes.Low.Should().BeApproximately(5 / coveredDays, 0.001);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayFigures_SeparateEachLevelAndDirection()
+    {
+        var result = _statisticsService.CalculateTimeInRange(
+            Readings(4, 5, (0, 20, 45), (60, 20, 60), (120, 20, 60), (180, 20, 220), (240, 20, 220),
+                (300, 20, 220), (360, 20, 300)));
+
+        var episodes = result.AverageDailyEpisodes;
+        episodes.VeryLow.Should().BeApproximately(1, 0.001);
+        episodes.Low.Should().BeApproximately(2, 0.001);
+        episodes.High.Should().BeApproximately(3, 0.001);
+        episodes.VeryHigh.Should().BeApproximately(1, 0.001);
+        episodes.BelowRange.Should().BeApproximately(3, 0.001);
+        episodes.AboveRange.Should().BeApproximately(4, 0.001);
+        result.AverageDailyMinutes.Low.Should().BeApproximately(60, 0.001);
+        result.AverageDailyMinutes.High.Should().BeApproximately(80, 0.001);
+        result.AverageDailyMinutes.Target.Should().BeApproximately(1440 - 140, 0.001);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayFigures_FollowAOneMinuteSensor()
+    {
+        var result = _statisticsService.CalculateTimeInRange(Readings(3, 1, (180, 100, 60)));
+
+        result.AverageDailyMinutes.Low.Should().BeApproximately(100, 0.001);
+        result.AverageDailyEpisodes.BelowRange.Should().BeApproximately(1, 0.001);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayFigures_WeighTimeNotReadingsAcrossCadences()
+    {
+        // Three days on a one-minute sensor with a 100-minute low each day, then three days
+        // in range on a five-minute one. Counting readings would put the low at 83 minutes a day.
+        var oneMinute = Readings(3, 1, (180, 100, 60));
+        var fiveMinute = Readings(3, 5).Select(r => new SensorGlucose
+        {
+            Mgdl = r.Mgdl,
+            Timestamp = r.Timestamp.AddDays(3),
+        });
+
+        var result = _statisticsService.CalculateTimeInRange(oneMinute.Concat(fiveMinute));
+
+        result.AverageDailyMinutes.Low.Should().BeApproximately(50, 0.5);
+        result.AverageDailyEpisodes.BelowRange.Should().BeApproximately(0.5, 0.01);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayFigures_CountReadingsOfOneInstantOnce()
+    {
+        var once = Readings(3, 5, (180, 100, 60), (900, 60, 220));
+        var twice = once.SelectMany(r => new[]
+        {
+            r,
+            new SensorGlucose { Mgdl = r.Mgdl, Timestamp = r.Timestamp },
+        });
+
+        var single = _statisticsService.CalculateTimeInRange(once);
+        var doubled = _statisticsService.CalculateTimeInRange(twice);
+
+        doubled.AverageDailyMinutes.Low.Should().BeApproximately(single.AverageDailyMinutes.Low, 0.001);
+        doubled.AverageDailyMinutes.High.Should().BeApproximately(single.AverageDailyMinutes.High, 0.001);
+        doubled.AverageDailyEpisodes.BelowRange.Should().BeApproximately(1, 0.001);
+        doubled.AverageDailyEpisodes.AboveRange.Should().BeApproximately(1, 0.001);
+    }
+
+    [Theory]
+    [InlineData(7, 14)]
+    [InlineData(3, 10)]
+    public void CalculateTimeInRange_PerDayFigures_DoNotDependOnThePeriodLength(int shorter, int longer)
+    {
+        var shortPeriod = _statisticsService.CalculateTimeInRange(DailyPattern(Enumerable.Range(0, shorter)));
+        var longPeriod = _statisticsService.CalculateTimeInRange(DailyPattern(Enumerable.Range(0, longer)));
+
+        shortPeriod.AverageDailyEpisodes.BelowRange.Should().BeApproximately(1, 0.01);
+        shortPeriod.AverageDailyEpisodes.AboveRange.Should().BeApproximately(1, 0.01);
+        longPeriod.AverageDailyEpisodes.BelowRange.Should().BeApproximately(shortPeriod.AverageDailyEpisodes.BelowRange, 0.001);
+        longPeriod.AverageDailyEpisodes.AboveRange.Should().BeApproximately(shortPeriod.AverageDailyEpisodes.AboveRange, 0.001);
+        longPeriod.AverageDailyEpisodes.Low.Should().BeApproximately(shortPeriod.AverageDailyEpisodes.Low, 0.001);
+        longPeriod.AverageDailyEpisodes.VeryHigh.Should().BeApproximately(shortPeriod.AverageDailyEpisodes.VeryHigh, 0.001);
+        longPeriod.AverageDailyMinutes.Low.Should().BeApproximately(shortPeriod.AverageDailyMinutes.Low, 0.001);
+        longPeriod.AverageDailyMinutes.High.Should().BeApproximately(shortPeriod.AverageDailyMinutes.High, 0.001);
+        longPeriod.Episodes.BelowRange.Should().NotBe(shortPeriod.Episodes.BelowRange);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayFigures_AreUnchangedByADaysLongSensorGap()
+    {
+        var contiguous = _statisticsService.CalculateTimeInRange(DailyPattern([0, 1, 2, 3, 4, 5]));
+        var gapped = _statisticsService.CalculateTimeInRange(DailyPattern([0, 1, 2, 5, 6, 7]));
+
+        gapped.Episodes.BelowRange.Should().Be(contiguous.Episodes.BelowRange);
+        gapped.AverageDailyEpisodes.BelowRange.Should().BeApproximately(contiguous.AverageDailyEpisodes.BelowRange, 0.001);
+        gapped.AverageDailyEpisodes.AboveRange.Should().BeApproximately(contiguous.AverageDailyEpisodes.AboveRange, 0.001);
+        gapped.AverageDailyMinutes.Low.Should().BeApproximately(contiguous.AverageDailyMinutes.Low, 0.001);
+        gapped.AverageDailyMinutes.High.Should().BeApproximately(contiguous.AverageDailyMinutes.High, 0.001);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayEpisodes_AreZeroWithoutReadings()
+    {
+        var result = _statisticsService.CalculateTimeInRange([]);
+
+        result.AverageDailyEpisodes.BelowRange.Should().Be(0);
+        result.AverageDailyEpisodes.AboveRange.Should().Be(0);
+        result.AverageDailyEpisodes.VeryLow.Should().Be(0);
+        result.AverageDailyEpisodes.VeryHigh.Should().Be(0);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_PerDayEpisodes_SplitByLevel()
+    {
+        var result = _statisticsService.CalculateTimeInRange(DailyPattern([0, 1], severe: true));
+
+        result.AverageDailyEpisodes.VeryLow.Should().BeApproximately(1, 0.01);
+        result.AverageDailyEpisodes.VeryHigh.Should().BeApproximately(1, 0.01);
+        result.AverageDailyEpisodes.Low.Should().Be(0);
+        result.AverageDailyEpisodes.High.Should().Be(0);
+        result.AverageDailyEpisodes.BelowRange.Should().BeApproximately(1, 0.01);
+    }
+
+    // Whole days of readings every cadenceMinutes, at 120 mg/dL except for each excursion, given
+    // as the minute of the day it starts, how long it lasts and its value.
+    private static SensorGlucose[] Readings(
+        int days,
+        int cadenceMinutes,
+        params (int StartMinute, int Minutes, int Mgdl)[] excursions)
+    {
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        return Enumerable
+            .Range(0, days * 1440 / cadenceMinutes)
+            .Select(i =>
+            {
+                var minute = i * cadenceMinutes;
+                var minuteOfDay = minute % 1440;
+                var excursion = excursions.FirstOrDefault(e =>
+                    minuteOfDay >= e.StartMinute && minuteOfDay < e.StartMinute + e.Minutes);
+                return new SensorGlucose
+                {
+                    Mgdl = excursion.Minutes > 0 ? excursion.Mgdl : 120,
+                    Timestamp = start.AddMinutes(minute),
+                };
+            })
+            .ToArray();
+    }
+
+    // Each listed day holds 288 five-minute readings: one 100-minute excursion below range from
+    // 03:00 and one above from 15:00, in target otherwise.
+    private static SensorGlucose[] DailyPattern(IEnumerable<int> days, bool severe = false)
+    {
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        var low = severe ? 45 : 60;
+        var high = severe ? 300 : 220;
+        return days
+            .SelectMany(day => Enumerable.Range(0, 288).Select(slot => new SensorGlucose
+            {
+                Mgdl = slot is >= 36 and < 56 ? low : slot is >= 180 and < 200 ? high : 120,
+                Timestamp = start.AddDays(day).AddMinutes(slot * 5),
+            }))
+            .ToArray();
     }
 
     private static SensorGlucose[] Sequence(params int[] mgdl) => Sequence(5, mgdl);
@@ -1520,6 +1680,21 @@ public class StatisticsServiceTests
 
         result.DataSufficiency.TotalDays.Should().Be(30);
         result.DataSufficiency.IsSufficient.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AnalyzeGlucoseDataExtended_AveragesTheTreatmentSummaryOverTheWindow()
+    {
+        var readings = AtCadence(new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc), 5, 288);
+
+        var result = _statisticsService.AnalyzeGlucoseDataExtended(
+            readings,
+            [new Bolus { Insulin = 6 }, new Bolus { Insulin = 6 }],
+            [new CarbIntake { Carbs = 90 }],
+            windowDays: 3);
+
+        result.TreatmentSummary!.DailyCarbs.Should().Be(30);
+        result.TreatmentSummary.DailyBoluses.Should().BeApproximately(2.0 / 3, 1e-9);
     }
 
     private static SensorGlucose[] AtCadence(

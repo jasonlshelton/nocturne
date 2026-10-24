@@ -55,7 +55,6 @@
 
     await deletion.run(async () => {
       await removeClockFace(target.id);
-      await clockFacesQuery.refresh();
       toast.success("Clock face deleted");
       deleteDialogOpen = false;
       clockFaceToDelete = null;

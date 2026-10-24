@@ -5,11 +5,13 @@ using System.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.API.Authorization;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Glucose;
 using Nocturne.Core.Constants;
+using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Platform;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
@@ -46,6 +48,7 @@ public class StatusService : IStatusService
     private readonly PublicAccessCacheService _publicAccessCacheService;
     private readonly ITenantAppearanceReader _appearanceReader;
     private readonly IGlucoseStatusClassifier _thresholdClassifier;
+    private readonly IAlertRepository _alertRepository;
     private readonly ICategoryReadContext _categoryReadContext;
     private readonly ILogger<StatusService> _logger;
 
@@ -76,6 +79,7 @@ public class StatusService : IStatusService
         PublicAccessCacheService publicAccessCacheService,
         ITenantAppearanceReader appearanceReader,
         IGlucoseStatusClassifier thresholdClassifier,
+        IAlertRepository alertRepository,
         ICategoryReadContext categoryReadContext,
         ILogger<StatusService> logger
     )
@@ -89,6 +93,7 @@ public class StatusService : IStatusService
         _publicAccessCacheService = publicAccessCacheService;
         _appearanceReader = appearanceReader;
         _thresholdClassifier = thresholdClassifier;
+        _alertRepository = alertRepository;
         _categoryReadContext = categoryReadContext;
         _logger = logger;
     }
@@ -518,8 +523,8 @@ public class StatusService : IStatusService
         var ct = _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None;
         try
         {
-            await using var db = await _dbContextFactory.CreateAsync(ct);
-            return await _thresholdClassifier.ResolveThresholdsAsync(db, ct);
+            var rules = await _alertRepository.GetEnabledRulesAsync(_tenantAccessor.TenantId, ct);
+            return _thresholdClassifier.ResolveThresholds(rules);
         }
         catch (DbException ex)
         {
@@ -682,7 +687,7 @@ public class StatusService : IStatusService
             .Select(f => (DateTime?)f.SysUpdatedAt)
             .FirstOrDefaultAsync());
 
-        var settingsTask = ReadableLastModifiedAsync("settings", ctx => ctx.Settings.AsNoTracking()
+        var settingsTask = ReadableLastModifiedAsync("settings", ctx => ctx.Settings.V3Documents().AsNoTracking()
             .OrderByDescending(s => s.SrvModified ?? s.SysUpdatedAt)
             .Select(s =>
                 (DateTime?)(s.SrvModified.HasValue ? s.SrvModified.Value.UtcDateTime : s.SysUpdatedAt))

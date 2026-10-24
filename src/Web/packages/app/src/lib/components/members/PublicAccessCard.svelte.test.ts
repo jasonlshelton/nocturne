@@ -25,8 +25,20 @@ interface ShareState {
   canReveal: boolean;
   fullHistory: boolean;
   scopes: string[];
+  shareableScopes: string[];
   lastAccessedAt: string | null;
 }
+
+const SHAREABLE_SCOPES = [
+  "alerts.read",
+  "devices.read",
+  "food.read",
+  "glucose.read",
+  "heartrate.read",
+  "reports.read",
+  "stepcount.read",
+  "treatments.read",
+];
 
 const enabledShare: ShareState = {
   enabled: true,
@@ -35,6 +47,7 @@ const enabledShare: ShareState = {
   canReveal: true,
   fullHistory: false,
   scopes: ["glucose.read"],
+  shareableScopes: SHAREABLE_SCOPES,
   lastAccessedAt: null,
 };
 const disabledShare: ShareState = {
@@ -44,6 +57,7 @@ const disabledShare: ShareState = {
   canReveal: false,
   fullHistory: false,
   scopes: [],
+  shareableScopes: SHAREABLE_SCOPES,
   lastAccessedAt: null,
 };
 

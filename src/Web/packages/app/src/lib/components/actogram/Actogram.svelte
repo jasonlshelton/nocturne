@@ -136,7 +136,7 @@
           class="print:hidden"
           disabled={offset === 0}
           onclick={() => navigate(-7)}
-          aria-label="Previous week"
+          aria-label="Newer week"
         >
           <ChevronUp class="size-4" />
         </Button>
@@ -212,7 +212,7 @@
           size="icon-2xs"
           disabled={offset >= maxOffset}
           onclick={() => navigate(7)}
-          aria-label="Next week"
+          aria-label="Older week"
         >
           <ChevronDown class="size-4" />
         </Button>

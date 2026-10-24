@@ -105,6 +105,76 @@ public class TherapySettingsResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDIA_ReturnsPrimaryInsulinDia_WhenNoSettingsExist()
+    {
+        _repo.Setup(r => r.GetByProfileNameAsync("Default", default))
+            .ReturnsAsync(Array.Empty<TherapySettings>());
+        _insulinRepo.Setup(r => r.GetPrimaryBolusInsulinAsync(default))
+            .ReturnsAsync(new PatientInsulin { Dia = 4.5, IsPrimary = true });
+
+        var result = await _sut.GetDIAAsync(NoonMills);
+
+        result.Should().Be(4.5);
+    }
+
+    [Fact]
+    public async Task GetDIA_ExternallyManagedSettingsWin_OverPrimaryInsulin()
+    {
+        var settings = MakeSettings(dia: 6.0, isExternallyManaged: true);
+        _repo.Setup(r => r.GetByProfileNameAsync("Default", default))
+            .ReturnsAsync(new[] { settings });
+        _insulinRepo.Setup(r => r.GetPrimaryBolusInsulinAsync(default))
+            .ReturnsAsync(new PatientInsulin { Dia = 4.5, IsPrimary = true });
+
+        var result = await _sut.GetDIAAsync(NoonMills);
+
+        result.Should().Be(6.0);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-1.0)]
+    public async Task GetDIA_FallsThroughToTherapySettings_WhenPrimaryInsulinDiaNotPositive(double insulinDia)
+    {
+        var settings = MakeSettings(dia: 5.0);
+        _repo.Setup(r => r.GetByProfileNameAsync("Default", default))
+            .ReturnsAsync(new[] { settings });
+        _insulinRepo.Setup(r => r.GetPrimaryBolusInsulinAsync(default))
+            .ReturnsAsync(new PatientInsulin { Dia = insulinDia, IsPrimary = true });
+
+        var result = await _sut.GetDIAAsync(NoonMills);
+
+        result.Should().Be(5.0);
+    }
+
+    [Fact]
+    public async Task GetDIA_ExternallyManagedSettingsWithNoDia_FallThroughToPrimaryInsulin()
+    {
+        var settings = MakeSettings(dia: 0, isExternallyManaged: true);
+        _repo.Setup(r => r.GetByProfileNameAsync("Default", default))
+            .ReturnsAsync(new[] { settings });
+        _insulinRepo.Setup(r => r.GetPrimaryBolusInsulinAsync(default))
+            .ReturnsAsync(new PatientInsulin { Dia = 4.5, IsPrimary = true });
+
+        var result = await _sut.GetDIAAsync(NoonMills);
+
+        result.Should().Be(4.5);
+    }
+
+    [Fact]
+    public async Task GetDIA_ReturnsDefault_WhenNoSettingsAndPrimaryInsulinDiaNotPositive()
+    {
+        _repo.Setup(r => r.GetByProfileNameAsync("Default", default))
+            .ReturnsAsync(Array.Empty<TherapySettings>());
+        _insulinRepo.Setup(r => r.GetPrimaryBolusInsulinAsync(default))
+            .ReturnsAsync(new PatientInsulin { Dia = 0, IsPrimary = true });
+
+        var result = await _sut.GetDIAAsync(NoonMills);
+
+        result.Should().Be(3.0);
+    }
+
+    [Fact]
     public async Task GetCarbAbsorptionRate_ReturnsValue()
     {
         var settings = MakeSettings(carbsHr: 30);

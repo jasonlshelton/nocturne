@@ -1,10 +1,15 @@
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
+import { page as pageState } from "$app/state";
 import TrackerNotificationEditor from "./tracker-notification-editor-test-wrapper.svelte";
 import { NotificationUrgency } from "$api";
 
 describe("TrackerNotificationEditor", () => {
+	beforeEach(() => {
+		pageState.data = { effectivePermissions: ["alerts.read"] };
+	});
+
 	it("renders the section label and add button", async () => {
 		render(TrackerNotificationEditor, { notifications: [] });
 
@@ -129,6 +134,25 @@ describe("TrackerNotificationEditor", () => {
 			"href",
 			"/alerts/22222222-2222-2222-2222-222222222222",
 		);
+	});
+
+	it("omits the channels link from a viewer without alerts.read", async () => {
+		pageState.data = { effectivePermissions: ["glucose.read"] };
+		render(TrackerNotificationEditor, {
+			notifications: [
+				{
+					urgency: NotificationUrgency.Info,
+					hours: 24,
+					description: "First",
+					alertRuleId: "11111111-1111-1111-1111-111111111111",
+				},
+			],
+		});
+
+		await expect.element(page.getByText("Level")).toBeVisible();
+		await expect
+			.element(page.getByRole("link", { name: /Channels/i }))
+			.not.toBeInTheDocument();
 	});
 
 	it("omits the channels link for a threshold with no managed rule yet", async () => {

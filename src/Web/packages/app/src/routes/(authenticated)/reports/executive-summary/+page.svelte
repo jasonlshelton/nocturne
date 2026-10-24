@@ -41,6 +41,9 @@
   const bgOr = (mgdl: number | undefined | null) =>
     mgdl != null ? bg(mgdl) : "–";
 
+  const bgRangeOr = (low: number | undefined | null, high: number | undefined | null) =>
+    low != null && high != null ? bgRange(low, high) : "–";
+
   // Get shared date params from context (set by reports layout)
   // Default: 14 days is standard for executive summary reports
   const reportsParams = requireDateParamsContext(14);
@@ -65,7 +68,6 @@
 </script>
 
 <svelte:head>
-  <title>Executive Summary - Nocturne Reports</title>
   <meta
     name="description"
     content="High-level overview of your diabetes management metrics"
@@ -93,6 +95,7 @@
   <div class="@container space-y-8">
     {#if analysis}
       {@const tir = analysis?.timeInRange?.percentages}
+      {@const edges = analysis?.timeInRange?.thresholds}
       {@const dailyMinutes = analysis?.timeInRange?.averageDailyMinutes}
       {@const variability = analysis?.glycemicVariability}
       {@const stats = analysis?.basicStats}
@@ -119,7 +122,7 @@
               Time in Range
             </CardTitle>
             <CardDescription>
-              Percentage of time in your target zone ({bgRange(70, 180)})
+              Percentage of time in the consensus target range ({bgRangeOr(edges?.targetBottom, edges?.targetTop)})
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-6">
@@ -257,10 +260,10 @@
           <CardHeader>
             <CardTitle class="flex items-center gap-2">
               <AlertTriangle class="w-5 h-5 text-glucose-very-low" />
-              Low Blood Sugar Events
+              Low Glucose Events
             </CardTitle>
             <CardDescription>
-              Time spent below {bg(70)} {bgLabel()} (target: &lt;4%)
+              Time spent below {bgOr(edges?.low)} {bgLabel()} (target: &lt;4%)
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
@@ -268,11 +271,11 @@
               <div class="space-y-1 text-sm tabular-nums">
                 <div class="flex items-center gap-2">
                   <TextureSwatch texture="very-low" />
-                  <span>&lt;{bg(54)}: {tir?.veryLow?.toFixed(1) ?? 0}%</span>
+                  <span>&lt;{bgOr(edges?.veryLow)}: {tir?.veryLow?.toFixed(1) ?? 0}%</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <TextureSwatch texture="low" />
-                  <span>{bg(54)}-{bg(70)}: {tir?.low?.toFixed(1) ?? 0}%</span>
+                  <span>{bgOr(edges?.veryLow)}-{bgOr(edges?.low)}: {tir?.low?.toFixed(1) ?? 0}%</span>
                 </div>
               </div>
             </div>
@@ -290,7 +293,7 @@
             {/if}
 
             <div class="text-sm text-muted-foreground">
-              Target for time below {bg(70)} {bgLabel()} is under 4%.
+              Target for time below {bgOr(edges?.low)} {bgLabel()} is under 4%.
             </div>
           </CardContent>
         </Card>
@@ -300,10 +303,10 @@
           <CardHeader>
             <CardTitle class="flex items-center gap-2">
               <TrendingUp class="w-5 h-5 text-glucose-high" />
-              High Blood Sugar Events
+              High Glucose Events
             </CardTitle>
             <CardDescription>
-              Time spent above {bg(180)} {bgLabel()} (target: &lt;25%)
+              Time spent above {bgOr(edges?.high)} {bgLabel()} (target: &lt;25%)
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
@@ -311,17 +314,17 @@
               <div class="space-y-1 text-sm tabular-nums">
                 <div class="flex items-center gap-2">
                   <TextureSwatch texture="high" />
-                  <span>{bg(180)}-{bg(250)}: {tir?.high?.toFixed(1) ?? 0}%</span>
+                  <span>{bgOr(edges?.high)}-{bgOr(edges?.veryHigh)}: {tir?.high?.toFixed(1) ?? 0}%</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <TextureSwatch texture="very-high" />
-                  <span>&gt;{bg(250)}: {tir?.veryHigh?.toFixed(1) ?? 0}%</span>
+                  <span>&gt;{bgOr(edges?.veryHigh)}: {tir?.veryHigh?.toFixed(1) ?? 0}%</span>
                 </div>
               </div>
             </div>
 
             <div class="text-sm text-muted-foreground">
-              Target for time above {bg(180)} {bgLabel()} is under 25%. The AGP
+              Target for time above {bgOr(edges?.high)} {bgLabel()} is under 25%. The AGP
               report shows the times of day when highs occur most.
             </div>
           </CardContent>
@@ -421,7 +424,7 @@
               </div>
             {/if}
             <p class="text-xs text-muted-foreground">
-              Target: at least 70% CGM active time over 14 days; the statistics
+              Target: at least 70% CGM active time over 14 days. The statistics
               on this page are most reliable at 90% or above.
             </p>
 

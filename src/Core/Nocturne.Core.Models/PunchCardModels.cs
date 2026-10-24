@@ -11,7 +11,7 @@ public class PunchCardDay
     /// <summary>Local-midnight Unix milliseconds for the day.</summary>
     public long Timestamp { get; set; }
 
-    /// <summary>Approximate count of CGM readings for the day (5-min cadence assumed).</summary>
+    /// <summary>Count of the day's CGM readings.</summary>
     public int TotalReadings { get; set; }
     public int InRangeCount { get; set; }
     public int VeryLowCount { get; set; }
@@ -115,4 +115,7 @@ public class PunchCardResponse
     public double GlobalMaxCarbs { get; set; }
     public double GlobalMaxInsulin { get; set; }
     public double GlobalMaxCarbInsulinDiff { get; set; }
+
+    /// <summary>Why <see cref="Months"/> is empty; null when the tenant's timezone resolved.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }

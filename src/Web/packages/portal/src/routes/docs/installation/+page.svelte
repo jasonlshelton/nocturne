@@ -7,6 +7,7 @@
   import MapPin from "@lucide/svelte/icons/map-pin";
   import SystemRequirements from "$lib/components/docs/SystemRequirements.svelte";
   import PikaPodsVoteCard from "$lib/components/PikaPodsVoteCard.svelte";
+  import { campaignUrl, track } from "$lib/analytics";
 
   let showListingRequirements = $state(false);
 
@@ -21,29 +22,37 @@
 
   const PLATFORMS = [
     {
+      id: "docker-compose",
       href: resolve("/docs/installation/docker-compose"),
       logo: "/logos/docker-compose.png",
       title: "Docker Compose",
       desc: "Deploy directly on any Linux server, VPS, or Raspberry Pi using Docker Compose from the command line.",
     },
     {
+      id: "portainer",
       href: resolve("/docs/installation/portainer"),
       logo: "/logos/portainer.jpg",
       title: "Portainer",
       desc: "Deploy using the Portainer web interface. Great for managing your stack visually without SSH access.",
     },
     {
+      id: "oracle-cloud",
       href: resolve("/docs/installation/oracle-cloud"),
+      logo: "/logos/oracle.svg",
       title: "Oracle Cloud",
       desc: "One command in the browser sets up a free server, HTTPS and Nocturne. No SSH or Docker knowledge needed.",
     },
     {
+      id: "byo-postgres",
       href: resolve("/docs/installation/byo-postgres"),
+      logo: "/logos/postgresql.svg",
       title: "Bring Your Own PostgreSQL",
       desc: "Use a managed PostgreSQL service (RDS, Cloud SQL, Supabase, Neon) or an existing shared database instance. Requires a one-time role bootstrap.",
     },
     {
+      id: "reverse-proxy",
       href: resolve("/docs/installation/reverse-proxy"),
+      logo: "/logos/nginx.svg",
       title: "Bring Your Own Reverse Proxy",
       desc: "Terminate TLS with nginx, Traefik, or an existing edge instead of the bundled Caddy. Covers the forwarded headers Nocturne requires.",
     },
@@ -52,6 +61,7 @@
   const managedProviders = shuffle([
     {
       name: "nocturne.run",
+      logo: "/logos/nocturne-run.svg",
       url: "https://nocturne.run",
       location: "Germany",
       license: "Commercial",
@@ -76,12 +86,8 @@
     {#each PLATFORMS as platform (platform.title)}
       <li class="border-b border-border">
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- platform.href is resolve()d in PLATFORMS -->
-        <a href={platform.href} class="group flex items-start gap-4 py-5 no-underline text-inherit">
-          {#if platform.logo}
-            <img src={platform.logo} alt="" class="size-8 rounded-md object-contain shrink-0 mt-0.5" />
-          {:else}
-            <span class="size-8 shrink-0" aria-hidden="true"></span>
-          {/if}
+        <a href={platform.href} onclick={() => track("Install Platform", { platform: platform.id })} class="group flex items-start gap-4 py-5 no-underline text-inherit">
+          <img src={platform.logo} alt="" class="size-8 rounded-md object-contain shrink-0 mt-0.5" />
           <div class="flex-1">
             <h3 class="text-lg font-semibold text-foreground m-0 mb-1 group-hover:underline underline-offset-4">{platform.title}</h3>
             <p class="text-sm text-muted-foreground m-0">{platform.desc}</p>
@@ -97,18 +103,19 @@
 
   <h2 class="text-2xl font-bold mt-12 mb-4">Managed Instances</h2>
   <p class="text-muted-foreground mb-4">
-    Don't want to self-host? These Nocturne-as-a-Service providers handle the
+    Prefer not to self-host? These Nocturne-as-a-Service providers handle the
     infrastructure so you can focus on your diabetes management.
   </p>
   <ul class="not-prose m-0 mb-4 p-0 list-none border-t border-border">
     {#each managedProviders as provider (provider.url)}
       <li class="border-b border-border">
         <a
-          href={provider.url}
+          href={campaignUrl(provider.url, "managed-instances")}
           target="_blank"
           rel="external noopener noreferrer"
           class="group flex items-start gap-4 py-5 no-underline text-inherit"
         >
+          <img src={provider.logo} alt="" class="size-8 rounded-md object-contain shrink-0 mt-0.5" />
           <div class="flex-1">
             <h3 class="text-lg font-semibold text-foreground m-0 mb-1 group-hover:underline underline-offset-4">{provider.name}</h3>
             <p class="text-sm text-muted-foreground m-0 mb-2">{provider.blurb}</p>

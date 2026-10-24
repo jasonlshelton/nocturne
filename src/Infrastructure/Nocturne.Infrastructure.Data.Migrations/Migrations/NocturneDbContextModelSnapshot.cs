@@ -293,6 +293,51 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.ToTable("alert_excursion_mutes");
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertExcursionReceiptEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("actor_kind");
+
+                    b.Property<string>("ActorLabel")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("actor_label");
+
+                    b.Property<Guid>("AlertExcursionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("alert_excursion_id");
+
+                    b.Property<DateTime>("SeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("seen_at");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlertExcursionId");
+
+                    b.HasIndex("TenantId", "AlertExcursionId", "ActorKind", "ActorId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_alert_excursion_receipts_tenant_excursion_actor");
+
+                    b.ToTable("alert_excursion_receipts");
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertInstanceEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3022,7 +3067,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasDatabaseName("ix_oauth_clients_tenant_client_id");
 
                     b.HasIndex("TenantId", "SoftwareId")
-                        .IsUnique()
                         .HasDatabaseName("ix_oauth_clients_tenant_software_id")
                         .HasFilter("\"software_id\" IS NOT NULL");
 
@@ -6016,9 +6060,13 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_aps_snapshots_correlation_id");
 
-                    b.HasIndex("DeviceId");
+                    b.HasIndex("DeviceId")
+                        .HasDatabaseName("ix_aps_snapshots_device_id")
+                        .HasFilter("device_id IS NOT NULL");
 
-                    b.HasIndex("PatientDeviceId");
+                    b.HasIndex("PatientDeviceId")
+                        .HasDatabaseName("ix_aps_snapshots_patient_device_id")
+                        .HasFilter("patient_device_id IS NOT NULL");
 
                     b.HasIndex("Timestamp")
                         .IsDescending()
@@ -6723,16 +6771,24 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApsSnapshotId");
+                    b.HasIndex("ApsSnapshotId")
+                        .HasDatabaseName("ix_boluses_aps_snapshot_id")
+                        .HasFilter("aps_snapshot_id IS NOT NULL");
 
-                    b.HasIndex("BolusCalculationId");
+                    b.HasIndex("BolusCalculationId")
+                        .HasDatabaseName("ix_boluses_bolus_calculation_id")
+                        .HasFilter("bolus_calculation_id IS NOT NULL");
 
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_boluses_correlation_id");
 
-                    b.HasIndex("DeviceId");
+                    b.HasIndex("DeviceId")
+                        .HasDatabaseName("ix_boluses_device_id")
+                        .HasFilter("device_id IS NOT NULL");
 
-                    b.HasIndex("PatientDeviceId");
+                    b.HasIndex("PatientDeviceId")
+                        .HasDatabaseName("ix_boluses_patient_device_id")
+                        .HasFilter("patient_device_id IS NOT NULL");
 
                     b.HasIndex("Timestamp")
                         .IsDescending()
@@ -8245,9 +8301,13 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_pump_snapshots_correlation_id");
 
-                    b.HasIndex("DeviceId");
+                    b.HasIndex("DeviceId")
+                        .HasDatabaseName("ix_pump_snapshots_device_id")
+                        .HasFilter("device_id IS NOT NULL");
 
-                    b.HasIndex("PatientDeviceId");
+                    b.HasIndex("PatientDeviceId")
+                        .HasDatabaseName("ix_pump_snapshots_patient_device_id")
+                        .HasFilter("patient_device_id IS NOT NULL");
 
                     b.HasIndex("Timestamp")
                         .IsDescending()
@@ -8813,14 +8873,20 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApsSnapshotId");
+                    b.HasIndex("ApsSnapshotId")
+                        .HasDatabaseName("ix_temp_basals_aps_snapshot_id")
+                        .HasFilter("aps_snapshot_id IS NOT NULL");
 
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_temp_basals_correlation_id");
 
-                    b.HasIndex("DeviceId");
+                    b.HasIndex("DeviceId")
+                        .HasDatabaseName("ix_temp_basals_device_id")
+                        .HasFilter("device_id IS NOT NULL");
 
-                    b.HasIndex("PatientDeviceId");
+                    b.HasIndex("PatientDeviceId")
+                        .HasDatabaseName("ix_temp_basals_patient_device_id")
+                        .HasFilter("patient_device_id IS NOT NULL");
 
                     b.HasIndex("Timestamp")
                         .IsDescending()
@@ -9150,7 +9216,9 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("ix_uploader_snapshots_correlation_id");
 
-                    b.HasIndex("DeviceId");
+                    b.HasIndex("DeviceId")
+                        .HasDatabaseName("ix_uploader_snapshots_device_id")
+                        .HasFilter("device_id IS NOT NULL");
 
                     b.HasIndex("Timestamp")
                         .IsDescending()
@@ -9276,6 +9344,23 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Navigation("AlertExcursion");
 
                     b.Navigation("Subject");
+                });
+
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertExcursionReceiptEntity", b =>
+                {
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.AlertExcursionEntity", "AlertExcursion")
+                        .WithMany()
+                        .HasForeignKey("AlertExcursionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AlertExcursion");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.AlertInstanceEntity", b =>

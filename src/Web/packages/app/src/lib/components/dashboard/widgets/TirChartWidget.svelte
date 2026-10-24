@@ -77,7 +77,6 @@
           {percentages}
           orientation={isLargeScreen.current ? "horizontal" : "vertical"}
           showLabels={!isLargeScreen.current}
-          showThresholds={false}
           compact
         />
       </div>

@@ -928,7 +928,7 @@ internal class MigrationJob
             : failure.Message;
 
     /// <summary>Marks a collection finished-and-failed, keeping whatever it managed to import.</summary>
-    private void RecordCollectionFailure(string collectionName, string reason) =>
+    internal void RecordCollectionFailure(string collectionName, string reason) =>
         _collectionProgress[collectionName] = Progress(collectionName) with
         {
             IsComplete = true,
@@ -936,7 +936,7 @@ internal class MigrationJob
         };
 
     /// <summary>Marks a collection passed over rather than attempted. See <see cref="CollectionProgress.SkippedReason"/>.</summary>
-    private void RecordCollectionSkipped(string collectionName, string reason) =>
+    internal void RecordCollectionSkipped(string collectionName, string reason) =>
         _collectionProgress[collectionName] = Progress(collectionName) with
         {
             IsComplete = true,
@@ -1142,13 +1142,12 @@ internal class MigrationJob
         }
     }
 
-    private void UpdateCollectionProgress(
+    internal void UpdateCollectionProgress(
         string collectionName, long totalDocuments, long migrated, long failed, bool isComplete,
         DecompositionTally tally = default)
     {
-        _collectionProgress[collectionName] = new CollectionProgress
+        _collectionProgress[collectionName] = Progress(collectionName) with
         {
-            CollectionName = collectionName,
             TotalDocuments = totalDocuments,
             DocumentsMigrated = migrated,
             DocumentsFailed = failed,
@@ -1161,7 +1160,7 @@ internal class MigrationJob
     }
 
     /// <summary>What a collection's decompositions stored and passed over; see <see cref="DecompositionResult"/>.</summary>
-    private readonly record struct DecompositionTally(
+    internal readonly record struct DecompositionTally(
         long RecordsStored, long RecordsSkippedDeleted, long DocumentsSkippedDeleted, long DocumentsSkippedUnsupported)
     {
         public long DocumentsSkipped => DocumentsSkippedDeleted + DocumentsSkippedUnsupported;
@@ -1793,9 +1792,8 @@ internal class MigrationJob
 
             await dbContext.SaveChangesAsync(ct);
 
-            _collectionProgress[collectionName] = new CollectionProgress
+            _collectionProgress[collectionName] = Progress(collectionName) with
             {
-                CollectionName = collectionName,
                 TotalDocuments = totalDocs,
                 DocumentsMigrated = totalMigrated,
                 DocumentsFailed = totalFailed,
@@ -1851,10 +1849,7 @@ internal class MigrationJob
             OutputMode = MongoDB.Bson.IO.JsonOutputMode.RelaxedExtendedJson
         };
         var json = doc.ToJson(jsonWriterSettings);
-        var status = System.Text.Json.JsonSerializer.Deserialize<DeviceStatus>(json, new System.Text.Json.JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        });
+        var status = System.Text.Json.JsonSerializer.Deserialize<DeviceStatus>(json, JsonDefaults.CaseInsensitive);
 
         if (status == null)
             return;

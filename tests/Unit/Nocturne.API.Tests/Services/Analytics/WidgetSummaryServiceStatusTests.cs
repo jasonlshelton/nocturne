@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -6,6 +7,7 @@ using Moq;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Glucose;
 using Nocturne.Core.Contracts.Glucose;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -13,6 +15,8 @@ using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Tests.Shared.Mocks;
 using Nocturne.Infrastructure.Data.Abstractions;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
@@ -38,6 +42,17 @@ public class WidgetSummaryServiceStatusTests
 
         summary.Current!.Status.Should().Be(GlucoseStatus.High,
             "the tenant's above-140 rule, not the configured 180 default, bounds the range");
+    }
+
+    [Fact]
+    public async Task Current_onAPublicShare_isClassifiedAgainstTheDefaultsWhateverRulesExist()
+    {
+        SeedThresholdRule("above", 140, AlertRuleSeverity.Warning);
+
+        var summary = await NewService(failingContext: false, isShare: true, Reading(170, minutesAgo: 2))
+            .GetSummaryAsync("user");
+
+        summary.Current!.Status.Should().Be(GlucoseStatus.InRange);
     }
 
     [Fact]
@@ -69,7 +84,7 @@ public class WidgetSummaryServiceStatusTests
     public async Task Current_whenThresholdsCannotBeRead_isServedWithoutAStatus()
     {
         var summary = await NewService(
-                failingContext: true, Reading(120, minutesAgo: 1))
+                failingContext: true, isShare: false, Reading(120, minutesAgo: 1))
             .GetSummaryAsync("user");
 
         summary.Current.Should().NotBeNull();
@@ -127,9 +142,9 @@ public class WidgetSummaryServiceStatusTests
     }
 
     private WidgetSummaryService NewService(params Entry[] newestFirst) =>
-        NewService(failingContext: false, newestFirst);
+        NewService(failingContext: false, isShare: false, newestFirst);
 
-    private WidgetSummaryService NewService(bool failingContext, params Entry[] newestFirst)
+    private WidgetSummaryService NewService(bool failingContext, bool isShare, params Entry[] newestFirst)
     {
         var entries = new Mock<IEntryService>();
         entries.Setup(e => e.GetEntriesAsync(
@@ -141,25 +156,25 @@ public class WidgetSummaryServiceStatusTests
         trackers.Setup(t => t.GetActiveInstancesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
-        var contextFactory = new Mock<INocturneDbContextFactory>();
-        contextFactory.Setup(f => f.CreateAsync(It.IsAny<CancellationToken>()))
+        var contextFactory = new Mock<IDbContextFactory<NocturneDbContext>>();
+        contextFactory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
             .Returns(() => failingContext
-                ? ValueTask.FromException<NocturneDbContext>(new InvalidOperationException("boom"))
-                : ValueTask.FromResult(new NocturneDbContext(_options) { TenantId = _tenantId }));
+                ? Task.FromException<NocturneDbContext>(new InvalidOperationException("boom"))
+                : Task.FromResult(new NocturneDbContext(_options) { TenantId = _tenantId }));
+        var categoryReadContext = new Mock<ICategoryReadContext>();
+        categoryReadContext.SetupGet(c => c.IsShare).Returns(isShare);
 
         return new WidgetSummaryService(
             entries.Object,
-            Mock.Of<IIobCalculator>(),
-            Mock.Of<ICobCalculator>(),
-            Mock.Of<IBolusRepository>(),
-            Mock.Of<ICarbIntakeRepository>(),
-            Mock.Of<ITempBasalRepository>(),
+            TestIobCobReader.Empty(),
             Mock.Of<IApsSnapshotRepository>(),
             trackers.Object,
             Mock.Of<INotificationV1Service>(),
             new GlucoseStatusClassifier(
                 new ConfigurationBuilder().Build(), NullLogger<GlucoseStatusClassifier>.Instance),
-            contextFactory.Object,
+            new AlertRepository(contextFactory.Object),
+            MockTenantAccessor.Create(tenantId: _tenantId).Object,
+            categoryReadContext.Object,
             NullLogger<WidgetSummaryService>.Instance);
     }
 }

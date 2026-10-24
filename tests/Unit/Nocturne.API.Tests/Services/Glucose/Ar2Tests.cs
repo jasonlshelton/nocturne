@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.Infrastructure;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -131,11 +132,7 @@ public class Ar2Tests
         var service = new PropertiesService(
             ddataService.Object,
             Mock.Of<ILogger<PropertiesService>>(),
-            Mock.Of<IIobCalculator>(),
-            Mock.Of<ICobCalculator>(),
-            Mock.Of<IBolusRepository>(),
-            Mock.Of<ICarbIntakeRepository>(),
-            Mock.Of<ITempBasalRepository>(),
+            TestIobCobReader.Empty(),
             _ar2Service,
             Mock.Of<IDeviceAgeService>()
         );

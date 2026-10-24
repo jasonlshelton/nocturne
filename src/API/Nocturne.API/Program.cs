@@ -146,7 +146,6 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddHostedService<AuditRetentionService>();
 builder.Services.AddHostedService<SoftDeleteCleanupService>();
-builder.Services.AddSingleton<IGoogleHealthCoordinatorStore, PostgresGoogleHealthCoordinatorStore>();
 builder.Services.AddSingleton<GoogleHealthCoordinator>();
 builder.Services.AddSingleton<IGoogleHealthGrantHolders, PostgresGoogleHealthGrantHolders>();
 builder.Services.AddSingleton<IGoogleHealthSyncCoordinator>(provider =>
@@ -549,7 +548,7 @@ app.Services.GetRequiredService<CredentialPathRedactor>()
 var isNSwagGeneration = IsRunningInNSwagContext();
 
 if (!isNSwagGeneration)
-    app.Services.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineSelection>();
+    app.Services.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineNativeLibrary>();
 if (!isNSwagGeneration && !app.Environment.IsEnvironment("Testing"))
 {
     // Validate that the migrator connection string is present and uses a different role.

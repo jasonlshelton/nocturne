@@ -24,12 +24,10 @@ namespace Nocturne.API.Tests.Services.Seeding;
 /// pump mode, override, temporary target and illness spans the seeder writes.
 /// </summary>
 /// <remarks>
-/// The wiring is a copy of <c>LoopAnalysisService</c>'s loading, simpler in five ways, none of which
+/// The wiring is a copy of <c>LoopAnalysisService</c>'s loading, simpler in four ways, none of which
 /// the sample's data reaches today: the series are not padded past the range; the scheduled baseline
-/// carries no override scale factor; open loop comes from Manual pump mode spans alone, not Off;
-/// <see cref="TargetAt"/> reads the profile's targets without temporary targets; and the IOB is
-/// the Settings evidence page's <see cref="BasalIobModel.Carried"/> model, where the Daily profile
-/// page reads <see cref="BasalIobModel.Displayed"/>.
+/// carries no override scale factor; open loop comes from Manual pump mode spans alone, not Off; and
+/// <see cref="TargetAt"/> reads the profile's targets without temporary targets.
 /// </remarks>
 public class DemoLoopAnalysisTests(ITestOutputHelper output)
 {
@@ -104,8 +102,8 @@ public class DemoLoopAnalysisTests(ITestOutputHelper output)
                 Carbs = [.. carbs.Select(c => new CarbEvent(c.Mills, c.Carbs))],
                 IobCob = IobCobSeries.Build(
                     iob, cob, boluses, carbs, temps, timeline,
-                    run.Snapshots.Select(s => new ApsIobCobPoint(s.Timestamp, s.Iob, s.Cob)),
-                    from, to - 1, to - 1, 5 * Minute, BasalIobModel.Carried),
+                    DeviceReadings.Of(run.Snapshots.Select(s => new ApsIobCobPoint(s.Timestamp, s.Iob, s.Cob)), null),
+                    from, to - 1, to - 1, 5 * Minute),
                 CalculatedIobCobTime = DailyProfileCalculator.CalculableIobCobTime(
                     evidence, boluses.Select(b => b.Mills).Concat(carbs.Select(c => c.Mills))),
                 TargetAt = mills => TargetAt(profile, mills),

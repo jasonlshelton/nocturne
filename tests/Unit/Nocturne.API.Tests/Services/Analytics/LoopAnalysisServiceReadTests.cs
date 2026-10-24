@@ -3,6 +3,8 @@ using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Core.Clinical.LoopAnalysis;
+using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Repositories;
@@ -27,6 +29,7 @@ public class LoopAnalysisServiceReadTests
     private readonly Mock<IPatientDeviceRepository> _devices = new();
     private readonly Mock<IBasalSeriesBuilder> _series = new();
     private readonly List<TempBasal> _seriesTemps = [];
+    private readonly List<long> _timelineStarts = [];
 
     public LoopAnalysisServiceReadTests()
     {
@@ -70,6 +73,7 @@ public class LoopAnalysisServiceReadTests
         var timeline = new Mock<ITherapyTimelineResolver>();
         timeline
             .Setup(t => t.BuildAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((long from, long _, string? _, CancellationToken _) => _timelineStarts.Add(from))
             .ReturnsAsync(new TherapyTimeline([
                 new TherapySegment(0, long.MaxValue,
                     new TherapySnapshot(5.0, TherapySnapshot.DefaultPeakMinutes, TherapySnapshot.DefaultCarbsPerHour,
@@ -83,6 +87,7 @@ public class LoopAnalysisServiceReadTests
             carbIntakeRepository: Mock.Of<ICarbIntakeRepository>(),
             tempBasalRepository: _tempBasals.Object,
             apsSnapshotRepository: _snapshots.Object,
+            pumpSnapshotRepository: Mock.Of<IPumpSnapshotRepository>(),
             stateSpanRepository: spans.Object,
             patientDeviceRepository: _devices.Object,
             targetRangeScheduleRepository: Mock.Of<ITargetRangeScheduleRepository>(),
@@ -91,7 +96,9 @@ public class LoopAnalysisServiceReadTests
             activeProfileResolver: profiles.Object,
             basalSeriesBuilder: _series.Object,
             basalSegmentService: Mock.Of<IBasalSegmentService>(),
-            iobCalculator: Mock.Of<IIobCalculator>(),
+            iobCalculator: new IobCalculator(
+                Mock.Of<ITherapySettingsResolver>(), Mock.Of<ISensitivityResolver>(), Mock.Of<IBasalRateResolver>(),
+                Mock.Of<IApsSnapshotRepository>(), Mock.Of<IPumpSnapshotRepository>()),
             cobCalculator: Mock.Of<ICobCalculator>(),
             therapySettingsRepository: Mock.Of<ITherapySettingsRepository>(),
             aidSystemMetrics: null!,
@@ -118,6 +125,17 @@ public class LoopAnalysisServiceReadTests
 
         _seriesTemps.Should().ContainSingle().Which.EndTimestamp.Should().Be(To,
             "the load reads past the range for climbs, but nothing after now has been delivered");
+    }
+
+    [Fact]
+    public async Task DailyProfile_BuildsTheTimelineFromTheLookback()
+    {
+        // Temp basals are read from the look-back before the range, and the net basal IOB at the
+        // first tick reads the schedule under each of their chunks, so the timeline starts there too.
+        await Service().GetDailyProfileAsync(new LoopAnalysisFilter { From = From, To = To, Now = To }, Utc);
+
+        _timelineStarts.Should().NotBeEmpty().And.OnlyContain(start =>
+            start == new DateTimeOffset(From).ToUnixTimeMilliseconds() - DailyProfileCalculator.ActingMs);
     }
 
     [Theory]

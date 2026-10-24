@@ -212,7 +212,7 @@ public class MyLifeConnectorService(
                 UpdatePreviousTail(previousTail, batch.Events, overlapMs);
             }
 
-            // Publish Profile records and active-profile state spans from pump settings
+            // Publish Profile records and profile activations from pump settings
             // (one SOAP call, two derived data shapes).
             if (activeTypes.Contains(SyncDataType.Profiles))
             {

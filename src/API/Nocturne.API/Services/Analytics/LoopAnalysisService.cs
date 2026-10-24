@@ -29,6 +29,7 @@ internal sealed partial class LoopAnalysisService(
     ICarbIntakeRepository carbIntakeRepository,
     ITempBasalRepository tempBasalRepository,
     IApsSnapshotRepository apsSnapshotRepository,
+    IPumpSnapshotRepository pumpSnapshotRepository,
     IStateSpanRepository stateSpanRepository,
     IPatientDeviceRepository patientDeviceRepository,
     ITargetRangeScheduleRepository targetRangeScheduleRepository,
@@ -187,7 +188,7 @@ internal sealed partial class LoopAnalysisService(
         var to = window.To;
         var hasTherapy = await therapySettingsResolver.HasDataAsync(ct);
         var tickStart = from - from % TickMs;
-        var timeline = await therapyTimelineResolver.BuildAsync(tickStart, to + 1, ct: ct);
+        var timeline = await therapyTimelineResolver.BuildAsync(tickStart - DailyProfileCalculator.ActingMs, to + 1, ct: ct);
 
         var scheduled = hasTherapy
             ? NetInsulinAboveSchedule.ScheduledBaseline(

@@ -107,6 +107,7 @@ public class LoopAnalysisLoopHealthZoneTests
             carbIntakeRepository: Mock.Of<ICarbIntakeRepository>(),
             tempBasalRepository: Mock.Of<ITempBasalRepository>(),
             apsSnapshotRepository: snapshots.Object,
+            pumpSnapshotRepository: Mock.Of<IPumpSnapshotRepository>(),
             stateSpanRepository: spans.Object,
             patientDeviceRepository: devices.Object,
             targetRangeScheduleRepository: Mock.Of<ITargetRangeScheduleRepository>(),

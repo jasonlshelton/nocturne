@@ -42,7 +42,7 @@
         a guided form for all configuration values.
     </p>
 
-    <h3 class="text-xl font-semibold mt-6 mb-3">Step 1: Add the template URL</h3>
+    <h3 data-install-step="1" class="text-xl font-semibold mt-6 mb-3">Step 1: Add the template URL</h3>
     <p class="text-muted-foreground mb-4">
         In Portainer, go to <strong class="text-foreground">Settings &rsaquo; App Templates</strong> and
         set the URL to:
@@ -52,7 +52,7 @@
         Click <strong class="text-foreground">Save settings</strong>.
     </p>
 
-    <h3 class="text-xl font-semibold mt-6 mb-3">Step 2: Deploy from the template</h3>
+    <h3 data-install-step="2" class="text-xl font-semibold mt-6 mb-3">Step 2: Deploy from the template</h3>
     <ol class="list-decimal list-inside space-y-3 text-muted-foreground mb-8">
         <li>
             Navigate to <strong class="text-foreground">App Templates</strong> in the sidebar.
@@ -75,14 +75,14 @@
 
     <Callout type="info" title="Bot integrations are optional">
         <p>
-            Leave Discord, Telegram, Slack, and WhatsApp fields blank if you don't need them.
-            They can be configured later by updating the stack.
+            If you do not need Discord, Telegram, Slack, or WhatsApp, leave their fields blank.
+            You can configure them later by updating the stack.
         </p>
     </Callout>
 
     <Callout type="warning" title="PostgreSQL host-directory storage">
         <p>
-            Portainer's stack editor and app template use the default named Docker volume;
+            Portainer's stack editor and app template use the default named Docker volume.
             Portainer does not apply Compose override files. To put PostgreSQL data in a host
             directory, deploy the Docker Compose bundle from the command line with both
             <code class="text-xs bg-muted/50 px-1 py-0.5 rounded">docker-compose.yaml</code>
@@ -92,7 +92,7 @@
         </p>
     </Callout>
 
-    <h2 class="text-2xl font-bold mt-8 mb-4">Option 2: Manual deployment</h2>
+    <h2 data-install-step="manual" class="text-2xl font-bold mt-8 mb-4">Option 2: Manual deployment</h2>
     <p class="text-muted-foreground mb-4">
         If you prefer to configure the stack manually, download
         <code class="text-xs bg-muted/50 px-1.5 py-0.5 rounded">docker-compose.yaml</code>
@@ -122,10 +122,10 @@
         </li>
     </ol>
 
-    <h2 class="text-2xl font-bold mt-8 mb-4">Verify the installation</h2>
+    <h2 data-install-step="verify" class="text-2xl font-bold mt-8 mb-4">Verify the installation</h2>
     <p class="text-muted-foreground mb-4">
-        In Portainer, navigate to your <strong class="text-foreground">nocturne</strong> stack.
-        All containers should show as <strong class="text-foreground">Running</strong>. Click any
+        In Portainer, go to your <strong class="text-foreground">nocturne</strong> stack.
+        Make sure that all containers show as <strong class="text-foreground">Running</strong>. Select any
         container to view its logs and check for errors.
     </p>
     <p class="text-muted-foreground mb-8">
@@ -159,11 +159,11 @@
 
     <h2 class="text-2xl font-bold mt-8 mb-4">Connectors</h2>
     <p class="text-muted-foreground mb-8">
-        Data source connectors (Dexcom, LibreLinkUp, Glooko, etc.) are configured through the
-        Nocturne UI after deployment; no compose changes are required.
+        Data source connectors (Dexcom, LibreLinkUp, Glooko, and others) are configured through the
+        Nocturne UI after deployment. No compose changes are required.
     </p>
 
-    <h2 class="text-2xl font-bold mt-8 mb-4">Next Steps</h2>
+    <h2 data-install-step="next-steps" class="text-2xl font-bold mt-8 mb-4">Next Steps</h2>
     <NextSteps />
 
     <SupportNocturne />

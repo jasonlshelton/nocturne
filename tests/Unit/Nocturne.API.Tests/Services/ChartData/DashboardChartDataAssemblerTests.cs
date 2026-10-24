@@ -21,6 +21,7 @@ public class DashboardChartDataAssemblerTests
             BasalSeries = new List<BasalPoint> { new() { Timestamp = 1700000000000L, Rate = 0.8, ScheduledRate = 0.9, Origin = BasalDeliveryOrigin.Algorithm, FillColor = ChartColor.GlucoseInRange, StrokeColor = ChartColor.GlucoseHigh } },
             DefaultBasalRate = 0.75,
             MaxBasalRate = 2.5,
+            MinIob = -0.4,
             MaxIob = 5.0,
             MaxCob = 60.0,
 
@@ -70,6 +71,7 @@ public class DashboardChartDataAssemblerTests
         // Assert — scalar fields
         result.DefaultBasalRate.Should().Be(context.DefaultBasalRate);
         result.MaxBasalRate.Should().Be(context.MaxBasalRate);
+        result.MinIob.Should().Be(context.MinIob);
         result.MaxIob.Should().Be(context.MaxIob);
         result.MaxCob.Should().Be(context.MaxCob);
 

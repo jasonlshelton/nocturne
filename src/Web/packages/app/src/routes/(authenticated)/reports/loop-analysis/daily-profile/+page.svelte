@@ -23,7 +23,6 @@
 </script>
 
 <svelte:head>
-  <title>Daily profile - Loop Analysis - Nocturne Reports</title>
   <meta name="description" content="Glucose, basal, loop corrections, IOB and COB at each time of day." />
 </svelte:head>
 

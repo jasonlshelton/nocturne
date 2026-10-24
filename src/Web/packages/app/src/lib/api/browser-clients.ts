@@ -5,6 +5,7 @@ import {
   ApsSnapshotClient,
   BGCheckClient,
   BolusClient,
+  ClockFaceAlertsClient,
   ClockFacesClient,
   CurrentTherapyStateClient,
   DeviceEventClient,
@@ -39,6 +40,7 @@ function browserHttp(): Http {
 export const apsSnapshotClient = () => new ApsSnapshotClient("", browserHttp());
 export const bgCheckClient = () => new BGCheckClient("", browserHttp());
 export const bolusClient = () => new BolusClient("", browserHttp());
+export const clockFaceAlertsClient = () => new ClockFaceAlertsClient("", browserHttp());
 export const clockFacesClient = () => new ClockFacesClient("", browserHttp());
 export const currentTherapyStateClient = () => new CurrentTherapyStateClient("", browserHttp());
 export const deviceEventClient = () => new DeviceEventClient("", browserHttp());

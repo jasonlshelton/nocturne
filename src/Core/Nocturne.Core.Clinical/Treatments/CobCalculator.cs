@@ -1,6 +1,5 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
-using Nocturne.Core.Clinical.Statistics;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -38,6 +37,7 @@ public class CobCalculator(
         List<Bolus>? boluses,
         List<TempBasal>? tempBasals,
         long time,
+        bool live = false,
         CancellationToken ct = default
     )
     {
@@ -65,20 +65,10 @@ public class CobCalculator(
             }
         }
 
-        // Get COB from APS snapshot (prioritized source)
-        var deviceCob = await GetLatestDeviceCobAsync(time, ct);
-
-        // Prefer the device's own COB when it is recent. A reported COB of exactly zero is a
-        // real value ("no carbs on board"), not a missing one, so it is accepted like any other.
-        // Age is measured against the requested time, so historical queries resolve against that
-        // instant rather than the wall clock.
-        if (deviceCob != null && deviceCob.Mills.HasValue)
+        // A reported COB of exactly zero is a real value ("no carbs on board"), not a missing one.
+        if (await GetDeviceCobAsync(time, live, ct) is { } deviceCob)
         {
-            var deviceAge = time - deviceCob.Mills.Value;
-            if (deviceAge <= DeviceReportedValues.RecencyThresholdMs)
-            {
-                return AddDisplay(deviceCob);
-            }
+            return AddDisplay(deviceCob);
         }
 
         // Fall back to carb-intake-based COB calculation
@@ -112,12 +102,11 @@ public class CobCalculator(
     )
     {
         // Insulin activity for the dynamic carb-delay calc comes from the full IOB total
-        // (boluses + temp basals + device snapshots) at the requested time. Carbs still absorbing
-        // ask for times after it, and a temp still running has delivered nothing past it.
-        var delivered = tempBasals is null ? null : StatisticsService.ClipOverlappingTempBasals(tempBasals, time);
+        // (boluses + temp basals + device snapshots). Carbs still absorbing ask for times after the
+        // requested one, and a temp still running has delivered nothing past it.
         double ActivityAt(long t) =>
             iobCalculator
-                .CalculateTotalAsync(boluses ?? [], delivered, t, ct: default)
+                .CalculateTotalAsync(boluses ?? [], tempBasals, t, deliveredUntil: time, ct: default)
                 .GetAwaiter()
                 .GetResult()
                 ?.Activity ?? double.NaN;
@@ -138,6 +127,7 @@ public class CobCalculator(
         List<Bolus>? boluses,
         List<TempBasal>? tempBasals,
         TherapySnapshot snapshot,
+        Func<long, double> scheduledBasalAt,
         long time
     )
     {
@@ -150,10 +140,10 @@ public class CobCalculator(
         double CarbRatioAt(long t) =>
             snapshot.CarbRatioAt(t) is var c && c > 0 ? c : DEFAULT_CARB_RATIO;
 
-        // Temp basals carry zero insulin activity, so bolus-derived activity is the full activity
-        // signal — computed in-memory from the snapshot rather than via the async IOB total.
+        // The bolus plus net basal activity the async IOB total gives, computed in-memory.
         double ActivityAt(long t) =>
-            iobCalculator.FromBoluses(boluses ?? [], snapshot, t).Activity ?? double.NaN;
+            (iobCalculator.FromBoluses(boluses ?? [], snapshot, t).Activity ?? double.NaN)
+            + (iobCalculator.FromTempBasals(tempBasals ?? [], snapshot, scheduledBasalAt, t, deliveredUntil: time).Activity ?? 0);
 
         return FromCarbIntakesCore(
             carbIntakes,
@@ -389,48 +379,30 @@ public class CobCalculator(
     }
 
     /// <summary>
-    /// Query <see cref="IApsSnapshotRepository"/> for the most recent device-reported COB
-    /// within the staleness window.
+    /// The device COB that holds at <paramref name="time"/> by <see cref="DeviceReadings.At"/>, read
+    /// from the newest APS snapshot in its window; a pump reports no COB. Null where the calculation holds.
     /// </summary>
-    internal async Task<CobResult?> GetLatestDeviceCobAsync(long time, CancellationToken ct = default)
+    internal async Task<CobResult?> GetDeviceCobAsync(long time, bool live, CancellationToken ct = default)
     {
-        var futureMills = time + DeviceReportedValues.FutureSkewToleranceMs;
-        var recentMills = time - DeviceReportedValues.RecencyThresholdMs;
+        var (from, to) = DeviceReportedValues.Window(time, live);
+        var aps = (await apsSnapshotRepo.GetAsync(
+            from: DateTimeOffset.FromUnixTimeMilliseconds(from).UtcDateTime,
+            to: DateTimeOffset.FromUnixTimeMilliseconds(to).UtcDateTime,
+            device: null, source: null, limit: 1, offset: 0, descending: true, ct: ct))
+            .Select(s => new DeviceReading(
+                DeviceReading.MillsOf(s.Timestamp), DeviceSource.Aps, s.Iob, s.Cob,
+                Name: s.AidAlgorithm == AidAlgorithm.Loop ? "Loop" : "OpenAPS", Device: s.Device));
 
-        var recentTime = DateTimeOffset.FromUnixTimeMilliseconds(recentMills).UtcDateTime;
-        var futureTime = DateTimeOffset.FromUnixTimeMilliseconds(futureMills).UtcDateTime;
+        if (new DeviceReadings(aps, []).At(time, live).Cob is not { } reading)
+            return null;
 
-        var apsSnapshots = await apsSnapshotRepo.GetAsync(
-            from: recentTime,
-            to: futureTime,
-            device: null,
-            source: null,
-            limit: 1,
-            offset: 0,
-            descending: true,
-            ct: ct
-        );
-
-        var apsSnapshot = apsSnapshots.FirstOrDefault();
-        // A reported COB of exactly zero is a real value ("no carbs on board"), not a missing one.
-        if (apsSnapshot?.Cob is not null)
+        return new CobResult
         {
-            var source = apsSnapshot.AidAlgorithm switch
-            {
-                AidAlgorithm.Loop => "Loop",
-                _ => "OpenAPS",
-            };
-
-            return new CobResult
-            {
-                Cob = apsSnapshot.Cob.Value,
-                Source = source,
-                Device = apsSnapshot.Device,
-                Mills = new DateTimeOffset(apsSnapshot.Timestamp, TimeSpan.Zero).ToUnixTimeMilliseconds(),
-            };
-        }
-
-        return null;
+            Cob = reading.Cob!.Value,
+            Source = reading.Name,
+            Device = reading.Device,
+            Mills = reading.Mills,
+        };
     }
 
     private static CobResult AddDisplay(CobResult cob)

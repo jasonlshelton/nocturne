@@ -3,6 +3,7 @@ import {
   reportCategories,
   visibleReportCategories,
   getSidebarReportItems,
+  reportSubRouteTitle,
   reportTitle,
   type ReportViewer,
 } from "./report-navigation.svelte";
@@ -161,5 +162,22 @@ describe("a report made of several pages", () => {
 
   it("is found by searching for the report", () => {
     expect(loop().reports.find((r) => r.href.endsWith("/daily-profile"))?.keywords).toContain("loop analysis");
+  });
+});
+
+describe("reportSubRouteTitle", () => {
+  it.each([
+    ["/reports/data-quality/compression-lows", "Compression Lows"],
+    ["/reports/data-quality/sensor-integrity", "Signal Integrity"],
+    ["/reports/data-quality/cgm-comparison", "CGM Comparison"],
+    ["/reports/data-quality/rejected-uploads", "Rejected Uploads"],
+    ["/reports/sleep/2026-10-01", "Sleep Night Report"],
+  ])("names %s", (path, name) => {
+    expect(reportSubRouteTitle(path)).toBe(name);
+  });
+
+  it("has no name for an unknown path", () => {
+    expect(reportSubRouteTitle("/reports/unknown")).toBeUndefined();
+    expect(reportSubRouteTitle("/reports/sleep")).toBeUndefined();
   });
 });

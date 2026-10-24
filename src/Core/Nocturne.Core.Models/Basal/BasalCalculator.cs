@@ -1,3 +1,5 @@
+using Nocturne.Core.Models.V4;
+
 namespace Nocturne.Core.Models.Basal;
 
 /// <summary>
@@ -67,7 +69,7 @@ public static class BasalCalculator
         // two boundaries at the same instant and silently mask the second value. Keep the last
         // upload for each second-of-day, then sort.
         var entries = assignment.Entries
-            .Select(e => (Seconds: e.TimeAsSeconds ?? ParseTimeAsSeconds(e.Time), e.Value))
+            .Select(e => (Seconds: ScheduleEntryTime.SecondsOf(e.TimeAsSeconds, e.Time), e.Value))
             .GroupBy(e => e.Seconds)
             .Select(g => g.Last())
             .OrderBy(e => e.Seconds)
@@ -164,13 +166,6 @@ public static class BasalCalculator
     {
         if (string.IsNullOrEmpty(timezoneId)) return TimeZoneInfo.Utc;
         return TimeZoneHelper.GetTimeZoneInfoFromId(timezoneId);
-    }
-
-    private static int ParseTimeAsSeconds(string hhmm)
-    {
-        if (TimeOnly.TryParse(hhmm, out var t))
-            return (int)t.ToTimeSpan().TotalSeconds;
-        return 0;
     }
 
     /// <summary>

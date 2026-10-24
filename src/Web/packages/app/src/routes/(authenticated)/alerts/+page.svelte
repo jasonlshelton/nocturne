@@ -81,7 +81,6 @@
     togglingRuleId = ruleId;
     try {
       await toggleRule(ruleId);
-      await rulesQuery.refresh();
     } catch (err) {
       toast.error(mutationError(err));
     } finally {
@@ -93,7 +92,6 @@
     deletingRuleId = ruleId;
     try {
       await deleteRule(ruleId);
-      await rulesQuery.refresh();
     } catch (err) {
       toast.error(mutationError(err));
     } finally {
@@ -126,7 +124,6 @@
         dndScheduleStart: current.dndScheduleStart,
         dndScheduleEnd: current.dndScheduleEnd,
       });
-      await dndQuery.refresh();
     } catch (err) {
       toast.error(mutationError(err));
     } finally {
@@ -176,7 +173,7 @@
       </div>
       <div>
         <h1 class="text-2xl font-bold tracking-tight">Alerts</h1>
-        <p class="text-sm text-muted-foreground">Rules that decide when, how, and where you're notified.</p>
+        <p class="text-sm text-muted-foreground">Rules that decide when, how, and where you are notified.</p>
       </div>
     </div>
     {#if canManageAlerts}

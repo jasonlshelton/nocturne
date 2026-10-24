@@ -17,7 +17,7 @@
     type ActogramRowContext,
   } from "$lib/components/actogram";
   import { MS_PER_HOUR, HOURS_PER_ROW, type ActogramPoint } from "$lib/components/actogram/actogram";
-  import { getTrends } from "$api/generated/sleepReports.generated.remote";
+  import { getSleepTrends } from "$api/reports.remote";
   import { useActogramReport } from "$lib/hooks/actogram-report.svelte";
   import { contextResource } from "$lib/hooks/resource-context.svelte";
   import { resolve } from "$app/paths";
@@ -68,9 +68,8 @@
   // padded window for double-plot context.
   const trendsResource = contextResource(
     () =>
-      getTrends({
-        from: new Date(reportsParams.dateRangeMillis.from).toISOString(),
-        to: new Date(reportsParams.dateRangeMillis.to).toISOString(),
+      getSleepTrends({
+        ...reportsParams.dateRangeInput,
         source: sourceFilter === "all" ? undefined : sourceFilter,
       }),
     { errorTitle: "Error Loading Sleep Report" }
@@ -258,7 +257,6 @@
 </script>
 
 <svelte:head>
-  <title>Sleep & Overnight - Nocturne Reports</title>
   <meta
     name="description"
     content="Sleep pattern actogram with glucose overlay"
@@ -314,7 +312,7 @@
           </CardTitle>
           {#if sourceFilter !== "all"}
             <CardDescription>
-              Showing all {sourceLabel} sessions — nights aren't deduplicated across devices.
+              Showing all {sourceLabel} sessions. Nights are not deduplicated across devices.
             </CardDescription>
           {:else}
             <CardDescription class="hidden print:block">Source: {sourceLabel}</CardDescription>

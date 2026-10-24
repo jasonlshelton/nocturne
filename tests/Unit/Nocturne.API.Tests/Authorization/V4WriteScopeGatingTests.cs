@@ -160,6 +160,12 @@ public class V4WriteScopeGatingTests
 
         /// <summary>Sends to an external service and persists no tenant row.</summary>
         public const string OutboundOnly = "outbound call, persists no tenant data";
+
+        /// <summary>
+        /// A record that the caller saw a firing alarm. Gated on <c>alerts.read</c> so a share or
+        /// guest link can make it; it changes no excursion, instance, mute or delivery.
+        /// </summary>
+        public const string AlertReceipt = "append-only receipt; changes no alert state";
     }
 
     /// <summary>
@@ -296,6 +302,11 @@ public class V4WriteScopeGatingTests
             // .svx file as an upstream pull request and stores nothing locally.
             ["ContentContributionsController.SubmitContribution"] = NotDataCategory.OutboundOnly,
             ["ContentContributionsController.AcceptRelayedContribution"] = NotDataCategory.AnonymousByDeclaration,
+
+            ["AlertsController.MarkSeen"] = NotDataCategory.AlertReceipt,
+
+            // The clock face is the capability, and the face's owner turned acknowledging on.
+            ["ClockFaceAlertsController.MarkClockAlertSeen"] = NotDataCategory.AnonymousByDeclaration,
         };
 
     /// <summary>
@@ -448,7 +459,7 @@ public class V4WriteScopeGatingTests
     public void ReadOnlyGuestLinkScopes_CannotWriteGlucose()
     {
         // The maximum a guest link can hold: GuestLinkService.AllowedGuestScopes is read-only.
-        var guestScopes = Scope.Normalize([Scope.HealthRead, Scope.TherapyRead, Scope.ReportsRead]);
+        var guestScopes = Scope.Normalize([Scope.HealthRead, Scope.TherapyRead, Scope.ReportsRead, Scope.AlertsRead]);
 
         var result = Evaluate(NewSensorGlucoseController(), authenticated: true, guestScopes.ToArray());
 
@@ -844,7 +855,7 @@ public class V4WriteScopeGatingTests
         var controller = ApiAssembly.GetType(controllerTypeName)!;
 
         // The maximum a guest link holds (GuestLinkService.AllowedGuestScopes, read-only).
-        var guestScopes = Scope.Normalize([Scope.HealthRead, Scope.TherapyRead, Scope.ReportsRead]);
+        var guestScopes = Scope.Normalize([Scope.HealthRead, Scope.TherapyRead, Scope.ReportsRead, Scope.AlertsRead]);
 
         EvaluateAction(controller, actionName, authenticated: true, guestScopes.ToArray())
             .Should().BeOfType<ForbidResult>("a read-only session must not reach this write action");

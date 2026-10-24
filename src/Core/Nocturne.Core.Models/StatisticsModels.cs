@@ -207,6 +207,9 @@ public class GlycemicThresholds
 
 public class TimeInRangeMetrics
 {
+    /// <summary>The band edges the percentages, durations and episodes were measured against.</summary>
+    public GlycemicThresholds? Thresholds { get; set; }
+
     /// <summary>
     /// Percentages of time in each range
     /// </summary>
@@ -225,9 +228,14 @@ public class TimeInRangeMetrics
     public TimeInRangeDetailedStats RangeStats { get; set; } = new();
 
     /// <summary>
-    /// Average minutes per day in target, below-range and above-range zones
+    /// Average minutes per covered day in target, below-range and above-range zones
     /// </summary>
     public AverageDailyMinutes AverageDailyMinutes { get; set; } = new();
+
+    /// <summary>
+    /// Episodes per covered day
+    /// </summary>
+    public AverageDailyEpisodes AverageDailyEpisodes { get; set; } = new();
 }
 
 /// <summary>
@@ -387,9 +395,10 @@ public class TimeInRangeDurations
 }
 
 /// <summary>
-/// Average minutes per day in each zone, derived from <see cref="TimeInRangePercentages"/> rather
-/// than the recorded durations. Percentages sum to 100, so target, low and high account for a whole
-/// day even when the underlying data has gaps.
+/// Average minutes per day in each zone: the zone minutes of <see cref="TimeInRangeDurations"/>
+/// over the days the readings cover, which is the time they stand for over twenty-four hours.
+/// A gap the sensor did not cover adds no days, and a period with no covered time reports zero.
+/// <see cref="AverageDailyEpisodes"/> divides by the same days.
 /// </summary>
 public class AverageDailyMinutes
 {
@@ -447,6 +456,25 @@ public class TimeInRangeEpisodes
     /// counted the same way as <see cref="AboveRange"/>.
     /// </summary>
     public int BelowRange { get; set; }
+}
+
+/// <summary>
+/// <see cref="TimeInRangeEpisodes"/> per covered day, on the days <see cref="AverageDailyMinutes"/>
+/// divides by.
+/// </summary>
+public class AverageDailyEpisodes
+{
+    public double VeryLow { get; set; }
+
+    public double Low { get; set; }
+
+    public double High { get; set; }
+
+    public double VeryHigh { get; set; }
+
+    public double AboveRange { get; set; }
+
+    public double BelowRange { get; set; }
 }
 
 public class DistributionDataPoint
@@ -918,7 +946,8 @@ public enum HourlyClockBasis
 }
 
 /// <summary>
-/// Why no tenant timezone was available, so the hours fell back to each reading's own offset.
+/// Why no tenant timezone was available. What a report does without one is stated on the response
+/// that carries the reason.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<TimeZoneUnavailableReason>))]
 public enum TimeZoneUnavailableReason
@@ -1022,6 +1051,18 @@ public class WeekdayGlucoseSlot
     /// readings in the slot is absent.
     /// </summary>
     public Dictionary<DayOfWeek, double> Mean { get; set; } = new();
+}
+
+/// <summary>
+/// Response for <c>GET /api/v4/Statistics/weekday-averages</c>.
+/// </summary>
+public class WeekdayAveragesResponse
+{
+    /// <summary>The populated slots in time-of-day order.</summary>
+    public List<WeekdayGlucoseSlot> Slots { get; set; } = [];
+
+    /// <summary>Why <see cref="Slots"/> is empty; null when the tenant's timezone resolved.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 /// <summary>
@@ -1483,8 +1524,8 @@ public sealed class ContributingDevice
     /// <summary>The registered <see cref="PatientDevice"/> id, or <c>null</c> for the unattributed bucket.</summary>
     public Guid? PatientDeviceId { get; set; }
 
-    /// <summary>Display name of the device, or "Unattributed" for readings with no <see cref="PatientDeviceId"/>.</summary>
-    public string Name { get; set; } = string.Empty;
+    /// <summary>Display name of the device, or <c>null</c> for the unattributed bucket.</summary>
+    public string? Name { get; set; }
 
     /// <summary>Number of readings attributed to this device within the requested window.</summary>
     public int ReadingCount { get; set; }
@@ -1591,6 +1632,11 @@ public class InsulinDeliveryStatistics
     /// Total carbohydrates consumed in grams
     /// </summary>
     public double TotalCarbs { get; set; }
+
+    /// <summary>
+    /// Grams of carbohydrate per day: <see cref="TotalCarbs"/> over <see cref="WindowDays"/>
+    /// </summary>
+    public double CarbsPerDay { get; set; }
 
     /// <summary>
     /// Number of manually initiated boluses in the period. Algorithm-delivered boluses
@@ -1796,6 +1842,9 @@ public class DailyBasalBolusRatioResponse
     /// by it. Not the length of the requested window.
     /// </summary>
     public int DaysWithData { get; set; }
+
+    /// <summary>Why <see cref="DailyData"/> is empty; null when the tenant's timezone resolved.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 /// <summary>
@@ -1872,7 +1921,7 @@ public class BasalStats
     public int Count { get; set; }
 
     /// <summary>
-    /// Average basal rate in U/hr
+    /// Time-weighted average basal rate in U/hr
     /// </summary>
     public double AvgRate { get; set; }
 
@@ -1915,6 +1964,12 @@ public class BasalAnalysisResponse
     public string StartDate { get; set; } = string.Empty;
 
     public string EndDate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Why <see cref="HourlyPercentiles"/> is empty; null when the tenant's timezone resolved. The
+    /// other figures do not depend on the local clock and are served either way.
+    /// </summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 /// <summary>
@@ -2042,6 +2097,9 @@ public class HourlyInsulinDeliveryResponse
     /// End date of the analysis period
     /// </summary>
     public string EndDate { get; set; } = string.Empty;
+
+    /// <summary>Why <see cref="Hours"/> is empty; null when the tenant's timezone resolved.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 public class SiteChangeImpactAnalysis
@@ -2056,6 +2114,9 @@ public class SiteChangeImpactAnalysis
 
     /// <summary>Summary statistics comparing before vs after</summary>
     public SiteChangeImpactSummary Summary { get; set; } = new();
+
+    /// <summary>The consensus band edges the chart draws its target range between.</summary>
+    public required GlycemicThresholds Thresholds { get; set; }
 
     /// <summary>Hours analyzed before site change</summary>
     public int HoursBeforeChange { get; set; }

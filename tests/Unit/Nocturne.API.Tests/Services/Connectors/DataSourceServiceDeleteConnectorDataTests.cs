@@ -72,45 +72,15 @@ public class DataSourceServiceDeleteConnectorDataTests : IDisposable
 
     private NocturneDbContext NewContext() => _db.CreateContext(TenantId);
 
-    private DataSourceService CreateService(NocturneDbContext context, ITreatmentDecomposer? decomposer = null) => new(
+    private DataSourceService CreateService(NocturneDbContext context) => new(
         context.AsFactory(),
         _sensorGlucose.Object,
         _meterGlucose.Object,
         _calibrations.Object,
         _auditContext,
         _connectorConfig.Object,
-        decomposer ?? CreateDecomposer(context, Mock.Of<IProfileDecomposer>()),
         Nocturne.API.Tests.Infrastructure.ProfileActivationTestDeps.Writer(context),
         NullLogger<DataSourceService>.Instance);
-
-    private TreatmentDecomposer CreateDecomposer(NocturneDbContext context, IProfileDecomposer profiles) => new(
-        context.AsFactory(),
-        Mock.Of<IBolusRepository>(), Mock.Of<ITempBasalRepository>(), Mock.Of<ICarbIntakeRepository>(),
-        Mock.Of<IBGCheckRepository>(), Mock.Of<INoteRepository>(), Mock.Of<IDeviceEventRepository>(),
-        Mock.Of<IBolusCalculationRepository>(), Mock.Of<IStateSpanService>(),
-        ProfileActivationTestDeps.Repository(context), ProfileActivationTestDeps.Writer(context), Mock.Of<ITreatmentFoodService>(),
-        Mock.Of<IDeviceService>(), Mock.Of<IPatientDeviceStamper>(), profiles, Mock.Of<IActiveProfileResolver>(),
-        Mock.Of<IPatientInsulinRepository>(), TempBasalTestDeps.Unscheduled(), _auditContext, NullLogger<TreatmentDecomposer>.Instance);
-
-    private static Profile ProfileDocument(string id, string storeName) => new()
-    {
-        Id = id,
-        Mills = 1672567200000,
-        DefaultProfile = storeName,
-        Store =
-        {
-            [storeName] = new ProfileData
-            {
-                Dia = 3.0,
-                Timezone = "UTC",
-                Basal = [new TimeValue { Time = "00:00", Value = 1.0 }],
-                CarbRatio = [new TimeValue { Time = "00:00", Value = 10.0 }],
-                Sens = [new TimeValue { Time = "00:00", Value = 50.0 }],
-                TargetLow = [new TimeValue { Time = "00:00", Value = 80.0 }],
-                TargetHigh = [new TimeValue { Time = "00:00", Value = 120.0 }],
-            },
-        },
-    };
 
     private void SeedOneOfEachType()
     {
@@ -220,9 +190,8 @@ public class DataSourceServiceDeleteConnectorDataTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteConnectorData_DeletesTheProfileRowsOfTheSourcesProfileSwitchesOnly()
+    public async Task DeleteConnectorData_DeletesTheSourcesProfileActivationsOnly()
     {
-        const string storeName = "Weekend@@@@@1672567200000";
         await using (var seed = NewContext())
         {
             seed.ProfileActivations.AddRange(
@@ -241,33 +210,11 @@ public class DataSourceServiceDeleteConnectorDataTests : IDisposable
 
         await using (var ctx = NewContext())
         {
-            var factory = new TestNocturneDbContextFactory(ctx);
-            var profiles = new ProfileDecomposer(
-                new TherapySettingsRepository(factory, _auditContext, NullLogger<TherapySettingsRepository>.Instance),
-                new BasalScheduleRepository(factory, _auditContext, NullLogger<BasalScheduleRepository>.Instance),
-                new CarbRatioScheduleRepository(factory, _auditContext, NullLogger<CarbRatioScheduleRepository>.Instance),
-                new SensitivityScheduleRepository(factory, _auditContext, NullLogger<SensitivityScheduleRepository>.Instance),
-                new TargetRangeScheduleRepository(factory, _auditContext, NullLogger<TargetRangeScheduleRepository>.Instance),
-                TempBasalTestDeps.NoReresolution(),
-                NullLogger<ProfileDecomposer>.Instance);
-            await profiles.DecomposeAsync(ProfileDocument("ps-1", storeName), WriteOrigin.Live);
-            await profiles.DecomposeAsync(ProfileDocument("ps-2", storeName), WriteOrigin.Live);
-
-            (await CreateService(ctx, CreateDecomposer(ctx, profiles)).DeleteConnectorDataAsync(ConnectorId))
+            (await CreateService(ctx).DeleteConnectorDataAsync(ConnectorId))
                 .Success.Should().BeTrue();
         }
 
         await using var db = NewContext();
-        var snapshots = (await db.TherapySettings.IgnoreQueryFilters().ToListAsync()).Select(r => (r.LegacyId, r.DeletedAt))
-            .Concat((await db.BasalSchedules.IgnoreQueryFilters().ToListAsync()).Select(r => (r.LegacyId, r.DeletedAt)))
-            .Concat((await db.CarbRatioSchedules.IgnoreQueryFilters().ToListAsync()).Select(r => (r.LegacyId, r.DeletedAt)))
-            .Concat((await db.SensitivitySchedules.IgnoreQueryFilters().ToListAsync()).Select(r => (r.LegacyId, r.DeletedAt)))
-            .Concat((await db.TargetRangeSchedules.IgnoreQueryFilters().ToListAsync()).Select(r => (r.LegacyId, r.DeletedAt)))
-            .ToList();
-        snapshots.Where(r => r.LegacyId == $"ps-1:{storeName}").Should().HaveCount(5)
-            .And.AllSatisfy(r => r.DeletedAt.Should().NotBeNull());
-        snapshots.Where(r => r.LegacyId == $"ps-2:{storeName}").Should().HaveCount(5)
-            .And.AllSatisfy(r => r.DeletedAt.Should().BeNull());
         (await db.ProfileActivations.IgnoreQueryFilters().SingleAsync(a => a.LegacyId == "ps-1")).DeletedAt.Should().NotBeNull();
         (await db.ProfileActivations.IgnoreQueryFilters().SingleAsync(a => a.LegacyId == "ps-2")).DeletedAt.Should().BeNull();
     }

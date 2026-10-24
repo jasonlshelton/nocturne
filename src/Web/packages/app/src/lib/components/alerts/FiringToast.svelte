@@ -6,6 +6,7 @@
     getActiveAlerts,
     snoozeInstance,
     acknowledgeExcursion,
+    markSeen,
   } from "$api/generated/alerts.generated.remote";
   import type { ActiveExcursionResponse } from "$api-clients";
   import { Button } from "$lib/components/ui/button";
@@ -14,6 +15,7 @@
   import X from "@lucide/svelte/icons/x";
   import { severity } from "./severity";
   import { formatTimeSince } from "./alertTime";
+  import { markSeenOnThisDevice, seenHere } from "./seen-here.svelte";
   import { Now } from "$lib/hooks/now.svelte";
 
   /**
@@ -55,6 +57,22 @@
   const acknowledgesForEveryone = $derived(
     satisfiesScope(page.data.effectivePermissions ?? [], "alerts.readwrite")
   );
+  // A share or guest link records that it saw the alarm instead of
+  // acknowledging, muting or snoozing it, none of which its scopes reach.
+  const hasAccount = $derived(!!page.data.hasAccount);
+  const viewer = $derived({
+    hasAccount,
+    isShareHost: !!page.data.isShareHost,
+  });
+  const canSnooze = $derived(
+    satisfiesScope(page.data.effectivePermissions ?? [], "alerts.acknowledge")
+  );
+
+  // A guest or share link may see the alarm but not the rule behind it.
+  const canOpenRule = $derived(
+    !!page.data.hasAccount &&
+      satisfiesScope(page.data.effectivePermissions ?? [], "alerts.read")
+  );
 
   // The layout drives one shared poll of this query; react to whatever it
   // returns rather than running a second timer at a different cadence.
@@ -68,7 +86,7 @@
         seen.delete(id);
         continue;
       }
-      if (seen.has(id) || a.acknowledgedAt || a.mutedByCaller) continue;
+      if (seen.has(id) || a.acknowledgedAt || a.mutedByCaller || seenHere(a, viewer)) continue;
       seen.add(id);
       fresh.push(a);
     }
@@ -80,7 +98,10 @@
     // and loops.
     const quietIds = new Set(
       list
-        .filter((a) => a.acknowledgedAt || a.mutedByCaller || a.snoozedUntil)
+        .filter(
+          (a) =>
+            a.acknowledgedAt || a.mutedByCaller || a.snoozedUntil || seenHere(a, viewer)
+        )
         .map((a) => a.id)
     );
     if (quietIds.size > 0) {
@@ -139,6 +160,13 @@
     );
   }
 
+  function markAsSeen(id: string): Promise<void> {
+    return optimistic(id, async () => {
+      await markSeen(id);
+      markSeenOnThisDevice(id);
+    });
+  }
+
   // "Mute the rule" used to call toggleRule, which disables the rule outright,
   // tenant-wide, with no confirmation — a one-tap way to switch off a safety rule
   // at 3am, and one that silently re-enabled a rule already disabled. Snoozing is
@@ -178,7 +206,7 @@
               </span>
             </div>
             <div class="mt-2 flex flex-wrap items-center gap-1">
-              {#if a.activeInstances?.[0]?.id}
+              {#if a.activeInstances?.[0]?.id && canSnooze}
                 <Button
                   type="button"
                   variant="outline"
@@ -215,20 +243,32 @@
               <!-- This one records the acknowledgement; the X beside it only
                    closes the card. They used to read "Dismiss" and an unlabelled
                    cross, which is the wrong pair of words for that difference. -->
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                class="ml-auto"
-                onclick={() => ack(a.id ?? "")}
-              >
-                {#if acknowledgesForEveryone}
-                  Acknowledge
-                {:else}
-                  Mute for me
-                {/if}
-              </Button>
-              {#if a.alertRuleId}
+              {#if hasAccount}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  class="ml-auto"
+                  onclick={() => ack(a.id ?? "")}
+                >
+                  {#if acknowledgesForEveryone}
+                    Acknowledge
+                  {:else}
+                    Mute for me
+                  {/if}
+                </Button>
+              {:else}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  class="ml-auto"
+                  onclick={() => markAsSeen(a.id ?? "")}
+                >
+                  Seen
+                </Button>
+              {/if}
+              {#if a.alertRuleId && canOpenRule}
                 <Button
                   type="button"
                   variant="ghost"

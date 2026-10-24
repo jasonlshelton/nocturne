@@ -7,10 +7,12 @@ using OpenApi.Remote.Attributes;
 using Nocturne.API.Attributes;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Alerts;
-using Nocturne.API.Services.Alerts.Evaluators;
+using Nocturne.API.Services.Alerts.Engines;
+using Nocturne.API.Services.Alerts.Conditions;
 using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.Authorization;
@@ -18,6 +20,7 @@ using Nocturne.Core.Models.ClientDevices;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
+using Nocturne.API.Authorization;
 
 namespace Nocturne.API.Controllers.V4.Monitoring;
 
@@ -31,7 +34,9 @@ namespace Nocturne.API.Controllers.V4.Monitoring;
 /// <para>
 /// Every write action requires <see cref="Scope.AlertsReadWrite"/>: a rule decides whether a
 /// low-glucose alert reaches anyone, and the class-level <c>[Authorize]</c> alone is satisfied by
-/// read-only credentials such as a guest-link session, which holds <c>alerts.read</c>.
+/// read-only credentials such as a guest-link session, which holds <c>alerts.read</c>. Both rule
+/// reads require <see cref="Scope.AlertsRead"/>, because a rule names its delivery channels' phone
+/// numbers and webhook targets.
 /// </para>
 /// <para>
 /// The runtime evaluation pipeline that operates on these rules is documented in
@@ -48,9 +53,12 @@ namespace Nocturne.API.Controllers.V4.Monitoring;
 [Tags("Monitoring")]
 [Authorize]
 [Route("api/v4/alert-rules")]
+[DenyNoAccountViewer]
 public class AlertRulesController : ControllerBase
 {
     private readonly INocturneDbContextFactory _contextFactory;
+    private readonly IAlertRepository _alerts;
+    private readonly ITenantAccessor _tenantAccessor;
     private readonly IAlertReferenceService _referenceService;
     private readonly IAlertDeliveryService _deliveryService;
     private readonly IRuleScopeClassifier _scopeClassifier;
@@ -65,6 +73,8 @@ public class AlertRulesController : ControllerBase
     /// </summary>
     public AlertRulesController(
         INocturneDbContextFactory contextFactory,
+        IAlertRepository alerts,
+        ITenantAccessor tenantAccessor,
         IAlertReferenceService referenceService,
         IAlertDeliveryService deliveryService,
         IRuleScopeClassifier scopeClassifier,
@@ -75,6 +85,8 @@ public class AlertRulesController : ControllerBase
         ILogger<AlertRulesController> logger)
     {
         _contextFactory = contextFactory;
+        _alerts = alerts;
+        _tenantAccessor = tenantAccessor;
         _referenceService = referenceService;
         _deliveryService = deliveryService;
         _scopeClassifier = scopeClassifier;
@@ -89,41 +101,30 @@ public class AlertRulesController : ControllerBase
     /// List all alert rules for the current tenant with their flat channel list.
     /// </summary>
     [HttpGet]
+    [RequireScope(Scope.AlertsRead)]
     [RemoteQuery]
     [ProducesResponseType(typeof(List<AlertRuleResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<AlertRuleResponse>>> GetRules(CancellationToken ct)
     {
-        await using var db = await _contextFactory.CreateAsync(ct);
-
-        var rules = await db.AlertRules
-            .AsNoTracking()
-            .Include(r => r.Channels)
-            .OrderBy(r => r.SortOrder)
-            .ToListAsync(ct);
-
-        return Ok(await ToResponsesAsync(db, rules, ct));
+        var rules = await _alerts.GetRulesAsync(_tenantAccessor.TenantId, ct);
+        return Ok(await ToResponsesAsync(rules, ct));
     }
 
     /// <summary>
     /// Get a single alert rule with its flat channel list.
     /// </summary>
     [HttpGet("{id:guid}")]
+    [RequireScope(Scope.AlertsRead)]
     [RemoteQuery]
     [ProducesResponseType(typeof(AlertRuleResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AlertRuleResponse>> GetRule(Guid id, CancellationToken ct)
     {
-        await using var db = await _contextFactory.CreateAsync(ct);
-
-        var rule = await db.AlertRules
-            .AsNoTracking()
-            .Include(r => r.Channels)
-            .FirstOrDefaultAsync(r => r.Id == id, ct);
-
+        var rule = await _alerts.GetRuleAsync(_tenantAccessor.TenantId, id, ct);
         if (rule is null)
             return NotFound();
 
-        return Ok(await ToResponseAsync(db, rule, ct));
+        return Ok(await ToResponseAsync(rule, ct));
     }
 
     /// <summary>
@@ -137,8 +138,7 @@ public class AlertRulesController : ControllerBase
     public async Task<ActionResult<AlertRuleResponse>> CreateRule(
         [FromBody] CreateAlertRuleRequest request, CancellationToken ct)
     {
-        var trees = CanonicalTrees.From(
-            request.ConditionType, request.ConditionParams, request.AutoResolveParams, request.ClientConfiguration);
+        var trees = RequestTrees.From(request.ConditionParams, request.AutoResolveParams, request.ClientConfiguration);
         if (RejectInvalidConditions(request.ConditionType, trees, request.AutoResolveEnabled) is { } invalid)
             return invalid;
 
@@ -149,7 +149,8 @@ public class AlertRulesController : ControllerBase
         if (await ResolveAndValidateChannelsAsync(request.Channels, NoStoredRecipients, db, ct) is { } badChannel)
             return badChannel;
 
-        if (await RejectInvalidTrackerAgeAsync(db, request.ConditionType, request.ConditionParams, ct) is { } badTracker)
+        var leaves = RuleTrees.Leaves(request.ConditionType, trees.ConditionParams);
+        if (await RejectInvalidTrackerAgeAsync(db, leaves, ct) is { } badTracker)
             return badTracker;
 
         var tenantId = db.TenantId;
@@ -188,12 +189,7 @@ public class AlertRulesController : ControllerBase
         db.AlertRules.Add(rule);
         await db.SaveChangesAsync(ct);
 
-        var created = await db.AlertRules
-            .AsNoTracking()
-            .Include(r => r.Channels)
-            .FirstAsync(r => r.Id == rule.Id, ct);
-
-        return CreatedAtAction(nameof(GetRule), new { id = created.Id }, await ToResponseAsync(db, created, ct));
+        return CreatedAtAction(nameof(GetRule), new { id = rule.Id }, await ReadBackAsync(tenantId, rule.Id, ct));
     }
 
     /// <summary>
@@ -218,25 +214,18 @@ public class AlertRulesController : ControllerBase
         if (rule is null)
             return NotFound();
 
-        var requested = CanonicalTrees.From(
-            request.ConditionType, request.ConditionParams, request.AutoResolveParams, request.ClientConfiguration);
-        var check = _conditionValidator.ValidateUpdate(
-            request.ConditionType, requested.ConditionParams, request.AutoResolveEnabled,
-            requested.AutoResolveParams, requested.ClientConfiguration,
-            new StoredConditionTrees(rule.ConditionType, rule.ConditionParams, rule.AutoResolveParams, rule.ClientConfiguration));
-        if (ConditionProblem(check.Issues) is { } invalid)
+        var trees = RequestTrees.From(request.ConditionParams, request.AutoResolveParams, request.ClientConfiguration);
+        if (RejectInvalidConditions(request.ConditionType, trees, request.AutoResolveEnabled) is { } invalid)
             return invalid;
-        var trees = new CanonicalTrees(check.ConditionParams, check.AutoResolveParams, check.ClientConfiguration);
 
         if (await ResolveAndValidateChannelsAsync(request.Channels, InAppRecipientsOf(rule.Channels), db, ct) is { } badChannel)
             return badChannel;
 
-        if (await RejectInvalidTrackerAgeAsync(db, request.ConditionType, request.ConditionParams, ct) is { } badTracker)
+        var leaves = RuleTrees.Leaves(request.ConditionType, trees.ConditionParams);
+        if (await RejectInvalidTrackerAgeAsync(db, leaves, ct) is { } badTracker)
             return badTracker;
 
-        var rootForCycle = TryDeserializeRoot(request.ConditionType, request.ConditionParams);
-        if (rootForCycle is not null
-            && await _referenceService.DetectCycleAsync(id, rootForCycle, ct))
+        if (await _referenceService.DetectCycleAsync(id, RuleTrees.AlertStateTargets(leaves).ToList(), ct))
         {
             return BadRequest("Cyclical alert_state reference detected.");
         }
@@ -254,6 +243,9 @@ public class AlertRulesController : ControllerBase
             || !sameBody
             || rule.AutoResolveEnabled != request.AutoResolveEnabled
             || !sameAutoResolve;
+        var snoozeChanged = !SmartSnoozeConfig.SameConditions(
+            SmartSnoozeConfig.StoredConditions(rule.ClientConfiguration),
+            SmartSnoozeConfig.StoredConditions(trees.ClientConfiguration));
 
         rule.Name = request.Name;
         rule.Description = request.Description;
@@ -294,24 +286,14 @@ public class AlertRulesController : ControllerBase
         // clear the hold.
         if (conditionsChanged)
             await _rearm.SaveAndClearAsync(unit, id, ct);
+        else if (snoozeChanged)
+            await _rearm.SaveAndPruneAsync(unit, id, ct);
         else
             await db.SaveChangesAsync(ct);
         if (wasEnabled && !request.IsEnabled)
             await _retirement.CloseAsync([id], tenantId, CancellationToken.None);
 
-        foreach (var field in check.Stripped)
-        {
-            _logger.LogWarning(
-                "Removed property {Field} from {Scope} condition {Path} of alert rule {AlertRuleId}: no condition kind reads it",
-                field.Field, field.Scope, field.Path, id);
-        }
-
-        var updated = await db.AlertRules
-            .AsNoTracking()
-            .Include(r => r.Channels)
-            .FirstAsync(r => r.Id == id, ct);
-
-        return Ok(await ToResponseAsync(db, updated, ct));
+        return Ok(await ReadBackAsync(tenantId, id, ct));
     }
 
     /// <summary>
@@ -372,10 +354,7 @@ public class AlertRulesController : ControllerBase
         await using var unit = await DbUnitOfWork.OpenAsync(_contextFactory, ct);
         var db = unit.Context;
 
-        var rule = await db.AlertRules
-            .Include(r => r.Channels)
-            .FirstOrDefaultAsync(r => r.Id == id, ct);
-
+        var rule = await db.AlertRules.FirstOrDefaultAsync(r => r.Id == id, ct);
         if (rule is null)
             return NotFound();
 
@@ -386,7 +365,7 @@ public class AlertRulesController : ControllerBase
         if (wasEnabled)
             await _retirement.CloseAsync([id], db.TenantId, CancellationToken.None);
 
-        return Ok(await ToResponseAsync(db, rule, ct));
+        return Ok(await ReadBackAsync(db.TenantId, id, ct));
     }
 
     /// <summary>
@@ -401,23 +380,11 @@ public class AlertRulesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> TestFire(Guid id, CancellationToken ct)
     {
-        await using var db = await _contextFactory.CreateAsync(ct);
-
-        var rule = await db.AlertRules
-            .AsNoTracking()
-            .Include(r => r.Channels)
-            .FirstOrDefaultAsync(r => r.Id == id, ct);
-
+        var tenantId = _tenantAccessor.TenantId;
+        var rule = await _alerts.GetRuleAsync(tenantId, id, ct);
         if (rule is null) return NotFound();
 
-        var channels = rule.Channels
-            .OrderBy(c => c.SortOrder)
-            .Select(c => new AlertRuleChannelSnapshot(
-                c.Id, c.AlertRuleId, c.ChannelType,
-                c.Destination, c.DestinationLabel, c.SortOrder, c.Metadata, c.Secret))
-            .ToList();
-
-        await _deliveryService.TestFireAsync(rule.Id, channels, BuildTestPayload(rule, db.TenantId), ct);
+        await _deliveryService.TestFireAsync(id, rule.Channels, BuildTestPayload(rule.Rule, tenantId), ct);
         return Accepted();
     }
 
@@ -483,7 +450,7 @@ public class AlertRulesController : ControllerBase
         return Accepted();
     }
 
-    private static AlertPayload BuildTestPayload(AlertRuleEntity rule, Guid tenantId) => new()
+    private static AlertPayload BuildTestPayload(AlertRuleSnapshot rule, Guid tenantId) => new()
     {
         AlertType = rule.ConditionType,
         RuleName = $"[Test] {rule.Name}",
@@ -810,9 +777,34 @@ public class AlertRulesController : ControllerBase
     private static string? SerializeMetadata(object? metadata) =>
         metadata is not null ? JsonSerializer.Serialize(metadata) : null;
 
-    private async Task<AlertRuleResponse> ToResponseAsync(
-        NocturneDbContext db, AlertRuleEntity rule, CancellationToken ct) =>
-        (await ToResponsesAsync(db, [rule], ct))[0];
+    private async Task<AlertRuleResponse> ToResponseAsync(AlertRuleRecord rule, CancellationToken ct) =>
+        (await ToResponsesAsync([rule], ct))[0];
+
+    /// <summary>The response for a rule this request has just committed.</summary>
+    private async Task<AlertRuleResponse> ReadBackAsync(Guid tenantId, Guid ruleId, CancellationToken ct) =>
+        await ToResponseAsync(
+            await _alerts.GetRuleAsync(tenantId, ruleId, ct)
+                ?? throw new InvalidOperationException($"Alert rule {ruleId} was not found after it was saved."),
+            ct);
+
+    /// <summary>
+    /// What a save of the stored rule would reject. A rule the engine cannot take at all is logged
+    /// and listed without issues, so one such rule does not fail the whole list.
+    /// </summary>
+    private IReadOnlyList<RustValidationIssue> StoredIssues(AlertRuleSnapshot rule)
+    {
+        try
+        {
+            return _conditionValidator.Validate(
+                rule.ConditionType, rule.ConditionParams, rule.AutoResolveEnabled,
+                rule.AutoResolveParams, rule.ClientConfiguration);
+        }
+        catch (RustAlertEngineException ex)
+        {
+            _logger.LogError(ex, "The alert engine could not check the conditions of alert rule {AlertRuleId}", rule.Id);
+            return [];
+        }
+    }
 
     /// <summary>
     /// Maps rules to responses and, for a caller who may edit the rules, describes each in-app
@@ -820,12 +812,9 @@ public class AlertRulesController : ControllerBase
     /// This is not a privacy boundary: member names are readable more widely (issue #2359).
     /// </summary>
     private async Task<List<AlertRuleResponse>> ToResponsesAsync(
-        NocturneDbContext db, IEnumerable<AlertRuleEntity> rules, CancellationToken ct)
+        IEnumerable<AlertRuleRecord> rules, CancellationToken ct)
     {
-        var responses = rules.Select(rule => MapToResponse(rule, _conditionValidator.Validate(
-                rule.ConditionType, rule.ConditionParams, rule.AutoResolveEnabled,
-                rule.AutoResolveParams, rule.ClientConfiguration)))
-            .ToList();
+        var responses = rules.Select(rule => MapToResponse(rule, StoredIssues(rule.Rule))).ToList();
         var inApp = responses
             .SelectMany(r => r.Channels)
             .Where(c => c.ChannelType == ChannelType.InApp)
@@ -835,6 +824,7 @@ public class AlertRulesController : ControllerBase
             return responses;
         }
 
+        await using var db = await _contextFactory.CreateAsync(ct);
         var recipients = await InAppRecipients.ListAsync(db, db.TenantId, ct);
         foreach (var channel in inApp)
         {
@@ -871,28 +861,27 @@ public class AlertRulesController : ControllerBase
     }
 
     private static AlertRuleResponse MapToResponse(
-        AlertRuleEntity entity, IReadOnlyList<RustValidationIssue> conditionIssues) => new()
+        AlertRuleRecord record, IReadOnlyList<RustValidationIssue> conditionIssues) => new()
     {
-        Id = entity.Id,
-        Name = entity.Name,
-        Description = entity.Description,
-        ConditionType = entity.ConditionType,
-        ConditionParams = DeserializeJson(entity.ConditionParams),
-        IsEnabled = entity.IsEnabled,
-        SortOrder = entity.SortOrder,
-        Severity = entity.Severity,
-        AllowThroughDnd = entity.AllowThroughDnd,
-        ScopeClass = entity.ScopeClass,
-        ManagedBy = entity.ManagedBy,
-        ReviewReason = entity.ReviewReason,
+        Id = record.Rule.Id,
+        Name = record.Rule.Name,
+        Description = record.Description,
+        ConditionType = record.Rule.ConditionType,
+        ConditionParams = DeserializeJson(record.Rule.ConditionParams),
+        IsEnabled = record.IsEnabled,
+        SortOrder = record.Rule.SortOrder,
+        Severity = record.Rule.Severity,
+        AllowThroughDnd = record.Rule.AllowThroughDnd,
+        ScopeClass = record.Rule.ScopeClass,
+        ManagedBy = record.ManagedBy,
+        ReviewReason = record.ReviewReason,
         ConditionIssues = [.. conditionIssues],
-        AutoResolveEnabled = entity.AutoResolveEnabled,
-        AutoResolveParams = entity.AutoResolveParams is null
+        AutoResolveEnabled = record.Rule.AutoResolveEnabled,
+        AutoResolveParams = record.Rule.AutoResolveParams is null
             ? null
-            : DeserializeJson(entity.AutoResolveParams),
-        ClientConfiguration = DeserializeJson(entity.ClientConfiguration),
-        Channels = entity.Channels
-            .OrderBy(c => c.SortOrder)
+            : DeserializeJson(record.Rule.AutoResolveParams),
+        ClientConfiguration = DeserializeJson(record.Rule.ClientConfiguration),
+        Channels = record.Channels
             .Select(c => new AlertRuleChannelResponse
             {
                 Id = c.Id,
@@ -919,86 +908,20 @@ public class AlertRulesController : ControllerBase
     }
 
     /// <summary>
-    /// Reconstructs a <see cref="ConditionNode"/> from the controller's
-    /// <c>ConditionType</c> + <c>ConditionParams</c> request shape so the reference walker can
-    /// inspect the proposed tree before persisting. Returns null if the payload can't be
-    /// deserialised — cycle detection then no-ops and the request still passes validation
-    /// (the existing rule-shape validator catches malformed payloads with a clearer error).
-    /// </summary>
-    private static ConditionNode? TryDeserializeRoot(AlertConditionType type, object? conditionParams)
-    {
-        if (conditionParams is null) return null;
-        try
-        {
-            var json = JsonSerializer.Serialize(conditionParams);
-            return type switch
-            {
-                AlertConditionType.Composite => new ConditionNode("composite",
-                    Composite: JsonSerializer.Deserialize<CompositeCondition>(json, ReferenceJsonOptions)),
-                AlertConditionType.Not => new ConditionNode("not",
-                    Not: JsonSerializer.Deserialize<NotCondition>(json, ReferenceJsonOptions)),
-                AlertConditionType.Sustained => new ConditionNode("sustained",
-                    Sustained: JsonSerializer.Deserialize<SustainedCondition>(json, ReferenceJsonOptions)),
-                AlertConditionType.AlertState => new ConditionNode("alert_state",
-                    AlertState: JsonSerializer.Deserialize<AlertStateCondition>(json, ReferenceJsonOptions)),
-                _ => new ConditionNode(type.ToString().ToLowerInvariant()),
-            };
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private static readonly JsonSerializerOptions ReferenceJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = true,
-    };
-
-    /// <summary>
     /// Returns a <c>400 BadRequest</c> when the rule contains a <c>tracker_age</c> leaf whose
     /// <c>tracker_definition_id</c> is missing, malformed, or does not exist for this tenant.
-    /// Without this the rule saves fine but the evaluator fails closed on every reading and
-    /// sweep pass — a rule that silently never fires (or throws into the per-rule catch when
-    /// the id can't even deserialise). Returns null when the request is acceptable.
+    /// Without this the rule saves fine but the engine fails closed on every reading and sweep
+    /// pass, a rule that silently never fires. Returns null when the request is acceptable.
     /// </summary>
     private static async Task<BadRequestObjectResult?> RejectInvalidTrackerAgeAsync(
-        NocturneDbContext db, AlertConditionType type, object? conditionParams, CancellationToken ct)
+        NocturneDbContext db, IReadOnlyList<ConditionLeaf> leaves, CancellationToken ct)
     {
-        if (conditionParams is null)
-            return null;
-
         var definitionIds = new List<Guid>();
-        if (type == AlertConditionType.TrackerAge)
+        foreach (var leaf in leaves.Where(leaf => leaf.Kind == AlertConditionType.TrackerAge))
         {
-            try
-            {
-                var json = JsonSerializer.Serialize(conditionParams);
-                var typed = JsonSerializer.Deserialize<TrackerAgeCondition>(json, ReferenceJsonOptions);
-                if (typed is null || typed.TrackerDefinitionId == Guid.Empty)
-                    return new BadRequestObjectResult("tracker_age requires a tracker_definition_id.");
-                definitionIds.Add(typed.TrackerDefinitionId);
-            }
-            catch (JsonException)
-            {
-                return new BadRequestObjectResult("tracker_age requires a valid tracker_definition_id.");
-            }
-        }
-        else
-        {
-            var root = TryDeserializeRoot(type, conditionParams);
-            if (root is not null)
-            {
-                ConditionPath.Walk<object>(root, (visited, _) =>
-                {
-                    if (visited.TrackerAge is { } trackerAge)
-                        definitionIds.Add(trackerAge.TrackerDefinitionId);
-                    return null;
-                });
-                if (definitionIds.Contains(Guid.Empty))
-                    return new BadRequestObjectResult("tracker_age requires a tracker_definition_id.");
-            }
+            if (leaf.GuidParam("tracker_definition_id") is not { } definitionId || definitionId == Guid.Empty)
+                return new BadRequestObjectResult("tracker_age requires a tracker_definition_id.");
+            definitionIds.Add(definitionId);
         }
 
         foreach (var definitionId in definitionIds)
@@ -1016,7 +939,7 @@ public class AlertRulesController : ControllerBase
     /// <c>{scope}:{path}</c> and each value a reason code, suffixed <c>:{field}</c> when the
     /// problem is on a field; the <c>issues</c> extension carries the same list structured.
     /// </summary>
-    private ActionResult? RejectInvalidConditions(AlertConditionType type, CanonicalTrees trees, bool autoResolveEnabled) =>
+    private ActionResult? RejectInvalidConditions(AlertConditionType type, RequestTrees trees, bool autoResolveEnabled) =>
         ConditionProblem(_conditionValidator.Validate(
             type, trees.ConditionParams, autoResolveEnabled, trees.AutoResolveParams, trees.ClientConfiguration));
 
@@ -1041,22 +964,16 @@ public class AlertRulesController : ControllerBase
     }
 
     /// <summary>
-    /// A request's condition trees serialised as they are stored, with timezone ids through
-    /// <see cref="ConditionTimeZones"/>. A null tree stays null, except the body, stored as <c>{}</c>.
+    /// A request's condition trees serialised as they are stored. A null tree stays null, except the
+    /// body, stored as <c>{}</c>.
     /// </summary>
-    private sealed record CanonicalTrees(string ConditionParams, string? AutoResolveParams, string? ClientConfiguration)
+    private sealed record RequestTrees(string ConditionParams, string? AutoResolveParams, string? ClientConfiguration)
     {
-        public static CanonicalTrees From(
-            AlertConditionType type, object? conditionParams, object? autoResolveParams, object? clientConfiguration) =>
+        public static RequestTrees From(object? conditionParams, object? autoResolveParams, object? clientConfiguration) =>
             new(
-                ConditionTimeZones.CanonicaliseRule(
-                    type, conditionParams is not null ? JsonSerializer.Serialize(conditionParams) : "{}"),
-                autoResolveParams is not null
-                    ? ConditionTimeZones.CanonicaliseNode(JsonSerializer.Serialize(autoResolveParams))
-                    : null,
-                clientConfiguration is not null
-                    ? ConditionTimeZones.CanonicaliseClientConfiguration(JsonSerializer.Serialize(clientConfiguration))
-                    : null);
+                conditionParams is not null ? JsonSerializer.Serialize(conditionParams) : "{}",
+                autoResolveParams is not null ? JsonSerializer.Serialize(autoResolveParams) : null,
+                clientConfiguration is not null ? JsonSerializer.Serialize(clientConfiguration) : null);
     }
 
     #endregion
@@ -1115,9 +1032,9 @@ public class AlertRuleResponse
     /// <summary>Why a data repair changed or disabled this rule (<see cref="AlertRuleReviewReasons"/>);
     /// null when none did. Cleared by the next edit.</summary>
     public string? ReviewReason { get; set; }
-    /// <summary>What a save of the rule's stored conditions would reject. A stored rule keeps
-    /// evaluating with them, so a non-empty list can mean a condition that never fires as
-    /// written.</summary>
+    /// <summary>Every problem that keeps one of the rule's stored condition trees from being
+    /// evaluated: with one in its body the rule is skipped, in its auto-resolve tree it never
+    /// resolves, and in its smart-snooze conditions the snooze clears.</summary>
     public List<RustValidationIssue> ConditionIssues { get; set; } = [];
     public bool AutoResolveEnabled { get; set; }
     public object? AutoResolveParams { get; set; }

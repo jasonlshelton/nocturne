@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Nocturne.Core.Contracts.Alerts;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Treatments;
@@ -25,16 +27,14 @@ namespace Nocturne.API.Services.Analytics;
 public class WidgetSummaryService : IWidgetSummaryService
 {
     private readonly IEntryService _entryService;
-    private readonly IIobCalculator _iobCalculator;
-    private readonly ICobCalculator _cobCalculator;
-    private readonly IBolusRepository _bolusRepository;
-    private readonly ICarbIntakeRepository _carbIntakeRepository;
-    private readonly ITempBasalRepository _tempBasalRepository;
+    private readonly IIobCobReader _iobCobReader;
     private readonly IApsSnapshotRepository _apsSnapshots;
     private readonly ITrackerRepository _trackerRepository;
     private readonly INotificationV1Service _notificationService;
     private readonly IGlucoseStatusClassifier _statusClassifier;
-    private readonly INocturneDbContextFactory _contextFactory;
+    private readonly IAlertRepository _alertRepository;
+    private readonly ITenantAccessor _tenantAccessor;
+    private readonly ICategoryReadContext _categoryReadContext;
     private readonly ILogger<WidgetSummaryService> _logger;
 
     /// <summary>
@@ -44,30 +44,26 @@ public class WidgetSummaryService : IWidgetSummaryService
 
     public WidgetSummaryService(
         IEntryService entryService,
-        IIobCalculator iobCalculator,
-        ICobCalculator cobCalculator,
-        IBolusRepository bolusRepository,
-        ICarbIntakeRepository carbIntakeRepository,
-        ITempBasalRepository tempBasalRepository,
+        IIobCobReader iobCobReader,
         IApsSnapshotRepository apsSnapshots,
         ITrackerRepository trackerRepository,
         INotificationV1Service notificationService,
         IGlucoseStatusClassifier statusClassifier,
-        INocturneDbContextFactory contextFactory,
+        IAlertRepository alertRepository,
+        ITenantAccessor tenantAccessor,
+        ICategoryReadContext categoryReadContext,
         ILogger<WidgetSummaryService> logger
     )
     {
         _entryService = entryService;
-        _iobCalculator = iobCalculator;
-        _cobCalculator = cobCalculator;
-        _bolusRepository = bolusRepository;
-        _carbIntakeRepository = carbIntakeRepository;
-        _tempBasalRepository = tempBasalRepository;
+        _iobCobReader = iobCobReader;
         _apsSnapshots = apsSnapshots;
         _trackerRepository = trackerRepository;
         _notificationService = notificationService;
         _statusClassifier = statusClassifier;
-        _contextFactory = contextFactory;
+        _alertRepository = alertRepository;
+        _tenantAccessor = tenantAccessor;
+        _categoryReadContext = categoryReadContext;
         _logger = logger;
     }
 
@@ -160,8 +156,10 @@ public class WidgetSummaryService : IWidgetSummaryService
 
         try
         {
-            await using var db = await _contextFactory.CreateAsync(cancellationToken);
-            var thresholds = await _statusClassifier.ResolveThresholdsAsync(db, cancellationToken);
+            var thresholds = _categoryReadContext.IsShare
+                ? _statusClassifier.Defaults
+                : _statusClassifier.ResolveThresholds(
+                    await _alertRepository.GetEnabledRulesAsync(_tenantAccessor.TenantId, cancellationToken));
             current.Status = _statusClassifier.Classify(
                 current.Sgv,
                 DateTimeOffset.FromUnixTimeMilliseconds(current.Mills).UtcDateTime,
@@ -182,7 +180,7 @@ public class WidgetSummaryService : IWidgetSummaryService
     {
         return new V4GlucoseReading
         {
-            Sgv = entry.Sgv ?? entry.Mgdl,
+            Sgv = entry.GlucoseMgdl(),
             Direction = entry.DirectionEnum,
             TrendRate = entry.TrendRate,
             Delta = entry.Delta,
@@ -203,30 +201,9 @@ public class WidgetSummaryService : IWidgetSummaryService
         {
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            // Query v4 types: 8h for IOB, 6h for COB
-            var iobFrom = DateTime.UtcNow.AddHours(-8);
-            var cobFrom = DateTime.UtcNow.AddHours(-6);
-
-            var boluses = (await _bolusRepository.GetAsync(
-                from: iobFrom, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false, ct: cancellationToken
-            )).ToList();
-            var tempBasals = (await _tempBasalRepository.GetAsync(
-                from: iobFrom, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false, ct: cancellationToken
-            )).ToList();
-            var carbIntakes = (await _carbIntakeRepository.GetAsync(
-                from: cobFrom, to: null, device: null, source: null,
-                limit: 1000, offset: 0, descending: false, ct: cancellationToken
-            )).ToList();
-
-            // Calculate IOB
-            var iobResult = await _iobCalculator.CalculateTotalAsync(boluses, tempBasals, now, ct: cancellationToken);
-            response.Iob = Math.Round(iobResult.Iob * 100) / 100; // Round to 2 decimal places
-
-            // Calculate COB
-            var cobResult = await _cobCalculator.CalculateTotalAsync(carbIntakes, boluses, tempBasals, now, ct: cancellationToken);
-            response.Cob = Math.Round(cobResult.Cob);
+            var reading = await _iobCobReader.ReadTotalAsync(now, live: true, cancellationToken);
+            response.Iob = Math.Round(reading.Iob.Iob * 100) / 100;
+            response.Cob = reading.Cob is null ? 0 : Math.Round(reading.Cob.Cob);
         }
         catch (Exception ex)
         {

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { page } from "$app/state";
+  import { satisfiesScope } from "$lib/authorization/scopes";
   import { enumValue } from "$lib/components/ui/enum-value";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
@@ -29,6 +31,10 @@
     mode = "Duration",
     lifespanHours,
   }: Props = $props();
+
+  const canOpenRule = $derived(
+    satisfiesScope(page.data.effectivePermissions ?? [], "alerts.read")
+  );
 
   const urgencyOptions: {
     value: NotificationUrgency;
@@ -164,7 +170,7 @@
           <div class="ml-auto flex-shrink-0 pt-5 flex items-center gap-1">
             <!-- New tab: this editor lives in a dialog, so in-place navigation
                  would discard the tracker edits made so far. -->
-            {#if notification.alertRuleId}
+            {#if notification.alertRuleId && canOpenRule}
               <Button
                 variant="ghost-muted"
                 href="/alerts/{notification.alertRuleId}"
@@ -203,6 +209,6 @@
 
   <p class="text-xs text-muted-foreground">
     Each threshold is delivered through a managed alert rule. Use Channels to
-    open that rule; a new threshold gets its rule after the tracker is saved.
+    open that rule. A new threshold gets its rule after you save the tracker.
   </p>
 </div>

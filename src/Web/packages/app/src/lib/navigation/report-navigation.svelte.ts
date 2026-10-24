@@ -127,16 +127,16 @@ export function reportCategories(): ReportCategory[] {
           title: "Glucose Distribution",
           description: "Time spent in each glucose zone",
           href: "/reports/glucose-distribution",
-          keywords: ["box chart", "box plot", "whisker", "percentiles", "quartiles", "spread"],
+          keywords: ["spread"],
           scopes: [READ.reports],
           icon: PieChart,
           status: "available",
         },
         {
           title: "Data Quality",
-          description: "Assess the reliability of your data",
+          description: "Compression lows, signal integrity, CGM comparison and rejected uploads",
           href: "/reports/data-quality",
-          keywords: ["gaps", "missing", "coverage", "reliability"],
+          keywords: ["compression", "signal", "sensor", "rejected uploads"],
           scopes: [READ.glucose, READ.reports],
           icon: Layers,
           status: "available",
@@ -316,7 +316,7 @@ export function reportCategories(): ReportCategory[] {
         {
           title: "Insulin Dosing Profile",
           sidebarTitle: "IDP",
-          description: "Standardised insulin and glucose summary",
+          description: "Standardized insulin and glucose summary",
           href: "/reports/idp",
           keywords: ["insulin dosing profile", "daily insulin", "dose adjustment"],
           scopes: [READ.treatments, READ.reports],
@@ -326,7 +326,7 @@ export function reportCategories(): ReportCategory[] {
         },
         {
           title: "Battery",
-          description: "Pump battery trends and longevity",
+          description: "Device battery levels and charge cycles",
           href: "/reports/battery",
           keywords: ["pump battery", "phone battery", "charge"],
           scopes: [READ.devices],
@@ -400,6 +400,24 @@ export function reportCategories(): ReportCategory[] {
 /** A report's full title: a page of a report made of several is named with that report. */
 export function reportTitle(category: ReportCategory, report: ReportItem): string {
   return category.pages ? `${category.title}: ${report.title}` : report.title;
+}
+
+const reportSubRouteTitles: Record<string, string> = {
+  "/reports/data-quality/compression-lows": "Compression Lows",
+  "/reports/data-quality/sensor-integrity": "Signal Integrity",
+  "/reports/data-quality/cgm-comparison": "CGM Comparison",
+  "/reports/data-quality/rejected-uploads": "Rejected Uploads",
+  "/reports/sleep/[date]": "Sleep Night Report",
+};
+
+/**
+ * The name of a report route the registry does not list, resolvable on the
+ * server where a page's own effects do not run.
+ */
+export function reportSubRouteTitle(pathname: string): string | undefined {
+  return reportSubRouteTitles[
+    /^\/reports\/sleep\/[^/]+$/.test(pathname) ? "/reports/sleep/[date]" : pathname
+  ];
 }
 
 /** The viewer a report list is built for. */

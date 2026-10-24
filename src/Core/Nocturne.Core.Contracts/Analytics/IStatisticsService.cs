@@ -383,20 +383,23 @@ public interface IStatisticsService
     /// Carb intakes, when given, fill each day's <see cref="DailyBasalBolusRatioData.Carbs"/>. A day with carbs and no
     /// insulin gets a row but is not counted in <see cref="DailyBasalBolusRatioResponse.DaysWithData"/>.
     /// </summary>
+    /// <param name="startDate">Start of the window; a temp basal that began before it counts from here.</param>
     /// <param name="untilMills">As for <see cref="CalculateInsulinDeliveryStatistics"/>.</param>
     DailyBasalBolusRatioResponse CalculateDailyBasalBolusRatios(
         IEnumerable<Bolus> boluses,
         IEnumerable<Bolus> algorithmBoluses,
         IEnumerable<TempBasal> tempBasals,
+        DateTime startDate,
         long untilMills,
-        TimeZoneInfo? userTimeZone = null,
+        TimeZoneInfo userTimeZone,
         IEnumerable<BasalInjection>? basalInjections = null,
         IEnumerable<CarbIntake>? carbIntakes = null);
 
     /// <summary>
     /// Calculate comprehensive basal analysis statistics from TempBasals. Hourly percentiles are
     /// bucketed by <paramref name="userTimeZone"/>'s local hour-of-day (0–23) so the chart shows
-    /// rates against the user's wall clock, not UTC. Defaults to UTC when null.
+    /// rates against the user's wall clock, not UTC. Null leaves them empty, since there is no local
+    /// hour to bucket on.
     /// </summary>
     /// <param name="untilMills">As for <see cref="CalculateInsulinDeliveryStatistics"/>.</param>
     BasalAnalysisResponse CalculateBasalAnalysis(
@@ -412,7 +415,6 @@ public interface IStatisticsService
     /// <paramref name="userTimeZone"/>-local hours each TempBasal overlaps; averages
     /// divide by the number of distinct local days that have delivery data, so a
     /// period that extends beyond the available data does not distort the pattern.
-    /// Defaults to UTC hour-of-day when <paramref name="userTimeZone"/> is null.
     /// Long-acting basal injections (MDI) are spread evenly across the 24 hours
     /// following each injection and counted as scheduled basal.
     /// <paramref name="profileBasalSegments"/> is the profile's schedule over the window; it fills
@@ -426,9 +428,55 @@ public interface IStatisticsService
         DateTime startDate,
         DateTime endDate,
         long untilMills,
-        TimeZoneInfo? userTimeZone = null,
+        TimeZoneInfo userTimeZone,
         IEnumerable<BasalInjection>? basalInjections = null,
         IEnumerable<BasalSegment>? profileBasalSegments = null);
+
+    /// <summary>
+    /// The registered CGMs that contributed <paramref name="readings"/>, each with its reading count,
+    /// then a nameless entry with no device id when any reading has no device.
+    /// </summary>
+    IEnumerable<ContributingDevice> CalculateContributingDevices(
+        IReadOnlyCollection<SensorGlucose> readings,
+        IEnumerable<PatientDevice> devices);
+
+    /// <summary>
+    /// One standard period of the multi-period report. Every collection is the period's slice, and
+    /// <paramref name="tempBasals"/> already holds any profile basal standing in for the pump's.
+    /// A period with too few readings carries only its counts.
+    /// </summary>
+    /// <param name="untilMills">As for <see cref="CalculateInsulinDeliveryStatistics"/>.</param>
+    PeriodStatistics CalculatePeriodStatistics(
+        int periodDays,
+        DateTime startDate,
+        DateTime endDate,
+        IReadOnlyCollection<SensorGlucose> entries,
+        IReadOnlyCollection<Bolus> manualBoluses,
+        IReadOnlyCollection<Bolus> algorithmBoluses,
+        IReadOnlyCollection<TempBasal> tempBasals,
+        IReadOnlyCollection<BasalInjection> basalInjections,
+        IReadOnlyCollection<CarbIntake> carbs,
+        IReadOnlyCollection<DeviceEvent> deviceEvents,
+        long untilMills,
+        TimeZoneInfo? timeZone);
+
+    /// <summary>
+    /// Per-day glucose, treatment and basal figures for the calendar punch-card view, bucketed into
+    /// the tenant's local days from <paramref name="startDate"/> to <paramref name="endDate"/> inclusive.
+    /// </summary>
+    /// <param name="now">Ends the window of a range that has not finished, and sets which day is today.</param>
+    PunchCardResponse CalculatePunchCard(
+        IEnumerable<SensorGlucose> glucose,
+        IEnumerable<Bolus> manualBoluses,
+        IEnumerable<Bolus> algorithmBoluses,
+        IEnumerable<CarbIntake> carbs,
+        IEnumerable<TempBasal> tempBasals,
+        IEnumerable<BasalInjection> basalInjections,
+        DateOnly startDate,
+        DateOnly endDate,
+        TimeZoneInfo timeZone,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

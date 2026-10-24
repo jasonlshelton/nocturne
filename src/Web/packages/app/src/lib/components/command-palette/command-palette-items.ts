@@ -237,6 +237,7 @@ export const items: CommandPaletteItem[] = [
 		keywords: ["alerts", "alarms", "urgent", "warnings", "notifications"],
 		icon: TriangleAlert,
 		href: "/alerts",
+		scope: "alerts.read",
 	},
 	{
 		id: "settings-grants",

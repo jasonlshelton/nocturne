@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 using Nocturne.API.Controllers.V4.Base;
 using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.API.Attributes;
+using Nocturne.Core.Models.Authorization;
 
 namespace Nocturne.API.Controllers.V4.Platform;
 
@@ -32,6 +34,7 @@ public class SystemEventsController : ControllerBase
     /// </summary>
     /// <inheritdoc cref="ISystemEventRepository.GetSystemEventsAsync"/>
     [HttpGet]
+    [RequireScope(Scope.DevicesRead)]
     public async Task<ActionResult<IEnumerable<SystemEvent>>> GetSystemEvents(
         [FromQuery] SystemEventType? type = null,
         [FromQuery] SystemEventCategory? category = null,
@@ -57,6 +60,7 @@ public class SystemEventsController : ControllerBase
     /// </summary>
     /// <inheritdoc cref="ISystemEventRepository.GetSystemEventByIdAsync"/>
     [HttpGet("{id}")]
+    [RequireScope(Scope.DevicesRead)]
     public async Task<ActionResult<SystemEvent>> GetSystemEvent(
         string id,
         CancellationToken cancellationToken = default)

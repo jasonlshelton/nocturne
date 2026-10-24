@@ -96,8 +96,8 @@ public class IobCobComputeStageTests
             .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
             .Returns(new IobResult { Iob = 0 });
         _mockIobCalculator
-            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
-            .Callback((List<TempBasal> pieces, TherapySnapshot _, long _) => pieceEnds.AddRange(pieces.Select(p => p.EndMills!.Value)))
+            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>(), It.IsAny<long>()))
+            .Callback((List<TempBasal> pieces, TherapySnapshot _, Func<long, double> _, long _, long _) => pieceEnds.AddRange(pieces.Select(p => p.EndMills!.Value)))
             .Returns(new IobResult { BasalIob = 0.1 });
 
         await _stage.ExecuteAsync(new ChartDataContext
@@ -147,11 +147,11 @@ public class IobCobComputeStageTests
             .Returns(new IobResult { Iob = 2.0 });
 
         _mockIobCalculator
-            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>(), It.IsAny<long>()))
             .Returns(new IobResult { BasalIob = 0.5 });
 
         _mockCobCalculator
-            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()))
             .Returns(new CobResult { Cob = 20.0 });
 
         var context = new ChartDataContext
@@ -210,7 +210,7 @@ public class IobCobComputeStageTests
             Times.Never
         );
         _mockCobCalculator.Verify(
-            s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()),
+            s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()),
             Times.Never
         );
 
@@ -377,7 +377,7 @@ public class IobCobComputeStageTests
             Times.Never
         );
         _mockCobCalculator.Verify(
-            s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()),
+            s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()),
             Times.Never
         );
     }
@@ -395,7 +395,7 @@ public class IobCobComputeStageTests
             .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
             .Returns(new IobResult { Iob = 2.0 });
         _mockCobCalculator
-            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()))
             .Returns(new CobResult { Cob = 20.0 });
 
         var context = new ChartDataContext
@@ -435,7 +435,7 @@ public class IobCobComputeStageTests
         const int intervalMinutes = 5;
 
         _mockCobCalculator
-            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()))
             .Returns(new CobResult { Cob = 20.0 });
 
         var context = new ChartDataContext
@@ -499,6 +499,101 @@ public class IobCobComputeStageTests
         }, CancellationToken.None);
 
         second.IobSeries.Should().ContainSingle().Which.Value.Should().Be(1.5);
+    }
+
+    [Fact]
+    public void BuildIobCobSeries_NowInADifferentTick_MissesTheCache_ButNotInTheSameTick()
+    {
+        // Ticks at start and start + 5 min; start is not on the epoch's five-minute grid, so
+        // start + 3 and start + 6 share an epoch slot while falling in different ticks.
+        const long minute = 60 * 1000;
+        var start = TestMills;
+        var timeline = new TherapyTimeline([new TherapySegment(start - 600 * minute, start + 600 * minute,
+            new TherapySnapshot(3.0, TherapySnapshot.DefaultPeakMinutes, TherapySnapshot.DefaultCarbsPerHour,
+                null, null, 0, null, null, null))]);
+        List<Bolus> boluses = [new Bolus
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(start - 5 * minute).UtcDateTime,
+            Insulin = 3.0,
+        }];
+        // Stamped two minutes after the second tick, so only that tick, while live, takes it.
+        IReadOnlyList<ApsIobCobPoint> aps = [new ApsIobCobPoint(
+            DateTimeOffset.FromUnixTimeMilliseconds(start + 7 * minute).UtcDateTime, 1.5, null)];
+        var calculated = 2.0;
+        _mockIobCalculator
+            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Returns(() => new IobResult { Iob = calculated });
+
+        List<double> At(long now) => _stage
+            .BuildIobCobSeries(boluses, [], start, start + 5 * minute, now, 5, [], timeline, aps)
+            .iobSeries.Select(p => p.Value).ToList();
+
+        var firstTickLive = At(start + 3 * minute);
+        var secondTickLive = At(start + 6 * minute);
+        calculated = 9.0;
+        var secondTickLater = At(start + 9 * minute);
+
+        firstTickLive.Should().Equal(2.0, 2.0);
+        secondTickLive.Should().Equal(2.0, 1.5);
+        secondTickLater.Should().Equal(secondTickLive);
+    }
+
+    [Fact]
+    public void BuildIobCobSeries_StartsWithinOneInterval_AreDifferentSeries()
+    {
+        // Two windows whose starts share an epoch five-minute slot tick at different instants.
+        const long minute = 60 * 1000;
+        var timeline = new TherapyTimeline([new TherapySegment(TestMills - 600 * minute, TestMills + 600 * minute,
+            new TherapySnapshot(3.0, TherapySnapshot.DefaultPeakMinutes, TherapySnapshot.DefaultCarbsPerHour,
+                null, null, 0, null, null, null))]);
+        List<Bolus> boluses = [new Bolus
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 5 * minute).UtcDateTime,
+            Insulin = 3.0,
+        }];
+        _mockIobCalculator
+            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Returns(new IobResult { Iob = 2.0 });
+
+        List<long> TicksFrom(long start) => _stage
+            .BuildIobCobSeries(boluses, [], start, start + 5 * minute, start + 60 * minute, 5, [], timeline)
+            .iobSeries.Select(p => p.Timestamp).ToList();
+
+        var first = TicksFrom(TestMills);
+        var second = TicksFrom(TestMills + minute);
+
+        first.Should().Equal(TestMills, TestMills + 5 * minute);
+        second.Should().Equal(TestMills + minute, TestMills + 6 * minute);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NewPumpSnapshot_InvalidatesCachedSeries()
+    {
+        _mockIobCalculator
+            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Returns(new IobResult { Iob = 2.0 });
+        var baseContext = new ChartDataContext
+        {
+            StartTime = TestMills,
+            EndTime = TestMills,
+            IntervalMinutes = 5,
+            DefaultBasalRate = 1.0,
+            BolusList = [new Bolus
+            {
+                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 5 * 60 * 1000).UtcDateTime,
+                Insulin = 3.0,
+            }],
+        };
+
+        var first = await _stage.ExecuteAsync(baseContext, CancellationToken.None);
+        var second = await _stage.ExecuteAsync(baseContext with
+        {
+            PumpIobPointList = [new PumpIobPoint(
+                DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 60 * 1000).UtcDateTime, 1.1, null)],
+        }, CancellationToken.None);
+
+        first.IobSeries.Should().ContainSingle().Which.Value.Should().Be(2.0);
+        second.IobSeries.Should().ContainSingle().Which.Value.Should().Be(1.1);
     }
 
     /// <summary>
@@ -581,8 +676,8 @@ public class IobCobComputeStageTests
     public async Task ExecuteAsync_BasalScheduleEditBetweenTicks_InvalidatesCachedSeries()
     {
         // TestMills is 22:13:20 UTC and the temp basal starts at 22:11:20. The edit adds a 2 U/h
-        // block from 22:10 to 22:13, which changes the rate at the temp basal's start but not at
-        // the only tick.
+        // block from 22:10 to 22:13, which changes the rate under the temp basal's first chunk but
+        // not at the only tick.
         var basal = new List<ScheduleEntry> { new() { TimeAsSeconds = 0, Value = 1.0 } };
         _mockTherapyTimelineResolver
             .Setup(r => r.BuildAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -591,9 +686,9 @@ public class IobCobComputeStageTests
                     3.0, TherapySnapshot.DefaultPeakMinutes, TherapySnapshot.DefaultCarbsPerHour,
                     null, null, 0, null, null, basal.ToList()))]));
         _mockIobCalculator
-            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
-            .Returns((List<TempBasal> tempBasals, TherapySnapshot snapshot, long _) =>
-                new IobResult { BasalIob = snapshot.BasalRateAt(tempBasals[0].StartMills) });
+            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>(), It.IsAny<long>()))
+            .Returns((List<TempBasal> tempBasals, TherapySnapshot _, Func<long, double> scheduledBasalAt, long _, long _) =>
+                new IobResult { BasalIob = scheduledBasalAt(tempBasals[0].StartMills) });
         var context = new ChartDataContext
         {
             StartTime = TestMills,
@@ -638,8 +733,8 @@ public class IobCobComputeStageTests
 
         List<TempBasal>? firstTickBasals = null;
         _mockIobCalculator
-            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
-            .Callback<List<TempBasal>, TherapySnapshot, long>((tbs, _, t) =>
+            .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>(), It.IsAny<long>()))
+            .Callback<List<TempBasal>, TherapySnapshot, Func<long, double>, long, long>((tbs, _, _, t, _) =>
             {
                 if (t == startTime)
                     firstTickBasals = tbs;
@@ -664,5 +759,263 @@ public class IobCobComputeStageTests
             It.Is<List<TempBasal>>(l => l.Count == 0),
             startTime, endTime, It.IsAny<double>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    private const long Minute = 60 * 1000;
+
+    private static TherapySnapshot FlatSchedule(double basalRate) => new(
+        3.0, TherapySnapshot.DefaultPeakMinutes, TherapySnapshot.DefaultCarbsPerHour, null, null, 0,
+        [new ScheduleEntry { TimeAsSeconds = 0, Value = 95.0 }], null,
+        [new ScheduleEntry { TimeAsSeconds = 0, Value = basalRate }]);
+
+    /// <summary>
+    /// The stage with the real IOB calculator over the mocked timeline and a COB calculator that is
+    /// never reached, since these cases carry no carbs.
+    /// </summary>
+    private IobCobComputeStage RealIobStage() => new(
+        new IobCalculator(
+            Mock.Of<ITherapySettingsResolver>(MockBehavior.Strict),
+            Mock.Of<ISensitivityResolver>(MockBehavior.Strict),
+            Mock.Of<IBasalRateResolver>(MockBehavior.Strict),
+            Mock.Of<IApsSnapshotRepository>(MockBehavior.Strict),
+            Mock.Of<IPumpSnapshotRepository>(MockBehavior.Strict)),
+        new Mock<ICobCalculator>(MockBehavior.Strict).Object,
+        _mockBasalSeriesBuilder.Object,
+        _mockTherapyTimelineResolver.Object,
+        TestTenantCache.Create(new MemoryCache(new MemoryCacheOptions())),
+        NullLogger<IobCobComputeStage>.Instance);
+
+    private static TempBasal Temp(long start, long? end, double rate, TempBasalOrigin origin = TempBasalOrigin.Algorithm) => new()
+    {
+        StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(start).UtcDateTime,
+        EndTimestamp = end is { } e ? DateTimeOffset.FromUnixTimeMilliseconds(e).UtcDateTime : null,
+        Rate = rate,
+        Origin = origin,
+    };
+
+    [Fact]
+    public async Task ExecuteAsync_ScheduleChangeBeforeTheWindow_SetsTheBaselineOfEarlierChunks()
+    {
+        // The profile in force until 20 minutes before the window had a 2 U/h schedule. A 1 U/h temp
+        // over the 30 minutes before the window withheld 1/12 U in each of its chunks 30 and 25
+        // minutes old and nothing after: -(0.922216 + 0.94444) / 12 = -0.155555 on the DIA 3 h curve,
+        // where a dose m minutes old keeps 1 - 0.001852 (m/5)(m/5 + 1). Built from the window start,
+        // the timeline would put every chunk under the later 1 U/h profile.
+        var bufferStart = TestMills - 8L * 60 * Minute;
+        var switchAt = TestMills - 20 * Minute;
+        _mockTherapyTimelineResolver
+            .Setup(r => r.BuildAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((long from, long to, string? _, CancellationToken _) => from < switchAt
+                ? new TherapyTimeline(
+                [
+                    new TherapySegment(from, switchAt, FlatSchedule(2.0)),
+                    new TherapySegment(switchAt, to, FlatSchedule(1.0)),
+                ])
+                : new TherapyTimeline([new TherapySegment(from, to, FlatSchedule(1.0))]));
+
+        var result = await RealIobStage().ExecuteAsync(new ChartDataContext
+        {
+            StartTime = TestMills,
+            EndTime = TestMills,
+            BufferStartTime = bufferStart,
+            IntervalMinutes = 5,
+            DefaultBasalRate = 1.0,
+            TempBasalList = [Temp(TestMills - 30 * Minute, TestMills, rate: 1.0)],
+        }, CancellationToken.None);
+
+        result.IobSeries.Should().ContainSingle().Which.Value.Should().Be(-0.156);
+        result.MinIob.Should().Be(-0.156);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SuspendOutweighingBoluses_GivesNegativeIob()
+    {
+        // A 0.5 U bolus and a suspend on a 1 U/h schedule, both from 30 minutes before the window's end.
+        // At the end the bolus keeps 0.5 * 0.922216 = 0.461 and the suspend has withheld six 1/12 U
+        // chunks, (0.996296 + 0.988888 + 0.977776 + 0.96296 + 0.94444 + 0.922216) / 12 = 0.483, so the
+        // tick is -0.022. Five minutes earlier the bolus keeps 0.5 * 0.94444 = 0.472 and five chunks are
+        // withheld, (0.996296 + 0.988888 + 0.977776 + 0.96296 + 0.94444) / 12 = 0.406, so 0.066.
+        _mockTherapyTimelineResolver
+            .Setup(r => r.BuildAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((long from, long to, string? _, CancellationToken _) =>
+                new TherapyTimeline([new TherapySegment(from, to, FlatSchedule(1.0))]));
+
+        var result = await RealIobStage().ExecuteAsync(new ChartDataContext
+        {
+            StartTime = TestMills - 5 * Minute,
+            EndTime = TestMills,
+            BufferStartTime = TestMills - 8L * 60 * Minute,
+            IntervalMinutes = 5,
+            DefaultBasalRate = 1.0,
+            BolusList = [new Bolus
+            {
+                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 30 * Minute).UtcDateTime,
+                Insulin = 0.5,
+            }],
+            TempBasalList = [Temp(TestMills - 30 * Minute, TestMills, rate: 0, TempBasalOrigin.Suspended)],
+        }, CancellationToken.None);
+
+        result.IobSeries.Select(p => Math.Round(p.Value, 9)).Should().Equal(0.066, -0.022);
+        result.MinIob.Should().Be(result.IobSeries[1].Value);
+        result.MaxIob.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoNegativeIob_MinIobIsZero()
+    {
+        _mockIobCalculator
+            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Returns(new IobResult { Iob = 2.0 });
+
+        var result = await _stage.ExecuteAsync(new ChartDataContext
+        {
+            StartTime = TestMills,
+            EndTime = TestMills,
+            IntervalMinutes = 5,
+            DefaultBasalRate = 1.0,
+            BolusList = [new Bolus
+            {
+                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 5 * Minute).UtcDateTime,
+                Insulin = 3.0,
+            }],
+        }, CancellationToken.None);
+
+        result.IobSeries.Should().ContainSingle().Which.Value.Should().Be(2.0);
+        result.MinIob.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Runs the stage over <paramref name="first"/> and then <paramref name="second"/>, which differ
+    /// only in one input the series reads, and returns the single IOB or COB tick of each.
+    /// </summary>
+    private async Task<(double First, double Second)> TwoRuns(
+        ChartDataContext first, ChartDataContext second, Func<ChartDataContext, double> tick)
+    {
+        var a = await _stage.ExecuteAsync(first, CancellationToken.None);
+        var b = await _stage.ExecuteAsync(second, CancellationToken.None);
+        return (tick(a), tick(b));
+    }
+
+    private static ChartDataContext WindowOf(
+        List<TempBasal>? temps = null, List<Bolus>? boluses = null, List<CarbIntake>? carbs = null) => new()
+    {
+        StartTime = TestMills,
+        EndTime = TestMills,
+        IntervalMinutes = 5,
+        DefaultBasalRate = 1.0,
+        TempBasalList = temps ?? [],
+        BolusList = boluses ?? [],
+        CarbIntakeList = carbs ?? [],
+    };
+
+    private void BasalIobIs(Func<List<TempBasal>, double> read) => _mockIobCalculator
+        .Setup(s => s.FromTempBasals(It.IsAny<List<TempBasal>>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>(), It.IsAny<long>()))
+        .Returns((List<TempBasal> pieces, TherapySnapshot _, Func<long, double> _, long _, long _) => new IobResult { BasalIob = read(pieces) });
+
+    private static double OnlyIob(ChartDataContext result) => result.IobSeries.Single().Value;
+
+    [Fact]
+    public async Task ExecuteAsync_TempOriginChange_InvalidatesCachedSeries()
+    {
+        BasalIobIs(pieces => pieces[0].Origin == TempBasalOrigin.Suspended ? -1 : 1);
+
+        var (first, second) = await TwoRuns(
+            WindowOf(temps: [Temp(TestMills - 10 * Minute, TestMills, rate: 2.0)]),
+            WindowOf(temps: [Temp(TestMills - 10 * Minute, TestMills, rate: 2.0, TempBasalOrigin.Suspended)]),
+            OnlyIob);
+
+        (first, second).Should().Be((1.0, -1.0));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TempScheduledRateChange_InvalidatesCachedSeries()
+    {
+        BasalIobIs(pieces => pieces[0].ScheduledRate ?? 0);
+        TempBasal WithScheduledRate(double rate)
+        {
+            var temp = Temp(TestMills - 10 * Minute, TestMills, rate: 2.0);
+            temp.ScheduledRate = rate;
+            return temp;
+        }
+
+        var (first, second) = await TwoRuns(
+            WindowOf(temps: [WithScheduledRate(0.5)]), WindowOf(temps: [WithScheduledRate(0.8)]), OnlyIob);
+
+        (first, second).Should().Be((0.5, 0.8));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TempInsulinContextDiaChange_InvalidatesCachedSeries()
+    {
+        BasalIobIs(pieces => pieces[0].InsulinContext?.Dia ?? 0);
+        TempBasal WithDia(double dia)
+        {
+            var temp = Temp(TestMills - 10 * Minute, TestMills, rate: 2.0);
+            temp.InsulinContext = new TreatmentInsulinContext { Dia = dia, Peak = 75 };
+            return temp;
+        }
+
+        var (first, second) = await TwoRuns(WindowOf(temps: [WithDia(3)]), WindowOf(temps: [WithDia(5)]), OnlyIob);
+
+        (first, second).Should().Be((3.0, 5.0));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BolusInsulinContextChange_InvalidatesCachedSeries()
+    {
+        _mockIobCalculator
+            .Setup(s => s.FromBoluses(It.IsAny<List<Bolus>>(), It.IsAny<TherapySnapshot>(), It.IsAny<long>()))
+            .Returns((List<Bolus> boluses, TherapySnapshot _, long _) => new IobResult { Iob = boluses[0].InsulinContext?.Dia ?? 0 });
+        Bolus WithDia(double dia) => new()
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 5 * Minute).UtcDateTime,
+            Insulin = 1.0,
+            InsulinContext = new TreatmentInsulinContext { Dia = dia, Peak = 75 },
+        };
+
+        var (first, second) = await TwoRuns(WindowOf(boluses: [WithDia(4)]), WindowOf(boluses: [WithDia(6)]), OnlyIob);
+
+        (first, second).Should().Be((4.0, 6.0));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CarbAbsorptionTimeChange_InvalidatesCachedSeries()
+    {
+        _mockCobCalculator
+            .Setup(s => s.FromCarbIntakes(It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(), It.IsAny<List<TempBasal>?>(), It.IsAny<TherapySnapshot>(), It.IsAny<Func<long, double>>(), It.IsAny<long>()))
+            .Returns((List<CarbIntake> carbs, List<Bolus>? _, List<TempBasal>? _, TherapySnapshot _, Func<long, double> _, long _) =>
+                new CobResult { Cob = carbs[0].AbsorptionTime ?? 0 });
+        CarbIntake WithAbsorption(int minutes) => new()
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(TestMills - 5 * Minute).UtcDateTime,
+            Carbs = 30,
+            AbsorptionTime = minutes,
+        };
+
+        var (first, second) = await TwoRuns(
+            WindowOf(carbs: [WithAbsorption(120)]), WindowOf(carbs: [WithAbsorption(180)]), r => r.CobSeries.Single().Value);
+
+        (first, second).Should().Be((120.0, 180.0));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeviceChangeThatMovesTheClipsWinner_InvalidatesCachedSeries()
+    {
+        // Two streams cover the same ten minutes. With nothing else between them the lower stream key
+        // wins, so renaming the 3 U/h stream from "b" to "0" makes it the one delivered.
+        BasalIobIs(pieces => pieces.Single().Rate!.Value);
+        TempBasal OnDevice(string device, double rate)
+        {
+            var temp = Temp(TestMills - 10 * Minute, TestMills, rate);
+            temp.Device = device;
+            return temp;
+        }
+
+        var (first, second) = await TwoRuns(
+            WindowOf(temps: [OnDevice("a", 2.0), OnDevice("b", 3.0)]),
+            WindowOf(temps: [OnDevice("a", 2.0), OnDevice("0", 3.0)]),
+            OnlyIob);
+
+        (first, second).Should().Be((2.0, 3.0));
     }
 }

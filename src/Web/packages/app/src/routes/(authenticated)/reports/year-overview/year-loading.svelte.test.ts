@@ -80,6 +80,17 @@ function enter(...years: number[]) {
 }
 
 describe("year overview page loading", () => {
+  it("colours the heatmaps on the band edges the API served", async () => {
+    requests.metadata.mockResolvedValue({
+      years: [2025],
+      availableDataSources: [],
+      thresholds: { veryLow: 50, low: 63, high: 140, veryHigh: 260 },
+    });
+    render(Harness);
+
+    await expect.element(page.getByTestId("bands-2025")).toHaveTextContent("50,63,140,260");
+  });
+
   it("waits for metadata when Print is clicked before discovery finishes", async () => {
     let discover!: (response: {
       years: number[];

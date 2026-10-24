@@ -1,3 +1,6 @@
+using Nocturne.API.Tests.Infrastructure;
+using Nocturne.API.Services.Treatments;
+using Nocturne.Core.Clinical.Treatments;
 using System.Reflection;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -66,6 +69,7 @@ public partial class AnalyticsReadScopeGuardTests
         LastPumpSyncMills = 1,
         DefaultBasalRate = 0.9,
         MaxBasalRate = 1.2,
+        MinIob = -0.5,
         MaxIob = 4,
         MaxCob = 40,
         DeviceEventMarkers = [new DeviceEventMarkerDto { Time = 1 }],
@@ -117,6 +121,7 @@ public partial class AnalyticsReadScopeGuardTests
 
         data.DefaultBasalRate.Should().Be(0);
         data.MaxBasalRate.Should().Be(0);
+        data.MinIob.Should().Be(0);
         data.MaxIob.Should().Be(0);
         data.MaxCob.Should().Be(0);
     }
@@ -183,6 +188,7 @@ public partial class AnalyticsReadScopeGuardTests
         data.HeartRateSeries.Should().HaveCount(1);
         data.StepSeries.Should().HaveCount(1);
         data.ActivitySpans.Should().HaveCount(2);
+        data.MinIob.Should().Be(-0.5);
         data.MaxIob.Should().Be(4);
     }
 
@@ -394,14 +400,14 @@ public partial class AnalyticsReadScopeGuardTests
         iob
             .Setup(c => c.CalculateTotalAsync(
                 It.IsAny<List<Bolus>>(), It.IsAny<List<TempBasal>?>(),
-                It.IsAny<long>(), It.IsAny<CancellationToken>()))
+                It.IsAny<long>(), It.IsAny<long?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new IobResult());
 
         var cob = new Mock<ICobCalculator>();
         cob
             .Setup(c => c.CalculateTotalAsync(
                 It.IsAny<List<CarbIntake>>(), It.IsAny<List<Bolus>?>(),
-                It.IsAny<List<TempBasal>?>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+                It.IsAny<List<TempBasal>?>(), It.IsAny<long>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CobResult());
 
         var basal = new Mock<IBasalRateResolver>();
@@ -409,7 +415,8 @@ public partial class AnalyticsReadScopeGuardTests
 
         var controller = new RetrospectiveController(
             iob.Object, cob.Object, entries.Object, boluses.Object, carbs.Object,
-            tempBasals.Object, projectionService: null!, basal.Object,
+            tempBasals.Object, projectionService: null!, basal.Object, Mock.Of<ITherapyTimelineResolver>(), Mock.Of<IApsSnapshotRepository>(),
+            Mock.Of<IPumpSnapshotRepository>(), new IobCobReader(iob.Object, cob.Object, boluses.Object, tempBasals.Object, carbs.Object, TestTenantCache.Create(partition: null), NullLogger<IobCobReader>.Instance),
             NullLogger<RetrospectiveController>.Instance)
         {
             ControllerContext = ContextWith(Granted(Scope.GlucoseRead)),

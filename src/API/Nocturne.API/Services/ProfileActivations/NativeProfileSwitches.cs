@@ -207,8 +207,7 @@ public sealed class NativeProfileSwitches
     /// <summary>The stored profile's schedules at <paramref name="at"/>; null when the store has no such profile.</summary>
     private async Task<ProfileActivationSnapshot?> CaptureAsync(string name, DateTime at, CancellationToken ct)
     {
-        if (name.Contains(TherapySettings.ProfileSwitchStoreMarker, StringComparison.Ordinal)
-            || await _therapySettings.GetActiveAtAsync(name, at, ct) is not { } settings)
+        if (await _therapySettings.GetActiveAtAsync(name, at, ct) is not { } settings)
             return null;
 
         return new ProfileActivationSnapshot

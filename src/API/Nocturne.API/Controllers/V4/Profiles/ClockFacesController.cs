@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
+using Nocturne.API.Authorization;
 using Nocturne.API.Extensions;
 using Nocturne.Core.Contracts.Platform;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Authorization;
 
 namespace Nocturne.API.Controllers.V4.Profiles;
 
@@ -158,6 +160,11 @@ public class ClockFacesController : ControllerBase
             return Problem(detail: configError, statusCode: 400, title: "Bad Request");
         }
 
+        if (AlertsSettingWithoutScope(request.Config) is { } refused)
+        {
+            return refused;
+        }
+
         var userId = HttpContext.GetSubjectIdString()!;
         var clockFace = await _clockFaceService.CreateAsync(userId, request, HttpContext.RequestAborted);
 
@@ -183,6 +190,12 @@ public class ClockFacesController : ControllerBase
             return Problem(detail: configError, statusCode: 400, title: "Bad Request");
         }
 
+        var existing = await _clockFaceService.GetByIdAsync(id, HttpContext.RequestAborted);
+        if (AlertsSettingWithoutScope(request.Config, existing?.Config.Settings) is { } refused)
+        {
+            return refused;
+        }
+
         var userId = HttpContext.GetSubjectIdString()!;
         var clockFace = await _clockFaceService.UpdateAsync(id, userId, request, HttpContext.RequestAborted);
 
@@ -192,6 +205,22 @@ public class ClockFacesController : ControllerBase
         }
 
         return Ok(clockFace);
+    }
+
+    /// <summary>
+    /// Refuses turning on alerts for a face from a caller who may not read them: the face would hand
+    /// them to anyone holding its link. Keeping a setting the face already had is not turning it on,
+    /// and <see cref="ClockFaceAlertsController"/> stops serving alerts once the owner loses them.
+    /// </summary>
+    private ObjectResult? AlertsSettingWithoutScope(ClockFaceConfig? config, ClockSettings? before = null)
+    {
+        var turnsOn = config?.Settings is { } after
+            && ((after.ShowAlerts && before?.ShowAlerts != true)
+                || (after.AllowMarkSeen && before?.AllowMarkSeen != true));
+
+        return turnsOn && !HttpContext.HasScope(Scope.AlertsRead)
+            ? this.ForbiddenForScope(Scope.AlertsRead)
+            : null;
     }
 
     /// <summary>

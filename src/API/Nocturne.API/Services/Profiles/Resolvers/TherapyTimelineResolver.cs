@@ -151,7 +151,7 @@ internal sealed class TherapyTimelineResolver : ITherapyTimelineResolver
         if (!hasData)
         {
             return new TherapySnapshot(
-                dia: TherapySnapshot.DefaultDia,
+                dia: await _therapySettings.GetDIAAsync(anchorMills, profileName, ct),
                 peakMinutes: TherapySnapshot.DefaultPeakMinutes,
                 carbsPerHour: TherapySnapshot.DefaultCarbsPerHour,
                 timezone: null,

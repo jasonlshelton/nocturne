@@ -48,6 +48,7 @@
     glucose ? formatGlucoseValue(value, units) : String(Math.round(value * 1000) / 1000);
 
   const bandKey = $derived.by(() => {
+    if (glucoseBands.length < 4) return [];
     const [veryLow, low, high, veryHigh] = glucoseBands.map((mgdl) => formatGlucoseValue(mgdl, units));
     return [
       { texture: "very-low-hatch" as const, label: `Very low < ${veryLow} ${unitLabel}` },

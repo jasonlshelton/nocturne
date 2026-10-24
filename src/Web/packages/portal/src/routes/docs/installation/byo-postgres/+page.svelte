@@ -39,7 +39,7 @@
     <h2 class="text-2xl font-bold mt-8 mb-4">Setup steps</h2>
 
     <ol class="list-decimal pl-6 space-y-4 text-muted-foreground">
-        <li>
+        <li data-install-step="1">
             Download
             <code class="text-xs bg-muted/50 px-1.5 py-0.5 rounded font-mono">bootstrap-roles.sql</code>
             from the Nocturne repository under
@@ -49,16 +49,16 @@
                 <CodeBlock code={bootstrapSql} class="mt-2" maxHeight="400px" />
             </details>
         </li>
-        <li>
+        <li data-install-step="2">
             Edit the file and replace the three
             <code class="text-xs bg-muted/50 px-1.5 py-0.5 rounded font-mono">REPLACE_ME</code>
             passwords with strong values from your secrets manager.
         </li>
-        <li>
+        <li data-install-step="3">
             Run as a PostgreSQL superuser against your Nocturne database:
             <CodeBlock code="psql -U <superuser> -d <nocturne-database> -f bootstrap-roles.sql" class="mt-2" />
         </li>
-        <li>
+        <li data-install-step="4">
             Set three connection strings in Nocturne's environment:
             <ul class="list-disc pl-5 mt-2 space-y-1">
                 <li>
@@ -77,7 +77,7 @@
                 </li>
             </ul>
         </li>
-        <li>
+        <li data-install-step="5">
             Start Nocturne. If either role is missing or misconfigured, the startup error will
             inline the exact SQL needed to fix it.
         </li>

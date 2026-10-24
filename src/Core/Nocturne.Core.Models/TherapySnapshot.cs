@@ -192,7 +192,7 @@ public sealed class TherapyTimeline
     /// <summary>
     /// Returns the snapshot active at <paramref name="timeMills"/>.
     /// Advances the internal cursor when the caller queries forward in time.
-    /// Falls back to a linear scan if the query is not monotonic.
+    /// Falls back to a binary search over the segments if the query is not monotonic.
     /// </summary>
     public TherapySnapshot SnapshotAt(long timeMills)
     {
@@ -203,12 +203,19 @@ public sealed class TherapyTimeline
         if (_segments[_cursor].Contains(timeMills))
             return _segments[_cursor].Snapshot;
 
-        // Caller went backward — full scan, leave cursor unchanged for the common forward case.
-        for (var i = 0; i < _segments.Count; i++)
+        // Caller went backward: search, leaving the cursor for the common forward case.
+        var lo = 0;
+        var hi = _segments.Count - 1;
+        while (lo < hi)
         {
-            if (_segments[i].Contains(timeMills))
-                return _segments[i].Snapshot;
+            var mid = lo + (hi - lo + 1) / 2;
+            if (_segments[mid].StartMills <= timeMills)
+                lo = mid;
+            else
+                hi = mid - 1;
         }
+        if (_segments[lo].Contains(timeMills))
+            return _segments[lo].Snapshot;
 
         // Outside any segment — clamp to nearest. By contract callers query within
         // [first.StartMills, last.EndMills); we still return something sensible.

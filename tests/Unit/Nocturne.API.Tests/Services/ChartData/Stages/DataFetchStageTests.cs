@@ -256,6 +256,28 @@ public class DataFetchStageTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ReadsPumpModeOverrideAndTheDrawnActivityCategories()
+    {
+        var inputContext = new ChartDataContext
+        {
+            StartTime = StartTime,
+            EndTime = EndTime,
+            IntervalMinutes = 5,
+            BufferStartTime = BufferStartTime,
+        };
+
+        await _stage.ExecuteAsync(inputContext, CancellationToken.None);
+
+        _mockStateSpanRepo.Verify(r => r.GetByCategories(
+            It.Is<IEnumerable<StateSpanCategory>>(c => c.OrderBy(x => x).SequenceEqual(
+                new[] { StateSpanCategory.PumpMode, StateSpanCategory.Override }
+                    .Concat(StateSpanCategories.DrawnActivities).OrderBy(x => x))),
+            It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_StartsFactoryBackedReadsConcurrently()
     {
         const int factoryBackedReads = 9;

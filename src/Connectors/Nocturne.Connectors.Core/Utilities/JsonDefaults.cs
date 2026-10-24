@@ -32,7 +32,7 @@ public static class JsonDefaults
         PropertyNameCaseInsensitive = true,
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
-            Modifiers = { UploaderIdJsonModifier.RemoveBaseIdProperty },
+            Modifiers = { UploaderIdJsonModifier.RemoveIgnoredBaseProperties },
         },
         Converters =
         {

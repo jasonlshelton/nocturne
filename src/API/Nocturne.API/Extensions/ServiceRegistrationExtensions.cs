@@ -12,7 +12,7 @@ using Nocturne.API.Multitenancy;
 using Nocturne.API.RateLimiting;
 using Nocturne.API.Services.AidDetection;
 using Nocturne.API.Services.Alerts;
-using Nocturne.API.Services.Alerts.Evaluators;
+using Nocturne.API.Services.Alerts.Conditions;
 using Nocturne.API.Services.Alerts.Webhooks;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Auth;
@@ -207,6 +207,40 @@ public static class ServiceRegistrationExtensions
         context.Request.Host.Host.ToLowerInvariant();
 
     /// <summary>
+    /// Rate-limiting policy for the anonymous alert reads and receipts of a no-account viewer: a
+    /// clock face's alerts, and the "seen" a share, guest or clock records.
+    /// </summary>
+    public const string NoAccountAlertsRateLimitPolicy = "no-account-alerts";
+
+    /// <summary>
+    /// Partition key for <see cref="NoAccountAlertsRateLimitPolicy"/>: the request host, lowered,
+    /// and the hashed credential the request presents (session or bearer, as
+    /// <see cref="TranslationDraftPartitionKey"/> reads them, or a guest session cookie), else the
+    /// clock face in the route, else one anonymous bucket for the host.
+    /// </summary>
+    /// <remarks>
+    /// The limiter runs before authentication, so the key reads the request rather than the auth
+    /// context, and never the client address, which the caller controls through X-Forwarded-For.
+    /// A public share is its own host, so its viewers share a bucket no one without the link can
+    /// spend.
+    /// </remarks>
+    internal static string NoAccountAlertsPartitionKey(HttpContext context)
+    {
+        var host = context.Request.Host.Host.ToLowerInvariant();
+        var cookie = context.RequestServices.GetService<IOptions<OidcOptions>>()?.Value.Cookie;
+        var credential =
+            (cookie is null ? null : context.Request.Cookies[cookie.AccessTokenName])
+            ?? (cookie is null ? null : context.Request.Cookies[cookie.RefreshTokenName])
+            ?? context.Request.Cookies[GuestSessionHandler.CookieName]
+            ?? TokenCredential(context.Request);
+
+        var who = !string.IsNullOrEmpty(credential)
+            ? Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(credential)))
+            : context.Request.RouteValues["id"]?.ToString() ?? AnonymousDraftPartition;
+        return $"{host}|{who}";
+    }
+
+    /// <summary>
     /// Rate-limiting policy for the per-session translation draft store.
     /// </summary>
     public const string TranslationDraftsRateLimitPolicy = "translation-drafts";
@@ -303,6 +337,7 @@ public static class ServiceRegistrationExtensions
 
         services.AddScoped<IDDataService, DDataService>();
         services.AddScoped<IPropertiesService, PropertiesService>();
+        services.AddScoped<IIobCobReader, IobCobReader>();
         services.AddScoped<ISummaryService, SummaryService>();
         // Prediction service — configurable via Predictions:Source (None, DeviceStatus, OrefWasm)
         var predictionSource = PredictionOptions.ResolveSource(configuration);
@@ -571,6 +606,22 @@ public static class ServiceRegistrationExtensions
                     )
             );
 
+            // A clock polls its alerts every 10 seconds from each screen it is open on, so a face on
+            // a few dozen screens shares one bucket; a receipt is one press per alarm.
+            options.AddPolicy(
+                NoAccountAlertsRateLimitPolicy,
+                context =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: NoAccountAlertsPartitionKey(context),
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 300,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }
+                    )
+            );
+
             options.OnRejected = async (context, ct) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -667,6 +718,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ProfileStoreTimelineSource>();
         services.AddScoped<IBasalRateResolver, BasalRateResolver>();
         services.AddScoped<IBasalSegmentService, BasalSegmentService>();
+        services.AddScoped<IActiveProfileSchedulesService, ActiveProfileSchedulesService>();
         services.AddScoped<ISensitivityResolver, SensitivityResolver>();
         services.AddScoped<ICarbRatioResolver, CarbRatioResolver>();
         services.AddScoped<ITargetRangeResolver, TargetRangeResolver>();
@@ -912,6 +964,7 @@ public static class ServiceRegistrationExtensions
         // Push notifications
         services.AddScoped<INotificationV2Service, NotificationV2Service>();
         services.AddScoped<INotificationV1Service, NotificationV1Service>();
+        services.AddSingleton<LegacyAlarmSnoozeStore>();
         services.AddScoped<IApnsClientFactory, ApnsClientFactory>();
         services.AddHttpClient(
             "dotAPNS",
@@ -981,23 +1034,13 @@ public static class ServiceRegistrationExtensions
                     new PinnedConnector(OutboundAddressPolicy.PubliclyRoutable).ConnectAsync,
             });
 
-        // Condition evaluators. Scoped because SustainedEvaluator depends on the scoped
-        // IConditionTimerStore (DbContext-backed); the registry is also scoped because it captures
-        // IEnumerable<IConditionEvaluator>.
-        services.AddAlertEvaluators();
-        services.AddScoped<ConditionEvaluatorRegistry>();
-
-        // Sustained-condition timer store
-        services.AddScoped<IConditionTimerStore, ConditionTimerRepository>();
-
         // The excursion tracker's per-rule serialisation gate is a singleton: the sweep and the
         // per-reading path evaluate the same rule from different scopes.
         services.AddSingleton<AlertRuleEvaluationGate>();
         services.AddScoped<AlertRuleRearm>();
         services.AddScoped<AlertRuleRetirement>();
 
-        // Alert evaluation engine and excursion tracker seams (Alerts:Engine = managed | shadow | rust)
-        services.AddAlertEvaluationEngine(configuration);
+        services.AddAlertEvaluationEngine();
 
         // Alert engine core
         services.AddScoped<IAlertRepository, AlertRepository>();
@@ -1010,8 +1053,11 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IAlertOrchestrator, AlertOrchestrator>();
         services.AddScoped<IAlertDeliveryService, AlertDeliveryService>();
         services.AddScoped<IAlertAcknowledgementService, AlertAcknowledgementService>();
+        services.AddScoped<AlertReceiptService>();
         services.AddScoped<IAlertSnoozeService, AlertSnoozeService>();
         services.AddScoped<IExcursionResolutionHandler, ExcursionResolutionHandler>();
+        services.AddScoped<IEngineAlarmRelay, EngineAlarmRelay>();
+        services.AddScoped<IAlarmAckHandler, AlarmAckHandler>();
         services.AddScoped<IAlertReferenceService, AlertReferenceService>();
         services.AddScoped<IAlertReplayService, AlertReplayService>();
         // Scope-class classification (scoped Do Not Disturb, ADR 0004): stateless over
@@ -1103,25 +1149,19 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// Registers the <see cref="Nocturne.Core.Contracts.Alerts.IAlertEvaluationEngine"/> and
-    /// <see cref="IExcursionTracker"/> seams: all three engine implementations, the tracker
-    /// deciding with the selected engine, plus the singleton
-    /// <see cref="Nocturne.API.Services.Alerts.Engines.AlertEngineSelection"/> resolved
-    /// from the <c>Alerts:Engine</c> flag (<c>managed</c> | <c>shadow</c> | <c>rust</c>,
-    /// default <c>managed</c>). Program resolves the selection at startup so the native-library
-    /// probe runs once, before the host serves traffic; see
-    /// <see cref="Nocturne.API.Services.Alerts.Engines.AlertEngineSelector"/> for what a failed
-    /// probe does in each mode.
+    /// Registers the <see cref="Nocturne.Core.Contracts.Alerts.IAlertEvaluationEngine"/>,
+    /// <see cref="IExcursionTracker"/> and <see cref="Nocturne.Core.Contracts.Alerts.IAlertReplayEngine"/>
+    /// seams over the nocturne_alerts native library, plus the singleton
+    /// <see cref="Nocturne.API.Services.Alerts.Engines.AlertEngineNativeLibrary"/>, which Program
+    /// resolves at startup so a library that fails its probe stops the host before it serves traffic.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">Configuration carrying the <c>Alerts:Engine</c> flag.</param>
     /// <param name="nativeProbe">
     /// Native-library probe override for tests; defaults to
     /// <see cref="Nocturne.Core.Alerts.Native.AlertsInterop.Probe"/>.
     /// </param>
     public static IServiceCollection AddAlertEvaluationEngine(
         this IServiceCollection services,
-        IConfiguration configuration,
         Func<Nocturne.Core.Alerts.Native.NativeProbeResult>? nativeProbe = null)
     {
         services.AddMetrics();
@@ -1132,129 +1172,23 @@ public static class ServiceRegistrationExtensions
         services.AddHealthChecks()
             .AddCheck<Nocturne.API.Services.Alerts.Engines.AlertEngineHealthCheck>("alert-engine");
 
-        services.AddScoped<Nocturne.API.Services.Alerts.Engines.ManagedAlertEngine>();
-        services.AddScoped<Nocturne.API.Services.Alerts.Engines.RustBackedAlertEngine>();
-        services.AddScoped<
-            Nocturne.API.Services.Alerts.Engines.IShadowRuleEvaluator,
-            Nocturne.API.Services.Alerts.Engines.RustShadowRuleEvaluator>();
-        services.AddScoped<Nocturne.API.Services.Alerts.Engines.ShadowAlertEngine>();
+        services.AddSingleton(sp => Nocturne.API.Services.Alerts.Engines.AlertEngineNativeLibrary.Load(
+            nativeProbe ?? Nocturne.Core.Alerts.Native.AlertsInterop.Probe,
+            sp.GetRequiredService<ILoggerFactory>()
+                .CreateLogger(typeof(Nocturne.API.Services.Alerts.Engines.AlertEngineNativeLibrary).FullName!)));
 
-        // The managed engine always tracks with the managed decider; shadow mode compares
-        // through ShadowAlertEngine instead.
-        services.AddScoped(sp => new ExcursionTracker(
+        services.AddScoped<IExcursionTracker>(sp => new ExcursionTracker(
             sp.GetRequiredService<Nocturne.Core.Contracts.Repositories.IAlertTrackerRepository>(),
             sp.GetRequiredService<AlertRuleEvaluationGate>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<ILogger<ExcursionTracker>>()));
-        services.AddScoped<IExcursionTracker>(sp =>
-        {
-            var mode = sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineSelection>().Mode;
-            if (mode == Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Managed)
-                return sp.GetRequiredService<ExcursionTracker>();
+            sp.GetRequiredService<ILogger<ExcursionTracker>>(),
+            new Nocturne.API.Services.Alerts.Engines.RustExcursionDecider(
+                sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineErrors>())));
+        services.AddSingleton<Nocturne.Core.Contracts.Alerts.IAlertReplayEngine,
+            Nocturne.API.Services.Alerts.Engines.RustAlertReplayEngine>();
+        services.AddScoped<Nocturne.Core.Contracts.Alerts.IAlertEvaluationEngine,
+            Nocturne.API.Services.Alerts.Engines.RustBackedAlertEngine>();
 
-            var errors = sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineErrors>();
-            IExcursionDecider decider = mode == Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Rust
-                ? new Nocturne.API.Services.Alerts.Engines.RustExcursionDecider(
-                    errors, Nocturne.API.Services.Alerts.Engines.AlertEngineErrors.RustEngine)
-                : new Nocturne.API.Services.Alerts.Engines.ShadowExcursionDecider(
-                    ManagedExcursionDecider.Instance,
-                    new Nocturne.API.Services.Alerts.Engines.RustExcursionDecider(
-                        errors, Nocturne.API.Services.Alerts.Engines.AlertEngineErrors.ShadowEngine),
-                    sp.GetRequiredService<ILogger<Nocturne.API.Services.Alerts.Engines.ShadowExcursionDecider>>());
-            return new ExcursionTracker(
-                sp.GetRequiredService<Nocturne.Core.Contracts.Repositories.IAlertTrackerRepository>(),
-                sp.GetRequiredService<AlertRuleEvaluationGate>(),
-                sp.GetRequiredService<TimeProvider>(),
-                sp.GetRequiredService<ILogger<ExcursionTracker>>(),
-                decider);
-        });
-
-        services.AddSingleton(sp =>
-        {
-            var logger = sp.GetRequiredService<ILoggerFactory>()
-                .CreateLogger(typeof(Nocturne.API.Services.Alerts.Engines.AlertEngineSelector).FullName!);
-            return Nocturne.API.Services.Alerts.Engines.AlertEngineSelector.Select(
-                configuration[Nocturne.API.Services.Alerts.Engines.AlertEngineSelector.ConfigurationKey],
-                nativeProbe ?? Nocturne.Core.Alerts.Native.AlertsInterop.Probe,
-                logger);
-        });
-
-        services.AddSingleton<Nocturne.API.Services.Alerts.Engines.ManagedAlertReplayEngine>();
-        services.AddSingleton<Nocturne.Core.Contracts.Alerts.IAlertReplayEngine>(sp =>
-        {
-            var managed = sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.ManagedAlertReplayEngine>();
-            var errors = sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineErrors>();
-            return sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineSelection>().Mode switch
-            {
-                Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Rust =>
-                    new Nocturne.API.Services.Alerts.Engines.RustAlertReplayEngine(errors),
-                Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Shadow =>
-                    new Nocturne.API.Services.Alerts.Engines.ShadowAlertReplayEngine(
-                        managed,
-                        new Nocturne.API.Services.Alerts.Engines.RustAlertReplayEngine(errors)
-                        {
-                            EngineTag = Nocturne.API.Services.Alerts.Engines.AlertEngineErrors.ShadowEngine,
-                        },
-                        sp.GetRequiredService<ILogger<Nocturne.API.Services.Alerts.Engines.ShadowAlertReplayEngine>>()),
-                _ => managed,
-            };
-        });
-
-        services.AddScoped<Nocturne.Core.Contracts.Alerts.IAlertEvaluationEngine>(sp =>
-            sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.AlertEngineSelection>().Mode switch
-            {
-                Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Rust =>
-                    sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.RustBackedAlertEngine>(),
-                Nocturne.API.Services.Alerts.Engines.AlertEngineMode.Shadow =>
-                    sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.ShadowAlertEngine>(),
-                _ => sp.GetRequiredService<Nocturne.API.Services.Alerts.Engines.ManagedAlertEngine>(),
-            });
-
-        return services;
-    }
-
-    /// <summary>
-    /// Registers every <see cref="IConditionEvaluator"/> implementation that the
-    /// <see cref="ConditionEvaluatorRegistry"/> resolves at runtime. Extracted from
-    /// <see cref="AddAlertingAndMonitoring"/> so production wiring and the registry
-    /// coverage tests can share the same single source of truth — adding a new
-    /// evaluator here automatically updates both.
-    /// </summary>
-    public static IServiceCollection AddAlertEvaluators(this IServiceCollection services)
-    {
-        services.AddScoped<IConditionEvaluator, ThresholdEvaluator>();
-        services.AddScoped<IConditionEvaluator, RateOfChangeEvaluator>();
-        services.AddScoped<IConditionEvaluator, SignalLossEvaluator>();
-        services.AddScoped<IConditionEvaluator, StalenessEvaluator>();
-        services.AddScoped<IConditionEvaluator, CompositeEvaluator>();
-        services.AddScoped<IConditionEvaluator, NotEvaluator>();
-        services.AddScoped<IConditionEvaluator, SustainedEvaluator>();
-        services.AddScoped<IConditionEvaluator, PredictedEvaluator>();
-        services.AddScoped<IConditionEvaluator, TrendEvaluator>();
-        services.AddScoped<IConditionEvaluator, TimeOfDayEvaluator>();
-        services.AddScoped<IConditionEvaluator, IobEvaluator>();
-        services.AddScoped<IConditionEvaluator, CobEvaluator>();
-        services.AddScoped<IConditionEvaluator, ReservoirEvaluator>();
-        services.AddScoped<IConditionEvaluator, SiteAgeEvaluator>();
-        services.AddScoped<IConditionEvaluator, SensorAgeEvaluator>();
-        services.AddScoped<IConditionEvaluator, AlertStateEvaluator>();
-        services.AddScoped<IConditionEvaluator, LoopStaleEvaluator>();
-        services.AddScoped<IConditionEvaluator, LoopEnactionStaleEvaluator>();
-        services.AddScoped<IConditionEvaluator, PumpSuspendedEvaluator>();
-        services.AddScoped<IConditionEvaluator, PumpBatteryEvaluator>();
-        services.AddScoped<IConditionEvaluator, TempBasalEvaluator>();
-        services.AddScoped<IConditionEvaluator, UploaderBatteryEvaluator>();
-        services.AddScoped<IConditionEvaluator, OverrideActiveEvaluator>();
-        services.AddScoped<IConditionEvaluator, SensitivityRatioEvaluator>();
-        services.AddScoped<IConditionEvaluator, DoNotDisturbEvaluator>();
-        services.AddScoped<IConditionEvaluator, GlucoseBucketEvaluator>();
-        services.AddScoped<IConditionEvaluator, TimeSinceLastCarbEvaluator>();
-        services.AddScoped<IConditionEvaluator, TimeSinceLastBolusEvaluator>();
-        services.AddScoped<IConditionEvaluator, DayOfWeekEvaluator>();
-        services.AddScoped<IConditionEvaluator, PumpStateEvaluator>();
-        services.AddScoped<IConditionEvaluator, StateSpanActiveEvaluator>();
-        services.AddScoped<IConditionEvaluator, SleepSessionActiveEvaluator>();
-        services.AddScoped<IConditionEvaluator, TrackerAgeEvaluator>();
         return services;
     }
 

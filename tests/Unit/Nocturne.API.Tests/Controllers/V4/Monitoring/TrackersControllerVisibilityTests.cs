@@ -7,6 +7,7 @@ using Nocturne.API.Controllers.V4.Monitoring;
 using Nocturne.API.Services.Monitoring;
 using Nocturne.API.Services.Realtime;
 using Nocturne.Core.Contracts.Alerts;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data.Abstractions;
@@ -35,7 +36,8 @@ public class TrackersControllerVisibilityTests
             _repository.Object,
             Mock.Of<ISignalRBroadcastService>(),
             Mock.Of<ITrackerAlertRuleSyncService>(),
-            Mock.Of<INocturneDbContextFactory>(),
+            Mock.Of<IAlertRepository>(),
+            Mock.Of<ITenantAccessor>(),
             Mock.Of<IAlertAcknowledgementService>(),
             Mock.Of<ILogger<TrackersController>>()
         );

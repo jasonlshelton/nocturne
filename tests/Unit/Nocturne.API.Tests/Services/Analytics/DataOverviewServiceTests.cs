@@ -2,12 +2,14 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Services;
 using Nocturne.Infrastructure.Cache.Abstractions;
 using Nocturne.Infrastructure.Data;
@@ -29,6 +31,7 @@ public class DataOverviewServiceTests : IDisposable
     private readonly DataOverviewService _service;
     private readonly Mock<ITenantCache> _cacheService = new();
     private readonly Mock<ITherapySettingsResolver> _therapySettings = new();
+    private readonly CategoryReadContext _readContext = new();
     private readonly Mock<INocturneDbContextFactory> _factory = new();
     private readonly ListLogger<DataOverviewService> _logger = new();
     private IInterceptor[] _interceptors = [];
@@ -65,11 +68,12 @@ public class DataOverviewServiceTests : IDisposable
                 return ctx;
             });
 
-        _therapySettings.Setup(p => p.GetTimezoneAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
+        _therapySettings.Setup(p => p.GetTimezoneAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync("UTC");
         var mockStatisticsService = new Mock<IStatisticsService>();
+        mockStatisticsService.SetupGet(s => s.HourlyBandThresholds).Returns(ServedThresholds);
         _service = new DataOverviewService(
             _factory.Object,
-            _therapySettings.Object,
+            new TenantClockResolver(_therapySettings.Object, _readContext, NullLogger<TenantClockResolver>.Instance),
             mockStatisticsService.Object,
             _cacheService.Object,
             _logger
@@ -219,6 +223,25 @@ public class DataOverviewServiceTests : IDisposable
     }
 
     #region GetAvailableYearsAsync Tests
+
+    private static readonly GlycemicThresholds ServedThresholds = new()
+    {
+        VeryLow = 50,
+        Low = 63,
+        TargetBottom = 63,
+        TargetTop = 140,
+        High = 140,
+        VeryHigh = 260,
+    };
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetAvailableYearsAsync_ServesTheBandEdgesTheStatisticsServiceClassifiesOn()
+    {
+        var result = await _service.GetAvailableYearsAsync();
+
+        result.Thresholds.Should().BeSameAs(ServedThresholds);
+    }
 
     [Fact]
     [Trait("Category", "Unit")]

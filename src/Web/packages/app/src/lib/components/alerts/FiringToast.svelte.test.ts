@@ -12,6 +12,7 @@ import { remoteQuery } from "$lib/test-stubs/remote-resource";
 let activeAlerts = $state<ActiveExcursionResponse[]>([]);
 
 const snoozes: { calls: unknown[] } = vi.hoisted(() => ({ calls: [] }));
+const seenCalls: { ids: unknown[] } = vi.hoisted(() => ({ ids: [] }));
 
 vi.mock("$api/generated/alerts.generated.remote", () => ({
 	getActiveAlerts: () => remoteQuery(() => activeAlerts),
@@ -20,6 +21,10 @@ vi.mock("$api/generated/alerts.generated.remote", () => ({
 		return Promise.resolve();
 	},
 	acknowledgeExcursion: () => Promise.resolve(),
+	markSeen: (id: unknown) => {
+		seenCalls.ids.push(id);
+		return Promise.resolve();
+	},
 }));
 
 import FiringToast from "./FiringToast.svelte";
@@ -39,8 +44,34 @@ function excursion(
 describe("FiringToast", () => {
 	beforeEach(() => {
 		activeAlerts = [];
-		pageState.data = { effectivePermissions: ["alerts.readwrite"] };
+		pageState.data = { hasAccount: true, effectivePermissions: ["alerts.readwrite"] };
 		snoozes.calls = [];
+	});
+
+	it("offers a share or guest link only Seen, which records it and closes the card", async () => {
+		pageState.data = { hasAccount: false, effectivePermissions: ["alerts.read"] };
+		seenCalls.ids = [];
+		activeAlerts = [excursion("g", { activeInstances: [{ id: "i" }] })];
+
+		render(FiringToast);
+
+		await expect.element(page.getByText("Rule g")).toBeVisible();
+		expect(page.getByRole("button", { name: "5m" }).elements()).toHaveLength(0);
+		expect(page.getByRole("button", { name: "Mute for me" }).elements()).toHaveLength(0);
+
+		await page.getByRole("button", { name: "Seen" }).click();
+
+		expect(seenCalls.ids).toEqual(["g"]);
+		await expect.element(page.getByText("Rule g")).not.toBeInTheDocument();
+	});
+
+	it("leaves out an alarm a share or guest link has already seen", async () => {
+		pageState.data = { hasAccount: false, effectivePermissions: ["alerts.read"] };
+		activeAlerts = [excursion("s", { receipts: [{ seenAt: new Date().toISOString() }] })];
+
+		render(FiringToast);
+
+		await expect.element(page.getByText("Rule s")).not.toBeInTheDocument();
 	});
 
 	it("surfaces a toast for a newly firing alert", async () => {
@@ -89,7 +120,7 @@ describe("FiringToast", () => {
 	});
 
 	it("offers only Mute for me to a member without alerts.readwrite", async () => {
-		pageState.data = { effectivePermissions: ["glucose.read", "device.notify"] };
+		pageState.data = { hasAccount: true, effectivePermissions: ["glucose.read", "device.notify"] };
 		activeAlerts = [excursion("d")];
 
 		render(FiringToast);
@@ -98,8 +129,34 @@ describe("FiringToast", () => {
 		await expect.element(page.getByRole("button", { name: "Acknowledge" })).not.toBeInTheDocument();
 	});
 
+	it("links to the rule only for a member with an account holding alerts.read", async () => {
+		activeAlerts = [excursion("e", { alertRuleId: "11111111-1111-1111-1111-111111111111" })];
+
+		pageState.data = { hasAccount: true, effectivePermissions: ["glucose.read", "device.notify"] };
+		const withoutScope = render(FiringToast);
+		await expect.element(page.getByRole("button", { name: "Mute for me" })).toBeVisible();
+		await expect
+			.element(page.getByRole("link", { name: /Open settings for/ }))
+			.not.toBeInTheDocument();
+		withoutScope.unmount();
+
+		pageState.data = { hasAccount: false, effectivePermissions: ["alerts.read"] };
+		const guest = render(FiringToast);
+		await expect.element(page.getByText("Rule e")).toBeVisible();
+		await expect
+			.element(page.getByRole("link", { name: /Open settings for/ }))
+			.not.toBeInTheDocument();
+		guest.unmount();
+
+		pageState.data = { hasAccount: true, effectivePermissions: ["alerts.read", "device.notify"] };
+		render(FiringToast);
+		await expect
+			.element(page.getByRole("link", { name: /Open settings for/ }))
+			.toHaveAttribute("href", "/alerts/11111111-1111-1111-1111-111111111111");
+	});
+
 	it("never raises a card for an alert the member already muted", async () => {
-		pageState.data = { effectivePermissions: ["glucose.read", "device.notify"] };
+		pageState.data = { hasAccount: true, effectivePermissions: ["glucose.read", "device.notify"] };
 		activeAlerts = [excursion("e", { mutedByCaller: true })];
 
 		render(FiringToast);

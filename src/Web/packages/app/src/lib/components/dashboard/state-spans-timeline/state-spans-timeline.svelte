@@ -4,7 +4,9 @@
   import { PumpModeIcon, ActivityCategoryIcon } from "$lib/components/icons";
   import { BasalRateTrack } from "$lib/components/charts";
   import type { ProcessedSpan } from "../../../../routes/(authenticated)/time-spans/data.remote";
-  import { BasalDeliveryOrigin } from "$lib/api";
+  import { BasalDeliveryOrigin, type BasalDeliverySpanDto } from "$lib/api";
+  import { randomUUID } from "$lib/utils";
+  import { resolveChartColor } from "$lib/utils/chart-colors";
   import { formatDateTimeCompact } from "$lib/utils/formatting";
   import { formatElapsedDuration } from "$lib/utils/duration";
 
@@ -28,7 +30,7 @@
   interface Props {
     pumpModeSpans: ProcessedSpan[];
     profileSpans: ProcessedSpan[];
-    tempBasalSpans: ProcessedSpan[];
+    tempBasalSpans: BasalDeliverySpanDto[];
     overrideSpans: ProcessedSpan[];
     activitySpans: ProcessedSpan[];
     dateRange: { from: Date; to: Date };
@@ -89,20 +91,26 @@
   // Calculate basal track position
   const basalTrackTop = $derived(standardTracks.length * TRACK_HEIGHT + 5);
 
-  // Convert ProcessedSpan to BasalDeliveryChartData format for BasalRateTrack
   const basalDeliverySpans = $derived.by((): (BasalDeliveryChartData & { displayStart: Date; displayEnd: Date })[] => {
-    if (!tempBasalSpans) return [];
-    return tempBasalSpans.map((span) => ({
-      id: span.id,
-      startTime: span.startTime,
-      endTime: span.endTime,
-      displayStart: span.startTime,
-      displayEnd: span.endTime,
-      rate: span.rate ?? 0,
-      origin: span.origin ?? BasalDeliveryOrigin.Scheduled,
-      source: typeof span.metadata?.source === "string" ? span.metadata.source : undefined,
-      color: span.color,
-    }));
+    const rangeStart = dateRange.from.getTime();
+    const rangeEnd = dateRange.to.getTime();
+    return tempBasalSpans
+      .filter((span) => (span.endMills ?? rangeEnd) > rangeStart && (span.startMills ?? 0) < rangeEnd)
+      .map((span) => {
+        const startTime = new Date(Math.max(span.startMills ?? 0, rangeStart));
+        const endTime = new Date(Math.min(span.endMills ?? rangeEnd, rangeEnd));
+        return {
+          id: span.id ?? randomUUID(),
+          startTime,
+          endTime,
+          displayStart: startTime,
+          displayEnd: endTime,
+          rate: span.rate ?? 0,
+          origin: span.origin ?? BasalDeliveryOrigin.Scheduled,
+          source: span.source,
+          color: resolveChartColor(span.fillColor ?? "insulin-basal"),
+        };
+      });
   });
 
   // Dummy glucose scale values for BasalRateTrack (it needs these for internal calculations)

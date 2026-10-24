@@ -109,6 +109,30 @@ public class ChartDataService : IChartDataService
         if (hasData)
             defaultBasalRate = await _basalRateResolver.GetBasalRateAsync(endTime, ct: cancellationToken);
 
+        return await _basalSeriesBuilder.BuildAsync(
+            await GetDisplayTempBasalsAsync(startTime, endTime, cancellationToken),
+            startTime,
+            endTime,
+            defaultBasalRate,
+            cancellationToken
+        );
+    }
+
+    /// <inheritdoc />
+    public async Task<List<BasalDeliverySpanDto>> GetBasalDeliverySpansAsync(
+        long startTime,
+        long endTime,
+        CancellationToken cancellationToken = default
+    ) => MapBasalDeliverySpans(await GetDisplayTempBasalsAsync(startTime, endTime, cancellationToken));
+
+    #region Internal Helpers
+
+    private async Task<List<TempBasal>> GetDisplayTempBasalsAsync(
+        long startTime,
+        long endTime,
+        CancellationToken cancellationToken
+    )
+    {
         var tempBasals = (await _tempBasalRepository.GetAsync(
             from: DateTimeOffset.FromUnixTimeMilliseconds(startTime - BufferMs).UtcDateTime,
             to: DateTimeOffset.FromUnixTimeMilliseconds(endTime).UtcDateTime,
@@ -119,16 +143,8 @@ public class ChartDataService : IChartDataService
             descending: false,
             ct: cancellationToken
         )).ToList();
-        return await _basalSeriesBuilder.BuildAsync(
-            SelectDisplayTempBasals(tempBasals, startTime, endTime, _timeProvider.GetUtcNow().ToUnixTimeMilliseconds()),
-            startTime,
-            endTime,
-            defaultBasalRate,
-            cancellationToken
-        );
+        return SelectDisplayTempBasals(tempBasals, startTime, endTime, _timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
     }
-
-    #region Internal Helpers
 
     /// <summary>
     /// The delivered pieces (<see cref="StatisticsService.ClipOverlappingTempBasals"/>) that overlap
