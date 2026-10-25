@@ -18,12 +18,21 @@ public sealed class ApsLoopCycle
 
     public DateTime Timestamp { get; init; }
 
-    public long Mills => new DateTimeOffset(Timestamp, TimeSpan.Zero).ToUnixTimeMilliseconds();
+    public long Mills => Timestamp.ToMills();
 
     public AidAlgorithm AidAlgorithm { get; init; }
 
     /// <inheritdoc cref="ApsSnapshot.Enacted"/>
     public bool Enacted { get; init; }
+
+    /// <inheritdoc cref="ApsSnapshot.ClosedLoop"/>
+    public bool? ClosedLoop { get; init; }
+
+    /// <summary>
+    /// The cycle enacted its command with the loop closed: <see cref="Enacted"/>, unless
+    /// <see cref="ClosedLoop"/> says the loop was open.
+    /// </summary>
+    public bool EnactedClosedLoop => Enacted && ClosedLoop != false;
 
     /// <summary>U/h.</summary>
     public double? EnactedRate { get; init; }

@@ -32,8 +32,9 @@ not use an event until its window is complete.
 ## The events that you can select
 
 - **Meals**: a carb entry. Entries at the same time count as one meal.
-- **Correction boluses**: a manual bolus with no carbs logged in the 30 minutes
-  before or after it. Automatic boluses are not correction boluses.
+- **Correction boluses**: a manual bolus that is not paired with a meal. No carb
+  entry is linked to it, and no carbs are logged from 30 minutes before it to 1
+  hour after it. Automatic boluses are not correction boluses.
 - **Unannounced rises**: a rise in glucose that looks like a meal, with no carbs
   logged. See below.
 - **Sensor starts**, and the start of **exercise**, an **override** or a

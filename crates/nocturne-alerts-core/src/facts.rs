@@ -161,7 +161,7 @@ mod tests {
     use super::*;
     use crate::context::{
         ActiveAlertSnapshot, PredictedPoint, PumpStateSnapshot, SensorContext, StartedSpan,
-        StateSpanSnapshot, TempBasalSnapshot,
+        StateSpanSnapshot, TempBasalSnapshot, TrackerReference,
     };
     use crate::enums::{GlucoseBucket, PumpMode, StateSpanCategory, TrendBucket};
     use crate::eval::{Env, eval_payload};
@@ -491,7 +491,7 @@ mod tests {
             last_site_change_at: has(F::DeviceAges).then(|| ago(80 * 60)),
             last_sensor_start_at: has(F::DeviceAges).then(|| ago(12 * 24 * 60)),
             active_trackers: if has(F::Trackers) {
-                HashMap::from([(TRACKER_ID, ago(30))])
+                HashMap::from([(TRACKER_ID, TrackerReference::at(ago(30)))])
             } else {
                 HashMap::new()
             },

@@ -44,11 +44,11 @@ internal sealed partial class LoopAnalysisService
         var carbs = (await carbTask).ToList();
         var apsPoints = await apsTask;
         var common = await commonTask;
-        var now = ToMills(filter.Now);
+        var now = filter.Now.ToMills();
         var delivery = await DeliveryAsync(common, window, now, ct);
 
         var iobCob = IobCobSeries.Build(
-            iobCalculator, cobCalculator, common.Boluses, carbs, common.TempBasals, delivery.Timeline,
+            iobCalculator, cobCalculator, common.Boluses, carbs, common.TempBasals, delivery.Timeline, delivery.Scheduled,
             DeviceReadings.Of(apsPoints, await pumpTask),
             delivery.TickStart, to - 1, now, TickMs, ct);
 
@@ -57,10 +57,10 @@ internal sealed partial class LoopAnalysisService
             Zone = zone,
             Glucose = [.. common.Glucose.Select(g => new GlucoseSample(g.Mills, g.Mgdl))],
             Insulin = delivery.Insulin,
-            Carbs = [.. carbs.Where(c => c.Mills >= from && c.Mills < to).Select(c => new CarbEvent(c.Mills, c.Carbs))],
+            Carbs = [.. carbs.Where(c => c.Mills >= from && c.Mills < to).Select(c => new CarbEvent(c.Mills, c.Carbs, c.CorrelationId))],
             IobCob = iobCob,
             IobCobIntervalMs = TickMs,
-            HistoryVisibleFrom = filter.HistoryVisibleFrom is { } edge ? ToMills(edge) : null,
+            HistoryVisibleFrom = filter.HistoryVisibleFrom is { } edge ? edge.ToMills() : null,
             CalculatedIobCobTime = DailyProfileCalculator.CalculableIobCobTime(
                 delivery.Evidence,
                 common.Boluses.Where(b => b.Insulin > 0).Select(b => b.Mills)
@@ -106,7 +106,7 @@ internal sealed partial class LoopAnalysisService
             if (entries is null)
                 return null;
             var shifted = mills + (span.Adjustment?.TimeshiftMs ?? 0);
-            return ScheduleResolution.FindRangeAtTime(entries, ScheduleTimeHelper.GetSecondsFromMidnight(shifted, zone));
+            return ScheduleResolution.FindRangeAtTime(entries, ScheduleEntryTime.SecondsOfDay(shifted, zone));
         };
     }
 

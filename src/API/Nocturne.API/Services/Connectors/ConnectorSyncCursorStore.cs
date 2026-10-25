@@ -10,7 +10,7 @@ namespace Nocturne.API.Services.Connectors;
 
 /// <summary>
 ///     Persists incremental-sync cursors in the <c>sync_cursors</c> JSON column of the current tenant's
-///     <c>connector_configurations</c> row (RLS-scoped via the injected <see cref="NocturneDbContext"/>).
+///     <c>connector_configurations</c> row (RLS-scoped through contexts from <see cref="INocturneDbContextFactory"/>).
 ///     Cursors are keyed by resource name within that object, so one row holds every resource's cursor
 ///     for a connector.
 /// </summary>

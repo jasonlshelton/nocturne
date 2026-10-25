@@ -322,18 +322,18 @@ public class HiddenTableHistoryClampTests(RlsCompletenessFixture fx)
                 CreatedAt = now.AddDays(-4), IsArchived = true, ArchivedAt = now.AddHours(-1),
             });
 
-        var definition = new TrackerDefinitionEntity { Id = Guid.CreateVersion7(), UserId = "member", Name = "site" };
+        var definition = new TrackerDefinitionEntity { Id = Guid.CreateVersion7(), CreatedBy = "member", Name = "site" };
         db.TrackerDefinitions.Add(definition);
         db.TrackerInstances.AddRange(
-            new TrackerInstanceEntity { Id = Track("tracker_instances", true), UserId = "member", DefinitionId = definition.Id, StartedAt = now.AddDays(-10) },
+            new TrackerInstanceEntity { Id = Track("tracker_instances", true), CreatedBy = "member", DefinitionId = definition.Id, StartedAt = now.AddDays(-10) },
             new TrackerInstanceEntity
             {
-                Id = Track("tracker_instances", false), UserId = "member", DefinitionId = definition.Id,
+                Id = Track("tracker_instances", false), CreatedBy = "member", DefinitionId = definition.Id,
                 StartedAt = now.AddDays(-5), CompletedAt = now.AddDays(-2),
             },
             new TrackerInstanceEntity
             {
-                Id = Track("tracker_instances", true), UserId = "member", DefinitionId = definition.Id,
+                Id = Track("tracker_instances", true), CreatedBy = "member", DefinitionId = definition.Id,
                 StartedAt = now.AddDays(-3), CompletedAt = now.AddHours(-1),
             });
 

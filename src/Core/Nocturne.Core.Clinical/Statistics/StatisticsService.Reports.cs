@@ -115,7 +115,7 @@ public partial class StatisticsService
     /// </summary>
     public static long UntilMills(DateTime endUtc, DateTimeOffset now) =>
         Math.Min(
-            new DateTimeOffset(endUtc, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+            endUtc.ToMills(),
             now.ToUnixTimeMilliseconds());
 
     /// <summary>
@@ -168,6 +168,7 @@ public partial class StatisticsService
         var carbsByDay = PunchCardDayBuckets.Bucket(carbs, windows, c => c.Mills);
 
         var monthsMap = new Dictionary<string, PunchCardMonth>(StringComparer.Ordinal);
+        var coveredMinutesByDate = new Dictionary<string, double>(StringComparer.Ordinal);
         for (var i = 0; i < days.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -185,7 +186,7 @@ public partial class StatisticsService
                 monthsMap[monthKey] = monthBucket;
             }
 
-            var dayStats = PunchCardDayStatistics(
+            var (dayStats, coveredMinutes) = PunchCardDayStatistics(
                 day,
                 windows[i].StartMs,
                 glucoseByDay[i],
@@ -195,16 +196,17 @@ public partial class StatisticsService
                 dailyBasalMap);
 
             monthBucket.Days.Add(dayStats);
+            coveredMinutesByDate[dayStats.Date] = coveredMinutes;
             monthBucket.MaxCarbs = Math.Max(monthBucket.MaxCarbs, dayStats.TotalCarbs);
             monthBucket.MaxInsulin = Math.Max(monthBucket.MaxInsulin, dayStats.TotalInsulin);
             monthBucket.MaxCarbInsulinDiff = Math.Max(
-                monthBucket.MaxCarbInsulinDiff, Math.Abs(dayStats.CarbToInsulinRatio));
+                monthBucket.MaxCarbInsulinDiff, Math.Abs(dayStats.CarbToInsulinRatio ?? 0));
             monthBucket.TotalReadings += dayStats.TotalReadings;
         }
 
         var today = TimeZoneInfo.ConvertTime(now, timeZone).ToString("yyyy-MM-dd");
         foreach (var month in monthsMap.Values)
-            month.Summary = SummariseMonth(month, today);
+            month.Summary = SummariseMonth(month, today, coveredMinutesByDate);
 
         var months = monthsMap.Values
             .OrderBy(m => m.Year).ThenBy(m => m.Month)
@@ -224,7 +226,7 @@ public partial class StatisticsService
         };
     }
 
-    private PunchCardDay PunchCardDayStatistics(
+    private (PunchCardDay Day, double CoveredMinutes) PunchCardDayStatistics(
         DateTime day,
         long dayStartMs,
         IReadOnlyList<SensorGlucose> dayEntries,
@@ -233,9 +235,10 @@ public partial class StatisticsService
         IReadOnlyList<CarbIntake> dayCarbs,
         IReadOnlyDictionary<string, double> dailyBasal)
     {
-        TimeInRangeMetrics? tir = dayEntries.Count > 0
-            ? CalculateTimeInRange(dayEntries)
-            : null;
+        TimeInRangeMetrics? tir = null;
+        double coveredMinutes = 0;
+        if (dayEntries.Count > 0)
+            (tir, coveredMinutes) = TimeInRangeOverCoverage(dayEntries);
         TreatmentSummary? treatment = dayBoluses.Count > 0 || dayCarbs.Count > 0
             ? CalculateTreatmentSummary(dayBoluses, dayCarbs)
             : null;
@@ -259,10 +262,9 @@ public partial class StatisticsService
             .Select(e => new PunchCardEntry { Mills = e.Mills, Mgdl = e.Mgdl })
             .ToList();
 
-        // The counts are readings, so they come from the readings, not from durations.
         var totalReadings = entries.Count;
 
-        return new PunchCardDay
+        var punchCardDay = new PunchCardDay
         {
             Date = dateStr,
             Timestamp = dayStartMs,
@@ -282,38 +284,52 @@ public partial class StatisticsService
             TotalInsulin = totalBolus + totalBasal,
             TotalBolus = totalBolus,
             TotalBasal = totalBasal,
-            CarbToInsulinRatio = treatment?.CarbToInsulinRatio ?? 0,
+            CarbToInsulinRatio = treatment?.CarbToInsulinRatio,
             Entries = entries,
         };
+
+        return (punchCardDay, coveredMinutes);
     }
 
     private static int ReadingsAt(double percent, int totalReadings) =>
         (int)Math.Round(percent / 100.0 * totalReadings);
 
-    private static PunchCardMonthSummary? SummariseMonth(PunchCardMonth month, string today)
+    /// <summary>
+    /// The month's zone shares are the days' shares weighted by the minutes each day's readings
+    /// cover, so they equal zone minutes over covered minutes across the month whatever cadence
+    /// each day was recorded at. Average glucose is by reading, as it is per day.
+    /// </summary>
+    private static PunchCardMonthSummary? SummariseMonth(
+        PunchCardMonth month,
+        string today,
+        IReadOnlyDictionary<string, double> coveredMinutesByDate)
     {
         var daysWithData = month.Days.Where(d => d.TotalReadings > 0).ToList();
         if (daysWithData.Count == 0) return null;
 
         var totalReadings = daysWithData.Sum(d => d.TotalReadings);
+        var coveredMinutes = daysWithData.Sum(d => coveredMinutesByDate.GetValueOrDefault(d.Date));
         var totalInsulin = month.Days.Sum(d => d.TotalInsulin);
         var totalCarbs = month.Days.Sum(d => d.TotalCarbs);
         var elapsedDays = Math.Max(1, month.Days.Count(d => string.CompareOrdinal(d.Date, today) <= 0));
+
+        double Share(Func<PunchCardDay, double> dayPercent) =>
+            GlucoseCadence.PercentOfCovered(
+                daysWithData.Sum(d => dayPercent(d) / 100 * coveredMinutesByDate.GetValueOrDefault(d.Date)),
+                coveredMinutes);
 
         return new PunchCardMonthSummary
         {
             DayCount = daysWithData.Count,
             TotalReadings = totalReadings,
-            InRangePercent = ShareOf(daysWithData.Sum(d => d.InRangeCount), totalReadings),
-            VeryLowPercent = ShareOf(daysWithData.Sum(d => d.VeryLowCount), totalReadings),
-            LowPercent = ShareOf(daysWithData.Sum(d => d.LowCount), totalReadings),
-            HighPercent = ShareOf(daysWithData.Sum(d => d.HighCount), totalReadings),
-            VeryHighPercent = ShareOf(daysWithData.Sum(d => d.VeryHighCount), totalReadings),
+            InRangePercent = Share(d => d.InRangePercent),
+            VeryLowPercent = Share(d => d.VeryLowPercent),
+            LowPercent = Share(d => d.LowPercent),
+            HighPercent = Share(d => d.HighPercent),
+            VeryHighPercent = Share(d => d.VeryHighPercent),
             AvgGlucose = daysWithData.Sum(d => d.AverageGlucose * d.TotalReadings) / totalReadings,
             Tdd = totalInsulin > 0 ? totalInsulin / elapsedDays : null,
             AvgDailyCarbs = totalCarbs > 0 ? totalCarbs / elapsedDays : null,
         };
     }
-
-    private static double ShareOf(int count, int total) => total > 0 ? (double)count / total * 100 : 0;
 }

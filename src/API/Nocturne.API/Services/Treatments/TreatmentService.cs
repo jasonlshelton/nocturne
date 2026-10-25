@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Nocturne.API.Helpers;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Logging;
 using Nocturne.Core.Clinical.Treatments;
@@ -341,34 +342,10 @@ public class TreatmentService : ITreatmentService
     {
         // The identity used to upsert (LegacyId matching) must survive the round-trip. Serializing
         // rewrites _id to its 24-hex ObjectId form, so capture the real Id and restore it after the
-        // merge unless the patch explicitly changes _id.
+        // merge.
         var originalId = treatment.Id;
 
-        // JSON merge-patch: serialize existing, overlay patch properties, deserialize back
-        var existingJson = JsonSerializer.Serialize(treatment);
-        using var existingDoc = JsonDocument.Parse(existingJson);
-
-        var merged = new Dictionary<string, object?>();
-        foreach (var prop in existingDoc.RootElement.EnumerateObject())
-            merged[prop.Name] = prop.Value.Clone();
-        foreach (var prop in patchData.EnumerateObject())
-            merged[prop.Name] = prop.Value.Clone();
-
-        var mergedJson = JsonSerializer.Serialize(merged);
-        var patched = JsonSerializer.Deserialize<Treatment>(mergedJson);
-        if (patched == null) return;
-
-        // Copy patched values back to the existing treatment in-place
-        var props = typeof(Treatment).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        foreach (var prop in props)
-        {
-            if (!prop.CanWrite) continue;
-            try
-            {
-                prop.SetValue(treatment, prop.GetValue(patched));
-            }
-            catch { /* skip computed properties that throw on set */ }
-        }
+        JsonMergePatch.ApplyInPlace(treatment, patchData);
 
         // A PATCH updates the record identified by the URL; it never changes identity. Restore the
         // upsert key even if the client echoed an _id in the body (AAPS sends the derived ObjectId,

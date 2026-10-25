@@ -40,7 +40,8 @@ public class PunchCardDay
     public double TotalInsulin { get; set; }
     public double TotalBolus { get; set; }
     public double TotalBasal { get; set; }
-    public double CarbToInsulinRatio { get; set; }
+    /// <inheritdoc cref="TreatmentSummary.CarbToInsulinRatio"/>
+    public double? CarbToInsulinRatio { get; set; }
 
     /// <summary>Sorted glucose readings for the day (mills + mg/dL only) for the profile-line view.</summary>
     public List<PunchCardEntry> Entries { get; set; } = new();

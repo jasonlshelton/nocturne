@@ -235,7 +235,7 @@
     counts: "days" | "readings"
   ): string {
     if (!value) return "No data at this time";
-    const n = counts === "days" ? daysText(value.n) : readingsText(value.n);
+    const n = counts === "readings" ? readingsText(value.n) : daysText(value.n);
     return `Median ${format(value.p50 ?? 0)} ${unit}, ${n}`;
   }
 

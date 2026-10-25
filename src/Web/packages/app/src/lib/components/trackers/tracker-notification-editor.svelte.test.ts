@@ -3,7 +3,7 @@ import { page } from "vitest/browser";
 import { beforeEach, describe, it, expect } from "vitest";
 import { page as pageState } from "$app/state";
 import TrackerNotificationEditor from "./tracker-notification-editor-test-wrapper.svelte";
-import { NotificationUrgency } from "$api";
+import { NotificationUrgency, TrackerMode } from "$api";
 
 describe("TrackerNotificationEditor", () => {
 	beforeEach(() => {
@@ -14,7 +14,7 @@ describe("TrackerNotificationEditor", () => {
 		render(TrackerNotificationEditor, { notifications: [] });
 
 		await expect
-			.element(page.getByText("Notification Thresholds", { exact: true }))
+			.element(page.getByText("Notification thresholds", { exact: true }))
 			.toBeVisible();
 		await expect
 			.element(page.getByRole("button", { name: /Add/i }))
@@ -50,7 +50,7 @@ describe("TrackerNotificationEditor", () => {
 			notifications: [
 				{ urgency: NotificationUrgency.Info, hours: 24, description: "" },
 			],
-			mode: "Event",
+			mode: TrackerMode.Event,
 		});
 
 		await expect.element(page.getByText("Hours", { exact: true })).toBeVisible();
@@ -61,11 +61,11 @@ describe("TrackerNotificationEditor", () => {
 			notifications: [
 				{ urgency: NotificationUrgency.Info, hours: 24, description: "" },
 			],
-			mode: "Duration",
+			mode: TrackerMode.Duration,
 		});
 
 		await expect
-			.element(page.getByText(/Positive = after start, Negative = before expiration/))
+			.element(page.getByText(/Positive = after start, negative = before expiration/))
 			.toBeVisible();
 	});
 
@@ -74,11 +74,11 @@ describe("TrackerNotificationEditor", () => {
 			notifications: [
 				{ urgency: NotificationUrgency.Info, hours: 24, description: "" },
 			],
-			mode: "Event",
+			mode: TrackerMode.Event,
 		});
 
 		await expect
-			.element(page.getByText(/Negative = before event, Positive = after event/))
+			.element(page.getByText(/Negative = before event, positive = after event/))
 			.toBeVisible();
 	});
 

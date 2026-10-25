@@ -1,5 +1,6 @@
 import { render } from "vitest-browser-svelte";
 import { describe, it, expect, vi } from "vitest";
+import { MealPeriod } from "$lib/api";
 import Harness from "./IobCobTrackHarness.test.svelte";
 
 const baseTime = new Date("2026-01-01T12:00:00Z").getTime();
@@ -60,5 +61,36 @@ describe("IobCobTrack carb markers", () => {
 		});
 
 		await vi.waitFor(() => expect(carbGlyphs(container)).toHaveLength(2));
+	});
+});
+
+describe("IobCobTrack meal names", () => {
+	const names = (container: HTMLElement) =>
+		Array.from(container.querySelectorAll("text"))
+			.map((t) => t.textContent?.trim())
+			.filter((t) => t && !/^\d+g$/.test(t));
+
+	it("words a marker's meal period when it has no food name", async () => {
+		const { container } = render(Harness, {
+			carbMarkers: [{ ...meal, mealPeriod: MealPeriod.LateNight }],
+		});
+
+		await vi.waitFor(() => expect(names(container)).toContain("Late night"));
+	});
+
+	it("draws the food name in place of the meal period", async () => {
+		const { container } = render(Harness, {
+			carbMarkers: [{ ...meal, label: "Porridge", mealPeriod: MealPeriod.Breakfast }],
+		});
+
+		await vi.waitFor(() => expect(names(container)).toContain("Porridge"));
+		expect(names(container)).not.toContain("Breakfast");
+	});
+
+	it("draws no name for a marker with neither", async () => {
+		const { container } = render(Harness, { carbMarkers: [meal] });
+
+		await vi.waitFor(() => expect(carbGlyphs(container)).toHaveLength(1));
+		expect(names(container).filter((t) => !/^\d+(\.\d+)?$|^IOB\/COB$/.test(t!))).toEqual([]);
 	});
 });

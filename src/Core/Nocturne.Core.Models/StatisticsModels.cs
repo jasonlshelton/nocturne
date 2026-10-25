@@ -102,7 +102,11 @@ public class GlycemicVariability
     /// </summary>
     public double ContinuousOverlappingNetGlycemicAction { get; set; }
 
-    public double AverageDailyRiskRange { get; set; }
+    /// <summary>Null when the tenant has no timezone to bound the days in.</summary>
+    public double? AverageDailyRiskRange { get; set; }
+
+    /// <summary>Why <see cref="AverageDailyRiskRange"/> is null; null when a zone was applied.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 
     public double LabilityIndex { get; set; }
 
@@ -143,6 +147,17 @@ public class GlycemicVariability
     public A1cTargetState EstimatedA1cMeetsTarget => A1cTargetState.Below(EstimatedA1cDisplay, A1cTarget);
 
     public double CoefficientOfVariationTarget => GlucoseConstants.CoefficientOfVariationTargetPercent;
+
+    /// <summary>
+    /// Judged on the CV as a whole percent, the way <see cref="CoefficientOfVariation"/> is displayed.
+    /// </summary>
+    public GlycemicVariabilityStatus CoefficientOfVariationStatus =>
+        Math.Round(CoefficientOfVariation, MidpointRounding.AwayFromZero) switch
+        {
+            <= GlucoseConstants.CoefficientOfVariationTargetPercent => GlycemicVariabilityStatus.Stable,
+            <= GlucoseConstants.CoefficientOfVariationVariablePercent => GlycemicVariabilityStatus.Moderate,
+            _ => GlycemicVariabilityStatus.Variable,
+        };
 
     /// <summary>
     /// Glucose Management Indicator - modern replacement for estimated A1c
@@ -260,7 +275,11 @@ public class TimeInRangeDetailedStats
 }
 
 /// <summary>
-/// Time in range percentages
+/// Time in range percentages: the minutes a zone covers over the minutes the readings cover, from
+/// the same minutes that back <see cref="TimeInRangeDurations"/>, so the two agree whatever mix of
+/// sensor cadences the period holds. A count of readings would weigh a one-minute sensor's
+/// reading as much as a five-minute one's. The four outer zones and the time between them sum to
+/// 100; <see cref="Target"/> is that time only when the target range starts where low ends.
 /// </summary>
 public class TimeInRangePercentages
 {
@@ -347,8 +366,7 @@ public class ExtendedTimeInRangePercentages
 /// Time in range durations (in minutes), measured from the gaps between the readings themselves
 /// rather than assuming a cadence, so a one-minute sensor and a five-minute one both report the
 /// time they actually covered. A gap the sensor did not cover counts as one extra median gap.
-/// <see cref="TimeInRangePercentages"/> counts readings while these sum time, so the two diverge
-/// on a series with gaps or a cadence that varies.
+/// <see cref="TimeInRangePercentages"/> is these over the covered minutes.
 /// </summary>
 public class TimeInRangeDurations
 {
@@ -524,9 +542,10 @@ public class TreatmentSummary
     public int CarbEntryCount { get; set; }
 
     /// <summary>
-    /// Grams of carbs per unit of bolus insulin
+    /// Insulin-to-carb ratio as dosed, as <see cref="InsulinDeliveryStatistics.IcRatio"/>; null when
+    /// no manual bolus is paired with a meal
     /// </summary>
-    public double CarbToInsulinRatio { get; set; }
+    public double? CarbToInsulinRatio { get; set; }
 
     /// <summary>
     /// Average bolus insulin per bolus (units), excluding basal
@@ -749,6 +768,12 @@ public class GlucoseAnalytics
     /// Clinical assessment with insights, strengths, and priority areas
     /// </summary>
     public ClinicalTargetAssessment? ClinicalAssessment { get; set; }
+
+    /// <summary>
+    /// Why the tenant's timezone was unavailable. Without a zone, <see cref="GlycemicVariability"/> has no
+    /// average daily risk range and <see cref="Reliability"/> counts days of data on UTC days. Null when a zone was applied.
+    /// </summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 public class AnalysisTime
@@ -1307,7 +1332,7 @@ public class StatisticReliability
     /// <summary>Whether the data meets clinical reliability criteria for this analysis</summary>
     public bool MeetsReliabilityCriteria { get; set; }
 
-    /// <summary>Number of days with glucose data in this analysis window</summary>
+    /// <summary>Number of days with glucose data in this analysis window, counted on UTC days when the tenant has no timezone</summary>
     public int DaysOfData { get; set; }
 
     /// <summary>Minimum days recommended by clinical guidelines for reliable results</summary>
@@ -1418,7 +1443,7 @@ public class DataSufficiencyAssessment
     /// <summary>Number of days in the period</summary>
     public int TotalDays { get; set; }
 
-    /// <summary>Number of days with any data</summary>
+    /// <summary>Number of days with any data, counted on UTC days when <see cref="TimeZoneUnavailableReason"/> is set.</summary>
     public int DaysWithData { get; set; }
 
     /// <summary>Expected number of readings (based on sensor type)</summary>
@@ -1432,7 +1457,7 @@ public class DataSufficiencyAssessment
     /// <summary>Minimum required completeness for valid report (typically 70%)</summary>
     public double MinimumRequiredCompleteness { get; set; } = 70;
 
-    /// <summary>Average readings per day</summary>
+    /// <summary>Average readings per day, over the days of <see cref="DaysWithData"/></summary>
     public double AverageReadingsPerDay { get; set; }
 
     /// <summary>Longest data gap in hours</summary>
@@ -1445,6 +1470,9 @@ public class DataSufficiencyAssessment
     public string WarningMessage { get; set; } = string.Empty;
 
     public string Recommendation { get; set; } = string.Empty;
+
+    /// <summary>Why <see cref="DaysWithData"/> and <see cref="AverageReadingsPerDay"/> are counted on UTC days; null when a zone was applied.</summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 public class ExtendedGlucoseAnalytics : GlucoseAnalytics
@@ -1486,9 +1514,18 @@ public class ReportAnalysisResult
     /// <summary>
     /// Time in the tenant's personal target range schedule, alongside the clinical-consensus
     /// TIR in <see cref="Analysis"/>. Null when the tenant has no target range schedule
-    /// configured or the window has no readings.
+    /// configured, the window has no readings, or the tenant has no usable timezone and the schedule
+    /// has several entries.
     /// </summary>
     public PersonalRangeTimeInRange? PersonalRange { get; set; }
+
+    /// <summary>
+    /// Why the tenant's timezone was unavailable. Without a zone, <see cref="AveragedStats"/> groups
+    /// readings by their own UTC offset, <see cref="Analysis"/> has no average daily risk range and
+    /// counts days of data on UTC days, and <see cref="PersonalRange"/> is null unless the target
+    /// schedule has one entry. Null when a zone was applied.
+    /// </summary>
+    public TimeZoneUnavailableReason? TimeZoneUnavailableReason { get; set; }
 }
 
 /// <summary>
@@ -1691,20 +1728,28 @@ public class InsulinDeliveryStatistics
     public double AvgBolus { get; set; }
 
     /// <summary>
-    /// Number of meal boluses (based on event type)
+    /// Number of manual boluses paired with a meal: the meal of a carb entry linked to the bolus, else
+    /// the nearest meal from 30 minutes before it to 1 hour after it
     /// </summary>
     public int MealBoluses { get; set; }
 
     /// <summary>
-    /// Number of correction boluses (based on event type)
+    /// Number of manual boluses paired with no meal
     /// </summary>
     public int CorrectionBoluses { get; set; }
 
     /// <summary>
-    /// Insulin to carb ratio: grams of carbs per unit of the bolus insulin, manual and automatic,
-    /// delivered within the meal window of a carb entry
+    /// Insulin-to-carb ratio as dosed: grams of the meals a manual bolus is paired with, per unit of
+    /// every bolus, manual or automatic, paired with those meals; null when no manual bolus is paired
+    /// with a meal
     /// </summary>
-    public double IcRatio { get; set; }
+    public double? IcRatio { get; set; }
+
+    /// <summary>
+    /// Grams of the meals no manual bolus is paired with, such as hypo treatments and unbolused
+    /// snacks, which <see cref="IcRatio"/> leaves out
+    /// </summary>
+    public double UnpairedCarbs { get; set; }
 
     /// <summary>
     /// Average number of manual boluses per day
@@ -2206,7 +2251,14 @@ public class AidSegmentMetrics
     /// <summary>Number of loop iterations (applicable to open-source AIDs)</summary>
     public int? LoopCycleCount { get; set; }
 
+    /// <summary>Loop cycles the uploader reported enacted, Loop's open-loop cycles included</summary>
     public int? EnactedCount { get; set; }
+
+    /// <summary>
+    /// Loop cycles enacted with the loop closed (<see cref="V4.ApsLoopCycle.EnactedClosedLoop"/>), whose
+    /// time is <see cref="AidActivePercent"/>
+    /// </summary>
+    public int? ClosedLoopCount { get; set; }
 }
 
 /// <summary>
@@ -2225,7 +2277,7 @@ public class AidDetectionContext
     /// <summary>APS loop cycles within the segment window (for OS AID strategies)</summary>
     public IReadOnlyList<V4.ApsLoopCycle> LoopCycles { get; set; } = [];
 
-    /// <summary>Temp basals within the segment window (for TBR-based strategies)</summary>
+    /// <summary>Every temp basal read for the report, not only those in the segment (for TBR-based strategies)</summary>
     public IReadOnlyList<V4.TempBasal> TempBasals { get; set; } = [];
 }
 

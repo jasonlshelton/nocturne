@@ -6,6 +6,7 @@
     intensityScale,
     GLUCOSE_LIMITS,
     type ColorBoundary,
+    type ColorEnds,
     type ColorFocusRange as Range,
   } from "$lib/utils/metric-color-focus";
   import ColorFocusRange from "./ColorFocusRange.svelte";
@@ -32,12 +33,13 @@
 
   let focusWindow = $state<Range | null>(untrack(() => initialWindow));
   let boundaries = $state<ColorBoundary[] | null>(untrack(() => initialBoundaries));
+  let ends = $state<ColorEnds>({});
   let dim = $state(90);
   const limits = $derived<Range>(glucose ? GLUCOSE_LIMITS : [0, fixedMax ?? Infinity]);
   const scale = $derived(
     glucose
-      ? glucoseScale(focusWindow, boundaries, dim)
-      : intensityScale("--insulin", limits, observedMax, focusWindow, boundaries, dim)
+      ? glucoseScale(focusWindow, boundaries, dim, ends)
+      : intensityScale("--insulin", limits, observedMax, focusWindow, boundaries, dim, ends)
   );
 </script>
 
@@ -50,11 +52,14 @@
   {unit}
   onWindowChange={(next) => (focusWindow = next)}
   onBoundariesChange={(next) => (boundaries = next)}
+  onEndsChange={(next) => (ends = next)}
   onDimChange={(next) => (dim = next)}
   onReset={() => {
     focusWindow = null;
     boundaries = null;
+    ends = {};
   }}
 />
 <output data-testid="selected-window">{JSON.stringify(focusWindow)}</output>
 <output data-testid="selected-boundaries">{JSON.stringify(boundaries)}</output>
+<output data-testid="selected-ends">{JSON.stringify(ends)}</output>

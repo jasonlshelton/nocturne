@@ -5,8 +5,9 @@
   import Eye from "@lucide/svelte/icons/eye";
   import { Button } from "$lib/components/ui/button";
   import type { ClockAlertDto } from "$lib/api";
-  import { severity, severityLabel } from "$lib/components/alerts/severity";
-  import { formatTimeSince } from "$lib/components/alerts/alertTime";
+  import { severity } from "$lib/components/alerts/severity";
+  import { severityLabel } from "$lib/components/alerts/severityLabel.svelte";
+  import { formatDateTimeCompact, relativeAge, toDate } from "$lib/utils/formatting";
 
   interface Props {
     alerts: ClockAlertDto[];
@@ -48,8 +49,11 @@
           <div class="truncate text-xl font-medium">
             {alert.ruleName || "Alert"}
           </div>
-          <div class="text-sm text-white/70">
-            {formatTimeSince(alert.startedAt, now)}
+          <div
+            class="text-sm text-white/70"
+            title={toDate(alert.startedAt) ? formatDateTimeCompact(alert.startedAt) : undefined}
+          >
+            {relativeAge(alert.startedAt, { now, fallback: "Unknown" })}
           </div>
         </div>
         {#if onSeen && !alert.seenHere}

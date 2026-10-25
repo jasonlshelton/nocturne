@@ -48,8 +48,8 @@ public class SystemEventsController : ControllerBase
         count = V4ReadLimits.ClampLimit(count);
         skip = V4ReadLimits.ClampOffset(skip);
 
-        var fromMills = from.HasValue ? new DateTimeOffset(from.Value, TimeSpan.Zero).ToUnixTimeMilliseconds() : (long?)null;
-        var toMills = to.HasValue ? new DateTimeOffset(to.Value, TimeSpan.Zero).ToUnixTimeMilliseconds() : (long?)null;
+        var fromMills = from.HasValue ? from.Value.ToMills() : (long?)null;
+        var toMills = to.HasValue ? to.Value.ToMills() : (long?)null;
         var events = await _repository.GetSystemEventsAsync(
             type, category, fromMills, toMills, source, count, skip, cancellationToken);
         return Ok(events);

@@ -13,6 +13,7 @@ import { getContext, setContext } from "svelte";
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
+import { AUTH_COOKIE_NAMES } from "$lib/config/auth-cookies";
 import { toDate } from "$lib/utils/formatting";
 import { toIsoString } from "$lib/utils/api-date";
 import {
@@ -111,7 +112,7 @@ export class AuthStore {
     if (!browser) return;
 
     const cookies = document.cookie.split(";");
-    const authCookie = cookies.find((c) => c.trim().startsWith("IsAuthenticated="));
+    const authCookie = cookies.find((c) => c.trim().startsWith(`${AUTH_COOKIE_NAMES.isAuthenticated}=`));
 
     if (authCookie) {
       // Nothing on first paint reads the session (the layout's server data carries the user and

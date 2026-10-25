@@ -412,7 +412,7 @@ internal sealed class AlertReplayService(
         Dictionary<string, decimal> prev,
         Dictionary<string, List<FactSnapshotPoint>> points)
     {
-        var tickMs = new DateTimeOffset(tickUtc).ToUnixTimeMilliseconds();
+        var tickMs = tickUtc.ToMills();
 
         foreach (var binding in FactBindings)
         {

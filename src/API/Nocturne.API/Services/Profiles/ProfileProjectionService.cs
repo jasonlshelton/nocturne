@@ -193,7 +193,7 @@ public class ProfileProjectionService : IProfileProjectionService
             .Min();
 
     private static long Stamp(IV4Record record) =>
-        new DateTimeOffset(record.ModifiedAt, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        record.ModifiedAt.ToMills();
 
     /// <summary>
     /// Every settings record <see cref="ScheduleForProfileAsync{TRecord}"/> could pair with one of

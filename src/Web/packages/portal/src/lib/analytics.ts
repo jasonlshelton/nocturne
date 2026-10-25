@@ -9,6 +9,7 @@
  * Tracking is off unless VITE_PLAUSIBLE_DOMAIN is set at build time, so a self-hosted or
  * local build of the portal makes no request to anything.
  */
+import videos from '@nocturne/video/manifest.json';
 import { PLAUSIBLE_DOMAIN, PLAUSIBLE_HOST } from '$lib/config';
 import { DOCS_NAV_SECTIONS } from '$lib/data/docs-nav';
 
@@ -38,6 +39,9 @@ export const DOCS_SECTION_IDS = [
   'sdks',
   'api-reference',
 ] as const;
+
+/** Docs videos, as reported by `Video Play` and `Video Complete`: the @nocturne/video manifest ids. */
+export const VIDEO_IDS = Object.keys(videos);
 
 /** The guides on /docs/installation, by the last segment of their path. */
 export const INSTALL_PLATFORM_IDS = [
@@ -119,6 +123,10 @@ const ALLOWED_PROPS = {
   'Docs Feedback': { helpful: ['yes', 'no'], doc_section: DOCS_SECTION_IDS },
   /** Time spent reading a page while it was visible and in use. Once per milestone per pageview. */
   'Docs Read': { seconds: READ_MILESTONES, doc_section: DOCS_SECTION_IDS },
+  /** A docs video started. Once per video per pageview, so plays over completions is a rate. */
+  'Video Play': { video: VIDEO_IDS },
+  /** A docs video played to its last frame. Once per video per pageview. */
+  'Video Complete': { video: VIDEO_IDS },
 
   // --- Installation ----------------------------------------------------------------
   /** A guide picked from the platform list on /docs/installation. */

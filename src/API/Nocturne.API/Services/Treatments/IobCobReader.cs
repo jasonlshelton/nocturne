@@ -1,4 +1,7 @@
+using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Caching;
+using Nocturne.Core.Clinical.LoopAnalysis;
+using Nocturne.Core.Clinical.Statistics;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
@@ -29,14 +32,14 @@ public sealed class IobCobReader(
     public async Task<IobCobInputs> ReadInputsAsync(long at, CancellationToken ct = default)
     {
         var to = DateTimeOffset.FromUnixTimeMilliseconds(at).UtcDateTime;
-        var insulinFrom = to.AddHours(-IIobCobReader.InsulinLookbackHours);
+        var insulinFrom = to.AddMilliseconds(-DailyProfileCalculator.ActingMs);
 
         var boluses = await bolusRepository.GetAsync(
             from: insulinFrom, to: to, device: null, source: null,
             limit: Limit, offset: 0, descending: false, ct: ct);
         var tempBasals = await tempBasalRepository.GetAsync(
-            from: insulinFrom, to: to, device: null, source: null,
-            limit: Limit, offset: 0, descending: false, ct: ct);
+            from: StatisticsService.TempBasalReadStart(insulinFrom), to: to, device: null, source: null,
+            limit: ChartDataService.TempBasalQueryLimit, offset: 0, descending: false, ct: ct);
         var carbIntakes = await carbIntakeRepository.GetAsync(
             from: to.AddHours(-IIobCobReader.CarbLookbackHours), to: to, device: null, source: null,
             limit: Limit, offset: 0, descending: false, ct: ct);
@@ -47,7 +50,7 @@ public sealed class IobCobReader(
     /// <inheritdoc />
     public Task<IobCobReading> ReadTotalAsync(long at, bool live, CancellationToken ct = default) =>
         live
-            ? cache.GetOrCreateLocalAsync(LiveCacheKey, () => ComputeAsync(at, live: true, ct), LiveCacheDuration)
+            ? cache.GetOrCreateLocalAsync(LiveCacheKey, () => ComputeAsync(at, live: true, ct), LiveCacheDuration, ct)
             : ComputeAsync(at, live: false, ct);
 
     private async Task<IobCobReading> ComputeAsync(long at, bool live, CancellationToken ct)
@@ -55,7 +58,13 @@ public sealed class IobCobReader(
         var inputs = await ReadInputsAsync(at, ct);
         var iob = await iobCalculator.CalculateTotalAsync(
             inputs.Boluses, inputs.TempBasals, at, live: live, ct: ct);
-        return new IobCobReading(iob, await CobAsync(at, live, inputs, ct), inputs);
+        var windowStart = at - DailyProfileCalculator.ActingMs;
+        var insulinInWindow = inputs.Boluses.Count > 0
+            || inputs.TempBasals.Any(t => t.EndMills is null || t.EndMills >= windowStart);
+        return new IobCobReading(iob, await CobAsync(at, live, inputs, ct), inputs)
+        {
+            InsulinInWindow = insulinInWindow,
+        };
     }
 
     private async Task<CobResult?> CobAsync(long at, bool live, IobCobInputs inputs, CancellationToken ct)

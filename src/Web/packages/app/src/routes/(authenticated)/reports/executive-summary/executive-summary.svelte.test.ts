@@ -3,10 +3,12 @@ import { page } from "vitest/browser";
 import { beforeEach, expect, it, vi } from "vitest";
 import { TargetStatus, type GlycemicVariability } from "$api/generated/nocturne-api-client";
 import { applyPreferences } from "$lib/stores/appearance-store.svelte";
+import { TimeZoneUnavailableReason } from "$lib/api";
 
 const report = vi.hoisted(() => ({
   variability: null as GlycemicVariability | null,
   cvStatus: undefined as TargetStatus | undefined,
+  reason: undefined as TimeZoneUnavailableReason | undefined,
   thresholds: { veryLow: 54, low: 63, targetBottom: 63, targetTop: 140, high: 140, veryHigh: 250 },
 }));
 
@@ -19,7 +21,9 @@ vi.mock("$lib/hooks/resource-context.svelte", () => ({
     date: { dayCount: 14 },
     current: {
       entries: [],
+      timeZoneUnavailableReason: report.reason,
       analysis: {
+        reliability: { meetsReliabilityCriteria: false, daysOfData: 3, recommendedMinimumDays: 14 },
         basicStats: { mean: 154 },
         glycemicVariability: report.variability,
         clinicalAssessment: { cvAssessment: { status: report.cvStatus } },
@@ -45,6 +49,7 @@ const cardWith = (container: HTMLElement, text: string) => {
 beforeEach(() => {
   report.variability = null;
   report.cvStatus = undefined;
+  report.reason = undefined;
   applyPreferences({ a1cName: "HbA1c", a1cUnits: "percent" });
 });
 
@@ -104,7 +109,7 @@ it.each([
     await expect.element(a1cCard.getByText("Target: below 7.0%", { exact: true })).toBeVisible();
     await expect.element(a1cCard.getByText(a1cState, { exact: true })).toBeVisible();
 
-    const cvCard = cardWith(container, "Glucose Stability");
+    const cvCard = cardWith(container, "Glucose stability");
     await expect.element(cvCard.getByText("32%", { exact: true })).toBeVisible();
     await expect.element(cvCard.getByText("Target: ≤36%", { exact: true })).toBeVisible();
     await expect.element(cvCard.getByText(cvState, { exact: true })).toBeVisible();
@@ -134,7 +139,7 @@ it("shows no CV state when the assessment did not assess it", async () => {
   report.variability = { coefficientOfVariation: 31.6, coefficientOfVariationTarget: 36 };
   report.cvStatus = TargetStatus.NotAssessed;
   const { container } = render(ExecutiveSummary);
-  const cvCard = cardWith(container, "Glucose Stability");
+  const cvCard = cardWith(container, "Glucose stability");
   await expect.element(cvCard.getByText("32%", { exact: true })).toBeVisible();
   await expect.element(cvCard.getByText(/^Target (not )?met$/)).not.toBeInTheDocument();
 });
@@ -142,4 +147,16 @@ it("shows no CV state when the assessment did not assess it", async () => {
 it("shows no target state when the variability is unavailable", async () => {
   render(ExecutiveSummary);
   await expect.element(page.getByText(/^Target (not )?met$/)).not.toBeInTheDocument();
+});
+
+it("says the days of data are UTC days when range analytics carries a reason", async () => {
+  report.reason = TimeZoneUnavailableReason.NotConfigured;
+  render(ExecutiveSummary);
+  await expect.element(page.getByText("Days of data are counted on UTC days.")).toBeVisible();
+});
+
+it("shows the reliability badge without a note when range analytics carries no reason", async () => {
+  render(ExecutiveSummary);
+  await expect.element(page.getByText(/Based on 3 days of data/)).toBeVisible();
+  await expect.element(page.getByText("Days of data are counted on UTC days.")).not.toBeInTheDocument();
 });

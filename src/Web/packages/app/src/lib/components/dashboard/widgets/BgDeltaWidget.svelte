@@ -2,8 +2,12 @@
   import WidgetCard from "./WidgetCard.svelte";
   import { getRealtimeStore } from "$lib/stores/realtime-store.svelte";
   import { glucoseUnits } from "$lib/stores/appearance-store.svelte";
-  import { formatGlucoseDelta, getUnitLabel, time } from "$lib/utils/formatting";
-  import { timeAgo } from "$lib/utils";
+  import {
+    formatGlucoseDelta,
+    getUnitLabel,
+    relativeAge,
+    time,
+  } from "$lib/utils/formatting";
   import { Now } from "$lib/hooks/now.svelte";
   import BatteryCharging from "@lucide/svelte/icons/battery-charging";
   import BatteryFull from "@lucide/svelte/icons/battery-full";
@@ -29,10 +33,10 @@
   const rawBgDelta = $derived(bgDelta ?? realtimeStore.bgDelta);
   const displayLastUpdated = $derived(lastUpdated ?? realtimeStore.lastUpdated);
 
-  // `timeAgo` reads the clock once; re-derive it on a tick so the age
+  // `relativeAge` reads the clock once; re-derive it on a tick so the age
   // on screen keeps up with the reading it describes.
   const now = new Now();
-  const age = $derived(timeAgo(displayLastUpdated, undefined, now.current));
+  const age = $derived(relativeAge(displayLastUpdated, { now: now.current, fallback: "Unknown" }));
   const units = $derived(glucoseUnits.current);
   const displayBgDelta = $derived(formatGlucoseDelta(rawBgDelta, units));
   const unitLabel = $derived(getUnitLabel(units));
@@ -65,7 +69,7 @@
   });
 </script>
 
-<WidgetCard title="BG Delta">
+<WidgetCard title="BG delta">
   <div class="flex items-center justify-between">
     <div>
       <p class="flex items-baseline gap-1.5">

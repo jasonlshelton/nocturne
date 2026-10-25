@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Nocturne.API.Attributes;
 using Nocturne.API.Services.Analytics;
+using Nocturne.Core.Clinical.LoopAnalysis;
 using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models.Authorization;
@@ -30,7 +32,9 @@ public class IobController : ControllerBase
     private readonly IPumpSnapshotRepository _pumpSnapshotRepository;
     private readonly IBolusRepository _bolusRepository;
     private readonly ITempBasalRepository _tempBasalRepository;
+    private readonly IStateSpanRepository _stateSpanRepository;
     private readonly IIobCobReader _iobCobReader;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<IobController> _logger;
 
     /// <summary>
@@ -43,7 +47,9 @@ public class IobController : ControllerBase
     /// <param name="pumpSnapshotRepository">Pump snapshots the hourly series prefers after them.</param>
     /// <param name="bolusRepository">Repository for bolus records.</param>
     /// <param name="tempBasalRepository">Repository for temp basal records.</param>
+    /// <param name="stateSpanRepository">Overrides, which scale the schedule the hourly series' net basal is measured against.</param>
     /// <param name="iobCobReader">Reader of the total IOB at an instant.</param>
+    /// <param name="timeProvider">Clock for the default calculation time and the end of the hourly window.</param>
     /// <param name="logger">Logger instance.</param>
     public IobController(
         IIobCalculator iobCalculator,
@@ -53,7 +59,9 @@ public class IobController : ControllerBase
         IPumpSnapshotRepository pumpSnapshotRepository,
         IBolusRepository bolusRepository,
         ITempBasalRepository tempBasalRepository,
+        IStateSpanRepository stateSpanRepository,
         IIobCobReader iobCobReader,
+        TimeProvider timeProvider,
         ILogger<IobController> logger
     )
     {
@@ -64,7 +72,9 @@ public class IobController : ControllerBase
         _pumpSnapshotRepository = pumpSnapshotRepository;
         _bolusRepository = bolusRepository;
         _tempBasalRepository = tempBasalRepository;
+        _stateSpanRepository = stateSpanRepository;
         _iobCobReader = iobCobReader;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -88,7 +98,7 @@ public class IobController : ControllerBase
     {
         try
         {
-            var calculationTime = time ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var calculationTime = time ?? _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
 
             var reading = await _iobCobReader.ReadTotalAsync(calculationTime, live: time is null, cancellationToken);
 
@@ -121,7 +131,7 @@ public class IobController : ControllerBase
     {
         try
         {
-            var calculationTime = time ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var calculationTime = time ?? _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
 
             var (boluses, tempBasals, _) = await _iobCobReader.ReadInputsAsync(calculationTime, cancellationToken);
 
@@ -173,32 +183,36 @@ public class IobController : ControllerBase
                 return BadRequest(new { error = "Hours must be between 1 and 168" });
             }
 
-            var endTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var endTime = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var calculationStartTime = startTime ?? (endTime - (hours * 60 * 60 * 1000));
-
-            // Query boluses and temp basals covering the full calculation window plus 8h DIA before it
-            var fetchFromMills = calculationStartTime - 8 * 60 * 60 * 1000L;
-            var fetchFrom = DateTimeOffset.FromUnixTimeMilliseconds(fetchFromMills).UtcDateTime;
-            var boluses = (await _bolusRepository.GetAsync(
-                from: fetchFrom, to: null, device: null, source: null,
-                limit: 2000, offset: 0, descending: false, ct: cancellationToken
-            )).ToList();
-            var tempBasals = (await _tempBasalRepository.GetAsync(
-                from: fetchFrom, to: null, device: null, source: null,
-                limit: ChartDataService.TempBasalQueryLimit, offset: 0, descending: false, ct: cancellationToken
-            )).ToList();
 
             var totalIntervals = (hours * 60) / intervalMinutes;
             var intervalMs = intervalMinutes * 60 * 1000L;
             var lastSlot = calculationStartTime + (totalIntervals - 1) * intervalMs;
+
+            var fetchFromMills = calculationStartTime - DailyProfileCalculator.ActingMs;
+            var fetchFrom = DateTimeOffset.FromUnixTimeMilliseconds(fetchFromMills).UtcDateTime;
+            var fetchTo = DateTimeOffset.FromUnixTimeMilliseconds(lastSlot).UtcDateTime;
+            var boluses = (await _bolusRepository.GetAsync(
+                from: fetchFrom, to: fetchTo, device: null, source: null,
+                limit: 2000, offset: 0, descending: false, ct: cancellationToken
+            )).ToList();
+            var tempBasals = (await _tempBasalRepository.GetAsync(
+                from: fetchFrom, to: fetchTo, device: null, source: null,
+                limit: ChartDataService.TempBasalQueryLimit, offset: 0, descending: false, ct: cancellationToken
+            )).ToList();
+
             var timeline = await _therapyTimelineResolver.BuildAsync(fetchFromMills, lastSlot + 1, ct: cancellationToken);
+            var scheduled = new ScheduledBasal(
+                timeline.BasalSegments(),
+                await ScheduledBasal.OverridesAsync(_stateSpanRepository, fetchFromMills, lastSlot, cancellationToken));
             var deviceFrom = DateTimeOffset.FromUnixTimeMilliseconds(calculationStartTime - DeviceReportedValues.RecencyThresholdMs).UtcDateTime;
             var deviceTo = DateTimeOffset.FromUnixTimeMilliseconds(lastSlot + DeviceReportedValues.FutureSkewToleranceMs).UtcDateTime;
             var devices = DeviceReadings.Of(
                 await _apsSnapshotRepository.GetIobCobPointsAsync(deviceFrom, deviceTo, cancellationToken),
                 await _pumpSnapshotRepository.GetIobPointsAsync(deviceFrom, deviceTo, cancellationToken));
             var ticks = IobCobSeries.Build(
-                _iobCalculator, _cobCalculator, boluses, [], tempBasals, timeline, devices,
+                _iobCalculator, _cobCalculator, boluses, [], tempBasals, timeline, scheduled, devices,
                 calculationStartTime, lastSlot, endTime, intervalMs, cancellationToken);
 
             var hourlyData = ticks.Select(tick =>

@@ -1,5 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Nocturne.API.Configuration;
+using Nocturne.Core.Clinical.Schedules;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Devices;
 using Nocturne.Core.Contracts.Legacy;
@@ -9,6 +12,7 @@ using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.V4;
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Treatments;
 
@@ -27,6 +31,9 @@ public class PropertiesService : IPropertiesService
     private readonly IIobCobReader _iobCobReader;
     private readonly IAr2Service _ar2Service;
     private readonly IDeviceAgeService _deviceAgeService;
+    private readonly ITherapySettingsResolver _therapySettings;
+    private readonly TimeProvider _time;
+    private readonly DbSizeOptions _dbSize;
 
     // Properties served by IDeviceAgeService, each costing its own query.
     private static readonly HashSet<string> DeviceAgeProperties =
@@ -49,7 +56,10 @@ public class PropertiesService : IPropertiesService
         ILogger<PropertiesService> logger,
         IIobCobReader iobCobReader,
         IAr2Service ar2Service,
-        IDeviceAgeService deviceAgeService
+        IDeviceAgeService deviceAgeService,
+        ITherapySettingsResolver therapySettings,
+        TimeProvider time,
+        IOptions<DbSizeOptions> dbSize
     )
     {
         _ddataService = ddataService;
@@ -57,6 +67,9 @@ public class PropertiesService : IPropertiesService
         _iobCobReader = iobCobReader;
         _ar2Service = ar2Service;
         _deviceAgeService = deviceAgeService;
+        _therapySettings = therapySettings;
+        _time = time;
+        _dbSize = dbSize.Value;
     }
 
     /// <inheritdoc />
@@ -155,7 +168,7 @@ public class PropertiesService : IPropertiesService
     )
     {
         var properties = new Dictionary<string, object>();
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var timestamp = _time.GetUtcNow().ToUnixTimeMilliseconds();
 
         try
         {
@@ -173,7 +186,7 @@ public class PropertiesService : IPropertiesService
             // Direction properties
             SetDirectionProperties(properties, ddata);
 
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
             var iobCob = await ReadIobCobAsync(now);
             if (iobCob is not null)
             {
@@ -206,7 +219,10 @@ public class PropertiesService : IPropertiesService
             SetProfileProperties(properties, ddata);
 
             // Basal properties
-            SetBasalProperties(properties, ddata);
+            if (requested == null || requested.Contains("basal"))
+            {
+                await SetBasalPropertiesAsync(properties, ddata, cancellationToken);
+            }
 
             // DB Size properties
             SetDbSizeProperties(properties, ddata);
@@ -618,7 +634,10 @@ public class PropertiesService : IPropertiesService
     /// Set basal properties - exact 1:1 match with legacy basalprofile.js
     /// Provides current basal rate information including temp basal and combo bolus treatments
     /// </summary>
-    private void SetBasalProperties(Dictionary<string, object> properties, DData ddata)
+    private async Task SetBasalPropertiesAsync(
+        Dictionary<string, object> properties,
+        DData ddata,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -642,12 +661,13 @@ public class PropertiesService : IPropertiesService
                 return;
             }
 
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
             var treatments = ddata.Treatments ?? new List<Treatment>();
             _logger.LogDebug("SetBasalProperties: Now: {Now}, Treatments count: {TreatmentCount}", now, treatments.Count);
 
-            // Calculate current basal rate with temp treatments - exact legacy algorithm
-            var tempBasalResult = CalculateTempBasal(now, profileData, treatments);
+            var zone = TimeZoneHelper.GetTimeZoneInfoFromId(
+                await _therapySettings.GetTimezoneAsync(ct: cancellationToken));
+            var tempBasalResult = CalculateTempBasal(now, profileData, treatments, zone);
             _logger.LogDebug("SetBasalProperties: TempBasal result: Basal={Basal}, TotalBasal={TotalBasal}", tempBasalResult.Basal, tempBasalResult.TotalBasal);
 
             // Build temp markers like legacy: T for temp basal, C for combo bolus
@@ -672,7 +692,7 @@ public class PropertiesService : IPropertiesService
             };
             _logger.LogDebug("SetBasalProperties: Basal property set successfully");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "SetBasalProperties failed");
             // Don't throw, just skip setting basal properties
@@ -685,13 +705,14 @@ public class PropertiesService : IPropertiesService
     private TempBasalResult CalculateTempBasal(
         long time,
         ProfileData profileData,
-        List<Treatment> treatments
+        List<Treatment> treatments,
+        TimeZoneInfo zone
     )
     {
         var result = new TempBasalResult();
 
         // Get base basal rate from profile for the current time
-        result.Basal = GetBasalRateAtTime(time, profileData.Basal);
+        result.Basal = GetBasalRateAtTime(time, profileData.Basal, zone);
         result.TotalBasal = result.Basal;
 
         // Find active temp basal treatment - exact legacy search logic
@@ -751,25 +772,13 @@ public class PropertiesService : IPropertiesService
         return result;
     }
 
-    /// <summary>
-    /// Get basal rate at specific time from profile - exact legacy algorithm
-    /// </summary>
-    private double GetBasalRateAtTime(long time, List<TimeValue>? basalSchedule)
+    private static double GetBasalRateAtTime(long time, List<TimeValue> basalSchedule, TimeZoneInfo zone)
     {
-        if (basalSchedule == null || !basalSchedule.Any())
-            return 0.0;
-
-        // Convert timestamp to time of day in seconds
-        var dateTime = DateTimeOffset.FromUnixTimeMilliseconds(time);
-        var timeOfDaySeconds = (int)dateTime.TimeOfDay.TotalSeconds;
-
-        // Find the appropriate basal rate - exact legacy lookup logic
-        var applicableRate = basalSchedule
-            .Where(b => b.TimeAsSeconds.HasValue && b.TimeAsSeconds.Value <= timeOfDaySeconds)
-            .OrderByDescending(b => b.TimeAsSeconds)
-            .FirstOrDefault();
-
-        return applicableRate?.Value ?? basalSchedule.FirstOrDefault()?.Value ?? 0.0;
+        var entries = basalSchedule
+            .Select(b => new ScheduleEntry { Time = b.Time, Value = b.Value, TimeAsSeconds = b.TimeAsSeconds })
+            .ToList();
+        return ScheduleResolution.FindValueAtTime(entries, ScheduleEntryTime.SecondsOfDay(time, zone))
+            ?? 0.0;
     }
 
     /// <summary>
@@ -781,19 +790,18 @@ public class PropertiesService : IPropertiesService
         if (dbStats == null)
             return;
 
-        // Simplified database size calculation
-        var totalSize = dbStats.DataSize; // Only dataSize, no indexSize in our model
-        var maxSize = 500 * 1024 * 1024; // 500MB default max
-        var percentage = totalSize > 0 ? (int)((totalSize / (double)maxSize) * 100) : 0;
+        var totalSize = dbStats.DataSize + dbStats.IndexSize;
+        var percentage = totalSize > 0 ? (int)(totalSize * 100.0 / _dbSize.MaxBytes) : 0;
 
         properties["dbsize"] = new Dictionary<string, object>
         {
             ["size"] = totalSize,
             ["percentage"] = percentage,
             ["display"] = $"{percentage}%",
+            // NIGHTSCOUT-COMPAT: Nightscout's dbsize plugin warns from 60% and is urgent from 75% of the floored percentage.
             ["status"] =
-                percentage > 80 ? "urgent"
-                : percentage > 60 ? "warn"
+                percentage >= 75 ? "urgent"
+                : percentage >= 60 ? "warn"
                 : "ok",
         };
     }

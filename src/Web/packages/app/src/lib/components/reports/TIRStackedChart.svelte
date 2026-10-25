@@ -23,7 +23,7 @@
 </script>
 
 <script lang="ts">
-  import { Chart, Svg, Bars, Bar, Tooltip } from "layerchart";
+  import { Chart, Svg, Bars, Bar, Line, Rect, Tooltip } from "layerchart";
   import { scaleBand, scaleLinear } from "d3-scale";
   import { bandScale as toBandScale, numericScale } from "$lib/components/charts/scale-guards";
   import { bgRange } from "$lib/utils/formatting";
@@ -77,11 +77,11 @@
   const vertical = $derived(orientation === "vertical");
 
   const bandLabel = $derived<Record<BandKey, string>>({
-    veryLow: "Very Low",
+    veryLow: "Very low",
     low: "Low",
-    target: "In Range",
+    target: "In range",
     high: "High",
-    veryHigh: "Very High",
+    veryHigh: "Very high",
   });
 
   const pct = $derived({
@@ -166,7 +166,7 @@
           {#if tightInset}
             {@const a = valueScale(tightInset.start)}
             {@const b = valueScale(tightInset.end)}
-            <rect
+            <Rect
               x={vertical ? bandPos : Math.min(a, b)}
               y={vertical ? Math.min(a, b) : bandPos}
               width={vertical ? bandSize : Math.abs(b - a)}
@@ -183,14 +183,14 @@
             {@const lineMax = vertical ? context.height : context.width}
             {#each personalMarkers as marker, i (i)}
               {@const pos = Math.min(Math.max(valueScale(marker), 1), lineMax - 1)}
-              <line
+              <Line
                 x1={vertical ? bandPos - 4 : pos}
                 x2={vertical ? bandPos + bandSize + 4 : pos}
                 y1={vertical ? pos : bandPos - 2}
                 y2={vertical ? pos : bandPos + bandSize + 2}
                 stroke="var(--foreground)"
-                stroke-width={2}
-                stroke-dasharray="3 2"
+                strokeWidth={2}
+                dashArray="3 2"
                 data-testid="personal-range-marker"
               />
             {/each}
@@ -209,7 +209,7 @@
           />
           {#if row.key === "target" && pct.tightTarget > 0}
             <Tooltip.Item
-              label="Tight Range"
+              label="Tight range"
               format="percent"
               value={pct.tightTarget / 100}
               color="var(--glucose-tight-range)"

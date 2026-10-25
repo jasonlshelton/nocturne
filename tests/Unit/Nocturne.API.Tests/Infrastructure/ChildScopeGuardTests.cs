@@ -68,7 +68,7 @@ public class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Health/GoogleHealth/GoogleHealthWorker.cs: GoogleHealthWorker.ProcessRequestsAsync",
         "src/API/Nocturne.API/Services/Health/GoogleHealth/GoogleHealthWorker.cs: GoogleHealthWorker.SyncTenantAsync",
         "src/API/Nocturne.API/Services/Health/GoogleHealth/PostgresGoogleHealthGrantHolders.cs: PostgresGoogleHealthGrantHolders.AdoptAsync",
-        "src/API/Nocturne.API/Services/Migration/MigrationStartupService.cs: MigrationStartupService.StartAsync",
+        "src/API/Nocturne.API/Services/Migration/MigrationStartupService.cs: MigrationStartupService.NotifyIfPendingAsync",
         "src/API/Nocturne.API/Services/Monitoring/TrackerAlertRuleBackfillService.cs: TrackerAlertRuleBackfillService.ExecuteAsync",
         "src/API/Nocturne.API/Services/Notifications/NotificationResolutionService.cs: NotificationResolutionService.EvaluateAllTenantsAsync",
 
@@ -96,7 +96,6 @@ public class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJobService.FindRunAsync",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJobService.GetHistoryAsync",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJobService.GetSourcesAsync",
-        "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJobService.TestApiConnectionAsync",
 
         // Work a request starts that returns nothing it read. It writes as the system, and the caller
         // reads what it wrote back under the caller's own policies. Read as the caller, a sync or an
@@ -117,6 +116,7 @@ public class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.TransformDeviceStatusAsync",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.TransformProfileAsync",
         "src/API/Nocturne.API/Services/Seeding/SampleDataSeeder.cs: SampleDataSeeder.SeedInTenantScopeAsync",
+        "src/API/Nocturne.API/Services/V4/LoopClosedLoopStamper.cs: LoopClosedLoopStamper.RunAsync",
         "src/API/Nocturne.API/Services/V4/TempBasalRateReresolver.cs: TempBasalRateReresolver.RunAsync",
     ];
 

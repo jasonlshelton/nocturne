@@ -1,5 +1,7 @@
 using Nocturne.Core.Clinical.LoopAnalysis;
+using Nocturne.Core.Clinical.Tests.Treatments;
 using Nocturne.Core.Clinical.Treatments;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -378,10 +380,10 @@ public class SettingsEvidenceCalculatorTests
                 Kind = d.Automatic ? BolusKind.Algorithm : BolusKind.Manual,
             })];
             var calculator = new IobCalculator(
-                Mock.Of<ITherapySettingsResolver>(), Mock.Of<ISensitivityResolver>(), Mock.Of<IBasalRateResolver>(),
-                Mock.Of<IApsSnapshotRepository>(), Mock.Of<IPumpSnapshotRepository>());
+                Mock.Of<ITherapySettingsResolver>(), Mock.Of<ISensitivityResolver>(), Mock.Of<IBasalSegmentService>(),
+                Mock.Of<IApsSnapshotRepository>(), Mock.Of<IPumpSnapshotRepository>(), MockStateSpans.Empty().Object);
             var iob = IobCobSeries.Build(
-                    calculator, Mock.Of<ICobCalculator>(), boluses, [], temps, Timeline(), null,
+                    calculator, Mock.Of<ICobCalculator>(), boluses, [], temps, Timeline(), new ScheduledBasal(Timeline().BasalSegments(), []), null,
                     start, end, end, 5 * Minute)
                 .ToDictionary(t => t.Mills, t => t.Iob);
             Iob = t => iob[t];

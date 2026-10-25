@@ -1,8 +1,10 @@
 using Nocturne.Core.Clinical.Statistics;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Basal;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.Core.Clinical.Treatments;
@@ -19,9 +21,10 @@ namespace Nocturne.Core.Clinical.Treatments;
 public class IobCalculator(
     ITherapySettingsResolver therapySettings,
     ISensitivityResolver sensitivity,
-    IBasalRateResolver basalRate,
+    IBasalSegmentService basalSegments,
     IApsSnapshotRepository apsSnapshotRepo,
-    IPumpSnapshotRepository pumpSnapshotRepo
+    IPumpSnapshotRepository pumpSnapshotRepo,
+    IStateSpanRepository stateSpans
 ) : IIobCalculator
 {
     // Constants from legacy implementation (identical to IobService)
@@ -30,6 +33,10 @@ public class IobCalculator(
     private const double PEAK_MINUTES = 75.0;
     private const double MAX_IOB_MINUTES = 180.0;
     private const long NET_BASAL_CHUNK_MS = 5 * 60 * 1000;
+
+    // COB asks for the total at several instants over the same temps and cutoff, so the schedule
+    // they read is the same and is read once.
+    private (long From, long To, ScheduledBasal Scheduled)? _scheduled;
 
     /// <inheritdoc />
     public async Task<IobResult> CalculateTotalAsync(
@@ -238,7 +245,7 @@ public class IobCalculator(
     public IobResult FromTempBasals(
         List<TempBasal> pieces,
         TherapySnapshot snapshot,
-        Func<long, double> scheduledBasalAt,
+        Func<TempBasal, long, double> scheduledUnder,
         long time,
         long deliveredUntil)
     {
@@ -249,7 +256,7 @@ public class IobCalculator(
             snapshot.Dia,
             snapshot.PeakMinutes,
             snapshot.SensitivityAt(time),
-            scheduledBasalAt);
+            scheduledUnder);
     }
 
     private async Task<IobResult> FromTempBasalsAsync(
@@ -258,14 +265,27 @@ public class IobCalculator(
         var pieces = StatisticsService.ClipOverlappingTempBasals(tempBasals, cutoff);
         if (pieces.Count == 0 || pieces[0].StartMills >= cutoff)
         {
-            return FromTempBasalsCore([], time, cutoff, 0, 0, 0, _ => 0);
+            return FromTempBasalsCore([], time, cutoff, 0, 0, 0, (_, _) => 0);
         }
 
-        var scheduledBasalAt = await basalRate.BuildResolverAsync(pieces[0].StartMills, cutoff + 1, ct);
+        var scheduled = await ScheduledAsync(pieces[0].StartMills, cutoff, ct);
         var dia = await therapySettings.GetDIAAsync(time, null, ct);
         var sens = await sensitivity.GetSensitivityAsync(time, null, ct);
 
-        return FromTempBasalsCore(pieces, time, cutoff, dia, PEAK_MINUTES, sens, scheduledBasalAt);
+        return FromTempBasalsCore(pieces, time, cutoff, dia, PEAK_MINUTES, sens, scheduled.Under);
+    }
+
+    private async Task<ScheduledBasal> ScheduledAsync(long from, long to, CancellationToken ct)
+    {
+        if (_scheduled is { } held && held.From == from && held.To == to)
+            return held.Scheduled;
+
+        var profile = new List<BasalSegment>();
+        await foreach (var segment in basalSegments.GetSegmentsAsync(from, to + 1, ct))
+            profile.Add(segment);
+        var scheduled = new ScheduledBasal(profile, await ScheduledBasal.OverridesAsync(stateSpans, from, to, ct));
+        _scheduled = (from, to, scheduled);
+        return scheduled;
     }
 
     /// <param name="pieces">As <see cref="StatisticsService.ClipOverlappingTempBasals"/> returns them: ordered by start, each with an end.</param>
@@ -276,7 +296,7 @@ public class IobCalculator(
         double profileDia,
         double profilePeak,
         double sens,
-        Func<long, double> scheduledBasalAt)
+        Func<TempBasal, long, double> scheduledUnder)
     {
         double? basalIob = null;
         var activity = 0.0;
@@ -292,7 +312,7 @@ public class IobCalculator(
                 piece.InsulinContext?.Dia ?? profileDia,
                 piece.InsulinContext?.Peak ?? profilePeak,
                 sens,
-                scheduledBasalAt,
+                scheduledUnder,
                 time);
 
             basalIob = (basalIob ?? 0) + contribution.IobContrib;
@@ -311,9 +331,10 @@ public class IobCalculator(
 
     /// <summary>
     /// Net basal insulin on board from one delivered temp basal piece, on the model oref0, Loop,
-    /// AAPS and Trio share. The piece's rate less the scheduled rate under it is delivered in
-    /// <see cref="NET_BASAL_CHUNK_MS"/> chunks from its start, the last one partial, and each chunk
-    /// decays from its own start on the same insulin curve as a bolus (<see cref="CalcInsulinCore"/>).
+    /// AAPS and Trio share. The piece's rate less the scheduled rate under it
+    /// (<see cref="ScheduledBasal.Under"/>) is delivered in <see cref="NET_BASAL_CHUNK_MS"/> chunks
+    /// from its start, the last one partial, and each chunk decays from its own start on the same
+    /// insulin curve as a bolus (<see cref="CalcInsulinCore"/>).
     /// A temp below the schedule, or a suspend, withholds insulin, so its chunks are negative and so
     /// are the IOB and activity they give. Delivery stops at <paramref name="deliveryEnd"/>, the
     /// caller's cutoff at the latest; the curve is read at <paramref name="time"/>, which can be
@@ -325,7 +346,7 @@ public class IobCalculator(
         double dia,
         double peak,
         double sens,
-        Func<long, double> scheduledBasalAt,
+        Func<TempBasal, long, double> scheduledUnder,
         long time)
     {
         // A percent temp's Rate was resolved against the schedule at its start, so one that crosses a
@@ -346,10 +367,7 @@ public class IobCalculator(
         {
             var chunkEnd = Math.Min(chunkStart + NET_BASAL_CHUNK_MS, deliveryEnd);
 
-            // The device's own scheduled rate is what it measured the temp against, so it beats a
-            // profile that may have been edited since.
-            var scheduled = piece.ScheduledRate ?? scheduledBasalAt(chunkStart);
-            var units = (rate - scheduled) * (chunkEnd - chunkStart) / 3_600_000.0;
+            var units = (rate - scheduledUnder(piece, chunkStart)) * (chunkEnd - chunkStart) / 3_600_000.0;
 
             var contribution = CalcInsulinCore(units, chunkStart, dia, peak, sens, time);
             iob += contribution.IobContrib;
@@ -391,7 +409,7 @@ public class IobCalculator(
         var aps = (await apsSnapshotRepo.GetAsync(
             from: fromTime, to: toTime, device: null, source: null, limit: 1, offset: 0, descending: true, ct: ct))
             .Select(s => new DeviceReading(
-                DeviceReading.MillsOf(s.Timestamp), DeviceSource.Aps, s.Iob, s.Cob, s.BolusIob, s.BasalIob,
+                s.Timestamp.ToMills(), DeviceSource.Aps, s.Iob, s.Cob, s.BolusIob, s.BasalIob,
                 s.AidAlgorithm == AidAlgorithm.Loop ? "Loop" : "OpenAPS", s.Device));
         var pump = (await pumpSnapshotRepo.GetAsync(
             from: fromTime, to: toTime, device: null, source: null, limit: 1, offset: 0, descending: true, ct: ct))
@@ -408,6 +426,7 @@ public class IobCalculator(
             Source = reading.Name,
             Device = reading.Device,
             Mills = reading.Mills,
+            ReportedByDevice = true,
         };
     }
 

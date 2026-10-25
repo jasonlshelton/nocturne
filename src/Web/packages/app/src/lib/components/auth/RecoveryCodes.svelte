@@ -60,11 +60,11 @@
   }
 </script>
 
-<div class="space-y-4">
+<div class="@container space-y-4">
   <div class="space-y-3">
     <div class="flex items-center gap-2">
       <ShieldCheck class="h-5 w-5 text-primary" />
-      <h3 class="font-medium">Recovery Codes</h3>
+      <h3 class="font-medium">Recovery codes</h3>
     </div>
     <p class="text-sm text-muted-foreground">
       Save these recovery codes in a safe place. If you lose access to your
@@ -76,7 +76,7 @@
       <div class="grid grid-cols-2 gap-2 rounded-lg border bg-muted/50 p-4">
         {#each codes as code, i (i)}
           <code
-            class="rounded bg-background px-2 py-1 text-center text-sm font-mono"
+            class="rounded bg-background px-2 py-1 text-center text-sm font-mono break-all"
           >
             {code}
           </code>

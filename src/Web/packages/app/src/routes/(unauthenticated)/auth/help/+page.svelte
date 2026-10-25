@@ -2,18 +2,19 @@
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import HelpCircle from "@lucide/svelte/icons/circle-question-mark";
-  import Fingerprint from "@lucide/svelte/icons/fingerprint-pattern";
   import Smartphone from "@lucide/svelte/icons/smartphone";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Globe from "@lucide/svelte/icons/globe";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import { Artwork } from "@nocturne/watercolour";
+  import { fingerprintArtwork } from "$lib/watercolour-icons";
   // Quote the sign-in controls by name — this is the page a locked-out person
   // reaches, so the names have to match what they're looking at.
   import { signInMethodLabels } from "$lib/components/auth/labels";
 </script>
 
 <svelte:head>
-  <title>Sign-in Help - Nocturne</title>
+  <title>Sign-in help - Nocturne</title>
 </svelte:head>
 
 <div class="flex min-h-screen items-center justify-center bg-background p-4">
@@ -25,7 +26,7 @@
         >
           <HelpCircle class="h-6 w-6 text-primary" />
         </div>
-        <Card.Title class="text-2xl font-bold">Sign-in Help</Card.Title>
+        <Card.Title class="text-2xl font-bold">Sign-in help</Card.Title>
         <Card.Description>
           Learn about the different ways to sign in to Nocturne
         </Card.Description>
@@ -35,11 +36,13 @@
     <Card.Root>
       <Card.Header>
         <div class="flex items-center gap-3">
-          <div
-            class="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10"
-          >
-            <Fingerprint class="h-5 w-5 text-primary" />
-          </div>
+          <Artwork
+            icon={fingerprintArtwork}
+            palette="water"
+            motion="auto"
+            autoplay="once"
+            class="size-56"
+          />
           <Card.Title class="text-lg">Passkeys</Card.Title>
         </div>
       </Card.Header>
@@ -68,7 +71,7 @@
           >
             <Smartphone class="h-5 w-5 text-primary" />
           </div>
-          <Card.Title class="text-lg">Authenticator App</Card.Title>
+          <Card.Title class="text-lg">Authenticator app</Card.Title>
         </div>
       </Card.Header>
       <Card.Content>
@@ -78,9 +81,7 @@
           that refreshes every 30 seconds, and each code can be used once.
         </p>
         <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-          If you set one up, enter the code from the app on the sign-in page,
-          straight after your passkey. You can set up an authenticator in your
-          account settings after you sign in.
+          If you configure one, enter the code from the app on the sign-in page, straight after your passkey. You can configure an authenticator in your account settings after you sign in.
         </p>
       </Card.Content>
     </Card.Root>
@@ -93,14 +94,12 @@
           >
             <KeyRound class="h-5 w-5 text-primary" />
           </div>
-          <Card.Title class="text-lg">Recovery Codes</Card.Title>
+          <Card.Title class="text-lg">Recovery codes</Card.Title>
         </div>
       </Card.Header>
       <Card.Content>
         <p class="text-sm leading-relaxed text-muted-foreground">
-          Recovery codes are one-time backup codes you received when you first
-          set up your account. Use them if you cannot access your passkey or
-          authenticator app.
+          Recovery codes are one-time backup codes you received when you first created your account. Use them if you cannot access your passkey or authenticator app.
         </p>
         <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
           On the sign-in page, choose
@@ -109,8 +108,7 @@
           cross it off your list after use.
         </p>
         <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-          A code does not sign you in on its own: it gives you ten minutes to set
-          up a new passkey, and you sign in with that.
+          A code does not sign you in on its own. It gives you ten minutes to create a new passkey, and you sign in with that.
         </p>
       </Card.Content>
     </Card.Root>
@@ -123,7 +121,7 @@
           >
             <Globe class="h-5 w-5 text-primary" />
           </div>
-          <Card.Title class="text-lg">External Providers</Card.Title>
+          <Card.Title class="text-lg">External providers</Card.Title>
         </div>
       </Card.Header>
       <Card.Content>

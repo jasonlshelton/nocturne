@@ -106,8 +106,8 @@ public static class ScenarioConversions
                 ?? new Dictionary<(StateSpanCategory, string?), StateSpanSnapshot>(),
             ActiveTrackers = ctx.ActiveTrackers?.ToDictionary(
                     t => t.TrackerDefinitionId,
-                    t => Utc(t.ReferenceAt)!.Value)
-                ?? new Dictionary<Guid, DateTime>(),
+                    t => new ActiveTrackerReference(Utc(t.ReferenceAt)!.Value, Utc(t.RecordedAt), t.Scheduled))
+                ?? new Dictionary<Guid, ActiveTrackerReference>(),
             SleepSessionActive = ctx.SleepSessionActive,
         };
     }

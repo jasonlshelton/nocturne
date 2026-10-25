@@ -1,3 +1,5 @@
+using Nocturne.Core.Models;
+
 namespace Nocturne.Core.Clinical.Statistics;
 
 /// <summary>
@@ -12,12 +14,9 @@ public readonly record struct PunchCardDayWindow(long StartMs, long EndMs)
         var startLocal = DateTime.SpecifyKind(localDay.Date, DateTimeKind.Unspecified);
         var endLocal = startLocal.AddDays(1).AddTicks(-1);
         return new PunchCardDayWindow(
-            ToUnixMs(TimeZoneInfo.ConvertTimeToUtc(startLocal, tz)),
-            ToUnixMs(TimeZoneInfo.ConvertTimeToUtc(endLocal, tz)));
+            TimeZoneInfo.ConvertTimeToUtc(startLocal, tz).ToMills(),
+            TimeZoneInfo.ConvertTimeToUtc(endLocal, tz).ToMills());
     }
-
-    private static long ToUnixMs(DateTime utc) =>
-        new DateTimeOffset(utc, TimeSpan.Zero).ToUnixTimeMilliseconds();
 }
 
 public static class PunchCardDayBuckets

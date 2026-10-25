@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
+using Nocturne.API.Attributes;
 using Nocturne.API.Authorization;
 using Nocturne.API.Extensions;
 using Nocturne.Core.Contracts.Platform;
@@ -13,6 +14,13 @@ namespace Nocturne.API.Controllers.V4.Profiles;
 /// <summary>
 /// Controller for clock face configuration management.
 /// </summary>
+/// <remarks>
+/// A face serves glucose to anyone holding its link, so creating, changing or deleting one is
+/// managing a public link to the tenant and takes <see cref="Scope.SharingManage"/>, as
+/// <see cref="Identity.ShareLinkController"/> does. A face belongs to the caller's own subject, so a
+/// caller with none (the instance key) is refused rather than saving an ownerless face, and reads
+/// an empty list and an empty starter.
+/// </remarks>
 /// <seealso cref="IClockFaceService"/>
 [ApiController]
 [Tags("Profiles")]
@@ -118,7 +126,11 @@ public class ClockFacesController : ControllerBase
     [ProducesResponseType(typeof(ClockFaceListItem[]), 200)]
     public async Task<ActionResult<ClockFaceListItem[]>> List()
     {
-        var userId = HttpContext.GetSubjectIdString()!;
+        if (HttpContext.GetSubjectIdString() is not { } userId)
+        {
+            return Ok(Array.Empty<ClockFaceListItem>());
+        }
+
         var clockFaces = await _clockFaceService.GetByUserAsync(userId, HttpContext.RequestAborted);
 
         return Ok(clockFaces.ToArray());
@@ -134,7 +146,11 @@ public class ClockFacesController : ControllerBase
     [ProducesResponseType(typeof(ClockFaceConfig), 200)]
     public async Task<ActionResult<ClockFaceConfig>> GetStarter()
     {
-        var userId = HttpContext.GetSubjectIdString()!;
+        if (HttpContext.GetSubjectIdString() is not { } userId)
+        {
+            return Ok(new ClockFaceConfig());
+        }
+
         return Ok(await _clockFaceService.GetStarterConfigAsync(userId, HttpContext.RequestAborted));
     }
 
@@ -146,10 +162,18 @@ public class ClockFacesController : ControllerBase
     [HttpPost]
     [RemoteCommand(Invalidates = ["List"])]
     [Authorize]
+    [RequireScope(Scope.SharingManage)]
     [ProducesResponseType(typeof(ClockFace), 201)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
     public async Task<ActionResult<ClockFace>> Create([FromBody] CreateClockFaceRequest request)
     {
+        if (HttpContext.GetSubjectIdString() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return Problem(detail: "Name is required", statusCode: 400, title: "Bad Request");
@@ -165,7 +189,6 @@ public class ClockFacesController : ControllerBase
             return refused;
         }
 
-        var userId = HttpContext.GetSubjectIdString()!;
         var clockFace = await _clockFaceService.CreateAsync(userId, request, HttpContext.RequestAborted);
 
         return CreatedAtAction(nameof(GetById), new { id = clockFace.Id }, clockFace);
@@ -180,11 +203,19 @@ public class ClockFacesController : ControllerBase
     [HttpPut("{id:guid}")]
     [RemoteCommand(Invalidates = ["List", "GetById"])]
     [Authorize]
+    [RequireScope(Scope.SharingManage)]
     [ProducesResponseType(typeof(ClockFace), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ClockFace>> Update(Guid id, [FromBody] UpdateClockFaceRequest request)
     {
+        if (HttpContext.GetSubjectIdString() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
         if (request.Config?.Validate() is { } configError)
         {
             return Problem(detail: configError, statusCode: 400, title: "Bad Request");
@@ -196,7 +227,6 @@ public class ClockFacesController : ControllerBase
             return refused;
         }
 
-        var userId = HttpContext.GetSubjectIdString()!;
         var clockFace = await _clockFaceService.UpdateAsync(id, userId, request, HttpContext.RequestAborted);
 
         if (clockFace == null)
@@ -231,11 +261,18 @@ public class ClockFacesController : ControllerBase
     [HttpDelete("{id:guid}")]
     [RemoteCommand(Invalidates = ["List"])]
     [Authorize]
+    [RequireScope(Scope.SharingManage)]
     [ProducesResponseType(204)]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> Delete(Guid id)
     {
-        var userId = HttpContext.GetSubjectIdString()!;
+        if (HttpContext.GetSubjectIdString() is not { } userId)
+        {
+            return Unauthorized();
+        }
+
         var deleted = await _clockFaceService.DeleteAsync(id, userId, HttpContext.RequestAborted);
 
         if (!deleted)

@@ -96,8 +96,8 @@ public class ReadEndpointScopeEnforcementTests
         /// <summary>The action, or the service it calls, checks the scope or the share and guest access itself and answers Forbid, NotFound or a narrowed result.</summary>
         public const string ActionChecksAccess = "scope or share access checked in the action or its service";
 
-        /// <summary>Filtered per tracker by the caller's subject and the tracker's visibility.</summary>
-        public const string TrackerVisibility = "tracker visibility filtered by the caller's subject";
+        /// <summary>The tenant's trackers, read whole by a member holding alerts.read and not at all by anyone else (see TrackerReadAccess).</summary>
+        public const string TenantTrackers = "tenant's trackers, alerts.read checked in the action";
 
         /// <summary>Instance-level or compiled-in reference data; no tenant row is read.</summary>
         public const string StaticReference = "static reference data, no tenant rows";
@@ -110,26 +110,9 @@ public class ReadEndpointScopeEnforcementTests
 
         /// <summary>Every caller may ask; the action drops or refuses the parts the caller's scopes do not read.</summary>
         public const string CallerNarrowedAnswer = "answer narrowed to the caller's read scopes in the action";
-
-        /// <summary>The controller carries <c>[Authorize(Roles = "platform_admin")]</c>.</summary>
-        public const string PlatformAdminRole = "platform-admin role, not a data scope";
-
-        /// <summary>The controller carries <c>[RequireInstanceKeyAuth]</c>.</summary>
-        public const string InstanceKey = "instance-key service credential, not a data scope";
     }
 
-    private static readonly IReadOnlyDictionary<string, string> V4ExemptControllers =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["AccessRequestController"] = V4Reason.PlatformAdminRole,
-            ["ConnectorAdminController"] = V4Reason.PlatformAdminRole,
-            ["DemoAdminController"] = V4Reason.PlatformAdminRole,
-            ["OidcProviderAdminController"] = V4Reason.PlatformAdminRole,
-            ["PlatformSettingsController"] = V4Reason.PlatformAdminRole,
-            ["TenantController"] = V4Reason.PlatformAdminRole,
-            ["TenantDirectGrantController"] = V4Reason.PlatformAdminRole,
-            ["ChatIdentityDirectoryController"] = V4Reason.InstanceKey,
-        };
+    private static IReadOnlyDictionary<string, string> V4ExemptControllers => V4ScopeGuardExemptions.Controllers;
 
     private static readonly IReadOnlyDictionary<string, string> V4ExemptReadActions =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -152,7 +135,7 @@ public class ReadEndpointScopeEnforcementTests
             ["PlatformController.GetTenants"] = V4Reason.OwnData,
             ["FoodsController.GetFavorites"] = V4Reason.OwnData,
             ["NotificationsController.GetNotifications"] = V4Reason.OwnData,
-            ["TrackersController.GetPresets"] = V4Reason.OwnData,
+            ["TrackersController.GetPresets"] = V4Reason.TenantTrackers,
 
             ["MemberInviteController.ListInvites"] = V4Reason.ActionChecksAccess,
             ["MemberInviteController.GetEffectivePermissions"] = V4Reason.ActionChecksAccess,
@@ -168,11 +151,12 @@ public class ReadEndpointScopeEnforcementTests
             ["AuditController.GetAuditConfig"] = V4Reason.ActionChecksAccess,
             ["TenantAppearanceController.GetTenantAppearance"] = V4Reason.ActionChecksAccess,
 
-            ["TrackersController.GetDefinitions"] = V4Reason.TrackerVisibility,
-            ["TrackersController.GetDefinition"] = V4Reason.TrackerVisibility,
-            ["TrackersController.GetActiveInstances"] = V4Reason.TrackerVisibility,
-            ["TrackersController.GetInstanceHistory"] = V4Reason.TrackerVisibility,
-            ["TrackersController.GetUpcomingInstances"] = V4Reason.TrackerVisibility,
+            ["TrackersController.GetDefinitions"] = V4Reason.TenantTrackers,
+            ["TrackersController.GetDefinition"] = V4Reason.TenantTrackers,
+            ["TrackersController.GetActiveInstances"] = V4Reason.TenantTrackers,
+            ["TrackersController.GetInstanceHistory"] = V4Reason.TenantTrackers,
+            ["TrackersController.GetUpcomingInstances"] = V4Reason.TenantTrackers,
+            ["TrackerLegacyFallbacksController.GetLegacyFallbacks"] = V4Reason.ActionChecksAccess,
 
             ["DeviceCatalogController.GetCatalog"] = V4Reason.StaticReference,
             ["DeviceCatalogController.GetCatalogByCategory"] = V4Reason.StaticReference,
@@ -188,6 +172,8 @@ public class ReadEndpointScopeEnforcementTests
             ["ServicesController.GetConnectorCapabilities"] = V4Reason.StaticReference,
             ["ServicesController.GetApiInfo"] = V4Reason.StaticReference,
             ["SupportController.GetFallbackUrl"] = V4Reason.StaticReference,
+
+            ["DatabaseCapacityController.Get"] = V4ScopeGuardExemptions.PlatformAdminRole,
 
             ["WebhookSettingsController.GetWebhookSettings"] = V4Reason.NotStored,
 
@@ -332,15 +318,8 @@ public class ReadEndpointScopeEnforcementTests
                 .Single(t => t.Name == name && IsV4(t))
                 .GetCustomAttributes(inherit: true);
 
-            var holds = reason switch
-            {
-                V4Reason.PlatformAdminRole => attributes.OfType<AuthorizeAttribute>()
-                    .Any(a => a.Roles?.Contains("platform_admin", StringComparison.Ordinal) == true),
-                V4Reason.InstanceKey => attributes.Any(a => a.GetType().Name == "RequireInstanceKeyAuthAttribute"),
-                _ => false,
-            };
-
-            holds.Should().BeTrue($"{name} claims '{reason}' but does not carry it");
+            V4ScopeGuardExemptions.Carries(attributes, reason)
+                .Should().BeTrue($"{name} claims '{reason}' but does not carry it");
         }
     }
 

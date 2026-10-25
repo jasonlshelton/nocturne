@@ -40,7 +40,7 @@
   <CardHeader>
     <CardTitle class="flex items-center gap-2">
       <Smartphone class="h-5 w-5" />
-      Set Up an Uploader
+      Add an uploader
     </CardTitle>
     <CardDescription>
       Connect your CGM app or AID system to push data to Nocturne
@@ -49,8 +49,8 @@
   <CardContent class="@container">
     <Tabs.Root value="cgm">
       <Tabs.List class="grid w-full grid-cols-3">
-        <Tabs.Trigger value="cgm">CGM Apps</Tabs.Trigger>
-        <Tabs.Trigger value="aid">AID Systems</Tabs.Trigger>
+        <Tabs.Trigger value="cgm">CGM apps</Tabs.Trigger>
+        <Tabs.Trigger value="aid">AID systems</Tabs.Trigger>
         <Tabs.Trigger value="other">Other</Tabs.Trigger>
       </Tabs.List>
 
@@ -60,7 +60,7 @@
         { value: "other", apps: otherApps },
       ] as tab (tab.value)}
         <Tabs.Content value={tab.value} class="mt-4">
-          <div class="grid gap-3 @xl:grid-cols-2">
+          <div class="grid grid-cols-1 gap-3 @xl:grid-cols-2">
             {#each tab.apps as uploader (uploader.id)}
               {@const active = isUploaderActive(uploader)}
               <Item
@@ -95,7 +95,7 @@
                   </p>
                 </div>
                 <ChevronRight
-                  class="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors"
+                  class="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground transition-colors"
                 />
               </Item>
             {/each}

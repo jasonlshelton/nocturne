@@ -325,7 +325,7 @@ public static class WidgetCatalog
             "Stacked chart showing time in glucose ranges",
             "BarChart3"),
         Top(WidgetId.DailySummary, "Daily Summary",
-            "Today's glucose statistics overview",
+            "Last 24 hours of glucose statistics",
             "CalendarDays"),
         Top(WidgetId.Clock, "Clock",
             "Current time and date display",

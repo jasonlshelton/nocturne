@@ -9,6 +9,7 @@
     complete as completeCareLinkConnect,
     desktopToken as mintDesktopLinkCode,
   } from "$lib/api/generated/careLinkConnects.generated.remote";
+  import { CareLinkRegion } from "$lib/constants/carelink-regions";
   import { describeSubmitError } from "$lib/forms/submit-error";
   import {
     Card,
@@ -53,7 +54,7 @@
     // Called after a refresh token is stored, with the region signed in to and the
     // auto-detected profile (if any).
     onConnected?: (info: {
-      server: "EU" | "US";
+      server: CareLinkRegion;
       username?: string | null;
       country?: string | null;
     }) => void;
@@ -61,7 +62,7 @@
 
   type Phase = "idle" | "awaiting-code" | "done";
 
-  let region = $state<"EU" | "US">("EU");
+  let region = $state<CareLinkRegion>(CareLinkRegion.Eu);
   let phase = $state<Phase>("idle");
   let flowState = $state<string | null>(null);
   let codeInput = $state("");
@@ -78,7 +79,7 @@
     try {
       const res = await startCareLinkConnect({ server: region });
       if (!res.authorizeUrl || !res.state) {
-        error = "Could not start CareLink sign-in. Please try again.";
+        error = "Could not start CareLink sign-in. Try again.";
         return;
       }
       flowState = res.state;
@@ -102,7 +103,7 @@
         state: flowState,
       });
       if (!res.success) {
-        error = "Sign-in could not be completed. Please try again.";
+        error = "Sign-in could not be completed. Try again.";
         return;
       }
       connectedUsername = res.username ?? null;
@@ -169,15 +170,15 @@
         <Label>Region</Label>
         <div class="flex gap-2">
           <Button
-            variant={region === "EU" ? "default" : "outline"}
+            variant={region === CareLinkRegion.Eu ? "default" : "outline"}
             size="sm"
-            onclick={() => (region = "EU")}
-            disabled={busy}>EU / Outside-US</Button
+            onclick={() => (region = CareLinkRegion.Eu)}
+            disabled={busy}>EU / outside-US</Button
           >
           <Button
-            variant={region === "US" ? "default" : "outline"}
+            variant={region === CareLinkRegion.Us ? "default" : "outline"}
             size="sm"
-            onclick={() => (region = "US")}
+            onclick={() => (region = CareLinkRegion.Us)}
             disabled={busy}>US</Button
           >
         </div>
@@ -250,7 +251,7 @@
           <div class="mt-1 rounded bg-muted px-2 py-1 font-mono text-xs break-all text-foreground">
             {REDIRECT_PREFIX}?code=…
           </div>
-          Right-click it → <span class="font-medium text-foreground">Copy → Copy URL</span>.
+          Open its context menu → <span class="font-medium text-foreground">Copy → Copy URL</span>.
         </li>
         <li>Paste the whole thing below. You do not need to trim it.</li>
       </ol>

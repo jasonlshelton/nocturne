@@ -120,9 +120,10 @@
           xAxis: {
             tickMultiline: true,
             format: formatHour,
+            tickOcclusion: true,
           },
           yAxis: {
-            label: "Basal Rate (U/hr)",
+            label: "Basal rate (U/hr)",
           },
         }}
         padding={{ top: 20, right: 20, bottom: 40, left: 50 }}

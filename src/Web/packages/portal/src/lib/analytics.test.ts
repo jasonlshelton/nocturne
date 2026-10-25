@@ -5,6 +5,7 @@ import {
   DOCS_SECTION_IDS,
   INSTALL_PLATFORM_IDS,
   INSTALL_STEP_IDS,
+  VIDEO_IDS,
   allowedProps,
   campaignUrl,
   docsSectionAt,
@@ -33,6 +34,18 @@ describe('allowedProps', () => {
     expect(allowedProps('Docs Copy', { kind: 'code', page: '/docs/installation' })).toEqual({
       kind: 'code',
     });
+  });
+});
+
+describe('docs videos', () => {
+  it('reports a published video by id', () => {
+    expect(VIDEO_IDS).toContain('agp');
+    expect(allowedProps('Video Play', { video: 'agp' })).toEqual({ video: 'agp' });
+    expect(allowedProps('Video Complete', { video: 'agp' })).toEqual({ video: 'agp' });
+  });
+
+  it('drops an id the video manifest does not hold', () => {
+    expect(allowedProps('Video Complete', { video: 'not-a-video' })).toEqual({});
   });
 });
 

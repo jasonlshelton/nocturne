@@ -14,6 +14,7 @@
   } from "../engine/marker-label-layout";
   import { MARKER_HALF_WIDTH } from "$lib/components/icons/marker-shapes";
   import { patternClass } from "$lib/components/charts/print/chart-print-patterns";
+  import { carbMarkerName } from "../meal-period-labels.svelte";
   import TrackAxis from "./TrackAxis.svelte";
   import TrackLabel from "./TrackLabel.svelte";
 
@@ -105,8 +106,8 @@
       ...carbLabelCandidates.map((c) => c.x),
     ];
     const named = carbLabelCandidates
-      .filter((c) => c.item.label)
-      .map((c) => ({ ...c, text: c.item.label ?? "" }));
+      .map((c) => ({ ...c, text: carbMarkerName(c.item) ?? "" }))
+      .filter((c) => c.text);
     return placeTrailingLabels(named, glyphXs, MARKER_HALF_WIDTH, MEAL_LABEL_GAP, amountCharWidth);
   });
 
@@ -205,7 +206,7 @@
           {xPos}
           {yPos}
           carbs={marker.carbs ?? 0}
-          label={mealLabelVisible.has(marker) ? (marker.label ?? null) : null}
+          label={mealLabelVisible.has(marker) ? (carbMarkerName(marker) ?? null) : null}
           treatmentId={marker.treatmentId ?? ""}
           onMarkerClick={effectiveOnMarkerClick}
           showLabel={carbLabelVisible.has(marker)}

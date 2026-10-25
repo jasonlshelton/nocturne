@@ -800,6 +800,30 @@ public class GoogleHealthConnectorServiceTests
     }
 
     [Fact]
+    public async Task Sync_writes_nothing_while_another_holder_has_the_gate()
+    {
+        var fixture = new Fixture(request => request.RequestUri!.AbsolutePath == "/token"
+            ? Json($$"""{"access_token":"access","expires_in":3600,"scope":"{{GoogleHealthClient.MetricsScope}}"}""")
+            : Json("{\"dataPoints\":[]}"));
+        var config = fixture.Configuration();
+        var gateReleased = false;
+        bool? wroteAfterRelease = null;
+        fixture.Writer.Setup(value => value.BeginReconciliationAsync(
+                It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTimeOffset>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wroteAfterRelease ??= gateReleased)
+            .ReturnsAsync(() => Guid.NewGuid());
+        await fixture.Gate.WaitAsync();
+        var pending = fixture.Service.SyncDataAsync(new SyncRequest(), config, default);
+        Assert.False(pending.IsCompleted);
+        gateReleased = true;
+        fixture.Gate.Release();
+
+        Assert.True((await pending).Success);
+        Assert.True(wroteAfterRelease);
+    }
+
+    [Fact]
     public async Task Waiting_sync_does_not_restore_a_disconnected_session()
     {
         var fixture = new Fixture(_ => throw new InvalidOperationException("Google must not be called"));

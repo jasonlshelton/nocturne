@@ -45,7 +45,9 @@ public class ProfileController : ControllerBase, IWriteScopedController
     private readonly ISensitivityScheduleRepository _sensitivityRepo;
     private readonly ITargetRangeScheduleRepository _targetRangeRepo;
     private readonly IProfileProjectionService _projectionService;
+    private readonly IProfileDeletionService _deletionService;
     private readonly ITempBasalRateReresolver _tempBasalRates;
+    private readonly ILoopClosedLoopStamper _closedLoop;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ProfileController"/>.
@@ -56,7 +58,9 @@ public class ProfileController : ControllerBase, IWriteScopedController
     /// <param name="sensitivityRepo">Repository for insulin sensitivity schedule records.</param>
     /// <param name="targetRangeRepo">Repository for target glucose range schedule records.</param>
     /// <param name="projectionService">Service for reading legacy profile projections from V4 data.</param>
+    /// <param name="deletionService">Service for deleting a whole named therapy profile.</param>
     /// <param name="tempBasalRates">Re-resolves the percent temp basals a written basal schedule covers.</param>
+    /// <param name="closedLoop">Restamps the Loop snapshots written therapy settings govern.</param>
     public ProfileController(
         ITherapySettingsRepository therapyRepo,
         IBasalScheduleRepository basalRepo,
@@ -64,7 +68,9 @@ public class ProfileController : ControllerBase, IWriteScopedController
         ISensitivityScheduleRepository sensitivityRepo,
         ITargetRangeScheduleRepository targetRangeRepo,
         IProfileProjectionService projectionService,
-        ITempBasalRateReresolver tempBasalRates
+        IProfileDeletionService deletionService,
+        ITempBasalRateReresolver tempBasalRates,
+        ILoopClosedLoopStamper closedLoop
     )
     {
         _therapyRepo = therapyRepo;
@@ -73,7 +79,9 @@ public class ProfileController : ControllerBase, IWriteScopedController
         _sensitivityRepo = sensitivityRepo;
         _targetRangeRepo = targetRangeRepo;
         _projectionService = projectionService;
+        _deletionService = deletionService;
         _tempBasalRates = tempBasalRates;
+        _closedLoop = closedLoop;
     }
 
     #region Summary
@@ -191,27 +199,32 @@ public class ProfileController : ControllerBase, IWriteScopedController
         if (this.RejectDateSpan(from, to) is { } overlong)
             return overlong;
 
-        var profiles = await activeSchedules.GetForRangeAsync(ToMills(from), ToMills(to), ct);
+        var profiles = await activeSchedules.GetForRangeAsync(from.ToMills(), to.ToMills(), ct);
         return Ok(profiles.ToList());
     }
 
-    private static long ToMills(DateTime instant) =>
-        new DateTimeOffset(DateTime.SpecifyKind(instant, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-
     /// <summary>
-    /// Make the newest settings row of <paramref name="profileName"/> (exact name) the tenant's only default profile.
+    /// Make the newest settings row of the profile <see cref="ResolveProfile"/> finds for
+    /// <paramref name="profileName"/> the tenant's only default profile.
     /// </summary>
     [HttpPost("set-default/{profileName}")]
     [RequireDeclaredWriteScope]
     [RemoteCommand(Invalidates = ["GetProfileSummary", "GetTherapySettings"])]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> SetDefaultProfile(string profileName, CancellationToken ct = default)
     {
-        var all = await _therapyRepo.GetAsync(null, null, null, null, 1000, 0, true, ct);
+        var all = (await _therapyRepo.GetAsync(null, null, null, null, 1000, 0, true, ct)).ToList();
 
-        var target = all.FirstOrDefault(ts =>
-            string.Equals(ts.ProfileName, profileName, StringComparison.Ordinal));
+        var (target, ambiguous) = ResolveProfile(all, profileName);
+
+        if (ambiguous is not null)
+            return Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Ambiguous profile name",
+                detail: $"'{profileName}' matches more than one profile when case is ignored: "
+                    + $"{string.Join(", ", ambiguous)}. Use the exact name.");
 
         if (target is null)
             return NotFound();
@@ -220,6 +233,85 @@ public class ProfileController : ControllerBase, IWriteScopedController
         await _tempBasalRates.AfterProfilesChangedAsync([profileName], ct);
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Resolves a caller-supplied profile name against the stored records, preferring an exact
+    /// match and accepting a differently-cased one only when it is unambiguous.
+    /// </summary>
+    /// <remarks>
+    /// Profile names are stored case-sensitively, so <c>Default</c> and <c>default</c> are two
+    /// profiles. A tenant ends up with both when an uploader relays one and a pump writes the
+    /// other. Matching case-insensitively would silently act on whichever was written last.
+    /// Requiring an exact match would turn the lenient calls this endpoint has always served into
+    /// 404s. Neither is safe alone, so a case-only difference resolves when one candidate name
+    /// exists and is reported when several do.
+    /// </remarks>
+    /// <param name="all">Therapy settings, newest first.</param>
+    /// <param name="profileName">The name the caller asked for.</param>
+    /// <returns>
+    /// The newest record for the resolved name, or the candidate names when the request was
+    /// ambiguous. Both are null when nothing matched.
+    /// </returns>
+    private static (TherapySettings? Target, IReadOnlyList<string>? Ambiguous) ResolveProfile(
+        IReadOnlyList<TherapySettings> all,
+        string profileName
+    )
+    {
+        var exact = all.FirstOrDefault(ts =>
+            string.Equals(ts.ProfileName, profileName, StringComparison.Ordinal));
+
+        if (exact is not null)
+            return (exact, null);
+
+        var candidates = all
+            .Select(ts => ts.ProfileName)
+            .Where(n => string.Equals(n, profileName, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (candidates.Count > 1)
+            return (null, candidates);
+
+        if (candidates.Count == 0)
+            return (null, null);
+
+        return (all.First(ts => string.Equals(ts.ProfileName, candidates[0], StringComparison.Ordinal)), null);
+    }
+
+    /// <summary>
+    /// Delete a whole named therapy profile and every schedule record belonging to it.
+    /// </summary>
+    /// <remarks>
+    /// The name is matched case-sensitively, with no lenient fallback: this destroys data, so
+    /// <c>Default</c> must never resolve to <c>default</c>. Contrast
+    /// <see cref="ResolveProfile"/>, which the non-destructive <see cref="SetDefaultProfile"/> uses.
+    /// </remarks>
+    [HttpDelete("by-name/{profileName}")]
+    [RequireDeclaredWriteScope]
+    [RemoteCommand(Invalidates = ["GetProfileSummary", "GetTherapySettings"])]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> DeleteProfileByName(string profileName, CancellationToken ct = default)
+    {
+        var result = await _deletionService.DeleteByProfileNameAsync(profileName, ct);
+
+        return result.Refusal switch
+        {
+            ProfileDeletionRefusal.NotFound => NotFound(),
+            ProfileDeletionRefusal.OnlyProfile => Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Cannot delete the only profile",
+                detail: $"'{profileName}' is the only therapy profile. "
+                    + "Add or sync another profile before deleting this one."),
+            ProfileDeletionRefusal.ActiveProfile => Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Cannot delete the active profile",
+                detail: $"'{profileName}' is the active profile. "
+                    + "Set another profile active first, then delete this one."),
+            _ => NoContent(),
+        };
     }
 
     #endregion
@@ -368,6 +460,7 @@ public class ProfileController : ControllerBase, IWriteScopedController
             created.IsDefault = true;
         }
         await _tempBasalRates.AfterProfilesChangedAsync([created.ProfileName], ct);
+        await _closedLoop.AfterLoopSettingsWrittenAsync([created.Timestamp], ct);
         return CreatedAtAction(nameof(GetTherapySettingsById), new { id = created.Id }, created);
     }
 
@@ -395,7 +488,8 @@ public class ProfileController : ControllerBase, IWriteScopedController
     {
         if (model.Timestamp == default)
             return Problem(detail: "Timestamp must be set", statusCode: 400, title: "Bad Request");
-        model.DocumentDefaultProfile = (await _therapyRepo.GetByIdAsync(id, ct))?.DocumentDefaultProfile;
+        var stored = await _therapyRepo.GetByIdAsync(id, ct);
+        model.DocumentDefaultProfile = stored?.DocumentDefaultProfile;
         TherapySettings updated;
         try
         {
@@ -411,6 +505,8 @@ public class ProfileController : ControllerBase, IWriteScopedController
             updated.IsDefault = true;
         }
         await _tempBasalRates.AfterProfilesChangedAsync([updated.ProfileName], ct);
+        await _closedLoop.AfterLoopSettingsWrittenAsync(
+            stored is null ? [updated.Timestamp] : [stored.Timestamp, updated.Timestamp], ct);
         return Ok(updated);
     }
 
@@ -435,6 +531,7 @@ public class ProfileController : ControllerBase, IWriteScopedController
         }
 
         await _tempBasalRates.AfterProfilesChangedAsync(stored is null ? [] : [stored.ProfileName], ct);
+        await _closedLoop.AfterLoopSettingsWrittenAsync(stored is null ? [] : [stored.Timestamp], ct);
         return NoContent();
     }
 

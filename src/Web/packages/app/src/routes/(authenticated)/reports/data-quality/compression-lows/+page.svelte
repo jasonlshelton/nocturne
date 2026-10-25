@@ -59,7 +59,7 @@
 
 	const suggestionsResource = contextResource(
 		() => getCompressionLowSuggestions({}),
-		{ errorTitle: 'Error Loading Compression Low History' }
+		{ errorTitle: 'Error loading compression low history' }
 	);
 
 	const suggestions = $derived(suggestionsResource.current ?? []);
@@ -407,7 +407,7 @@
 					<div class="flex flex-col items-center gap-4 print:hidden">
 						<div class="flex flex-col items-center gap-2 @sm:flex-row @sm:items-end">
 							<div class="flex flex-col gap-1">
-								<label for="start-date" class="text-sm text-muted-foreground">Start Date</label>
+								<label for="start-date" class="text-sm text-muted-foreground">Start date</label>
 								<Input
 									id="start-date"
 									type="date"
@@ -417,7 +417,7 @@
 							</div>
 							<div class="flex flex-col gap-1">
 								<label for="end-date" class="text-sm text-muted-foreground"
-									>End Date (optional)</label
+									>End date (optional)</label
 								>
 								<Input
 									id="end-date"
@@ -433,7 +433,7 @@
 								class="@sm:mt-5"
 							>
 								<RefreshCw class="mr-2 h-4 w-4 {isLoading ? 'animate-spin' : ''}" />
-								Run Detection
+								Run detection
 							</Button>
 						</div>
 						{#if detectionResult}
@@ -543,7 +543,7 @@
 					{#if suggestionDetail}
 						<Card>
 							<CardHeader>
-								<div class="flex items-center justify-between">
+								<div class="flex flex-wrap items-center justify-between gap-2">
 									<CardTitle>
 										{suggestionDetail.suggestion?.nightOf
 											? formatNightOf(suggestionDetail.suggestion.nightOf)
@@ -591,7 +591,7 @@
 								{/if}
 
 								<dl class="m-0 mb-6 grid grid-cols-3 divide-x divide-border border-y border-border">
-									<div class="py-3 pr-4">
+									<div class="py-3 pr-2 @md:pr-4">
 										<dt class="text-sm text-muted-foreground">Lowest ({bgLabel()})</dt>
 										<dd class="m-0 mt-1 text-lg font-semibold tabular-nums">
 											{suggestionDetail.suggestion?.lowestGlucose != null
@@ -599,7 +599,7 @@
 												: '-'}
 										</dd>
 									</div>
-									<div class="px-4 py-3">
+									<div class="px-2 py-3 @md:px-4">
 										<dt class="text-sm text-muted-foreground">Drop Rate ({bgLabel()}/min)</dt>
 										<dd class="m-0 mt-1 text-lg font-semibold tabular-nums">
 											{suggestionDetail.suggestion?.dropRate != null
@@ -607,7 +607,7 @@
 												: '-'}
 										</dd>
 									</div>
-									<div class="py-3 pl-4">
+									<div class="py-3 pl-2 @md:pl-4">
 										<dt class="text-sm text-muted-foreground">Recovery (min)</dt>
 										<dd class="m-0 mt-1 text-lg font-semibold tabular-nums">
 											{suggestionDetail.suggestion?.recoveryMinutes ?? '-'}
@@ -618,7 +618,7 @@
 								{#if brushDomain}
 									<div class="mb-6 border-b border-border pb-4">
 										<p class="text-sm text-muted-foreground">
-											{isPending ? 'Selected Range' : 'Marked Range'}
+											{isPending ? 'Selected range' : 'Marked range'}
 										</p>
 										<p class="font-medium tabular-nums">
 											{time(brushDomain[0])} - {time(brushDomain[1])}
@@ -633,17 +633,17 @@
 
 								{#if isBulkMode && canReviewSuggestions}
 									<div
-										class="mb-4 flex items-center justify-between border-b border-border pb-3 print:hidden"
+										class="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 print:hidden"
 									>
 										<span class="text-sm font-medium">{selectionCount} selected</span>
-										<div class="flex gap-2">
+										<div class="flex flex-wrap gap-2">
 											<Button
 												size="sm"
 												onclick={handleAccept}
 												disabled={isLoading}
 											>
 												<Check class="mr-1 h-3 w-3" />
-												Accept All
+												Accept all
 											</Button>
 											<Button
 												size="sm"
@@ -652,7 +652,7 @@
 												disabled={isLoading}
 											>
 												<X class="mr-1 h-3 w-3" />
-												Dismiss All
+												Dismiss all
 											</Button>
 											<Button
 												size="sm"
@@ -661,7 +661,7 @@
 												disabled={isLoading}
 											>
 												<Trash2 class="mr-1 h-3 w-3" />
-												Delete All
+												Delete all
 											</Button>
 										</div>
 									</div>
@@ -669,7 +669,7 @@
 
 								{#if !isBulkMode && canReviewSuggestions}
 									{#if isPending}
-										<div class="flex gap-4 print:hidden">
+										<div class="flex flex-wrap gap-2 @md:gap-4 print:hidden">
 											<Button
 												class="flex-1"
 												onclick={handleAccept}
@@ -698,7 +698,7 @@
 											</Button>
 										</div>
 									{:else}
-										<div class="flex gap-4 print:hidden">
+										<div class="flex flex-wrap gap-2 @md:gap-4 print:hidden">
 											<Button
 												variant="destructive"
 												class="flex-1"

@@ -206,6 +206,9 @@ public class CarbMarkerDto
     public long Time { get; set; }
     public double Carbs { get; set; }
     public string? Label { get; set; }
+
+    /// <summary>Null when the patient's time zone is unknown.</summary>
+    public MealPeriod? MealPeriod { get; set; }
     public string? TreatmentId { get; set; }
     public bool IsOffset { get; set; }
     public string? DataSource { get; set; }

@@ -11,6 +11,8 @@ import {
 } from "$api-clients";
 import type {
 	AlertRuleResponse,
+	AlertRuleChannelResponse,
+	CreateAlertRuleChannelRequest,
 	InAppRecipientResponse,
 	ThresholdCondition,
 	RateOfChangeCondition,
@@ -122,7 +124,7 @@ export type TrendBucket =
 	| "rising"
 	| "rising_fast";
 
-const TREND_BUCKETS: readonly TrendBucket[] = [
+export const TREND_BUCKETS: readonly TrendBucket[] = [
 	"falling_fast",
 	"falling",
 	"flat",
@@ -728,17 +730,33 @@ export function buildBody(state: RuleEditorState) {
 					.map((c) => stripEditorFields(flattenSingleChildRoot(c))),
 			},
 		},
-		channels: state.channels.map((c) => ({
-			channelType: c.channelType,
-			destination: c.destination || undefined,
-			destinationLabel: c.destinationLabel || undefined,
-			// device_action carries its selected capabilities as a JSON object;
-			// the server serialises it to JSONB. Omit for channels without metadata.
-			metadata: c.metadata ?? undefined,
-			// Omitted keeps the stored secret, empty clears it — the editor only ever
-			// knows whether one exists, never what it is.
-			secret: c.secret ? c.secret : c.hasSecret ? undefined : "",
-		})),
+		channels: state.channels.map(toChannelRequest),
+	};
+}
+
+export function toChannelRequest(c: ChannelDef): CreateAlertRuleChannelRequest {
+	return {
+		channelType: c.channelType,
+		destination: c.destination || undefined,
+		destinationLabel: c.destinationLabel || undefined,
+		// device_action carries its selected capabilities as a JSON object;
+		// the server serialises it to JSONB. Omit for channels without metadata.
+		metadata: c.metadata ?? undefined,
+		// Omitted keeps the stored secret, empty clears it — the editor only ever
+		// knows whether one exists, never what it is.
+		secret: c.secret ? c.secret : c.hasSecret ? undefined : "",
+	};
+}
+
+export function toChannelDef(c: AlertRuleChannelResponse): ChannelDef {
+	return {
+		_uid: newUid(),
+		channelType: c.channelType ?? ChannelType.InApp,
+		destination: c.destination ?? "",
+		destinationLabel: c.destinationLabel ?? "",
+		metadata: parseChannelMetadata(c.metadata),
+		hasSecret: c.hasSecret ?? false,
+		recipient: c.recipient ?? null,
 	};
 }
 
@@ -862,7 +880,7 @@ export interface RuleEditorState {
 	clientConfig: ClientConfiguration;
 	/** Flat list of delivery channels. */
 	channels: ChannelDef[];
-	/** When true, this rule still fires while the tenant is in Do Not Disturb
+	/** When true, this rule still fires while the tenant is in Do not disturb
 	 *  mode. Critical-severity rules implicitly bypass DND regardless. */
 	allowThroughDnd: boolean;
 }
@@ -1024,15 +1042,7 @@ export function parseRule(r: AlertRuleResponse | null): RuleEditorState {
 		(r.channels ?? [])
 			.slice()
 			.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-			.map((c) => ({
-				_uid: newUid(),
-				channelType: c.channelType ?? ChannelType.InApp,
-				destination: c.destination ?? "",
-				destinationLabel: c.destinationLabel ?? "",
-				metadata: parseChannelMetadata(c.metadata),
-				hasSecret: c.hasSecret ?? false,
-				recipient: c.recipient ?? null,
-			}));
+			.map(toChannelDef);
 
 	return {
 		name: r.name ?? "",

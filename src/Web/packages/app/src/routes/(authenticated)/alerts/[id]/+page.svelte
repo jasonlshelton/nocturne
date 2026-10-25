@@ -49,7 +49,8 @@
   import AutoResolveSection from "$lib/components/alerts/AutoResolveSection.svelte";
   import ChannelsSection from "$lib/components/alerts/ChannelsSection.svelte";
   import ReplayPanel from "$lib/components/alerts/ReplayPanel.svelte";
-  import { severity, severityLabel } from "$lib/components/alerts/severity";
+  import { severity } from "$lib/components/alerts/severity";
+  import { severityLabel } from "$lib/components/alerts/severityLabel.svelte";
   import {
     parseRule,
     ensureCompositeRoot,
@@ -155,7 +156,7 @@
         savedBody = buildBody(editor);
       }
     } catch (e) {
-      const described = describeSubmitError(e, "Failed to save the alert rule. Please try again.");
+      const described = describeSubmitError(e, "Failed to save the alert rule. Try again.");
       error = conditionIssuesMessage(e) ?? described;
     } finally {
       saving = false;
@@ -171,7 +172,7 @@
       await deleteRule(ruleId);
       await goto(resolve("/alerts"));
     } catch (e) {
-      error = describeSubmitError(e, "Failed to delete the alert rule. Please try again.");
+      error = describeSubmitError(e, "Failed to delete the alert rule. Try again.");
     } finally {
       deleting = false;
     }
@@ -185,7 +186,7 @@
     try {
       await testFire(ruleId);
     } catch (e) {
-      error = describeSubmitError(e, "Failed to send a test alert. Please try again.");
+      error = describeSubmitError(e, "Failed to send a test alert. Try again.");
     } finally {
       testingSaved = false;
     }
@@ -418,7 +419,7 @@
               />
               <div class="space-y-0.5">
                 <Label class="cursor-pointer" for="rule-allow-dnd">
-                  Allow through Do Not Disturb
+                  Allow through Do not disturb
                 </Label>
                 <p class="text-xs text-muted-foreground">
                   Critical-severity rules implicitly bypass DND regardless of
@@ -434,8 +435,7 @@
           <CardHeader>
             <CardTitle>Condition</CardTitle>
             <CardDescription>
-              Define when this alert fires. Mix facts with AND/OR. Nest them
-              with brackets.
+              Define when this alert fires. Mix facts with AND or OR. Nest them with brackets.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -534,7 +534,7 @@
     </div>
 
     <!-- Right rail: test alert + historic firings -->
-    <aside class="min-w-0 lg:sticky lg:top-[calc(var(--app-sticky-top,0px)_+_var(--editor-bar-height,0px)_+_1.5rem)] self-start space-y-4">
+    <aside class="min-w-0 @3xl:sticky @3xl:top-[calc(var(--app-sticky-top,0px)_+_var(--editor-bar-height,0px)_+_1.5rem)] self-start space-y-4">
       <Card>
         <CardHeader>
           <CardTitle class="text-base">Test alert</CardTitle>
@@ -580,8 +580,7 @@
               <HistoryIcon class="h-4 w-4" /> Historic firings
             </CardTitle>
             <CardDescription size="sm">
-              Real fires for this rule. Click any to replay the day in the
-              simulator.
+              Real fires for this rule. Select any to replay the day in the simulator.
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-1.5">

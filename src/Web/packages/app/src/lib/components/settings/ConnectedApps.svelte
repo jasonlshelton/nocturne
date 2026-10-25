@@ -47,7 +47,7 @@
     } catch (err) {
       errorMessage = describeSubmitError(
         err,
-        "Failed to revoke access. Please try again."
+        "Failed to revoke access. Try again."
       );
       clearMessages();
     } finally {
@@ -57,11 +57,11 @@
 </script>
 
 <div class="space-y-4">
-  <div class="flex items-start justify-between gap-4">
+  <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="space-y-1">
-      <h2 class="text-lg font-semibold tracking-tight">Connected Apps</h2>
+      <h2 class="text-lg font-semibold tracking-tight">Connected apps</h2>
       <p class="text-sm text-muted-foreground">
-        OAuth applications that have been authorized to access your data
+        OAuth applications that you authorized to access your data
       </p>
     </div>
     <Button href="/oauth/device" variant="outline" size="sm" class="shrink-0">

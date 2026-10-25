@@ -36,7 +36,7 @@ const OWNER_ONLY = [
   "Meals",
   "Tools",
   "Alerts",
-  "Dev Tools",
+  "Dev tools",
   "Settings",
 ];
 
@@ -81,9 +81,8 @@ describe("buildAppNavigation", () => {
     expect(titles(GUEST)).toEqual([
       "Dashboard",
       "Calendar",
-      "Time Spans",
+      "Time spans",
       "Reports",
-      "Clock",
     ]);
   });
 
@@ -107,6 +106,14 @@ describe("buildAppNavigation", () => {
 
     expect(viewer).not.toContain("Alerts");
     expect(viewer).toContain("Settings");
+  });
+
+  it("withholds Reports from a member without reports.read", () => {
+    const withoutReports = titles({ ...MEMBER, grantedScopes: ["glucose.read", "alerts.read"] });
+
+    expect(withoutReports).not.toContain("Reports");
+    expect(withoutReports).toContain("Dashboard");
+    expect(titles({ ...MEMBER, grantedScopes: ["reports.read"] })).toContain("Reports");
   });
 
   it("offers the tenant switcher only to a member holding more than one", () => {
@@ -140,7 +147,6 @@ describe("readOnlyNav", () => {
       "calendar",
       "time-spans",
       "reports",
-      "clock",
     ]);
   });
 

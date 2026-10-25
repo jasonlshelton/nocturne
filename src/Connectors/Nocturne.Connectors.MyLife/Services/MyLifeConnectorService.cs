@@ -137,8 +137,8 @@ public class MyLifeConnectorService(
                 (long)config.TempBasalConsolidationWindowMinutes * 60_000);
 
             var previousTail = new List<MyLifeEvent>();
-            var glucoseSinceTicks = new DateTimeOffset(glucoseSince).ToUnixTimeMilliseconds() * 10_000;
-            var treatmentSinceTicks = new DateTimeOffset(treatmentSince).ToUnixTimeMilliseconds() * 10_000;
+            var glucoseSinceTicks = glucoseSince.ToMills() * 10_000;
+            var treatmentSinceTicks = treatmentSince.ToMills() * 10_000;
 
             // Stream month by month
             await foreach (var batch in syncService.FetchEventsPerMonthAsync(

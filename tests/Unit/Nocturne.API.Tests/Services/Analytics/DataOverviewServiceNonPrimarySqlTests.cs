@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Sqlite.Query.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Analytics;
+using Nocturne.API.Tests.Infrastructure;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
@@ -56,8 +57,8 @@ public class DataOverviewServiceNonPrimarySqlTests : IDisposable
                 therapySettings.Object,
                 new CategoryReadContext(),
                 NullLogger<TenantClockResolver>.Instance),
-            new Mock<IStatisticsService>().Object,
-            Mock.Of<ITenantCache>(),
+            new Mock<IStatisticsService>().WithRealTimeInRange().Object,
+            TestTenantCache.Create(),
             NullLogger<DataOverviewService>.Instance);
     }
 

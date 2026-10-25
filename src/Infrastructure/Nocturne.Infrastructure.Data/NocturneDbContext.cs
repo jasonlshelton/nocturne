@@ -404,6 +404,10 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<CoachMarkStateEntity> CoachMarkStates { get; set; }
 
+    public DbSet<SetupHubItemEntity> SetupHubItems { get; set; }
+
+    public DbSet<SetupHubAdditionEntity> SetupHubAdditions { get; set; }
+
     public DbSet<TranslationDraftEntity> TranslationDrafts { get; set; }
 
     public DbSet<ReadAccessLogEntity> ReadAccessLog { get; set; }
@@ -1240,28 +1244,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<TrackerDefinitionEntity>()
-            .HasIndex(d => d.UserId)
-            .HasDatabaseName("ix_tracker_definitions_user_id");
-
-        modelBuilder
-            .Entity<TrackerDefinitionEntity>()
-            .HasIndex(d => new { d.UserId, d.Category })
-            .HasDatabaseName("ix_tracker_definitions_user_category");
-
-        modelBuilder
-            .Entity<TrackerDefinitionEntity>()
-            .HasIndex(d => d.IsFavorite)
-            .HasDatabaseName("ix_tracker_definitions_is_favorite");
-
-        modelBuilder
-            .Entity<TrackerDefinitionEntity>()
             .HasIndex(d => d.CreatedAt)
             .HasDatabaseName("ix_tracker_definitions_created_at");
-
-        modelBuilder
-            .Entity<TrackerInstanceEntity>()
-            .HasIndex(i => i.UserId)
-            .HasDatabaseName("ix_tracker_instances_user_id");
 
         modelBuilder
             .Entity<TrackerInstanceEntity>()
@@ -1276,19 +1260,9 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<TrackerInstanceEntity>()
-            .HasIndex(i => new { i.UserId, i.CompletedAt })
-            .HasDatabaseName("ix_tracker_instances_user_completed");
-
-        modelBuilder
-            .Entity<TrackerInstanceEntity>()
             .HasIndex(i => i.StartedAt)
             .HasDatabaseName("ix_tracker_instances_started_at")
             .IsDescending();
-
-        modelBuilder
-            .Entity<TrackerPresetEntity>()
-            .HasIndex(p => p.UserId)
-            .HasDatabaseName("ix_tracker_presets_user_id");
 
         modelBuilder
             .Entity<TrackerPresetEntity>()
@@ -1316,6 +1290,18 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             .HasIndex(r => r.ManagedBy)
             .HasDatabaseName("ix_alert_rules_managed_by")
             .HasFilter("managed_by IS NOT NULL");
+
+        modelBuilder
+            .Entity<AlertRuleEntity>()
+            .Property(r => r.StarterKind)
+            .HasConversion<string>();
+
+        modelBuilder
+            .Entity<AlertRuleEntity>()
+            .HasIndex(r => new { r.StarterKind, r.TenantId })
+            .IsUnique()
+            .HasFilter("starter_kind IS NOT NULL")
+            .HasDatabaseName("ix_alert_rules_starter_kind_tenant");
 
         modelBuilder
             .Entity<TrackerNotificationThresholdEntity>()
@@ -1926,6 +1912,27 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             .HasIndex(e => e.Token)
             .HasDatabaseName("ix_alert_invites_token")
             .IsUnique();
+
+        modelBuilder.Entity<TenantEntity>()
+            .Property(t => t.PatientRelationship)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<SetupHubItemEntity>(entity =>
+        {
+            entity.Property(e => e.ItemKey).HasConversion<string>();
+            entity.Property(e => e.State).HasConversion<string>();
+            entity.HasIndex(e => new { e.TenantId, e.ItemKey })
+                .IsUnique()
+                .HasDatabaseName("ix_setup_hub_items_tenant_item_key");
+        });
+
+        modelBuilder.Entity<SetupHubAdditionEntity>(entity =>
+        {
+            entity.Property(e => e.ItemKey).HasConversion<string>();
+            entity.Property(e => e.RecordKind).HasConversion<string>();
+            entity.HasIndex(e => new { e.TenantId, e.ItemKey, e.RecordKind })
+                .HasDatabaseName("ix_setup_hub_additions_tenant_item_kind");
+        });
 
         // Signal loss sweep: find tenants that haven't reported recently
         modelBuilder.Entity<TenantEntity>()

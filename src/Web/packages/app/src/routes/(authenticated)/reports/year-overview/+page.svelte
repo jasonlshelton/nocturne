@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { BAND_KEY_SUFFIX } from "$lib/constants/year-overview-keys";
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import Loader2 from "@lucide/svelte/icons/loader-circle";
-  import CalendarDays from "@lucide/svelte/icons/calendar-days";
   import { scaleThreshold } from "d3-scale";
   import { Button } from "$lib/components/ui/button";
+  import { Artwork } from "@nocturne/watercolour";
   import {
     getAvailableYears,
     getYearSummary,
@@ -34,6 +35,7 @@
     scaleFill,
     GLUCOSE_LIMITS,
     type ColorBoundary,
+    type ColorEnds,
     type ColorFocusRange,
   } from "$lib/utils/metric-color-focus";
   import { onMount, untrack, tick } from "svelte";
@@ -73,8 +75,8 @@
     | "carbs";
 
   const METRIC_OPTIONS: { value: HeatmapMetric; label: string }[] = [
-    { value: "avgGlucose", label: "Avg Glucose" },
-    { value: "tir", label: "Time in Range" },
+    { value: "avgGlucose", label: "Avg glucose" },
+    { value: "tir", label: "Time in range" },
     { value: "bolus", label: "Bolus" },
     { value: "basal", label: "Basal" },
     { value: "tdd", label: "TDD" },
@@ -103,10 +105,14 @@
   type ScaleKeys = {
     band: `${HeatmapMetric}Band`;
     boundaries: `${HeatmapMetric}Boundaries`;
+    low: `${HeatmapMetric}LowColor`;
+    high: `${HeatmapMetric}HighColor`;
   };
   const scaleKeys = $derived<ScaleKeys>({
     band: `${selectedMetric}Band`,
     boundaries: `${selectedMetric}Boundaries`,
+    low: `${selectedMetric}LowColor`,
+    high: `${selectedMetric}HighColor`,
   });
   /**
    * The retired shape applied its bands and dimming only in advanced mode. A blob saved with
@@ -117,7 +123,7 @@
     if (!("advancedMode" in stored) || stored.advancedMode === true) return stored;
     return Object.fromEntries(
       Object.entries(stored).filter(
-        ([key]) => !key.endsWith("Band") && key !== "outOfBandTransparency"
+        ([key]) => !key.endsWith(BAND_KEY_SUFFIX) && key !== "outOfBandTransparency"
       )
     );
   });
@@ -151,12 +157,17 @@
       ? GLUCOSE_LIMITS
       : [0, selectedMetric === "tir" ? 100 : Infinity]
   );
+  const scaleEnds = $derived<ColorEnds>({
+    low: colorPreferences[scaleKeys.low],
+    high: colorPreferences[scaleKeys.high],
+  });
   const scale = $derived(
     selectedMetric === "avgGlucose"
       ? glucoseScale(
           colorPreferences.avgGlucoseBand,
           colorPreferences.avgGlucoseBoundaries,
-          dim
+          dim,
+          scaleEnds
         )
       : intensityScale(
           METRIC_CSS_VARS[selectedMetric],
@@ -164,7 +175,8 @@
           metricMax,
           colorPreferences[scaleKeys.band],
           colorPreferences[scaleKeys.boundaries],
-          dim
+          dim,
+          scaleEnds
         )
   );
 
@@ -178,8 +190,12 @@
     for (const { value } of METRIC_OPTIONS) {
       const band = colorPreferences[`${value}Band`];
       const boundaries = colorPreferences[`${value}Boundaries`];
+      const low = colorPreferences[`${value}LowColor`];
+      const high = colorPreferences[`${value}HighColor`];
       if (band) next[`${value}Band`] = band;
       if (boundaries) next[`${value}Boundaries`] = boundaries;
+      if (low) next[`${value}LowColor`] = low;
+      if (high) next[`${value}HighColor`] = high;
     }
     change(next);
     yearOverviewColors.current = next;
@@ -200,6 +216,15 @@
     });
   }
 
+  function setScaleEnds(ends: ColorEnds) {
+    saveColorPreferences((next) => {
+      if (ends.low) next[scaleKeys.low] = ends.low;
+      else delete next[scaleKeys.low];
+      if (ends.high) next[scaleKeys.high] = ends.high;
+      else delete next[scaleKeys.high];
+    });
+  }
+
   function setDim(value: number) {
     saveColorPreferences((next) => {
       next.outOfBandTransparency = Math.max(0, Math.min(100, value));
@@ -210,6 +235,8 @@
     saveColorPreferences((next) => {
       delete next[scaleKeys.band];
       delete next[scaleKeys.boundaries];
+      delete next[scaleKeys.low];
+      delete next[scaleKeys.high];
     });
   }
 
@@ -593,16 +620,9 @@
   }
 </script>
 
-<svelte:head>
-  <meta
-    name="description"
-    content="Multi-year heatmap overview of all your diabetes data"
-  />
-</svelte:head>
-
 <div class="year-overview @container flex min-h-full">
   <!-- Main Content -->
-  <div class="flex-1">
+  <div class="min-w-0 flex-1">
     {#if !metadataLoaded || sortedYears.some((year) => !yearData.has(year) || !griTimelineData.has(year))}
       <p class="hidden print:block">
         This overview is incomplete. Use the report's Print button to load all years before printing.
@@ -631,6 +651,7 @@
       limits={scaleLimits}
       onWindowChange={setScaleWindow}
       onBoundariesChange={setScaleBoundaries}
+      onEndsChange={setScaleEnds}
       onDimChange={setDim}
       onReset={resetScale}
       {glucoseBands}
@@ -664,12 +685,14 @@
         in:fade={{ duration: 300 }}
       >
         <div class="max-w-md space-y-4 text-center">
-          <div
-            class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted"
-          >
-            <CalendarDays class="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h2 class="text-xl font-semibold">No Data Available</h2>
+          <Artwork
+            artwork="calendar"
+            palette="moonlight"
+            motion="auto"
+            autoplay="once"
+            class="mx-auto size-48"
+          />
+          <h2 class="text-xl font-semibold">No data available</h2>
           <p class="text-muted-foreground">
             There is no data to display yet. Connect a data source in your
             settings to get started.
@@ -679,7 +702,7 @@
             variant="outline"
             class="print:hidden"
           >
-            Configure Data Sources
+            Configure data sources
           </Button>
         </div>
       </div>

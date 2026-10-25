@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getRequestEvent, query } from "$app/server";
 import { ClusterConfidence, SleepSource } from "$lib/api";
 import { fetchAllGlucose } from "./glucose-pagination";
-import { DateRangeSchema, resolveReportRange } from "./report-range";
+import { DateRangeSchema, resolvePatientToday, resolveReportRange } from "./report-range";
 import { readable } from "$lib/server/patient-timezone";
 import { compare } from "$api/generated/cgmComparisons.generated.remote";
 import { getTrends } from "$api/generated/sleepReports.generated.remote";
@@ -25,6 +25,9 @@ export const getReportSubject = query(async () => {
     dateOfBirth: record?.dateOfBirth ?? null,
   };
 });
+
+/** The patient's current calendar day as `YYYY-MM-DD`, which reports build relative windows from. */
+export const getReportsToday = query(async () => resolvePatientToday());
 
 /** Get sensor glucose readings for a date range */
 export const getEntries = query(DateRangeSchema.optional(), async (input) => {
@@ -101,7 +104,7 @@ export const getReportsData = query(
     const { apiClient } = locals;
     const { startDate, endDate } = await resolveReportRange(input);
 
-    const [entries, { analysis, averagedStats, personalRange }] = await Promise.all([
+    const [entries, { analysis, averagedStats, personalRange, timeZoneUnavailableReason }] = await Promise.all([
       fetchAllGlucose(apiClient, startDate, endDate),
       apiClient.statistics.getRangeAnalytics(startDate, endDate),
     ]);
@@ -111,6 +114,7 @@ export const getReportsData = query(
       analysis,
       averagedStats,
       personalRange,
+      timeZoneUnavailableReason,
       dateRange: {
         from: startDate,
         to: endDate,
@@ -131,8 +135,14 @@ export const getReportsAnalysis = query(
     const { apiClient } = locals;
     const { startDate, endDate } = await resolveReportRange(input);
 
-    const { analysis, averagedStats, hourlyBandThresholds, personalRange, contributingDevices } =
-      await apiClient.statistics.getRangeAnalytics(startDate, endDate);
+    const {
+      analysis,
+      averagedStats,
+      hourlyBandThresholds,
+      personalRange,
+      contributingDevices,
+      timeZoneUnavailableReason,
+    } = await apiClient.statistics.getRangeAnalytics(startDate, endDate);
 
     return {
       analysis,
@@ -140,6 +150,7 @@ export const getReportsAnalysis = query(
       hourlyBandThresholds,
       personalRange,
       contributingDevices,
+      timeZoneUnavailableReason,
       dateRange: {
         from: startDate,
         to: endDate,

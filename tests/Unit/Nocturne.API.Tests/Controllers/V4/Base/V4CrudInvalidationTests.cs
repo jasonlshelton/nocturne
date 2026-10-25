@@ -7,32 +7,24 @@ using Xunit;
 namespace Nocturne.API.Tests.Controllers.V4.Base;
 
 /// <summary>
-/// A delete or restore changes both the live list and the deleted list every derived controller
-/// exports, so the base's commands must name both reads for the generated command to refresh them.
+/// No page renders the list reads with the arguments a generated command refreshes them with, so a
+/// delete or restore declaring them would pay two API reads that refresh nothing. A call site
+/// refreshes its own query (<c>refresh()</c> or the realtime store). Without a declared
+/// <c>Invalidates</c> the server never calls <c>requested()</c>, so <c>.updates(...)</c> on these
+/// commands does nothing.
 /// </summary>
 [Trait("Category", "Unit")]
 public class V4CrudInvalidationTests
 {
     [Theory]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.Delete), nameof(V4ReadOnlyControllerBase<,>.GetAll))]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.Delete), nameof(V4CrudControllerBase<,,,>.ListDeleted))]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.Restore), nameof(V4ReadOnlyControllerBase<,>.GetAll))]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.Restore), nameof(V4CrudControllerBase<,,,>.ListDeleted))]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.BulkRestore), nameof(V4ReadOnlyControllerBase<,>.GetAll))]
-    [InlineData(nameof(V4CrudControllerBase<,,,>.BulkRestore), nameof(V4CrudControllerBase<,,,>.ListDeleted))]
-    public void DeletingOrRestoring_RefreshesTheListReads(string write, string read)
+    [InlineData(nameof(V4CrudControllerBase<,,,>.Delete))]
+    [InlineData(nameof(V4CrudControllerBase<,,,>.Restore))]
+    [InlineData(nameof(V4CrudControllerBase<,,,>.BulkRestore))]
+    public void DeletingOrRestoring_DeclaresNoBlanketRefresh(string write)
     {
-        Command(write).Invalidates.Should().Contain(read);
-    }
+        var command = typeof(V4CrudControllerBase<,,,>).GetMethod(write)!.GetCustomAttribute<RemoteCommandAttribute>();
 
-    [Theory]
-    [InlineData(typeof(V4ReadOnlyControllerBase<,>), nameof(V4ReadOnlyControllerBase<,>.GetAll))]
-    [InlineData(typeof(V4CrudControllerBase<,,,>), nameof(V4CrudControllerBase<,,,>.ListDeleted))]
-    public void EveryRefreshedRead_IsAQueryTheCommandCanRefresh(Type owner, string read)
-    {
-        owner.GetMethod(read)!.GetCustomAttribute<RemoteQueryAttribute>().Should().NotBeNull();
+        command.Should().NotBeNull();
+        command!.Invalidates.Should().BeNullOrEmpty();
     }
-
-    private static RemoteCommandAttribute Command(string write) =>
-        typeof(V4CrudControllerBase<,,,>).GetMethod(write)!.GetCustomAttribute<RemoteCommandAttribute>()!;
 }

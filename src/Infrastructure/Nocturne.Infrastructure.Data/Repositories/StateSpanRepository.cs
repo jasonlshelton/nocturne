@@ -353,7 +353,7 @@ public class StateSpanRepository : IStateSpanRepository
                 var dedupInputs = inserted
                     .Select(entity => new DeduplicationInput(
                         RecordId: entity.Id,
-                        Mills: new DateTimeOffset(entity.StartTimestamp, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+                        Mills: entity.StartTimestamp.ToMills(),
                         DataSource: entity.Source ?? DeduplicationInput.UnknownDataSource,
                         Criteria: MatchCriteriaMapper.From(entity)))
                     .ToList();

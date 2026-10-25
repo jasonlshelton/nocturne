@@ -1,3 +1,5 @@
+using Nocturne.Core.Models.V4;
+
 namespace Nocturne.Core.Contracts.Multitenancy;
 
 /// <summary>
@@ -32,6 +34,17 @@ public interface ITenantService
 
     Task<TenantSettingsDto> SetAllowPublicDocsAsync(Guid id, bool allowPublicDocs, CancellationToken ct = default);
 
+    Task<PatientRelationship?> GetPatientRelationshipAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Records the onboarder's relationship to the patient, replacing any earlier answer.</summary>
+    Task SetPatientRelationshipAsync(Guid id, PatientRelationship relationship, CancellationToken ct = default);
+
+    /// <summary>The glucose units the owner chose for the tenant, or null when none was chosen.</summary>
+    Task<string?> GetDefaultGlucoseUnitsAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Records the owner's choice of tenant glucose units, "mg/dl" or "mmol".</summary>
+    Task SetDefaultGlucoseUnitsAsync(Guid id, string units, CancellationToken ct = default);
+
     /// <summary>Permanently deletes a tenant and all associated data.</summary>
     Task DeleteAsync(Guid id, CancellationToken ct = default);
 
@@ -50,6 +63,13 @@ public interface ITenantService
     /// that person owns.
     /// </summary>
     Task<List<TenantDto>> GetTenantsForSubjectAsync(Guid subjectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the tenants the specified subject can go to: those of
+    /// <see cref="GetTenantsForSubjectAsync"/> that are active, in the same order. An inactive
+    /// tenant's host answers 403 on every path, so it is never somewhere to send anyone.
+    /// </summary>
+    Task<List<TenantDto>> GetReachableTenantsForSubjectAsync(Guid subjectId, CancellationToken ct = default);
 
     /// <summary>Checks whether a slug is valid and available for use.</summary>
     Task<SlugValidationResult> ValidateSlugAsync(string slug, CancellationToken ct = default);
@@ -90,9 +110,9 @@ public record TenantMemberDto(
     bool IsPlatformAdmin);
 
 /// <summary>
-/// Lightweight role reference attached to a <see cref="TenantMemberDto"/>.
+/// A role a <see cref="TenantMemberDto"/> holds, with the permissions it confers.
 /// </summary>
-public record TenantMemberRoleDto(Guid RoleId, string Name, string Slug);
+public record TenantMemberRoleDto(Guid RoleId, string Name, string Slug, List<string> Permissions);
 
 public record SlugValidationResult(bool IsValid, string? Message = null);
 

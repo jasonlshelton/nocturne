@@ -11,7 +11,7 @@ using Xunit;
 namespace Nocturne.API.Tests.Configuration;
 
 /// <summary>
-/// A document's <c>created_at</c> under the options the legacy endpoints and connectors read and write with.
+/// A document's <c>created_at</c> and <c>_id</c> under the options the legacy endpoints and connectors read and write with.
 /// </summary>
 public class DocumentCreatedAtProductionOptionsTests
 {
@@ -33,6 +33,16 @@ public class DocumentCreatedAtProductionOptionsTests
         var data = new TheoryData<Type>();
         foreach (var type in DocumentTypes())
             data.Add(type);
+        return data;
+    }
+
+    public static TheoryData<Type> AllIdTypes()
+    {
+        var data = new TheoryData<Type>();
+        foreach (var type in DocumentTypes())
+            data.Add(type);
+        data.Add(typeof(Profile));
+        data.Add(typeof(Food));
         return data;
     }
 
@@ -59,6 +69,20 @@ public class DocumentCreatedAtProductionOptionsTests
 
         served["created_at"]!.GetValue<string>().Should().Be(StoredValue);
         served.ContainsKey("createdAt").Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(AllIdTypes))]
+    public void Served_object_has_underscore_id_and_no_second_id(Type type)
+    {
+        var value = Activator.CreateInstance(type)!;
+        type.GetProperty("Id")!.SetValue(value, "507f1f77bcf86cd799439011");
+
+        var served = JsonNode.Parse(JsonSerializer.Serialize(value, type, NightscoutJsonOptions.Create()))!.AsObject();
+
+        served["_id"]!.GetValue<string>().Should().Be("507f1f77bcf86cd799439011");
+        served.ContainsKey("id").Should().BeFalse();
+        served.ContainsKey("Id").Should().BeFalse();
     }
 
     [Theory]

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.API.Services.Auth;
+using Nocturne.API.Services.Caching;
 using Nocturne.API.Services.Platform;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nocturne.Core.Models.Configuration;
@@ -34,6 +35,7 @@ public class ServiceCacheTests
     private readonly Mock<IEntryDecomposer> _mockEntryDecomposer;
     private readonly Mock<IEntryCache> _mockEntryCache;
     private readonly Mock<ICacheService> _mockCacheService;
+    private readonly Mock<ITenantService> _tenants = new();
     private readonly Mock<IDemoModeService> _mockDemoModeService;
     private readonly Mock<ILogger<EntryService>> _mockEntryLogger;
     private readonly Mock<ILogger<StatusService>> _mockStatusLogger;
@@ -199,11 +201,13 @@ public class ServiceCacheTests
         var statusService = new StatusService(
             mockConfiguration,
             _mockCacheService.Object,
+            new CacheFlights(),
             _mockDemoModeService.Object,
             tenantDbContextFactory.Object,
             httpContextAccessor,
             _mockTenantAccessor.Object,
             TestPublicAccessCache.Create(),
+            _tenants.Object,
             appearanceReader.Object,
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
@@ -290,11 +294,13 @@ public class ServiceCacheTests
         var statusService = new StatusService(
             mockConfiguration,
             _mockCacheService.Object,
+            new CacheFlights(),
             _mockDemoModeService.Object,
             tenantDbContextFactory.Object,
             httpContextAccessor,
             _mockTenantAccessor.Object,
             TestPublicAccessCache.Create(),
+            _tenants.Object,
             appearanceReader.Object,
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
@@ -310,11 +316,6 @@ public class ServiceCacheTests
         Assert.Equal("Test Site", result.Name);
         Assert.Equal("ok", result.Status);
 
-        // Verify cache was checked and result was cached
-        _mockCacheService.Verify(
-            x => x.GetAsync<StatusResponse>("status:system:00000000-0000-0000-0000-000000000001", It.IsAny<CancellationToken>()),
-            Times.Once
-        );
         _mockCacheService.Verify(
             x =>
                 x.SetAsync(

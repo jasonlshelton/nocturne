@@ -2028,7 +2028,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     /// <inheritdoc />
     /// <remarks>
     /// A connector's rows can sit under an uploader's <c>id</c> where its <c>_id</c> belongs (see
-    /// <see cref="UploaderIdJsonModifier"/>); read by <c>_id</c>, the same treatments would otherwise be
+    /// <see cref="IgnoredBasePropertyModifier"/>); read by <c>_id</c>, the same treatments would otherwise be
     /// stored a second time beside them. Equivalents sharing that <c>id</c> were merged into the row of
     /// the last one written, so the row moves to the equivalent at its time. A row the user deleted
     /// stays under the client id and its tombstone is copied onto every equivalent, because
@@ -2082,7 +2082,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
                 continue;
             }
 
-            var storedAt = rows.Select(r => ToMills(r.At)).ToHashSet();
+            var storedAt = rows.Select(r => r.At.ToMills()).ToHashSet();
             var target = group.FirstOrDefault(t => storedAt.Contains(t.Mills)) ?? group[0];
             if (!held.Contains(target.Id!))
                 moves.Add((rows.Key, target.Id!));
@@ -2123,9 +2123,6 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         await _profileActivationWriter.InvalidateAsync(ct);
         return rekeyed;
     }
-
-    private static long ToMills(DateTime at) =>
-        new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     /// <summary>Stages a user tombstone like each of <paramref name="tombstones"/> under each of <paramref name="keys"/>.</summary>
     private static void AddTombstoneCopies<T>(

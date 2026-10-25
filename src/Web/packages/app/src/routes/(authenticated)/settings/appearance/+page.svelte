@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { GlucoseProcessing } from "$lib/api";
   import { a1cLabel } from "$lib/utils/a1c-formatting";
   import { time } from "$lib/utils/formatting";
   import {
@@ -19,6 +20,8 @@
     setColorScheme,
     userPrefersMode,
     dashboardTopWidgets,
+    dashboardRail,
+    hiddenLegacyFallbacks,
     chartLineColorMode,
     chartLineColor,
     chartPointColorMode,
@@ -38,6 +41,7 @@
   import { getRealtimeStore } from "$lib/stores/realtime-store.svelte";
   import TitleFaviconSettings from "$lib/components/settings/TitleFaviconSettings.svelte";
   import DashboardWidgetConfigurator from "$lib/components/settings/DashboardWidgetConfigurator.svelte";
+  import DashboardRailConfigurator from "$lib/components/settings/DashboardRailConfigurator.svelte";
   import TextureSwatch from "$lib/components/charts/print/TextureSwatch.svelte";
   import LanguageSelector from "$lib/components/LanguageSelector.svelte";
   import { updateLanguagePreference } from "$api/user-preferences.remote";
@@ -194,8 +198,8 @@
 <div class="@container container mx-auto max-w-4xl p-3 @md:p-6 space-y-6">
   <!-- Header -->
   <div class="flex items-center gap-3">
-    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-      <Palette class="h-6 w-6 text-primary" />
+    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+      <Palette class="size-6 text-primary" />
     </div>
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Appearance</h1>
@@ -218,7 +222,7 @@
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Palette class="h-5 w-5" />
-          Color Theme
+          Color theme
         </CardTitle>
         <CardDescription>
           Choose a color theme and light/dark mode
@@ -249,7 +253,7 @@
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: oklch(0.6 0.118 184.704)"
-                title="In Range"
+                title="In range"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
@@ -259,7 +263,7 @@
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: oklch(0.577 0.245 27.325)"
-                title="Very Low"
+                title="Very low"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
@@ -329,17 +333,17 @@
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #006493"
-                title="Primary Blue"
+                title="Primary blue"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #006A5F"
-                title="Teal Secondary"
+                title="Teal secondary"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #00FF00"
-                title="In Range"
+                title="In range"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
@@ -369,27 +373,27 @@
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #000000"
-                title="Black Background"
+                title="Black background"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #4cff00"
-                title="Neon Green"
+                title="Neon green"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #808080"
-                title="Pill Gray"
+                title="Pill gray"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #bdbdbd"
-                title="Text Gray"
+                title="Text gray"
               ></div>
               <div
                 class="h-4 w-4 rounded-full"
                 style="background: #0099ff"
-                title="Classic Blue"
+                title="Classic blue"
               ></div>
             </div>
           </RadioGroup.Card>
@@ -551,7 +555,7 @@
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Globe class="h-5 w-5" />
-          Units & Formats
+          Units & formats
         </CardTitle>
         <CardDescription>
           Configure measurement units and display formats. These preferences sync
@@ -704,11 +708,11 @@
             <p class="font-medium">{browserTimezone}</p>
           </div>
           <div class="space-y-1">
-            <Label size="sm" variant="muted">UTC Offset</Label>
+            <Label size="sm" variant="muted">UTC offset</Label>
             <p class="font-medium">{timezoneOffset}</p>
           </div>
           <div class="space-y-1">
-            <Label size="sm" variant="muted">Current Time</Label>
+            <Label size="sm" variant="muted">Current time</Label>
             <p class="font-medium font-mono">{currentTime}</p>
           </div>
         </div>
@@ -724,7 +728,7 @@
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Eye class="h-5 w-5" />
-          Chart Options
+          Chart options
         </CardTitle>
         <CardDescription>Configure chart display preferences</CardDescription>
       </CardHeader>
@@ -945,6 +949,16 @@
       />
     </div>
 
+    <div {@attach coachmark({ ...coachFor("tracker-intro.rail") })}>
+      <DashboardRailConfigurator
+        value={dashboardRail.current}
+        {trackerPillsEnabled}
+        onchange={(preference) => (dashboardRail.current = preference)}
+        hiddenLegacyFallbacks={hiddenLegacyFallbacks.current}
+        onhiddenlegacyfallbackschange={(kinds) => (hiddenLegacyFallbacks.current = kinds)}
+      />
+    </div>
+
 
     {#if !tenantless}
     <!-- Glucose Processing -->
@@ -952,7 +966,7 @@
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Activity class="h-5 w-5" />
-          Glucose Processing
+          Glucose processing
         </CardTitle>
         <CardDescription>
           Choose how glucose values are displayed when both smoothed and unsmoothed readings are available
@@ -973,9 +987,9 @@
             >
               <SelectTrigger>
                 <span>
-                  {#if glucoseProcessingPreference === "Smoothed"}
+                  {#if glucoseProcessingPreference === GlucoseProcessing.Smoothed}
                     Smoothed
-                  {:else if glucoseProcessingPreference === "Unsmoothed"}
+                  {:else if glucoseProcessingPreference === GlucoseProcessing.Unsmoothed}
                     Unsmoothed
                   {:else}
                     Default
@@ -984,8 +998,8 @@
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">Default</SelectItem>
-                <SelectItem value="Smoothed">Smoothed</SelectItem>
-                <SelectItem value="Unsmoothed">Unsmoothed</SelectItem>
+                <SelectItem value={GlucoseProcessing.Smoothed}>Smoothed</SelectItem>
+                <SelectItem value={GlucoseProcessing.Unsmoothed}>Unsmoothed</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -997,7 +1011,7 @@
 
         <Separator />
 
-        <div class="flex items-center justify-between">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="space-y-0.5">
             <Label>Client upload source defaults</Label>
             <p class="text-sm text-muted-foreground">
@@ -1031,7 +1045,7 @@
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Timer class="h-5 w-5" />
-          Tracker Pills
+          Tracker pills
         </CardTitle>
         <CardDescription>
           Show active tracker ages on the dashboard
@@ -1043,6 +1057,9 @@
             <Label>Show tracker pills</Label>
             <p class="text-sm text-muted-foreground">
               Display active tracker ages (such as sensor and pump site) on homepage
+            </p>
+            <p class="text-sm text-muted-foreground">
+              When this is off, tracker pills do not show for any user.
             </p>
           </div>
           <Switch

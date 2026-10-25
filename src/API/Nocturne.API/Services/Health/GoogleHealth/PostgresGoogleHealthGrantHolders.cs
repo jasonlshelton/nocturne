@@ -30,7 +30,6 @@ public sealed class PostgresGoogleHealthGrantHolders(
     INocturneDbContextFactory contexts,
     ILogger<PostgresGoogleHealthGrantHolders> logger) : IGoogleHealthGrantHolders
 {
-    private const string ConnectorName = "GoogleHealth";
     private const string AuditEndpoint = "service:google-health";
     private readonly SemaphoreSlim adoption = new(1, 1);
     private volatile bool adopted;
@@ -117,7 +116,7 @@ public sealed class PostgresGoogleHealthGrantHolders(
             await using var scope = TenantJobScope.Open(
                 scopes, new TenantContext(tenantId, "", "", true, false), AuditEndpoint);
             var secrets = await scope.ServiceProvider.GetRequiredService<IConnectorConfigurationService>()
-                .GetSecretsAsync(ConnectorName, ct);
+                .GetSecretsAsync(GoogleHealthConnectorService.ConnectorName, ct);
             if (GoogleHealthSessionStore.HeldAccount(secrets) is not { } account) return;
             await using var db = await ContextAsync(ct);
             await TryInsertAsync(db, tenantId, account, ct);

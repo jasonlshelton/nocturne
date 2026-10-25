@@ -29,8 +29,9 @@ public readonly record struct IobCobTick(
 /// Treatments are kept in time-sorted arrays and the active window is tracked with two-pointer
 /// indices that advance with each tick: only boluses and temp basals within DIA hours of the tick
 /// contribute to IOB, and only carb intakes within 6 hours to COB, so the inner-loop work is
-/// O(ticks + active window) rather than O(ticks × treatments). DIA is read from the timeline at
-/// <c>endTime</c>. Temp basals count as delivered
+/// O(ticks + active window) rather than O(ticks × treatments). The window is the longest DIA in
+/// play: the timeline's at <c>endTime</c> or any bolus's or temp basal's own
+/// <see cref="TreatmentInsulinContext.Dia"/>, which the calculator reads in preference. Temp basals count as delivered
 /// (<see cref="StatisticsService.ClipOverlappingTempBasals"/>), one still running up to now or the
 /// window's end, whichever comes first,
 /// and each tick takes their net basal IOB up to the tick on the model
@@ -42,7 +43,8 @@ public static class IobCobSeries
 {
     private const long CobAbsorptionMs = 6L * 60 * 60 * 1000;
 
-    /// <param name="timeline">Covers at least <c>[startTime - DIA, endTime + 1)</c>: the scheduled rate is read under every chunk of temp basal still on board at a tick.</param>
+    /// <param name="timeline">Covers at least <c>[startTime - DIA, endTime + 1)</c>.</param>
+    /// <param name="scheduled">Over the same time as <paramref name="timeline"/>: it is read under every chunk of temp basal still on board at a tick.</param>
     /// <param name="deviceReadings">The APS and pump snapshots from <see cref="DeviceReportedValues.RecencyThresholdMs"/> before <paramref name="startTime"/>; null for none.</param>
     /// <param name="nowMills">The present. A temp basal still running stops at it or at <paramref name="endTime"/>; see <see cref="StatisticsService.ClipOverlappingTempBasals"/>.</param>
     /// <returns>One tick at <paramref name="startTime"/> and every <paramref name="intervalMs"/> after it, up to and including <paramref name="endTime"/>.</returns>
@@ -53,6 +55,7 @@ public static class IobCobSeries
         IEnumerable<CarbIntake> carbIntakes,
         IEnumerable<TempBasal>? tempBasals,
         TherapyTimeline timeline,
+        ScheduledBasal scheduled,
         DeviceReadings? deviceReadings,
         long startTime,
         long endTime,
@@ -61,8 +64,6 @@ public static class IobCobSeries
         CancellationToken ct = default)
     {
         var ticks = new List<IobCobTick>();
-
-        var diaMs = (long)(timeline.SnapshotAt(endTime).Dia * 60 * 60 * 1000);
 
         var sortedBoluses = boluses
             .Where(b => b.Insulin > 0)
@@ -73,7 +74,15 @@ public static class IobCobSeries
             .OrderBy(c => c.Mills)
             .ToList();
         var sortedTempBasals = tempBasals is null ? null : StatisticsService.ClipOverlappingTempBasals(tempBasals, Math.Min(endTime, nowMills));
-        double ScheduledAt(long mills) => timeline.SnapshotAt(mills).BasalRateAt(mills);
+
+        var diaHours = timeline.SnapshotAt(endTime).Dia;
+        foreach (var own in sortedBoluses.Select(b => b.InsulinContext?.Dia)
+                     .Concat(sortedTempBasals?.Select(p => p.InsulinContext?.Dia) ?? []))
+        {
+            if (own > diaHours)
+                diaHours = own.Value;
+        }
+        var diaMs = (long)(diaHours * 60 * 60 * 1000);
 
         int insulinHi = 0,
             insulinLo = 0;
@@ -129,7 +138,7 @@ public static class IobCobSeries
                     ? iobCalculator.FromBoluses(sortedBoluses.GetRange(insulinLo, insulinCount), snapshot, t).Iob
                     : 0;
                 var basal = sortedTempBasals is not null && basalCount > 0
-                    ? iobCalculator.FromTempBasals(sortedTempBasals.GetRange(basalLo, basalCount), snapshot, ScheduledAt, t, t).BasalIob ?? 0
+                    ? iobCalculator.FromTempBasals(sortedTempBasals.GetRange(basalLo, basalCount), snapshot, scheduled.Under, t, t).BasalIob ?? 0
                     : 0;
 
                 iob = bolus + basal;
@@ -155,7 +164,7 @@ public static class IobCobSeries
                             ? sortedTempBasals.GetRange(basalLo, basalCount)
                             : null,
                         snapshot,
-                        ScheduledAt,
+                        scheduled.Under,
                         t
                     )
                     : new CobResult { Cob = 0 };

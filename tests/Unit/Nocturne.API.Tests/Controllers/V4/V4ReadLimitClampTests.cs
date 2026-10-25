@@ -237,7 +237,9 @@ public class V4ReadLimitClampTests
             Mock.Of<ISensitivityScheduleRepository>(),
             Mock.Of<ITargetRangeScheduleRepository>(),
             Mock.Of<IProfileProjectionService>(),
-            TempBasalTestDeps.NoReresolution());
+            Mock.Of<IProfileDeletionService>(),
+            TempBasalTestDeps.NoReresolution(),
+            Mock.Of<Nocturne.API.Services.V4.ILoopClosedLoopStamper>());
 
     private static void VerifyTherapySettingsFetched(Mock<ITherapySettingsRepository> repo, int limit, int offset) =>
         repo.Verify(r => r.GetAsync(null, null, null, null, limit, offset, true, It.IsAny<CancellationToken>()), Times.Once);
@@ -550,7 +552,7 @@ public class V4ReadLimitClampTests
 
         await CreateTrackersController(repo).GetInstanceHistory(Ceiling);
 
-        repo.Verify(r => r.GetCompletedInstancesAsync(null, Ceiling, It.IsAny<CancellationToken>()), Times.Once);
+        repo.Verify(r => r.GetCompletedInstancesAsync(Ceiling, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -560,7 +562,7 @@ public class V4ReadLimitClampTests
 
         await CreateTrackersController(repo).GetInstanceHistory(AboveCeiling);
 
-        repo.Verify(r => r.GetCompletedInstancesAsync(null, Ceiling, It.IsAny<CancellationToken>()), Times.Once);
+        repo.Verify(r => r.GetCompletedInstancesAsync(Ceiling, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static TrackersController CreateTrackersController(Mock<ITrackerRepository> repo) =>
@@ -573,6 +575,23 @@ public class V4ReadLimitClampTests
             Mock.Of<IAlertAcknowledgementService>(),
             Mock.Of<ILogger<TrackersController>>())
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    Items =
+                    {
+                        ["AuthContext"] = new Nocturne.Core.Models.Authorization.AuthContext
+                        {
+                            IsAuthenticated = true,
+                            SubjectId = Guid.NewGuid(),
+                        },
+                        ["GrantedScopes"] = new HashSet<string>
+                        {
+                            Nocturne.Core.Models.Authorization.Scope.AlertsRead,
+                        },
+                    },
+                },
+            },
         };
 }

@@ -61,6 +61,28 @@ public class RustEnvelopeMapperTests
             .Should().Be("Australia/Sydney");
     }
 
+    [Fact]
+    public void BuildContext_sends_each_active_trackers_recorded_time_and_mode()
+    {
+        var definitionId = Guid.NewGuid();
+        var startedAt = new DateTime(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc);
+        var recordedAt = new DateTime(2026, 10, 23, 9, 30, 0, DateTimeKind.Utc);
+        var context = BuildContext() with
+        {
+            ActiveTrackers = new Dictionary<Guid, ActiveTrackerReference>
+            {
+                [definitionId] = new(startedAt, recordedAt, IsScheduled: true),
+            },
+        };
+
+        var tracker = RustEnvelopeMapper.BuildContext(context).GetProperty("active_trackers")[0];
+
+        tracker.GetProperty("tracker_definition_id").GetGuid().Should().Be(definitionId);
+        tracker.GetProperty("reference_at").GetDateTime().Should().Be(startedAt);
+        tracker.GetProperty("recorded_at").GetDateTime().Should().Be(recordedAt);
+        tracker.GetProperty("scheduled").GetBoolean().Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("""{"direction":"below","value":70}""", """{"type":"threshold","threshold":{"direction":"below","value":70}}""")]
     [InlineData("   ", """{"type":"threshold","threshold":null}""")]

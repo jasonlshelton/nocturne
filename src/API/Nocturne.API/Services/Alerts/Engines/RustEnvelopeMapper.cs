@@ -215,7 +215,8 @@ internal static class RustEnvelopeMapper
             ActiveTrackers = ctx.ActiveTrackers.Count == 0
                 ? null
                 : ctx.ActiveTrackers
-                    .Select(kv => new WireTrackerReference(kv.Key, Utc(kv.Value)!.Value))
+                    .Select(kv => new WireTrackerReference(
+                        kv.Key, Utc(kv.Value.ReferenceAt)!.Value, Utc(kv.Value.RecordedAt), kv.Value.IsScheduled))
                     .ToList(),
             SleepSessionActive = ctx.SleepSessionActive,
         };
@@ -352,5 +353,7 @@ internal static class RustEnvelopeMapper
 
     private sealed record WireTrackerReference(
         [property: JsonPropertyName("tracker_definition_id")] Guid TrackerDefinitionId,
-        [property: JsonPropertyName("reference_at")] DateTime ReferenceAt);
+        [property: JsonPropertyName("reference_at")] DateTime ReferenceAt,
+        [property: JsonPropertyName("recorded_at")] DateTime? RecordedAt,
+        [property: JsonPropertyName("scheduled")] bool Scheduled);
 }

@@ -1,9 +1,12 @@
 using Moq;
+using Nocturne.Core.Clinical.LoopAnalysis;
 using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Basal;
 using Nocturne.Core.Models.V4;
 using Xunit;
 
@@ -19,7 +22,8 @@ public class IobCalculatorTests
     private readonly IobCalculator _calculator;
     private readonly Mock<IApsSnapshotRepository> _apsSnapshotRepo;
     private readonly Mock<IPumpSnapshotRepository> _pumpSnapshotRepo;
-    private readonly Mock<IBasalRateResolver> _basalRateResolver;
+    private readonly Mock<IBasalSegmentService> _basalSegments;
+    private readonly Mock<IStateSpanRepository> _stateSpans = MockStateSpans.Empty();
 
     private const double DefaultDIA = 3.0;
     private const double DefaultSensitivity = 95.0;
@@ -37,10 +41,7 @@ public class IobCalculatorTests
             .Setup(s => s.GetSensitivityAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DefaultSensitivity);
 
-        _basalRateResolver = new Mock<IBasalRateResolver>();
-        _basalRateResolver
-            .Setup(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Func<long, double>)(_ => DefaultBasalRate));
+        _basalSegments = MockBasalSegments.Flat(DefaultBasalRate);
 
         _apsSnapshotRepo = new Mock<IApsSnapshotRepository>();
         _pumpSnapshotRepo = new Mock<IPumpSnapshotRepository>();
@@ -56,9 +57,10 @@ public class IobCalculatorTests
         _calculator = new IobCalculator(
             therapySettings.Object,
             sensitivityResolver.Object,
-            _basalRateResolver.Object,
+            _basalSegments.Object,
             _apsSnapshotRepo.Object,
-            _pumpSnapshotRepo.Object
+            _pumpSnapshotRepo.Object,
+            _stateSpans.Object
         );
     }
 
@@ -172,7 +174,7 @@ public class IobCalculatorTests
         Assert.Equal(viaAsync.ActivityContrib, viaSnapshot.ActivityContrib, 9);
 
         // And it must not touch the async resolvers.
-        _basalRateResolver.Verify(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+        _basalSegments.Verify(b => b.GetSegmentsAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -534,7 +536,7 @@ public class IobCalculatorTests
         var timeline = new TherapyTimeline([new TherapySegment(now - 60 * 60_000L, now + 1, MatchingSnapshot())]);
 
         var ticks = IobCobSeries.Build(
-            _calculator, Mock.Of<ICobCalculator>(), [], [], LoopStream(now), timeline, null, now, now, now, 5 * 60_000L);
+            _calculator, Mock.Of<ICobCalculator>(), [], [], LoopStream(now), timeline, new ScheduledBasal(timeline.BasalSegments(), []), null, now, now, now, 5 * 60_000L);
 
         Assert.Equal(LoopStreamBasalIob, ticks.Single().Iob, 0.002);
     }
@@ -581,8 +583,11 @@ public class IobCalculatorTests
         Origin = origin,
     };
 
-    private IobResult NetBasal(List<TempBasal> pieces, Func<long, double>? scheduledBasalAt = null) =>
-        _calculator.FromTempBasals(pieces, MatchingSnapshot(), scheduledBasalAt ?? (_ => DefaultBasalRate), Now, Now);
+    private IobResult NetBasal(List<TempBasal> pieces, double profileRate = DefaultBasalRate) =>
+        NetBasal(pieces, [new BasalSegment(Now - 24 * 60 * Minute, Now + 1, profileRate, profileRate, "Default")]);
+
+    private IobResult NetBasal(List<TempBasal> pieces, BasalSegment[] profile) =>
+        _calculator.FromTempBasals(pieces, MatchingSnapshot(), new ScheduledBasal(profile, []).Under, Now, Now);
 
     // Every expectation is on the DIA 3 h curve, where minutes are unscaled. Before the 75 min peak a
     // dose m minutes old keeps f(m) = 1 - 0.001852 (m/5)(m/5 + 1) of itself:
@@ -685,7 +690,7 @@ public class IobCalculatorTests
         var running = Temp(Now - 10 * Minute, end: null, rate: 2.0);
 
         var viaSnapshot = _calculator.FromTempBasals(
-            [Temp(Now - 10 * Minute, later, rate: 2.0)], MatchingSnapshot(), _ => DefaultBasalRate, later, Now);
+            [Temp(Now - 10 * Minute, later, rate: 2.0)], MatchingSnapshot(), (_, _) => DefaultBasalRate, later, Now);
         var viaAsync = await _calculator.CalculateTotalAsync([], [running], later, deliveredUntil: Now);
 
         Assert.Equal(0.147, viaSnapshot.BasalIob);
@@ -711,7 +716,12 @@ public class IobCalculatorTests
         // once at the temp's start, the schedule would make all six withhold it, -0.483.
         var switchAt = Now - 20 * Minute;
 
-        var result = NetBasal([Temp(Now - 30 * Minute, Now, rate: 1.0)], mills => mills < switchAt ? 2.0 : 1.0);
+        var result = NetBasal(
+            [Temp(Now - 30 * Minute, Now, rate: 1.0)],
+            [
+                new BasalSegment(Now - 24 * 60 * Minute, switchAt, 2.0, 2.0, "Default"),
+                new BasalSegment(switchAt, Now + 1, 1.0, 1.0, "Default"),
+            ]);
 
         Assert.Equal(-0.156, result.BasalIob);
     }
@@ -721,10 +731,54 @@ public class IobCalculatorTests
     {
         // 2 U/h against the temp's own 0.5 U/h schedule for five minutes: 1.5 / 12 = 0.125 U, 5 minutes
         // old, 0.125 * 0.996296 = 0.124537. Against the profile's 2 U/h it would be 0.
-        var result = NetBasal([Temp(Now - 5 * Minute, Now, rate: 2.0, scheduledRate: 0.5)], _ => 2.0);
+        var result = NetBasal([Temp(Now - 5 * Minute, Now, rate: 2.0, scheduledRate: 0.5)], profileRate: 2.0);
 
         Assert.Equal(0.125, result.BasalIob);
     }
+
+    [Fact]
+    public async Task CalculateTotalAsync_AnOverrideScalesTheSchedule_UnderATempWithNoRateOfItsOwn()
+    {
+        // 1 U/h for five minutes against the 1 U/h schedule halved: 0.5 / 12 U, 5 minutes old,
+        // 0.5 / 12 * 0.996296 = 0.041512. Against the unscaled schedule it would be 0.
+        HalvingOverride();
+
+        var result = await _calculator.CalculateTotalAsync([], [Temp(Now - 5 * Minute, Now, rate: 1.0)], Now);
+
+        Assert.Equal(0.042, result.BasalIob);
+    }
+
+    [Fact]
+    public async Task CalculateTotalAsync_AtSeveralInstantsOverTheSameTemps_ReadsTheScheduleOnce()
+    {
+        HalvingOverride();
+        List<TempBasal> temps = [Temp(Now - 5 * Minute, Now, rate: 1.0)];
+
+        foreach (var at in new[] { Now, Now + 30 * Minute, Now + 60 * Minute })
+            await _calculator.CalculateTotalAsync([], temps, at, deliveredUntil: Now);
+
+        _stateSpans.Verify(
+            s => s.GetByCategories(It.IsAny<IEnumerable<StateSpanCategory>>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _basalSegments.Verify(
+            s => s.GetSegmentsAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private void HalvingOverride() =>
+        _stateSpans
+            .Setup(s => s.GetByCategories(It.IsAny<IEnumerable<StateSpanCategory>>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<StateSpanCategory, List<StateSpan>>
+            {
+                [StateSpanCategory.Override] =
+                [
+                    new StateSpan
+                    {
+                        Category = StateSpanCategory.Override,
+                        StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(Now - 60 * Minute).UtcDateTime,
+                        Metadata = new Dictionary<string, object> { ["insulinNeedsScaleFactor"] = 0.5 },
+                    },
+                ],
+            });
 
     [Fact]
     public void InsulinContextDia_OverridesTheProfile()

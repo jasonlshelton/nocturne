@@ -332,7 +332,7 @@
             {remoteErrorMessage(punchCardError, "An error occurred")}
           </p>
           <Button class="mt-4" onclick={() => window.location.reload()}>
-            Try Again
+            Try again
           </Button>
         </div>
       </Card.Content>
@@ -342,7 +342,7 @@
   <div class="@container flex flex-col h-full">
     <div class="hidden print:block border-b pb-3 mb-4">
       <h1 class="text-xl font-bold">
-        Month-to-Month Report: {MONTH_NAMES[currentMonth]}
+        Month-to-month report: {MONTH_NAMES[currentMonth]}
         {currentYear}
       </h1>
       <p class="text-sm text-muted-foreground">
@@ -372,7 +372,7 @@
     </div>
 
     {#if trackersLoading}
-      <div class="flex-1 p-3 sm:p-4">
+      <div class="flex-1 p-3 @md:p-4">
         <Card.Root class="h-full">
           <Card.Content class="p-4 h-full flex items-center justify-center">
             <div class="text-muted-foreground">Loading data...</div>
@@ -380,9 +380,9 @@
         </Card.Root>
       </div>
     {:else}
-      <div class="flex-1 p-3 sm:p-4">
+      <div class="flex-1 p-3 @md:p-4">
         <Card.Root class="h-full">
-          <Card.Content class="p-2 sm:p-4 h-full flex flex-col">
+          <Card.Content class="p-2 @md:p-4 h-full flex flex-col">
             {#if trackersError}
               <!-- Trackers overlay the calendar; losing them must not take the glucose
                    calendar with them, which is served by a separate query. -->

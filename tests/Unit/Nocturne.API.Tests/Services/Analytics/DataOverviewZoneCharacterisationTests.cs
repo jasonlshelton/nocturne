@@ -63,6 +63,8 @@ public class DataOverviewZoneCharacterisationTests : IDisposable
             .Callback<TimeInRangeMetrics>(_griInputs.Add)
             .Returns(new GlycemicRiskIndex());
 
+        statistics.WithRealTimeInRange();
+
         var cacheService = new Mock<ITenantCache>();
 
         _service = new DataOverviewService(
@@ -152,11 +154,16 @@ public class DataOverviewZoneCharacterisationTests : IDisposable
     [Fact]
     public void BuildGriPeriod_ExcludesANonReadingFromEveryZoneAndFromTheDenominator()
     {
-        var readings = Enumerable.Repeat(120d, 72).Append(double.NaN).ToList();
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        var readings = Enumerable
+            .Range(0, 72)
+            .Select(i => (Timestamp: start.AddMinutes(i * 5), Mgdl: 120d))
+            .Append((Timestamp: start.AddMinutes(72 * 5), Mgdl: double.NaN))
+            .ToList();
 
         var period = _service.BuildGriPeriod(
             3, 2026, 72,
-            new Dictionary<int, List<double>> { [3] = readings },
+            new Dictionary<int, List<(DateTime Timestamp, double Mgdl)>> { [3] = readings },
             [], [], [], []
         );
 
@@ -167,6 +174,31 @@ public class DataOverviewZoneCharacterisationTests : IDisposable
         var percentages = _griInputs.Should().ContainSingle().Subject.Percentages;
         percentages.Target.Should().Be(100);
         percentages.VeryHigh.Should().Be(0);
+    }
+
+    /// <summary>
+    /// An hour of one-minute readings in range and an hour of five-minute readings high are an
+    /// hour each, however many readings each holds.
+    /// </summary>
+    [Fact]
+    public void BuildGriPeriod_WeighsAMonthMixingSensorCadencesByTime()
+    {
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        var readings = Enumerable
+            .Range(0, 60)
+            .Select(i => (Timestamp: start.AddMinutes(i), Mgdl: 120d))
+            .Concat(Enumerable.Range(0, 12).Select(i => (Timestamp: start.AddMinutes(60 + i * 5), Mgdl: 220d)))
+            .ToList();
+
+        _service.BuildGriPeriod(
+            3, 2026, 72,
+            new Dictionary<int, List<(DateTime Timestamp, double Mgdl)>> { [3] = readings },
+            [], [], [], []
+        );
+
+        var percentages = _griInputs.Should().ContainSingle().Subject.Percentages;
+        percentages.Target.Should().BeApproximately(50, 1e-9);
+        percentages.High.Should().BeApproximately(50, 1e-9);
     }
 
     /// <summary>

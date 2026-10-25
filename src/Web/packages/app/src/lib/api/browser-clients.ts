@@ -14,6 +14,7 @@ import {
   NutritionClient,
   ProfileClient,
   SensorGlucoseClient,
+  TrackerLegacyFallbacksClient,
   TrackersClient,
 } from "./generated/nocturne-api-client";
 
@@ -49,6 +50,8 @@ export const notificationsClient = () => new NotificationsClient("", browserHttp
 export const nutritionClient = () => new NutritionClient("", browserHttp());
 export const profileClient = () => new ProfileClient("", browserHttp());
 export const sensorGlucoseClient = () => new SensorGlucoseClient("", browserHttp());
+export const trackerLegacyFallbacksClient = () =>
+  new TrackerLegacyFallbacksClient("", browserHttp());
 export const trackersClient = () => new TrackersClient("", browserHttp());
 
 /** Drops the shared fetch so the next client is built on a fresh one. */

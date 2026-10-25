@@ -19,7 +19,7 @@
   import type { AlarmVisualSettings } from "$lib/types/alarm-profile";
   import type { TitleFaviconSettings } from "$lib/stores/serverSettings";
   import { browser, dev } from "$app/environment";
-  import { beforeNavigate, goto, invalidate } from "$app/navigation";
+  import { invalidate } from "$app/navigation";
   import { refreshOnVisible } from "$lib/utils/refresh-on-return.svelte";
   import { SHELL_DATA_KEY, SHELL_REVALIDATE_INTERVAL_MS } from "$lib/constants/shell-data";
   import { createShellRevalidator } from "$lib/utils/shell-session";
@@ -33,11 +33,12 @@
   import BackupSignInPrompt from "$lib/components/layout/BackupSignInPrompt.svelte";
   import MembershipRequestAutoSubmit from "$lib/components/members/MembershipRequestAutoSubmit.svelte";
   import { lazyComponent } from "$lib/utils/lazy-component.svelte";
-  import { CoachMarkProvider, type CoachRouter } from "@nocturne/coach";
+  import { CoachMarkProvider } from "@nocturne/coach";
   import "@nocturne/coach/theme.css";
   import "../../styles/coach-theme-overrides.css";
   import { createCoachMarkAdapter } from "$lib/coach-marks/adapter";
-  import { sequences } from "$lib/coach-marks/sequences";
+  import { createCoachRouter } from "$lib/coach-marks/router";
+  import { ONBOARDING_CORE_GATE, sequences } from "$lib/coach-marks/sequences";
   import { coachLabels } from "$lib/coach-marks/copy.svelte";
   import CoachParamHandler from "$lib/coach-marks/CoachParamHandler.svelte";
   import { STALE_THRESHOLD_MS } from "$lib/constants/staleness";
@@ -107,7 +108,7 @@
   let bannerStripHeight = $state(0);
 
   const coachMarkAdapter = createCoachMarkAdapter(tenantless);
-  const coachRouter: CoachRouter = { beforeNavigate, goto };
+  const coachRouter = createCoachRouter();
 
   // Title/Favicon service for dynamic updates
   const titleFaviconService = getTitleFaviconService();
@@ -240,11 +241,17 @@
 
 <InitialReadsPrefetch enabled={data.canViewRealtimeData} />
 
-<CoachMarkProvider adapter={coachMarkAdapter} labels={coachLabels()} {sequences} router={coachRouter}>
+<CoachMarkProvider
+  adapter={coachMarkAdapter}
+  labels={coachLabels()}
+  {sequences}
+  gates={{ [ONBOARDING_CORE_GATE]: data.onboardingComplete }}
+  router={coachRouter}
+>
   <CoachParamHandler />
   <ChartPrintPatterns />
   <Sidebar.Provider>
-    <AppSidebar user={data.user} isPlatformAdmin={data.isPlatformAdmin} isPlatformAccessGrant={data.isPlatformAccessGrant} isGuestSession={data.isGuestSession} currentSlug={data.tenantSlug} baseDomain={data.baseDomain} tenantless={data.tenantless} />
+    <AppSidebar user={data.user} isPlatformAdmin={data.isPlatformAdmin} isPlatformAccessGrant={data.isPlatformAccessGrant} isGuestSession={data.isGuestSession} currentSlug={data.tenantSlug} baseDomain={data.baseDomain} tenantless={data.tenantless} tenantTargets={data.tenantTargets} />
     <!-- --app-sticky-top is the top of the usable viewport below the app chrome (the visible
          MobileHeader plus the banner strip); page-level sticky bars pin to it with the
          header's 300ms transition. -->
@@ -254,7 +261,7 @@
     >
       <MobileHeader />
       <div
-        class="sticky top-(--mobile-header-offset,0px) z-40 transition-all duration-300 md:top-0"
+        class="@container sticky top-(--mobile-header-offset,0px) z-40 transition-all duration-300 md:top-0"
         bind:offsetHeight={bannerStripHeight}
       >
           {#if data.isDemo}
@@ -276,7 +283,7 @@
           <AlertSurfaces />
         {/if}
       {/if}
-      <main class="flex-1 overflow-x-clip">
+      <main class="@container/main flex-1 overflow-x-clip">
         <svelte:boundary>
           {@render children()}
 

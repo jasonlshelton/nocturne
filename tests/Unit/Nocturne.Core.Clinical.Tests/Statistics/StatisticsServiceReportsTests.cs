@@ -147,7 +147,7 @@ public class StatisticsServiceReportsTests
     }
 
     [Fact]
-    public void PunchCard_DerivesEachBandsCountFromItsPercentageAndWeightsTheMonthByReadings()
+    public void PunchCard_DerivesEachBandsCountFromItsPercentage()
     {
         double[] values = [50, 65, 100, 100, 150, 200, 300];
         var readings = values.Select((v, i) => Reading(June1.AddMinutes(5 * i), v)).ToList();
@@ -161,6 +161,24 @@ public class StatisticsServiceReportsTests
         month.Summary!.TotalReadings.Should().Be(8);
         month.Summary.InRangePercent.Should().BeApproximately(4.0 / 8 * 100, 1e-9);
         month.Summary.AvgGlucose.Should().BeApproximately((values.Sum() + 100) / 8, 1e-9);
+    }
+
+    [Fact]
+    public void PunchCard_WeighsTheMonthByCoveredTimeAcrossASensorSwap()
+    {
+        // A one-minute sensor with a 100-minute low on the first day, a five-minute sensor in range
+        // on the second.
+        var oneMinute = Enumerable.Range(0, 1440)
+            .Select(m => Reading(June1.AddMinutes(m), m is >= 180 and < 280 ? 60 : 120));
+        var fiveMinute = Enumerable.Range(0, 288)
+            .Select(i => Reading(June1.AddDays(1).AddMinutes(i * 5), 120));
+
+        var summary = PunchCard(
+            oneMinute.Concat(fiveMinute), new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 2))
+            .Months.Single().Summary!;
+
+        summary.LowPercent.Should().BeApproximately(100.0 / 2880 * 100, 0.01);
+        summary.InRangePercent.Should().BeApproximately(100 - 100.0 / 2880 * 100, 0.01);
     }
 
     [Fact]

@@ -215,14 +215,22 @@ public record SensorContext
     public bool SleepSessionActive { get; init; }
 
     /// <summary>
-    /// Reference timestamp of the active tracker instance per tracker definition: start
-    /// time for Duration trackers, scheduled time for Event trackers. Populated by the
-    /// enricher for every definition referenced by a <c>tracker_age</c> leaf in the rules
-    /// being evaluated. An absent key means no active instance — the leaf evaluates false.
+    /// The active tracker instance per tracker definition. Populated by the enricher for every
+    /// definition referenced by a <c>tracker_age</c> leaf in the rules being evaluated. An
+    /// absent key means no active instance — the leaf evaluates false.
     /// </summary>
-    public IReadOnlyDictionary<Guid, DateTime> ActiveTrackers { get; init; }
-        = new Dictionary<Guid, DateTime>();
+    public IReadOnlyDictionary<Guid, ActiveTrackerReference> ActiveTrackers { get; init; }
+        = new Dictionary<Guid, ActiveTrackerReference>();
 }
+
+/// <summary>A tracker definition's active instance, as the <c>tracker_age</c> leaf reads it.</summary>
+/// <param name="ReferenceAt">Start time for a Duration tracker, scheduled time for an Event tracker.</param>
+/// <param name="RecordedAt">
+/// When the instance was recorded. A threshold that already held then does not fire for a Duration
+/// instance (docs/alerts/engine-semantics.md §3). Null holds nothing back.
+/// </param>
+/// <param name="IsScheduled">An Event tracker's instance, which is never held back.</param>
+public sealed record ActiveTrackerReference(DateTime ReferenceAt, DateTime? RecordedAt, bool IsScheduled = false);
 
 /// <summary>
 /// A single predicted glucose value at a future offset from "now".

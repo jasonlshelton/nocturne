@@ -192,7 +192,9 @@ public sealed record ScenarioStateSpan(
 /// start time for Duration trackers, scheduled time for Event trackers.</summary>
 public sealed record ScenarioTrackerReference(
     [property: JsonPropertyName("tracker_definition_id")] Guid TrackerDefinitionId,
-    [property: JsonPropertyName("reference_at")] DateTime ReferenceAt);
+    [property: JsonPropertyName("reference_at")] DateTime ReferenceAt,
+    [property: JsonPropertyName("recorded_at")] DateTime? RecordedAt = null,
+    [property: JsonPropertyName("scheduled")] bool Scheduled = false);
 
 // ---------------------------------------------------------------------------
 // Expected snapshot output

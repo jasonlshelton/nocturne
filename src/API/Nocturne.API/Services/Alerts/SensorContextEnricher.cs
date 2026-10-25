@@ -368,7 +368,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
     private async Task<GlucoseBucket?> ResolveGlucoseBucketAsync(
         decimal glucoseMgdl, DateTime at, string? tenantTimeZoneId, CancellationToken ct)
     {
-        var atMills = new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var atMills = at.ToMills();
         var profileName = await _deps.ActiveProfileResolver.GetProfileNameAsync(atMills, ct);
         // Before the store's first version, its newest, as ProfileVersionCache.ActiveAt reads it.
         var schedule = await _deps.TargetRangeSchedules.GetActiveAtAsync(profileName, at, ct)
@@ -386,27 +386,13 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
                 null);
         }
 
-        // Pick the entry active at the tenant's local time-of-day. `at` is always UTC; the
-        // schedule's time-of-day entries are local wall-clock so we must convert. An
-        // unparseable tenant tz swallows to UTC (as the engine's day_of_week does) so a
+        // An unparseable tenant tz swallows to UTC (as the engine's day_of_week does) so a
         // misconfigured tenant tz field still produces a deterministic bucket rather than no
         // bucket at all.
-        var atUtc = DateTime.SpecifyKind(at, DateTimeKind.Utc);
-        var atLocal = atUtc;
-        if (!string.IsNullOrEmpty(tenantTimeZoneId))
-            atLocal = TimeZoneInfo.ConvertTimeFromUtc(atUtc, TimeZoneHelper.GetTimeZoneInfoFromId(tenantTimeZoneId));
-
-        var sortedEntries = schedule.Entries.OrderBy(e => e.TimeAsSeconds ?? 0).ToList();
-        var localTime = TimeOnly.FromDateTime(atLocal);
-        var secondsFromMidnight = (localTime.Hour * 3600) + (localTime.Minute * 60) + localTime.Second;
-        var active = sortedEntries[0];
-        foreach (var entry in sortedEntries)
-        {
-            if (secondsFromMidnight >= (entry.TimeAsSeconds ?? 0))
-                active = entry;
-            else
-                break;
-        }
+        var zone = string.IsNullOrEmpty(tenantTimeZoneId) ? null : TimeZoneHelper.GetTimeZoneInfoFromId(tenantTimeZoneId);
+        var secondsFromMidnight = ScheduleEntryTime.SecondsOfDay(at.ToMills(), zone);
+        ScheduleEntryTime.TryEntryAt(
+            schedule.Entries, secondsFromMidnight, e => ScheduleEntryTime.SecondsOf(e.TimeAsSeconds, e.Time), out var active);
 
         return GlucoseBucketResolver.Compute(
             glucoseMgdl,
@@ -545,7 +531,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
     /// </summary>
     private async Task<List<Treatment>> FetchRecentTreatmentsAsync(DateTime now, CancellationToken ct)
     {
-        var nowMills = new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var nowMills = now.ToMills();
         var cutoffMills = nowMills - (TreatmentLookbackHours * 60L * 60L * 1000L);
 
         var treatments = await _deps.Treatments.GetTreatmentsByRangeAsync(cutoffMills, nowMills, ct);
@@ -556,7 +542,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
     {
         try
         {
-            return await _deps.IobCob.ReadInputsAsync(ToMills(now), ct);
+            return await _deps.IobCob.ReadInputsAsync(now.ToMills(), ct);
         }
         catch (Exception ex)
         {
@@ -572,7 +558,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
         try
         {
             var result = await _deps.Iob.CalculateTotalAsync(
-                inputs.Boluses, inputs.TempBasals, ToMills(now), live: live, ct: ct);
+                inputs.Boluses, inputs.TempBasals, now.ToMills(), live: live, ct: ct);
             _logger.LogDebug(
                 "IOB compute @ {Now}: boluses={BolusCount}, tempBasals={TempBasalCount}, result.Iob={Iob}, source={Source}",
                 now, inputs.Boluses.Count, inputs.TempBasals.Count, result.Iob, result.Source ?? "(none)");
@@ -590,7 +576,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
         try
         {
             var result = await _deps.Cob.CalculateTotalAsync(
-                inputs.CarbIntakes, inputs.Boluses, inputs.TempBasals, ToMills(now), live: live, ct: ct);
+                inputs.CarbIntakes, inputs.Boluses, inputs.TempBasals, now.ToMills(), live: live, ct: ct);
             _logger.LogDebug(
                 "COB compute @ {Now}: carbIntakes={CarbCount}, result.Cob={Cob}, source={Source}",
                 now, inputs.CarbIntakes.Count, result.Cob, result.Source ?? "(none)");
@@ -602,9 +588,6 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
             return null;
         }
     }
-
-    private static long ToMills(DateTime utc) =>
-        new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     private async Task<IReadOnlyList<PredictedGlucosePoint>> FetchPredictionsAsync(
         DateTimeOffset? asOf, CancellationToken ct)
@@ -662,7 +645,7 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
     /// </summary>
     private async Task<DateTime?> ActiveProfileStartAsync(string? state, DateTime now, CancellationToken ct)
     {
-        var nowMills = new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var nowMills = now.ToMills();
         var resolved = await _deps.ProfileActivations.GetAtAsync(nowMills, ct);
         if (resolved is null)
             return null;

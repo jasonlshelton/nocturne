@@ -4,6 +4,7 @@ using Moq;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Core.Clinical.LoopAnalysis;
+using Nocturne.API.Services.ChartData;
 using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
@@ -13,6 +14,7 @@ using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.LoopAnalysis;
 using Nocturne.Core.Models.V4;
+using Nocturne.Tests.Shared.Mocks;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Analytics;
@@ -29,6 +31,8 @@ public class LoopAnalysisServiceReadTests
     private readonly Mock<IPatientDeviceRepository> _devices = new();
     private readonly Mock<IBasalSeriesBuilder> _series = new();
     private readonly List<TempBasal> _seriesTemps = [];
+    private readonly List<ScaleFactorInterval> _seriesOverrides = [];
+    private readonly List<StateSpan> _overrideSpans = [];
     private readonly List<long> _timelineStarts = [];
 
     public LoopAnalysisServiceReadTests()
@@ -48,8 +52,12 @@ public class LoopAnalysisServiceReadTests
             .ReturnsAsync([]);
         _series
             .Setup(b => b.BuildAsync(
-                It.IsAny<List<TempBasal>>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
-            .Callback((List<TempBasal> temps, long _, long _, double _, CancellationToken _) => _seriesTemps.AddRange(temps))
+                It.IsAny<List<TempBasal>>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<double>(), It.IsAny<IReadOnlyList<ScaleFactorInterval>>(), It.IsAny<CancellationToken>()))
+            .Callback((List<TempBasal> temps, long _, long _, double _, IReadOnlyList<ScaleFactorInterval> overrides, CancellationToken _) =>
+            {
+                _seriesTemps.AddRange(temps);
+                _seriesOverrides.AddRange(overrides);
+            })
             .ReturnsAsync([]);
     }
 
@@ -63,7 +71,10 @@ public class LoopAnalysisServiceReadTests
         spans
             .Setup(r => r.GetByCategories(
                 It.IsAny<IEnumerable<StateSpanCategory>>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
+            .ReturnsAsync(() => new Dictionary<StateSpanCategory, List<StateSpan>>
+            {
+                [StateSpanCategory.Override] = [.. _overrideSpans],
+            });
         var glucose = new Mock<ISensorGlucoseRepository>();
         glucose
             .Setup(r => r.GetForAnalyticsAsync(It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
@@ -97,8 +108,8 @@ public class LoopAnalysisServiceReadTests
             basalSeriesBuilder: _series.Object,
             basalSegmentService: Mock.Of<IBasalSegmentService>(),
             iobCalculator: new IobCalculator(
-                Mock.Of<ITherapySettingsResolver>(), Mock.Of<ISensitivityResolver>(), Mock.Of<IBasalRateResolver>(),
-                Mock.Of<IApsSnapshotRepository>(), Mock.Of<IPumpSnapshotRepository>()),
+                Mock.Of<ITherapySettingsResolver>(), Mock.Of<ISensitivityResolver>(), Mock.Of<IBasalSegmentService>(),
+                Mock.Of<IApsSnapshotRepository>(), Mock.Of<IPumpSnapshotRepository>(), MockStateSpans.Empty().Object),
             cobCalculator: Mock.Of<ICobCalculator>(),
             therapySettingsRepository: Mock.Of<ITherapySettingsRepository>(),
             aidSystemMetrics: null!,
@@ -125,6 +136,25 @@ public class LoopAnalysisServiceReadTests
 
         _seriesTemps.Should().ContainSingle().Which.EndTimestamp.Should().Be(To,
             "the load reads past the range for climbs, but nothing after now has been delivered");
+    }
+
+    [Fact]
+    public async Task SettingsEvidence_HandsTheBasalSeriesTheOverridesItRead()
+    {
+        _overrideSpans.Add(new StateSpan
+        {
+            Category = StateSpanCategory.Override,
+            StartTimestamp = From.AddHours(2),
+            EndTimestamp = From.AddHours(4),
+            Metadata = new Dictionary<string, object> { ["insulinNeedsScaleFactor"] = 0.5 },
+        });
+
+        await Service().GetSettingsEvidenceAsync(new LoopAnalysisFilter { From = From, To = To, Now = To }, Utc);
+
+        _seriesOverrides.Should().Equal(new ScaleFactorInterval(
+            new DateTimeOffset(From.AddHours(2)).ToUnixTimeMilliseconds(),
+            new DateTimeOffset(From.AddHours(4)).ToUnixTimeMilliseconds(),
+            0.5));
     }
 
     [Fact]

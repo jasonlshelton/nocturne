@@ -27,6 +27,7 @@ using Nocturne.API.Multitenancy;
 using Nocturne.API.OpenApi;
 using Scalar.AspNetCore;
 using Nocturne.Aspire.Scalar;
+using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Configuration;
@@ -150,7 +151,9 @@ builder.Services.AddSingleton<GoogleHealthCoordinator>();
 builder.Services.AddSingleton<IGoogleHealthGrantHolders, PostgresGoogleHealthGrantHolders>();
 builder.Services.AddSingleton<IGoogleHealthSyncCoordinator>(provider =>
     provider.GetRequiredService<GoogleHealthCoordinator>());
-builder.Services.AddScoped<IGoogleHealthService, GoogleHealthService>();
+builder.Services.AddScoped<GoogleHealthService>();
+builder.Services.AddScoped<IGoogleHealthService>(provider => provider.GetRequiredService<GoogleHealthService>());
+builder.Services.AddScoped<IConnectorDataPurge>(provider => provider.GetRequiredService<GoogleHealthService>());
 builder.Services.AddGoogleHealthPlatform();
 builder.Services.AddScoped<IGoogleHealthReadingWriter, GoogleHealthReadingWriter>();
 builder.Services.AddHostedService<GoogleHealthWorker>();

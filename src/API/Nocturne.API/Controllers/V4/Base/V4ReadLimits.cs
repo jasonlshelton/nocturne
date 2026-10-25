@@ -185,15 +185,11 @@ public static class V4ReadLimits
         if (from is not { } start || to is not { } end)
             return null;
 
-        var firstDay = LocalSlotBinning.LocalDay(Mills(start), zone);
-        var lastDay = LocalSlotBinning.LocalDay(Mills(end), zone);
+        var (firstDay, lastDay) = LocalSlotBinning.LocalDaySpan(start, end, zone);
         return lastDay.DayNumber - firstDay.DayNumber + 1 > maxDays
             ? DateSpanProblem(controller, maxDays)
             : null;
     }
-
-    private static long Mills(DateTime instant) =>
-        new DateTimeOffset(DateTime.SpecifyKind(instant, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     private static ObjectResult DateSpanProblem(ControllerBase controller, int maxDays) =>
         controller.Problem(detail: $"Date range must not exceed {maxDays} days.", statusCode: 400, title: "Bad Request");

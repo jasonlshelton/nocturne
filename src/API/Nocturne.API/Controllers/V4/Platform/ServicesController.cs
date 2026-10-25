@@ -409,6 +409,7 @@ public class ServicesController : ControllerBase
     [RemoteCommand(Invalidates = ["GetServicesOverview", "GetActiveDataSources", "GetStatus", "GetConnectorDataSummary"])]
     [ProducesResponseType(typeof(DataSourceDeleteResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<DataSourceDeleteResult>> DeleteConnectorData(
         string id,
@@ -427,6 +428,13 @@ public class ServicesController : ControllerBase
                 if (result.ErrorCode == DataSourceDeleteError.NotFound)
                 {
                     return Problem(detail: $"Connector not found: {id}", statusCode: 404, title: "Not Found");
+                }
+                if (result.ErrorCode == DataSourceDeleteError.SyncRunning)
+                {
+                    return Problem(
+                        detail: "A sync is running for this connector. Wait for it to end, then try again.",
+                        statusCode: 409,
+                        title: "Conflict");
                 }
                 return StatusCode(500, result);
             }

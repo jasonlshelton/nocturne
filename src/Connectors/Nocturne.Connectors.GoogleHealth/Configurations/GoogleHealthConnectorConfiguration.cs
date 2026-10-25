@@ -2,11 +2,12 @@ using System.Globalization;
 using Nocturne.Connectors.Core.Extensions;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Core.Constants;
+using Nocturne.Connectors.GoogleHealth.Services;
 
 namespace Nocturne.Connectors.GoogleHealth.Configurations;
 
 [ConnectorRegistration(
-    "GoogleHealth", ServiceNames.GoogleHealthConnector, "GOOGLE_HEALTH",
+    GoogleHealthConnectorService.ConnectorName, ServiceNames.GoogleHealthConnector, "GOOGLE_HEALTH",
     nameof(ConnectSource.GoogleHealth), DataSources.GoogleHealthConnector, "google-health",
     ConnectorCategory.Sync, "Import health and fitness data from Google Health", "Google Health",
     SupportsHistoricalSync = true,

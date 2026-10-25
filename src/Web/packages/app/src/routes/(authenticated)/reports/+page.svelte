@@ -20,6 +20,7 @@
   import { satisfiesAllScopes } from "$lib/authorization/scopes";
   import TIRStackedChart from "$lib/components/reports/TIRStackedChart.svelte";
   import ReliabilityBadge from "$lib/components/reports/ReliabilityBadge.svelte";
+  import TimeZoneNote from "$lib/components/reports/TimeZoneNote.svelte";
   import { AmbulatoryGlucoseProfile } from "$lib/components/ambulatory-glucose-profile";
   import { getReportsData } from "$api/reports.remote";
   import { requireDateParamsContext } from "$lib/hooks/date-params.svelte";
@@ -28,8 +29,6 @@
   import ReportsSkeleton from "$lib/components/reports/ReportsSkeleton.svelte";
   import { contextResource } from "$lib/hooks/resource-context.svelte";
   import { remoteErrorMessage } from "$lib/api/remote-error";
-  import { coachmark } from "@nocturne/coach";
-  import { coachFor } from "$lib/coach-marks/copy.svelte";
 
   // Get shared date params from context (set by reports layout)
   // Default: 14 days is standard for reports overview
@@ -58,7 +57,7 @@
       canLoadSummary
         ? getReportsData(reportsParams.dateRangeInput)
         : { loading: false, error: null, current: undefined, refresh: () => {} },
-    { errorTitle: "Error Loading Reports", dateParams: reportsParams }
+    { errorTitle: "Error loading reports", dateParams: reportsParams }
   );
 
   const isLoading = $derived(reportsResource.loading);
@@ -117,13 +116,6 @@
   } as const;
 </script>
 
-<svelte:head>
-  <meta
-    name="description"
-    content="Comprehensive diabetes management analytics and insights"
-  />
-</svelte:head>
-
 {#if isLoading && !reportsResource.current}
   <div class="mx-auto max-w-6xl px-3 py-6 @md:px-6"><ReportsSkeleton /></div>
 {:else if reportsResource.error}
@@ -155,13 +147,13 @@
         {#if visibleHrefs.has("/reports/executive-summary")}
           <Button href="/reports/executive-summary">
             <Gauge />
-            Executive Summary
+            Executive summary
           </Button>
         {/if}
         {#if visibleHrefs.has("/reports/agp")}
           <Button href="/reports/agp" variant="outline">
             <BarChart3 />
-            AGP Report
+            AGP report
           </Button>
         {/if}
         {#if visibleHrefs.has("/reports/readings")}
@@ -188,6 +180,14 @@
                 <p class="text-xl text-muted-foreground">No data</p>
               {/if}
               <p class="text-sm text-muted-foreground">Consensus target: at least 70% of time in range.</p>
+              {#if queryData?.timeZoneUnavailableReason}
+                <p class="text-sm text-muted-foreground">
+                  <TimeZoneNote reason={queryData.timeZoneUnavailableReason}>
+                    Time in a personal target range that changes through the day is not shown.
+                    Days of data are counted on UTC days.
+                  </TimeZoneNote>
+                </p>
+              {/if}
               {#if analysis?.reliability?.meetsReliabilityCriteria === false}
                 <ReliabilityBadge reliability={analysis.reliability} />
               {/if}
@@ -257,10 +257,6 @@
     <section
       class="grid gap-x-12 gap-y-10 @3xl:grid-cols-2"
       aria-label="All reports"
-      {@attach coachmark({
-        ...coachFor("setup-reports.categories"),
-        completeOn: { event: "click" },
-      })}
     >
       {#each categories as category (category.id)}
         {@const CategoryIcon = category.icon}
@@ -280,7 +276,7 @@
                   >
                     <div class="min-w-0 flex-1">
                       <div class="font-medium text-foreground">{report.title}</div>
-                      <div class="truncate text-sm text-muted-foreground">{report.description}</div>
+                      <div class="text-sm text-muted-foreground">{report.description}</div>
                     </div>
                     <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-hover/report:translate-x-0.5" aria-hidden="true" />
                   </a>

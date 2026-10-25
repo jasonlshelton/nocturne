@@ -5,6 +5,7 @@ using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.API.Services.ProfileActivations;
@@ -98,14 +99,14 @@ public sealed class NativeProfileSwitches
         var (activation, refusal) = await OwnedAsync(id, ct);
         if (activation is null)
             return new(refusal);
-        if (ProfileActivationSelection.EndOf(activation) is { } end && end <= ToMills(now))
+        if (ProfileActivationSelection.EndOf(activation) is { } end && end <= now.ToMills())
             return new(NativeProfileSwitchOutcome.AlreadyEnded);
 
         return await RecordAsync(
             activation.BaseProfileName,
             activation.Percentage,
             activation.TimeshiftMs,
-            ProfileActivationSelection.EndOf(activation) is { } until ? until - ToMills(now) : null,
+            ProfileActivationSelection.EndOf(activation) is { } until ? until - now.ToMills() : null,
             activation.AdditionalProperties?.GetValueOrDefault(ProfileActivation.NotesKey)?.ToString(),
             ct);
     }
@@ -117,7 +118,7 @@ public sealed class NativeProfileSwitches
         var (activation, refusal) = await OwnedAsync(id, ct);
         if (activation is null)
             return new(refusal);
-        if (ProfileActivationSelection.EndOf(activation) is { } end && end <= ToMills(now))
+        if (ProfileActivationSelection.EndOf(activation) is { } end && end <= now.ToMills())
             return new(NativeProfileSwitchOutcome.AlreadyEnded);
 
         var written = await _writer.EndAsync(activation, now, _audit.SubjectName,
@@ -140,7 +141,7 @@ public sealed class NativeProfileSwitches
     public async Task<ProfileActivationStatus> GetStatusAsync(CancellationToken ct)
     {
         var now = Now();
-        var nowMills = ToMills(now);
+        var nowMills = now.ToMills();
         var running = await _activations.GetOverlappingAsync(now, now, Neighbourhood, ct);
         var reported = ProfileActivationSelection.ReportedAt(running, nowMills);
         var recorded = ProfileActivationSelection.NativeAt(running, nowMills);
@@ -240,6 +241,4 @@ public sealed class NativeProfileSwitches
     /// </summary>
     private DateTime Now() =>
         DateTimeOffset.FromUnixTimeMilliseconds(_time.GetUtcNow().ToUnixTimeMilliseconds()).UtcDateTime;
-
-    private static long ToMills(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 }

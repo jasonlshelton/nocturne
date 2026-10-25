@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use nocturne_alerts_core::context::SensorContext;
+use nocturne_alerts_core::context::{SensorContext, TrackerReference};
 use nocturne_alerts_core::engine::{EngineState, Evaluation, Rule, evaluate_rule};
 use nocturne_alerts_core::enums::WireEnum;
 use nocturne_alerts_core::eval::{Env, eval_node, eval_payload as eval_parsed};
@@ -944,10 +944,39 @@ fn tracker_definition() -> Uuid {
 }
 
 fn tracker_ctx(reference_at: DateTime<Utc>) -> SensorContext {
+    recorded_tracker_ctx(reference_at, None)
+}
+
+fn recorded_tracker_ctx(
+    reference_at: DateTime<Utc>,
+    recorded_at: Option<DateTime<Utc>>,
+) -> SensorContext {
+    recorded_ctx(reference_at, recorded_at, false)
+}
+
+fn recorded_ctx(
+    reference_at: DateTime<Utc>,
+    recorded_at: Option<DateTime<Utc>>,
+    scheduled: bool,
+) -> SensorContext {
     let mut ctx = SensorContext::default();
-    ctx.active_trackers
-        .insert(tracker_definition(), reference_at);
+    ctx.active_trackers.insert(
+        tracker_definition(),
+        TrackerReference {
+            reference_at,
+            recorded_at,
+            scheduled,
+        },
+    );
     ctx
+}
+
+fn tracker_age_holds(ctx: &SensorContext, operator: &str, minutes: i32) -> bool {
+    eval_payload(
+        ConditionKind::TrackerAge,
+        &tracker_age_payload(operator, minutes),
+        ctx,
+    )
 }
 
 fn tracker_age_payload(operator: &str, minutes: i32) -> Value {
@@ -993,8 +1022,10 @@ fn tracker_age_no_active_instance_is_false() {
 #[test]
 fn tracker_age_other_definition_is_false() {
     let mut ctx = SensorContext::default();
-    ctx.active_trackers
-        .insert(Uuid::from_u128(0xFFFF), base() - TimeDelta::hours(48));
+    ctx.active_trackers.insert(
+        Uuid::from_u128(0xFFFF),
+        TrackerReference::at(base() - TimeDelta::hours(48)),
+    );
     assert!(!eval_payload(
         ConditionKind::TrackerAge,
         &tracker_age_payload(">=", 60),
@@ -1018,6 +1049,96 @@ fn tracker_age_negative_minutes_pre_event_window() {
         &tracker_age_payload(">=", -360),
         &ctx
     ));
+}
+
+#[test]
+fn tracker_age_threshold_due_before_recording_does_not_fire() {
+    // Backdated 72h and recorded an hour ago: the 48h threshold was due 23h before.
+    let ctx = recorded_tracker_ctx(
+        base() - TimeDelta::hours(72),
+        Some(base() - TimeDelta::hours(1)),
+    );
+    assert!(!tracker_age_holds(&ctx, ">=", 48 * 60));
+    assert!(!tracker_age_holds(&ctx, ">", 48 * 60));
+}
+
+#[test]
+fn tracker_age_threshold_due_after_recording_fires() {
+    // Recorded 42h into the run: the 48h threshold fell due after.
+    let ctx = recorded_tracker_ctx(
+        base() - TimeDelta::hours(72),
+        Some(base() - TimeDelta::hours(30)),
+    );
+    assert!(tracker_age_holds(&ctx, ">=", 48 * 60));
+}
+
+#[test]
+fn tracker_age_threshold_due_exactly_at_recording_does_not_fire() {
+    let start = base() - TimeDelta::hours(72);
+    let at_due = recorded_tracker_ctx(start, Some(start + TimeDelta::hours(48)));
+    assert!(!tracker_age_holds(&at_due, ">=", 48 * 60));
+
+    let just_before = recorded_tracker_ctx(
+        start,
+        Some(start + TimeDelta::hours(48) - TimeDelta::seconds(1)),
+    );
+    assert!(tracker_age_holds(&just_before, ">=", 48 * 60));
+}
+
+#[test]
+fn tracker_age_strictly_greater_is_held_back_only_after_its_due_time() {
+    // `> 48h` does not hold at 48h, so a run recorded exactly then still alerts.
+    let start = base() - TimeDelta::hours(72);
+    let at_due = recorded_tracker_ctx(start, Some(start + TimeDelta::hours(48)));
+    assert!(tracker_age_holds(&at_due, ">", 48 * 60));
+
+    let after = recorded_tracker_ctx(
+        start,
+        Some(start + TimeDelta::hours(48) + TimeDelta::seconds(1)),
+    );
+    assert!(!tracker_age_holds(&after, ">", 48 * 60));
+}
+
+#[test]
+fn tracker_age_event_run_is_never_held_back() {
+    // Booked two hours ago for 22h from now: the "24h before" step was due
+    // before the booking, and still fires.
+    let ctx = recorded_ctx(
+        base() + TimeDelta::hours(22),
+        Some(base() - TimeDelta::hours(2)),
+        true,
+    );
+    assert!(tracker_age_holds(&ctx, ">=", -24 * 60));
+}
+
+#[test]
+fn tracker_age_later_threshold_of_the_same_run_still_fires() {
+    // Recorded 50h into the run: 48h is held back, 70h fires once reached.
+    let start = base() - TimeDelta::hours(72);
+    let ctx = recorded_tracker_ctx(start, Some(start + TimeDelta::hours(50)));
+    assert!(!tracker_age_holds(&ctx, ">=", 48 * 60));
+    assert!(tracker_age_holds(&ctx, ">=", 70 * 60));
+}
+
+#[test]
+fn tracker_age_upper_bound_is_not_held_back_by_recording() {
+    let ctx = recorded_tracker_ctx(base() - TimeDelta::hours(2), Some(base()));
+    assert!(tracker_age_holds(&ctx, "<", 3 * 60));
+}
+
+#[test]
+fn tracker_age_wire_recorded_at_holds_back_a_due_threshold() {
+    let wire = json!({
+        "active_trackers": [
+            {
+                "tracker_definition_id": tracker_definition().to_string(),
+                "reference_at": "2026-01-02T12:00:00Z",
+                "recorded_at": "2026-01-05T11:00:00Z",
+            }
+        ]
+    });
+    let ctx: SensorContext = serde_json::from_value(wire).expect("context parses");
+    assert!(!tracker_age_holds(&ctx, ">=", 48 * 60));
 }
 
 #[test]

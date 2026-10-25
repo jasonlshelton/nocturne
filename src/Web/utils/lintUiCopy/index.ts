@@ -9,15 +9,20 @@
 //   pnpm run lint:copy --min=error           blocking alerts only
 //   pnpm run lint:copy --rule=Nocturne.Terms one rule
 //   pnpm run lint:copy --json                machine-readable
+//
+// It also fails when a file compares a value against a literal that the catalog
+// holds as a string for that same file.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { findTranslatedComparisons } from "./comparedLiterals.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../..");
+const appDir = path.resolve(here, "../../packages/app");
 const catalogPath = path.resolve(here, "../../locales/en.po");
 const exceptionsPath = path.join(here, "exceptions.txt");
 
@@ -127,6 +132,17 @@ function readExceptions(): Set<string> {
 }
 
 const entries = readCatalog(catalogPath);
+const comparisons = findTranslatedComparisons(entries, appDir);
+if (comparisons.size > 0) {
+  console.error(
+    "A file compares against a string the catalog translates. In another locale the comparison never matches. Compare against a generated enum or a constant in a plain .ts module.",
+  );
+  for (const [file, list] of comparisons) {
+    for (const f of list) console.error(`  ${file}:${f.line} "${f.literal}"`);
+  }
+  process.exit(1);
+}
+
 const unique = [
   ...new Map(
     entries

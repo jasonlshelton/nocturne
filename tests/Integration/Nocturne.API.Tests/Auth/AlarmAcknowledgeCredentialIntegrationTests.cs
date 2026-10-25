@@ -139,8 +139,6 @@ public class AlarmAcknowledgeCredentialIntegrationTests : ApiIntegrationTestBase
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await key.PostAsJsonAsync($"/api/v4/alerts/excursions/{Guid.CreateVersion7()}/acknowledge", new { }))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await key.PostAsJsonAsync("/api/v1/notifications/pushover", new { title = "t", message = "m" }))
-            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await key.PostAsJsonAsync("/api/v1/adminnotifies", new { title = "t", message = "m" }))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await key.GetAsync("/api/v1/entries")).StatusCode.Should().Be(HttpStatusCode.Forbidden);

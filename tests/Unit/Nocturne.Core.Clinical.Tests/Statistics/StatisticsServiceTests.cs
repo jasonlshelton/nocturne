@@ -684,7 +684,7 @@ public class StatisticsServiceTests
         var result = _statisticsService.CalculateTimeInRange(entries);
 
         result.Episodes.Low.Should().Be(0);
-        result.Percentages.Low.Should().Be(50);
+        result.Percentages.Low.Should().BeApproximately(50, 0.1);
         result.Durations.Low.Should().BeApproximately(60, 1);
     }
 
@@ -916,6 +916,87 @@ public class StatisticsServiceTests
     }
 
     [Fact]
+    public void CalculateTimeInRange_Percentages_AreZoneTimeOverCoveredTimeAcrossCadences()
+    {
+        var oneMinute = Readings(3, 1, (180, 100, 60));
+        var fiveMinute = Readings(3, 5).Select(r => new SensorGlucose
+        {
+            Mgdl = r.Mgdl,
+            Timestamp = r.Timestamp.AddDays(3),
+        });
+
+        var result = _statisticsService.CalculateTimeInRange(oneMinute.Concat(fiveMinute));
+
+        var covered = 6 * 1440.0;
+        result.Durations.Low.Should().BeApproximately(300, 0.5);
+        result.Percentages.Low.Should().BeApproximately(result.Durations.Low / covered * 100, 0.01);
+        result.Percentages.Low.Should().BeApproximately(3.47, 0.02);
+        result.Percentages.Target.Should().BeApproximately(result.Durations.Target / covered * 100, 0.01);
+        result.Percentages.TightTarget.Should().BeApproximately(result.Durations.TightTarget / covered * 100, 0.01);
+        result.RangeStats.Low.TimeInRange.Should().BeApproximately(3.5, 0.1);
+        result.RangeStats.Target.TimeInRange.Should().BeApproximately(96.5, 0.1);
+    }
+
+    [Fact]
+    public void CalculateTimeInRange_Percentages_OfTheExcludingZonesSumToOneHundred()
+    {
+        var oneMinute = Readings(2, 1, (180, 100, 60), (600, 50, 220), (900, 20, 45), (1000, 20, 300));
+        var fiveMinute = Readings(2, 5, (60, 100, 60), (700, 50, 300)).Select(r => new SensorGlucose
+        {
+            Mgdl = r.Mgdl,
+            Timestamp = r.Timestamp.AddDays(2),
+        });
+
+        var p = _statisticsService.CalculateTimeInRange(oneMinute.Concat(fiveMinute)).Percentages;
+
+        (p.VeryLow + p.Low + p.Target + p.High + p.VeryHigh).Should().BeApproximately(100, 0.001);
+    }
+
+    [Fact]
+    public void CalculatePersonalRangeTime_ResolvesAnInstantAgainstThePersonalRange()
+    {
+        // 140 is in the default range but above this schedule's 130.
+        var schedule = new List<TargetRangeEntry>
+        {
+            new() { Time = "00:00", TimeAsSeconds = 0, Low = 70, High = 130 },
+        };
+        var at = new DateTime(2026, 1, 1, 3, 0, 0, DateTimeKind.Utc);
+        var entries = new[]
+        {
+            new SensorGlucose { Mgdl = 100, Timestamp = at },
+            new SensorGlucose { Mgdl = 140, Timestamp = at },
+            new SensorGlucose { Mgdl = 100, Timestamp = at.AddMinutes(5) },
+        };
+
+        var result = _statisticsService.CalculatePersonalRangeTime(entries, schedule, TimeZoneInfo.Utc);
+
+        result!.AboveRangePercent.Should().BeApproximately(50, 0.001);
+        result.InRangePercent.Should().BeApproximately(50, 0.001);
+    }
+
+    [Fact]
+    public void CalculatePersonalRangeTime_WeighsTimeNotReadingsAcrossCadences()
+    {
+        var schedule = new List<TargetRangeEntry>
+        {
+            new() { Time = "00:00", TimeAsSeconds = 0, Low = 70, High = 180 },
+        };
+        var oneMinute = Readings(3, 1, (180, 100, 60));
+        var fiveMinute = Readings(3, 5).Select(r => new SensorGlucose
+        {
+            Mgdl = r.Mgdl,
+            Timestamp = r.Timestamp.AddDays(3),
+        });
+
+        var result = _statisticsService.CalculatePersonalRangeTime(
+            oneMinute.Concat(fiveMinute), schedule, TimeZoneInfo.Utc);
+
+        result!.BelowRangePercent.Should().BeApproximately(300 / (6 * 1440.0) * 100, 0.02);
+        (result.BelowRangePercent + result.InRangePercent + result.AboveRangePercent)
+            .Should().BeApproximately(100, 0.001);
+    }
+
+    [Fact]
     public void CalculateTimeInRange_PerDayFigures_CountReadingsOfOneInstantOnce()
     {
         var once = Readings(3, 5, (180, 100, 60), (900, 60, 220));
@@ -1073,6 +1154,44 @@ public class StatisticsServiceTests
         result.InRangePercent.Should().BeApproximately(50.0, 0.1);
         result.AboveRangePercent.Should().BeApproximately(25.0, 0.1);
         result.Entries.Should().BeSameAs(schedule);
+    }
+
+    [Fact]
+    public void CalculatePersonalRangeTime_WithNoZone_AndAFlatSchedule_ComputesTheSplit()
+    {
+        var schedule = new List<TargetRangeEntry>
+        {
+            new() { Time = "06:00", TimeAsSeconds = 6 * 3600, Low = 70, High = 130 },
+        };
+        var at = new DateTime(2026, 1, 1, 3, 0, 0, DateTimeKind.Utc);
+        var entries = new[]
+        {
+            new SensorGlucose { Mgdl = 100, Timestamp = at },
+            new SensorGlucose { Mgdl = 140, Timestamp = at },
+            new SensorGlucose { Mgdl = 100, Timestamp = at.AddMinutes(5) },
+        };
+
+        var result = _statisticsService.CalculatePersonalRangeTime(entries, schedule, null);
+
+        result!.AboveRangePercent.Should().BeApproximately(50, 0.001);
+        result.InRangePercent.Should().BeApproximately(50, 0.001);
+    }
+
+    [Fact]
+    public void CalculatePersonalRangeTime_WithNoZone_AndSeveralEntries_GivesNoPersonalRange()
+    {
+        var schedule = new List<TargetRangeEntry>
+        {
+            new() { Time = "00:00", TimeAsSeconds = 0, Low = 100, High = 180 },
+            new() { Time = "06:00", TimeAsSeconds = 6 * 3600, Low = 80, High = 160 },
+        };
+        var entries = new[]
+        {
+            new SensorGlucose { Mgdl = 170, Timestamp = new DateTime(2026, 1, 1, 9, 0, 0, DateTimeKind.Utc) },
+            new SensorGlucose { Mgdl = 170, Timestamp = new DateTime(2026, 1, 1, 9, 5, 0, DateTimeKind.Utc) },
+        };
+
+        _statisticsService.CalculatePersonalRangeTime(entries, schedule, null).Should().BeNull();
     }
 
     [Fact]

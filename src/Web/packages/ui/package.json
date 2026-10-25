@@ -11,6 +11,7 @@
     "./keys": "./src/lib/dom-keys.ts",
     "./glucose": "./src/lib/glucose.ts",
     "./energy": "./src/lib/energy.ts",
+    "./relative-time": "./src/lib/relative-time.ts",
     "./tokens": "./src/lib/tokens.ts",
     "./glucose-icon": "./src/lib/glucose-icon.ts",
     "./theme.css": "./src/theme.css"

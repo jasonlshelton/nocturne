@@ -40,23 +40,25 @@
   // Format hours for X-axis (ticks are always on hour boundaries)
   function formatHoursFromChange(minutes: number): string {
     const hours = Math.round(minutes / 60);
-    if (hours === 0) return "Site Change";
+    if (hours === 0) return "Site change";
     if (hours > 0) return `+${hours}h`;
     return `${hours}h`;
   }
 
-  const MAX_X_TICKS = 13;
+  // About one label per 64px of plot, so labels keep a gap without occlusion thinning them unevenly.
+  let chartWidth = $state(0);
+  const maxXTicks = $derived(chartWidth > 0 ? Math.min(13, Math.max(3, Math.floor(chartWidth / 64))) : 13);
   const TICK_STEPS_HOURS = [1, 2, 3, 4, 6, 12];
 
   // Hour ticks anchored on the change itself, thinned so labels never touch. Ordered by distance
   // from the change: occlusion with priority "start" keeps the first tick it can, so the
-  // "Site Change" label always survives and the rest thin outwards from it.
+  // "Site change" label always survives and the rest thin outwards from it.
   const hourlyTicks = $derived.by(() => {
     const [minMinutes, maxMinutes] = xDomain;
     const startHour = Math.ceil(minMinutes / 60);
     const endHour = Math.floor(maxMinutes / 60);
     const span = endHour - startHour;
-    const step = TICK_STEPS_HOURS.find((s) => span / s < MAX_X_TICKS) ?? 12;
+    const step = TICK_STEPS_HOURS.find((s) => span / s < maxXTicks) ?? 12;
     const ticks: number[] = [];
     for (let h = Math.ceil(startHour / step) * step; h <= endHour; h += step) {
       ticks.push(h * 60);
@@ -121,7 +123,7 @@
 
 <div class="@container w-full">
   {#if analysis && analysis.hasSufficientData && chartData.length > 0}
-    <div class="h-[400px] w-full">
+    <div class="h-[400px] w-full" bind:clientWidth={chartWidth}>
       <AreaChart
         data={chartData}
         x={(d) => d.minutesFromChange}
@@ -257,7 +259,7 @@
       class="flex h-[400px] w-full flex-col items-center justify-center text-muted-foreground"
     >
       <AlertCircle class="mx-auto h-10 w-10 opacity-30" />
-      <p class="mt-2 font-medium">Insufficient Data</p>
+      <p class="mt-2 font-medium">Insufficient data</p>
       <p class="text-sm text-center max-w-md">
         {#if (analysis.siteChangeCount ?? 0) < 2}
           At least 2 site changes are required for meaningful analysis.

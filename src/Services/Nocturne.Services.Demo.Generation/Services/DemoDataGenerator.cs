@@ -132,7 +132,7 @@ public class DemoDataGenerator : IDemoDataGenerator
             _currentGlucose = nextGlucose;
 
             var now = DateTime.UtcNow;
-            var mills = new DateTimeOffset(now).ToUnixTimeMilliseconds();
+            var mills = now.ToMills();
             var direction = CalculateDirection(change);
 
             return new Entry

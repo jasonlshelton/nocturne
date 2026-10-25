@@ -18,6 +18,8 @@ using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.CoachMarks;
+using Nocturne.API.Services.SetupHub;
+using Nocturne.API.Services.SetupHub.Items;
 using Nocturne.Core.Clinical.Statistics;
 using Nocturne.Core.Clinical.Treatments;
 using Nocturne.Core.Contracts.Content;
@@ -55,6 +57,7 @@ using Nocturne.Connectors.Core.Models;
 using Nocturne.Connectors.Nightscout.Services.WriteBack;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.CoachMarks;
+using Nocturne.Core.Contracts.SetupHub;
 using Nocturne.Core.Contracts.Timezones;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Alerts;
@@ -283,6 +286,29 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
+    /// Every rate-limit policy's partition key, by policy name. The registration reads its keys from
+    /// here, and <c>RateLimitPartitionKeyGuardTests</c> calls each entry and fails a registered
+    /// policy that has none.
+    /// </summary>
+    /// <remarks>
+    /// The limiter runs before <c>AuthenticationMiddleware</c>, so a key that reads the auth
+    /// context sees nothing and collapses into one shared bucket.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, Func<HttpContext, string>> RateLimitPartitionKeys(
+        ClientRateLimitKey clientRateLimitKey)
+    {
+        var keys = new Dictionary<string, Func<HttpContext, string>>
+        {
+            [StatisticsComputeRateLimitPolicy] = StatisticsComputePartitionKey,
+            [TranslationDraftsRateLimitPolicy] = TranslationDraftPartitionKey,
+            [NoAccountAlertsRateLimitPolicy] = NoAccountAlertsPartitionKey,
+        };
+        foreach (var (policy, _, _) in ClientAddressPolicies)
+            keys[policy] = clientRateLimitKey.Resolve;
+        return keys;
+    }
+
+    /// <summary>
     /// Reduces the Authorization header and <c>?token=</c> query parameter to
     /// the one token the handlers would authenticate on, collapsing the
     /// spellings they treat as one credential — hashing each separately would
@@ -335,6 +361,8 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IBraceExpansionService, BraceExpansionService>();
         services.AddScoped<ITimeQueryService, TimeQueryService>();
 
+        services.Configure<DbSizeOptions>(configuration.GetSection(DbSizeOptions.SectionName));
+        services.AddScoped<IStoreSizeReader, StoreSizeReader>();
         services.AddScoped<IDDataService, DDataService>();
         services.AddScoped<IPropertiesService, PropertiesService>();
         services.AddScoped<IIobCobReader, IobCobReader>();
@@ -383,6 +411,109 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<ITranslationContributionService, GitHubTranslationService>();
         services.AddSingleton<IContentContributionService, GitHubContentService>();
         services.AddScoped<ITranslationDraftService, TranslationDraftService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers every rate-limit policy, each partitioned by its entry in <see cref="RateLimitPartitionKeys"/>.
+    /// </summary>
+    internal static IServiceCollection AddApiRateLimiting(
+        this IServiceCollection services,
+        IConfiguration configuration
+    )
+    {
+        var partitionKeys = RateLimitPartitionKeys(new ClientRateLimitKey(configuration));
+
+        services.AddRateLimiter(options =>
+        {
+            foreach (var (policy, permitLimit, window) in ClientAddressPolicies)
+            {
+                options.AddPolicy(
+                    policy,
+                    context =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: partitionKeys[policy](context),
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = permitLimit,
+                                Window = window,
+                                QueueLimit = 0,
+                            }
+                        )
+                );
+            }
+
+            // Statistics compute POSTs: 60 per tenant host per minute. These actions compute over a
+            // caller-supplied body rather than over stored data, and reports.read — the scope
+            // gating them — is held by every public share link, so an anonymous viewer can post
+            // them. The partition is the Host rather than the client because what this bounds is one
+            // tenant's compute across all of its viewers, and the limiter runs before tenant
+            // resolution while the tenant (or share token) is already the subdomain.
+            options.AddPolicy(
+                StatisticsComputeRateLimitPolicy,
+                context =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: partitionKeys[StatisticsComputeRateLimitPolicy](context),
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 60,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }
+                    )
+            );
+
+            // Translation drafts: 60 per session per minute, sliding. Autosave
+            // batches every 800ms while typing, so the ceiling has to clear
+            // normal editing while still bounding the per-call database work an
+            // editor session can force. Partitioned by credential rather than
+            // IP because the caller controls X-Forwarded-For; see
+            // TranslationDraftPartitionKey.
+            options.AddPolicy(
+                TranslationDraftsRateLimitPolicy,
+                context =>
+                    RateLimitPartition.GetSlidingWindowLimiter(
+                        partitionKey: partitionKeys[TranslationDraftsRateLimitPolicy](context),
+                        factory: _ => new SlidingWindowRateLimiterOptions
+                        {
+                            PermitLimit = 60,
+                            Window = TimeSpan.FromMinutes(1),
+                            SegmentsPerWindow = 6,
+                            QueueLimit = 0,
+                        }
+                    )
+            );
+
+            // A clock polls its alerts every 10 seconds from each screen it is open on, so a face on
+            // a few dozen screens shares one bucket; a receipt is one press per alarm.
+            options.AddPolicy(
+                NoAccountAlertsRateLimitPolicy,
+                context =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: partitionKeys[NoAccountAlertsRateLimitPolicy](context),
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 300,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }
+                    )
+            );
+
+            options.OnRejected = async (context, ct) =>
+            {
+                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.HttpContext.Response.WriteAsJsonAsync(
+                    new
+                    {
+                        error = "rate_limit_exceeded",
+                        error_description = "Too many requests. Please try again later.",
+                    },
+                    ct
+                );
+            };
+        });
 
         return services;
     }
@@ -507,6 +638,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ITenantMemberService, TenantMemberService>();
         services.AddScoped<ITenantRoleService, TenantRoleService>();
         services.AddScoped<ITenantService, TenantService>();
+        services.AddScoped<IUnitsAndTimezoneService, UnitsAndTimezoneService>();
         services.AddScoped<ITenantOverviewService, TenantOverviewService>();
         services.AddScoped<IGlucoseStatusClassifier, GlucoseStatusClassifier>();
         services.AddScoped<IInstanceSetupState, InstanceSetupState>();
@@ -544,97 +676,7 @@ public static class ServiceRegistrationExtensions
             ConnectCallback = new PinnedConnector(OutboundAddressPolicy.NotLinkLocal).ConnectAsync,
         });
 
-        var clientRateLimitKey = new ClientRateLimitKey(configuration);
-
-        services.AddRateLimiter(options =>
-        {
-            foreach (var (policy, permitLimit, window) in ClientAddressPolicies)
-            {
-                options.AddPolicy(
-                    policy,
-                    context =>
-                        RateLimitPartition.GetFixedWindowLimiter(
-                            partitionKey: clientRateLimitKey.Resolve(context),
-                            factory: _ => new FixedWindowRateLimiterOptions
-                            {
-                                PermitLimit = permitLimit,
-                                Window = window,
-                                QueueLimit = 0,
-                            }
-                        )
-                );
-            }
-
-            // Statistics compute POSTs: 60 per tenant host per minute. These actions compute over a
-            // caller-supplied body rather than over stored data, and reports.read — the scope
-            // gating them — is held by every public share link, so an anonymous viewer can post
-            // them. The partition is the Host rather than the client because what this bounds is one
-            // tenant's compute across all of its viewers, and the limiter runs before tenant
-            // resolution while the tenant (or share token) is already the subdomain.
-            options.AddPolicy(
-                StatisticsComputeRateLimitPolicy,
-                context =>
-                    RateLimitPartition.GetFixedWindowLimiter(
-                        partitionKey: StatisticsComputePartitionKey(context),
-                        factory: _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = 60,
-                            Window = TimeSpan.FromMinutes(1),
-                            QueueLimit = 0,
-                        }
-                    )
-            );
-
-            // Translation drafts: 60 per session per minute, sliding. Autosave
-            // batches every 800ms while typing, so the ceiling has to clear
-            // normal editing while still bounding the per-call database work an
-            // editor session can force. Partitioned by credential rather than
-            // IP because the caller controls X-Forwarded-For; see
-            // TranslationDraftPartitionKey.
-            options.AddPolicy(
-                TranslationDraftsRateLimitPolicy,
-                context =>
-                    RateLimitPartition.GetSlidingWindowLimiter(
-                        partitionKey: TranslationDraftPartitionKey(context),
-                        factory: _ => new SlidingWindowRateLimiterOptions
-                        {
-                            PermitLimit = 60,
-                            Window = TimeSpan.FromMinutes(1),
-                            SegmentsPerWindow = 6,
-                            QueueLimit = 0,
-                        }
-                    )
-            );
-
-            // A clock polls its alerts every 10 seconds from each screen it is open on, so a face on
-            // a few dozen screens shares one bucket; a receipt is one press per alarm.
-            options.AddPolicy(
-                NoAccountAlertsRateLimitPolicy,
-                context =>
-                    RateLimitPartition.GetFixedWindowLimiter(
-                        partitionKey: NoAccountAlertsPartitionKey(context),
-                        factory: _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = 300,
-                            Window = TimeSpan.FromMinutes(1),
-                            QueueLimit = 0,
-                        }
-                    )
-            );
-
-            options.OnRejected = async (context, ct) =>
-            {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                await context.HttpContext.Response.WriteAsJsonAsync(
-                    new
-                    {
-                        error = "rate_limit_exceeded",
-                        error_description = "Too many requests. Please try again later.",
-                    },
-                    ct
-                );
-            };
-        });
+        services.AddApiRateLimiting(configuration);
 
         return services;
     }
@@ -648,6 +690,7 @@ public static class ServiceRegistrationExtensions
         // Demo mode
         services.AddSingleton<IDemoModeService, DemoModeService>();
 
+        services.AddSingleton<CacheFlights>();
         services.AddScoped<ITenantCache, TenantCache>();
 
         services.AddScoped<IV4ToLegacyProjectionService, V4ToLegacyProjectionService>();
@@ -710,6 +753,7 @@ public static class ServiceRegistrationExtensions
         });
         services.AddScoped<IBatteryService, BatteryService>();
         services.AddScoped<IProfileWriteService, ProfileWriteService>();
+        services.AddScoped<IProfileDeletionService, ProfileDeletionService>();
         services.AddScoped<IProfileActivationResolver, Services.ProfileActivations.ProfileActivationResolver>();
         services.AddScoped<Services.ProfileActivations.ProfileActivationWriter>();
         services.AddScoped<Services.ProfileActivations.NativeProfileSwitches>();
@@ -777,6 +821,8 @@ public static class ServiceRegistrationExtensions
         // definitions (and self-healing if a managed rule is ever lost).
         services.AddScoped<ITrackerAlertRuleSyncService, TrackerAlertRuleSyncService>();
         services.AddHostedService<TrackerAlertRuleBackfillService>();
+        services.AddScoped<ConsumableTrackerWriter>();
+        services.AddScoped<ILegacyFallbackService, LegacyFallbackService>();
         services.AddScoped<IDeviceAgeService, DeviceAgeService>();
         services.AddScoped<ISensorSessionInferenceService, SensorSessionInferenceService>();
         services.AddSingleton<ISensorSessionInferenceRunner, SensorSessionInferenceRunner>();
@@ -796,6 +842,18 @@ public static class ServiceRegistrationExtensions
 
         // Coach marks
         services.AddScoped<ICoachMarkService, CoachMarkService>();
+
+        // Setup hub
+        services.AddScoped<ISetupHubService, SetupHubService>();
+        services.AddScoped<ISetupHubItem, ConnectDataItem>();
+        services.AddScoped<ISetupHubItem, AlertsItem>();
+        services.AddScoped<AlertSetupService>();
+        services.AddScoped<ISetupHubItem, DevicesItem>();
+        services.AddScoped<DeviceSetupService>();
+        services.AddScoped<ISetupHubItem, TherapyItem>();
+        services.AddScoped<ITherapySetupService, TherapySetupService>();
+        services.AddScoped<ISetupHubItem, SharingItem>();
+        services.AddScoped<ISetupHubItem, AboutItem>();
 
         // Timezone timeline (fake-UTC connector conversion + travel/relocation)
         services.AddScoped<ITimezoneTimelineService, TimezoneTimelineService>();
@@ -894,6 +952,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IEntryDecomposer, EntryDecomposer>();
         services.AddScoped<RelativeTempBasalRates>();
         services.AddScoped<ITempBasalRateReresolver, TempBasalRateReresolver>();
+        services.AddScoped<ILoopClosedLoopStamper, LoopClosedLoopStamper>();
         services.AddHostedService<TempBasalRateSweepService>();
         services.AddScoped<ITreatmentDecomposer, TreatmentDecomposer>();
         services.AddScoped<IDeviceStatusDecomposer, DeviceStatusDecomposer>();
@@ -960,11 +1019,13 @@ public static class ServiceRegistrationExtensions
         // categories. Open generic so every V4 model type resolves; the repository chokepoint fires it
         // for live writes only. Additive to the legacy v1 IDataEventSink<T> projections above.
         services.AddScoped(typeof(IV4RecordBroadcaster<>), typeof(SignalRV4RecordBroadcaster<>));
+        services.AddScoped<IGlucoseReadingBroadcaster, HomeAssistantGlucoseBroadcaster>();
 
         // Push notifications
         services.AddScoped<INotificationV2Service, NotificationV2Service>();
         services.AddScoped<INotificationV1Service, NotificationV1Service>();
         services.AddSingleton<LegacyAlarmSnoozeStore>();
+        services.AddSingleton<LegacyNotificationStore>();
         services.AddScoped<IApnsClientFactory, ApnsClientFactory>();
         services.AddHttpClient(
             "dotAPNS",
@@ -1005,7 +1066,7 @@ public static class ServiceRegistrationExtensions
 
     /// <summary>
     /// Alert engines, device health monitoring, compression low detection,
-    /// and all notifier implementations (SignalR, webhook, Pushover).
+    /// and all notifier implementations (SignalR, webhook).
     /// </summary>
     public static IServiceCollection AddAlertingAndMonitoring(
         this IServiceCollection services,

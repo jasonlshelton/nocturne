@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Controllers.V4.Health;
 using Nocturne.API.Multitenancy;
+using Nocturne.API.Services.Audit;
 using Nocturne.API.Services.Connectors;
 using Nocturne.API.Services.Health.GoogleHealth;
 using Nocturne.Connectors.Core.Interfaces;
@@ -590,6 +591,63 @@ public class GoogleHealthTests : IDisposable
         Assert.False(await store.EnabledAsync());
         var fresh = await second.StartAsync(subject, null, default);
         Assert.NotEqual(state, QueryHelpers.ParseQuery(new Uri(fresh.Url).Query)["state"].ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Connector_purge_deletes_google_health_sleep_and_honours_allow_reimport(bool allowReimport)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<NocturneDbContext>().UseSqlite(connection).Options;
+        await using var db = new NocturneDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var tenantId = Guid.NewGuid();
+        db.TenantId = tenantId;
+        db.Tenants.Add(new TenantEntity { Id = tenantId, Slug = "sleep-purge", DisplayName = "Sleep purge", IsActive = true });
+        await db.SaveChangesAsync();
+        var factory = new Mock<INocturneDbContextFactory>();
+        factory.Setup(value => value.CreateAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => ValueTask.FromResult(new NocturneDbContext(options) { TenantId = tenantId }));
+        var repository = new SleepSessionRepository(factory.Object);
+        var sleepService = new Mock<ISleepService>();
+        sleepService.Setup(value => value.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
+            .Returns<SleepSession, CancellationToken>(repository.UpsertSessionAsync);
+        var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
+            Mock.Of<IBodyWeightService>(), sleepService.Object, db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+        var start = new DateTime(2026, 9, 1, 22, 0, 0, DateTimeKind.Utc);
+        await repository.UpsertSessionAsync(new SleepSession
+        {
+            Source = SleepSource.Google, OriginalId = "fit-sleep-1", SourceApp = "Google Fit",
+            StartTime = start, EndTime = start.AddHours(8)
+        });
+        var session = new SleepSession
+        {
+            Source = SleepSource.Google, OriginalId = "google-sleep-1", SourceApp = "Google Health",
+            StartTime = start, EndTime = start.AddHours(8)
+        };
+        await writer.WriteAsync([], [session], 25, default);
+        var store = new TestConnectorStore();
+        store.SetConfiguration("""{"lastSyncedTo":"2026-09-01T00:00:00Z","backfillComplete":true,"dataTypes":["sleep"]}""");
+        await store.Cursors.SetAsync("GoogleHealth", "health", new(null, "{}"));
+        IConnectorDataPurge purge = Service(store, new StubHandler(_ => Json("{}")), tenantId, writer: writer);
+        Assert.Equal(GoogleHealthConnectorService.ConnectorName, purge.ConnectorName);
+
+        var described = Assert.Single(await purge.DescribeAsync(null, start.AddHours(1), default));
+        Assert.Equal(("Sleep", 1L, 0, start), (described.DataType, described.Count, described.CountLast24Hours, described.Latest));
+        Assert.Empty(await purge.DescribeAsync(start.AddDays(1), start.AddDays(1), default));
+
+        var deleted = await purge.PurgeAsync(allowReimport,
+            new AuditContext { SubjectId = Guid.NewGuid(), SubjectName = "owner", AuthType = "Session" }, default);
+
+        Assert.Equal(1, deleted["Sleep"]);
+        Assert.Equal("Google Fit", (await db.SleepSessions.AsNoTracking().SingleAsync()).SourceApp);
+        await writer.WriteAsync([], [session], 25, default);
+        Assert.Equal(allowReimport, await db.SleepSessions.AsNoTracking().AnyAsync(value => value.SourceApp == "Google Health"));
+        Assert.Equal(!allowReimport, store.Configuration.TryGetProperty("lastSyncedTo", out _));
+        Assert.Equal(!allowReimport, store.Configuration.TryGetProperty("backfillComplete", out _));
+        Assert.Equal(allowReimport ? null : "{}", (await store.Cursors.GetAsync("GoogleHealth", "health"))!.LastGuid);
     }
 
     [Fact]

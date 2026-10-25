@@ -56,7 +56,7 @@
   });
 
   const CATEGORIES = [
-    { key: "pumpModes", label: "Pump Modes", color: "var(--pump-mode-automatic)" },
+    { key: "pumpModes", label: "Pump modes", color: "var(--pump-mode-automatic)" },
     { key: "profiles", label: "Profiles", color: "var(--chart-1)" },
     { key: "basal", label: "Basal", color: "var(--insulin-basal)" },
     { key: "overrides", label: "Overrides", color: "var(--chart-2)" },
@@ -111,7 +111,7 @@
   });
 </script>
 
-<div class="space-y-6 p-4">
+<div class="@container space-y-6 p-4">
   <!-- Header with Navigation -->
   <Card.Root>
     <Card.Content class="p-4">
@@ -119,16 +119,16 @@
         <!-- Back button -->
         <Button variant="ghost" size="sm" onclick={goBack}>
           <ArrowLeft class="h-4 w-4 mr-2" />
-          Back to Dashboard
+          Back to dashboard
         </Button>
 
         <!-- Date Navigation -->
-        <div class="flex min-w-0 items-center gap-2 max-sm:w-full">
+        <div class="flex min-w-0 items-center gap-2 @max-xl:w-full">
           <Button variant="outline" size="icon" onclick={() => shiftPeriod(-1)}>
             <ChevronLeft class="h-4 w-4" />
           </Button>
           <div
-            class="flex min-w-0 flex-1 items-center gap-2 justify-center text-center sm:min-w-[280px]"
+            class="flex min-w-0 flex-1 items-center gap-2 justify-center text-center @xl:min-w-[280px]"
           >
             <span class="text-lg font-medium">{dateRangeDisplay}</span>
           </div>
@@ -137,7 +137,7 @@
           </Button>
         </div>
 
-        <div class="hidden w-24 sm:block"></div>
+        <div class="hidden w-24 @2xl:block"></div>
       </div>
     </Card.Content>
   </Card.Root>
@@ -148,7 +148,7 @@
   <!-- Timeline Card -->
   <Card.Root>
     <Card.Header class="pb-2">
-      <Card.Title>State Spans Timeline</Card.Title>
+      <Card.Title>State spans timeline</Card.Title>
       <Card.Description>
         View pump modes, profiles, temp basals, overrides, and activities over time
       </Card.Description>

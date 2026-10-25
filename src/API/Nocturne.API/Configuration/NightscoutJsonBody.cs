@@ -24,7 +24,7 @@ public static class NightscoutJsonBody
         var options = new JsonOptions();
         options.JsonSerializerOptions.TypeInfoResolver =
             (options.JsonSerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
-            .WithAddedModifier(UploaderIdJsonModifier.RemoveIgnoredBaseProperties);
+            .WithAddedModifier(IgnoredBasePropertyModifier.RemoveIgnoredBaseProperties);
         return options;
     }
 

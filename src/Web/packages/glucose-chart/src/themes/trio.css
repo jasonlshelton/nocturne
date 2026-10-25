@@ -105,6 +105,7 @@
 }
 
 /* Dark mode - applied when both .trio-theme and .dark are on document */
+@media not print {
 :root.trio-theme.dark,
 .trio-theme .dark {
   /* shadcn/ui Base Colors - Trio Dark Mode */
@@ -141,4 +142,5 @@
   --percentile-outer: oklch(0.28 0.05 250);
   --percentile-inner: oklch(0.38 0.10 250);
   --percentile-median: oklch(0.75 0.15 250);
+}
 }

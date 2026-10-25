@@ -31,7 +31,7 @@ public sealed class GoogleHealthAuthTokenProvider(
     private readonly GoogleHealthOAuthClient oauth = new(httpClient);
     private readonly GoogleHealthPlatformOptions platform = platformOptions.Value;
 
-    protected override string ConnectorName => "GoogleHealth";
+    protected override string ConnectorName => GoogleHealthConnectorService.ConnectorName;
     protected override int TokenLifetimeBufferMinutes => 1;
     protected override bool RethrowTokenAcquisitionExceptions => true;
 

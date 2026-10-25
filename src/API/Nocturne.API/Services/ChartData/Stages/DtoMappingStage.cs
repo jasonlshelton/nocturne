@@ -37,7 +37,7 @@ internal sealed class DtoMappingStage(ITreatmentFoodService treatmentFoodService
         var (glucoseData, glucoseYMax) = ChartDataService.BuildGlucoseData(context.SensorGlucoseList.ToList());
 
         var bolusMarkers = ChartDataService.BuildBolusMarkers(context.DisplayBoluses.ToList());
-        var carbMarkers = ChartDataService.BuildCarbMarkers(context.DisplayCarbIntakes.ToList(), context.Timezone);
+        var carbMarkers = ChartDataService.BuildCarbMarkers(context.DisplayCarbIntakes.ToList(), context.Zone);
         var bgCheckMarkers = ChartDataService.BuildBgCheckMarkers(context.BgCheckList.ToList());
         var deviceEventMarkers = ChartDataService.BuildDeviceEventMarkers(context.DeviceEventList.ToList());
 

@@ -14,7 +14,7 @@
         installPrintFitFallback,
         printReport,
     } from "$lib/components/reports/print/report-print.svelte";
-    import {reportCategories, reportSubRouteTitle, reportTitle} from "$lib/navigation/report-navigation.svelte";
+    import {reportCategories, reportDescription, reportSubRouteTitle, reportTitle} from "$lib/navigation/report-navigation.svelte";
     import Filter from "@lucide/svelte/icons/funnel";
     import Calendar from "@lucide/svelte/icons/calendar";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -114,6 +114,8 @@
         );
     });
 
+    const description = $derived(reportDescription(page.url.pathname));
+
     // Show the range control only where the report actually reads the range
     const showFilters = $derived(
         page.url.pathname !== "/reports" && sharedRangeUse.consumed
@@ -136,6 +138,9 @@
 
 <svelte:head>
     <title>{reportName} - Nocturne</title>
+    {#if description}
+        <meta name="description" content={description}/>
+    {/if}
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 </svelte:head>
 
@@ -149,15 +154,15 @@
                 {@attach loopAnalysisHeaderMark()}
         >
             <div class="flex h-14 items-center justify-between gap-2 px-3 @md:px-6">
-                <div class="flex items-center gap-2">
+                <div class="flex min-w-0 items-center gap-2">
                     <!-- Report info -->
-                    <div class="flex items-center gap-3">
-                        <h1 class="text-lg font-semibold text-foreground">{reportName}</h1>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <h1 class="truncate text-lg font-semibold text-foreground">{reportName}</h1>
                         {#if showFilters}
                             <Button
                                     variant="outline"
                                     size="sm"
-                                    class="hidden sm:inline-flex"
+                                    class="hidden shrink-0 @xl:inline-flex"
                                     onclick={() => (filterSidebarOpen = true)}
                                     aria-label="Change date range"
                             >
@@ -169,7 +174,7 @@
                     </div>
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div class="flex shrink-0 items-center gap-2">
                     <Button
                             variant="outline"
                             size="sm"
@@ -178,7 +183,7 @@
                             aria-label="Print report"
                     >
                         <Printer class="w-4 h-4"/>
-                        <span class="hidden sm:inline">Print</span>
+                        <span class="hidden @lg:inline">Print</span>
                     </Button>
                     {#if showFilters}
                         <Button
@@ -188,7 +193,7 @@
                                 aria-label="Filters"
                         >
                             <Filter class="w-4 h-4"/>
-                            <span class="hidden sm:inline">Filters</span>
+                            <span class="hidden @lg:inline">Filters</span>
                         </Button>
                     {/if}
                 </div>

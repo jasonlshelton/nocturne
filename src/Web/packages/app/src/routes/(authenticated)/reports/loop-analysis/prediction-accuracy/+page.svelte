@@ -9,10 +9,6 @@
   const resource = contextResource(() => getPredictionAccuracy(analysis.query), { errorTitle: "Cannot load the prediction accuracy" });
 </script>
 
-<svelte:head>
-  <meta name="description" content="The glucose predictions of the loop compared with the glucose readings that followed them." />
-</svelte:head>
-
 {#if resource.current}
   <PredictionAccuracyBody response={resource.current} />
 {:else}

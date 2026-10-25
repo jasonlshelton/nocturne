@@ -49,10 +49,6 @@
   });
 </script>
 
-<svelte:head>
-  <meta name="description" content="Glucose and insulin before and after meals, corrections and other events." />
-</svelte:head>
-
 {#if resource.current}
   <div class="space-y-6">
     <EventCohortBuilder

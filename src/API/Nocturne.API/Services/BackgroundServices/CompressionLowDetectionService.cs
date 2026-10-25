@@ -689,8 +689,7 @@ public class CompressionLowDetectionService : BackgroundService
         try
         {
             // Query a small number of entries around midnight of the target night (in UTC)
-            var midnightUtcMills = new DateTimeOffset(nightOf.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
-                .ToUnixTimeMilliseconds();
+            var midnightUtcMills = nightOf.ToDateTime(TimeOnly.MinValue).ToMills();
             var entries = await entryService.GetEntriesAsync(
                 find: $"{{\"mills\":{{\"$gte\":{midnightUtcMills - 12 * 3600000},\"$lte\":{midnightUtcMills + 12 * 3600000}}}}}",
                 count: 10,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Chart, Svg, Axis } from "layerchart";
+  import { Chart, Svg, Axis, Group, Rect } from "layerchart";
   import { scaleTime, scaleLinear } from "d3-scale";
   import { PumpModeIcon, ActivityCategoryIcon } from "$lib/components/icons";
   import { BasalRateTrack } from "$lib/components/charts";
@@ -139,15 +139,10 @@
     >
       {#snippet children({ context })}
         <Svg>
-        <!-- Native SVG throughout: every span carries pre-scaled pixel
-             coordinates, and layerchart marks each call registerMark() on mount,
-             so one <Rect> per span cost O(N^2) across the chart's mark deriveds.
-             Native <rect>/<text>/<g> keep the per-span hover handlers while
-             registering nothing. -->
         {#each standardTracks as track, i (track.key)}
           {@const yPos = i * TRACK_HEIGHT + 5}
           <!-- Track background -->
-          <rect
+          <Rect
             x={context.xScale(dateRange.from)}
             y={yPos}
             width={context.xScale(dateRange.to) - context.xScale(dateRange.from)}
@@ -169,8 +164,7 @@
           {#each track.spans as span (span.id)}
             {@const xStartPx = context.xScale(span.startTime)}
             {@const xEndPx = context.xScale(span.endTime)}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <rect
+            <Rect
               x={xStartPx}
               y={yPos + 2}
               width={xEndPx - xStartPx}
@@ -193,21 +187,21 @@
             />
             <!-- Icon/label at start of span -->
             {#if track.key === "pumpMode"}
-              <g transform="translate({xStartPx}, {yPos + TRACK_HEIGHT / 2})">
+              <Group x={xStartPx} y={yPos + TRACK_HEIGHT / 2}>
                 <foreignObject x={4} y={-8} width={16} height={16}>
                   <div class="flex items-center justify-center w-full h-full">
                     <PumpModeIcon state={span.state} size={14} color={span.color} />
                   </div>
                 </foreignObject>
-              </g>
+              </Group>
             {:else if track.key === "activity"}
-              <g transform="translate({xStartPx}, {yPos + TRACK_HEIGHT / 2})">
+              <Group x={xStartPx} y={yPos + TRACK_HEIGHT / 2}>
                 <foreignObject x={4} y={-8} width={16} height={16}>
                   <div class="flex items-center justify-center w-full h-full">
                     <ActivityCategoryIcon category={span.category} size={14} color={span.color} />
                   </div>
                 </foreignObject>
-              </g>
+              </Group>
             {:else if track.key === "profile" && span.profileName}
               <text
                 x={xStartPx}
@@ -235,7 +229,7 @@
         <!-- Basal delivery track using BasalRateTrack component -->
         {#if showTempBasals}
           <!-- Track background -->
-          <rect
+          <Rect
             x={context.xScale(dateRange.from)}
             y={basalTrackTop}
             width={context.xScale(dateRange.to) - context.xScale(dateRange.from)}

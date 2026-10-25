@@ -352,7 +352,7 @@ public class DeviceStatusProjectionService
                     g.Aps is { } aps ? FindOverrideForTimestamp(overrides, aps.Timestamp) : null,
                     g.Extras,
                     _logger);
-                status.SrvModified = new DateTimeOffset(g.ModifiedAt, TimeSpan.Zero).ToUnixTimeMilliseconds();
+                status.SrvModified = g.ModifiedAt.ToMills();
                 return status;
             })
             .ToList();
@@ -425,14 +425,14 @@ public class DeviceStatusProjectionService
     private static DeviceStatus NewStatus(
         string id, DateTime timestamp, DateTime createdAt, DateTime modifiedAt, int? utcOffset, string? device)
     {
-        var mills = new DateTimeOffset(timestamp, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var mills = timestamp.ToMills();
         return new DeviceStatus
         {
             Id = id,
             Mills = mills,
             Date = mills,
-            SrvModified = new DateTimeOffset(modifiedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
-            SrvCreated = new DateTimeOffset(createdAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+            SrvModified = modifiedAt.ToMills(),
+            SrvCreated = createdAt.ToMills(),
             // Nightscout clients place a status on the timeline by created_at, so it is the event
             // time; the server clock is srvCreated.
             CreatedAt = timestamp.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),

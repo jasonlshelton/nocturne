@@ -23,20 +23,29 @@
   import { applyChannelDestination, type ChannelDef } from "./types";
   import {
     CHANNEL_META,
-    destinationError,
     findChannelMeta,
     type ChannelMetaEntry,
   } from "./channelMeta";
+  import {
+    channelDescription,
+    channelDestinationHelper,
+    channelDestinationLabel,
+    channelLabel,
+    destinationError,
+  } from "./channelText.svelte";
 
   interface Props {
     channels: ChannelDef[];
     /** The rule's severity, forwarded to the device editor's hardware warning. */
     severity?: AlertRuleSeverity;
+    /** Narrows the kinds that may be added to these; every kind the API offers when omitted. */
+    kinds?: ChannelType[];
   }
 
   let {
     channels = $bindable(),
     severity = AlertRuleSeverity.Warning,
+    kinds,
   }: Props = $props();
 
   const linkedPlatformsQuery = getLinkedPlatforms();
@@ -79,7 +88,9 @@
   // Every entry is listed but disabled until the API has answered, so the menu never
   // silently shrinks to nothing while the query is in flight or after it fails.
   const channelOptions = $derived(
-    statusPending || statusFailed ? CHANNEL_META : CHANNEL_META.filter(isOffered),
+    (statusPending || statusFailed ? CHANNEL_META : CHANNEL_META.filter(isOffered)).filter(
+      (o) => !kinds || kinds.includes(o.type),
+    ),
   );
 
   function addChannel(opt: ChannelMetaEntry): void {
@@ -175,9 +186,9 @@
       <div class="flex-1 space-y-2">
         <div class="flex items-center justify-between gap-2">
           <div>
-            <div class="text-sm font-medium">{opt?.label ?? ch.channelType}</div>
-            {#if opt?.description}
-              <div class="text-xs text-muted-foreground">{opt.description}</div>
+            <div class="text-sm font-medium">{opt ? channelLabel(opt.type) : ch.channelType}</div>
+            {#if opt}
+              <div class="text-xs text-muted-foreground">{channelDescription(opt.type)}</div>
             {/if}
             {#if !linked && opt?.platform}
               <div class="text-xs text-status-warning mt-0.5">
@@ -245,8 +256,9 @@
         {:else}
           {#if opt && needsDestination(ch.channelType)}
             {@const error = destinationError(opt, ch.destination)}
+            {@const helper = channelDestinationHelper(opt.type)}
             <div class="space-y-1.5">
-              <Label size="sm" for="channel-dest-{i}">{opt.destinationLabel}</Label>
+              <Label size="sm" for="channel-dest-{i}">{channelDestinationLabel(opt.type)}</Label>
               <Input
                 id="channel-dest-{i}"
                 type="text"
@@ -255,7 +267,7 @@
                 aria-invalid={error != null}
                 aria-describedby={error != null
                   ? `channel-dest-error-${i}`
-                  : opt.destinationHelper
+                  : helper
                     ? `channel-dest-helper-${i}`
                     : undefined}
                 value={ch.destination}
@@ -267,14 +279,14 @@
                 <p id="channel-dest-error-{i}" class="text-xs text-status-warning">
                   {error}
                 </p>
-              {:else if opt.destinationHelper}
+              {:else if helper}
                 <p id="channel-dest-helper-{i}" class="text-xs text-muted-foreground">
-                  {opt.destinationHelper}
+                  {helper}
                 </p>
               {/if}
             </div>
-          {:else if opt?.destinationHelper}
-            <p class="text-xs text-muted-foreground">{opt.destinationHelper}</p>
+          {:else if opt && channelDestinationHelper(opt.type)}
+            <p class="text-xs text-muted-foreground">{channelDestinationHelper(opt.type)}</p>
           {/if}
           {#if ch.channelType === ChannelType.Webhook}
             <div class="space-y-1.5">
@@ -364,7 +376,7 @@
           disabled={pending || unavailable}
           title={linked
             ? undefined
-            : `${platformLabel(o.platform!)} not linked. Connect it in Connectors & Apps to enable delivery.`}
+            : `${platformLabel(o.platform!)} not linked. Connect it in Connectors & apps to enable delivery.`}
           onSelect={() => addChannel(o)}
         >
           <span
@@ -380,7 +392,7 @@
           </span>
           <span class="flex flex-1 flex-col {!linked ? 'opacity-60' : ''}">
             <span class="flex items-center gap-1.5">
-              <span class="text-sm font-medium">{o.label}</span>
+              <span class="text-sm font-medium">{channelLabel(o.type)}</span>
               {#if pending}
                 <span class="rounded bg-muted px-1.5 py-0.5 text-2xs uppercase tracking-wide text-muted-foreground">
                   Loading
@@ -395,7 +407,7 @@
                 </span>
               {/if}
             </span>
-            <span class="text-xs text-muted-foreground leading-tight">{o.description}</span>
+            <span class="text-xs text-muted-foreground leading-tight">{channelDescription(o.type)}</span>
           </span>
         </DropdownMenu.Item>
       {/each}

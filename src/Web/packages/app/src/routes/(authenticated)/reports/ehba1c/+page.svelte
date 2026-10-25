@@ -343,9 +343,7 @@
           {a1cLabel(true)} estimates what a lab {a1cLabel()} test would read on a
           given day. For each day, it takes the average glucose from every reading
           in the trailing 90 days and weights each day's contribution by recency.
-          The most recent ~30 days count for roughly half the estimate, tapering off
-          exponentially for older days, similar to how glycated hemoglobin reflects
-          glucose exposure over a red blood cell's ~90–120 day lifespan. That weighted
+          The most recent ~30 days count for roughly half the estimate. The weight tapers off exponentially for older days. This is similar to how glycated hemoglobin reflects glucose exposure over a red blood cell's ~90–120 day lifespan. That weighted
           average glucose is then converted to NGSP percent with the ADAG formula:
           {a1cLabel(true)} (%) = (average glucose in mg/dL + 46.7) / 28.7.
         </Card.Description>
@@ -363,7 +361,7 @@
         </div>
       {:else if error}
         <div class="flex h-[320px] items-center justify-center text-destructive">
-          Failed to load {a1cLabel(true)} data. Please try again later.
+          Failed to load {a1cLabel(true)} data. Try again later.
         </div>
       {:else if chartData.length === 0 && timeZoneReason}
         <p class="text-sm text-muted-foreground">
@@ -408,6 +406,7 @@
             y="displayValue"
             {yDomain}
             clip
+            padding={{ top: 4, right: 16, bottom: 20, left: 20 }}
             series={[
               {
                 key: "displayValue",
@@ -523,7 +522,7 @@
         </ul>
       {/if}
 
-      <div class="grid gap-3 sm:grid-cols-3 print:hidden">
+      <div class="grid gap-3 @xl:grid-cols-3 print:hidden">
         <div class="space-y-1.5">
           <Label for="lab-date">Date of blood draw</Label>
           <Input id="lab-date" type="date" bind:value={newLabDate} />
@@ -568,6 +567,7 @@
 
 {#snippet labMarkers({ points }: { points: { x: number; y: number; data: (typeof labChartPoints)[number] }[] })}
   {#each points as point (point.data.id)}
+    <!-- Native polygon: layerchart Polygon draws a path with no children, so the per-marker title tooltip has no home; one marker per lab result. -->
     <polygon
       data-testid="lab-marker"
       points="{point.x},{point.y - 7} {point.x - 6},{point.y + 5} {point.x + 6},{point.y + 5}"

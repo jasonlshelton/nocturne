@@ -1,3 +1,4 @@
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.Core.Clinical.Treatments;
@@ -62,13 +63,10 @@ public readonly record struct DeviceReading(
     string? Device = null)
 {
     public static DeviceReading FromAps(ApsIobCobPoint point) =>
-        new(MillsOf(point.Timestamp), DeviceSource.Aps, point.Iob, point.Cob);
+        new(point.Timestamp.ToMills(), DeviceSource.Aps, point.Iob, point.Cob);
 
     public static DeviceReading FromPump(PumpIobPoint point) =>
-        new(MillsOf(point.Timestamp), DeviceSource.Pump, point.Iob ?? point.BolusIob, BolusIob: point.BolusIob, Name: "Pump");
-
-    public static long MillsOf(DateTime timestamp) =>
-        new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc), TimeSpan.Zero).ToUnixTimeMilliseconds();
+        new(point.Timestamp.ToMills(), DeviceSource.Pump, point.Iob ?? point.BolusIob, BolusIob: point.BolusIob, Name: "Pump");
 }
 
 /// <summary>The device readings that hold at one instant, each null where the calculation holds instead.</summary>

@@ -56,8 +56,8 @@ public class StatisticsServiceTDDTests
         };
         var carbIntakes = new[]
         {
-            new CarbIntake { Carbs = 45 },
-            new CarbIntake { Carbs = 15 },
+            MakeCarbIntake(45, Day1Mills),
+            MakeCarbIntake(15, Day1Mills),
         };
 
         var result = _sut.CalculateTreatmentSummary(boluses, carbIntakes);

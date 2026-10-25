@@ -1,3 +1,4 @@
+using Nocturne.Core.Clinical.LoopAnalysis;
 using Nocturne.API.Services.Caching;
 using Nocturne.API.Tests.Infrastructure;
 using Nocturne.Core.Clinical.Treatments;
@@ -248,8 +249,8 @@ public class SensorContextEnricherTests
         // One IOB read, the shared reader's window ending at the tick, serves both, and a
         // replay tick is not the live instant.
         _bolusRepository.Verify(r => r.GetAsync(
-            tick.AddHours(-IIobCobReader.InsulinLookbackHours), tick, null, null, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
-            It.IsAny<bool>(), It.IsAny<BolusKind?>(), It.IsAny<DateTime?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            tick.AddMilliseconds(-DailyProfileCalculator.ActingMs), tick, null, null, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(),
+            It.IsAny<BolusKind?>(), It.IsAny<DateTime?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _bolusRepository.VerifyNoOtherCalls();
         _iobCalculator.Verify(s => s.CalculateTotalAsync(
@@ -793,6 +794,35 @@ public class SensorContextEnricherTests
                 [
                     new TargetRangeEntry { Time = "00:00", TimeAsSeconds = 0,     Low = 80, High = 180 },
                     new TargetRangeEntry { Time = "12:00", TimeAsSeconds = 43200, Low = 70, High = 180 },
+                ],
+            });
+
+        var rule = MakeRule(AlertConditionType.GlucoseBucket, """{"buckets":["low"]}""");
+        var baseContext = BaseContext() with { LatestValue = 75m };
+
+        var enriched = await enricher.EnrichAsOfAsync(baseContext, new[] { rule }, _tenantId, tickUtc, CancellationToken.None);
+
+        enriched.GlucoseBucket.Should().Be(Nocturne.Core.Models.Alerts.GlucoseBucket.Low);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GlucoseBucket_resolution_reads_the_entry_time_when_TimeAsSeconds_is_absent(bool withSeconds)
+    {
+        var enricher = BuildEnricher();
+        var tickUtc = new DateTime(2026, 3, 22, 7, 0, 0, DateTimeKind.Utc);
+
+        _activeProfileResolver.Setup(s => s.GetActiveProfileNameAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Default");
+        _targetRangeScheduleRepository.Setup(s => s.GetActiveAtAsync("Default", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TargetRangeSchedule
+            {
+                ProfileName = "Default",
+                Entries =
+                [
+                    new TargetRangeEntry { Time = "06:00", TimeAsSeconds = withSeconds ? 21600 : null, Low = 80, High = 180 },
+                    new TargetRangeEntry { Time = "00:00", TimeAsSeconds = withSeconds ? 0 : null, Low = 70, High = 180 },
                 ],
             });
 

@@ -75,7 +75,7 @@
     } catch (err) {
       errorMessage = describeSubmitError(
         err,
-        "Failed to sign out the session. Please try again."
+        "Failed to sign out the session. Try again."
       );
       clearMessages();
     } finally {
@@ -94,7 +94,7 @@
     } catch (err) {
       errorMessage = describeSubmitError(
         err,
-        "Failed to sign out other sessions. Please try again."
+        "Failed to sign out other sessions. Try again."
       );
       clearMessages();
     } finally {
@@ -108,7 +108,7 @@
 <form method="POST" action="/auth/logout" bind:this={logoutForm} hidden></form>
 
 <div class="space-y-4">
-  <div class="flex items-start justify-between gap-4">
+  <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="space-y-1">
       <h2 class="text-lg font-semibold tracking-tight">Sessions</h2>
       <p class="text-sm text-muted-foreground">

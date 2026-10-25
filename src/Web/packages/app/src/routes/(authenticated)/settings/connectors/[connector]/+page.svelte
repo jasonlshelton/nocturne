@@ -12,6 +12,8 @@
   } from "$lib/components/ui/card";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ConnectorSetup from "$lib/components/connectors/ConnectorSetup.svelte";
+  import RepullHistoryCard from "./RepullHistoryCard.svelte";
+  import type { AvailableConnector } from "$lib/api/generated/nocturne-api-client";
 
   const connectorName = $derived(page.params.connector);
   const isHomeAssistant = $derived(
@@ -45,11 +47,15 @@
     showEnvVarHints={page.data.isPlatformAdmin === true}
     onCancel={() => goto(resolve("/settings/connectors"))}
   >
-    {#snippet extras()}
+    {#snippet extras({ connector }: { connector: AvailableConnector })}
+      {#if connector.id}
+        <RepullHistoryCard connectorId={connector.id} />
+      {/if}
+
       {#if isHomeAssistant}
         <Card>
           <CardHeader>
-            <CardTitle>Setup Guide</CardTitle>
+            <CardTitle>Setup guide</CardTitle>
             <CardDescription>
               Connect Home Assistant to Nocturne using the HACS custom integration
             </CardDescription>

@@ -19,7 +19,7 @@ public class SleepReportControllerTests
     {
         _service
             .Setup(s => s.GetTrendsReportAsync(
-                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(), It.IsAny<TimeZoneInfo?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SleepTrendsReport());
 
         _controller = new SleepReportController(_service.Object, TenantClockDoubles.In("Europe/London"));
@@ -28,7 +28,7 @@ public class SleepReportControllerTests
     private void VerifyNotBuilt() =>
         _service.Verify(
             s => s.GetTrendsReportAsync(
-                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(), It.IsAny<CancellationToken>()),
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(), It.IsAny<TimeZoneInfo?>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
     [Fact]
@@ -77,5 +77,41 @@ public class SleepReportControllerTests
 
         result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(400);
         VerifyNotBuilt();
+    }
+
+    [Fact]
+    public async Task GetTrends_builds_the_report_in_the_tenants_zone()
+    {
+        await _controller.GetTrends(From, From.AddDays(3));
+
+        _service.Verify(
+            s => s.GetTrendsReportAsync(
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(),
+                It.Is<TimeZoneInfo?>(z => z != null && z.Id == "Europe/London"), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetTrends_without_a_zone_builds_the_report_on_no_zone_and_says_why()
+    {
+        var controller = new SleepReportController(_service.Object, TenantClockDoubles.In(null));
+
+        var result = await controller.GetTrends(From, From.AddDays(3));
+
+        var report = result.Result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<SleepTrendsReport>().Subject;
+        report.TimeZoneUnavailableReason.Should().Be(TimeZoneUnavailableReason.NotConfigured);
+        _service.Verify(
+            s => s.GetTrendsReportAsync(
+                It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<SleepSource?>(), null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetTrends_on_a_tenant_zone_carries_no_reason()
+    {
+        var result = await _controller.GetTrends(From, From.AddDays(3));
+
+        result.Result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<SleepTrendsReport>().Subject
+            .TimeZoneUnavailableReason.Should().BeNull();
     }
 }

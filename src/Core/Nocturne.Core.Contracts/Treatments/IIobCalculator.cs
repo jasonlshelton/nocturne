@@ -51,12 +51,13 @@ public interface IIobCalculator
     /// </summary>
     /// <param name="pieces">As <c>StatisticsService.ClipOverlappingTempBasals</c> returns them. This
     /// does not clip, since the tick loop calls it for every tick over the same pieces.</param>
-    /// <param name="scheduledBasalAt">The scheduled rate in force at an instant. It is read under
-    /// every chunk delivered before <paramref name="deliveredUntil"/>.</param>
+    /// <param name="scheduledUnder">The scheduled rate under a piece at an instant, as
+    /// <c>ScheduledBasal.Under</c> gives it. It is read under every chunk delivered before
+    /// <paramref name="deliveredUntil"/>.</param>
     IobResult FromTempBasals(
         List<TempBasal> pieces,
         TherapySnapshot snapshot,
-        Func<long, double> scheduledBasalAt,
+        Func<TempBasal, long, double> scheduledUnder,
         long time,
         long deliveredUntil);
 }

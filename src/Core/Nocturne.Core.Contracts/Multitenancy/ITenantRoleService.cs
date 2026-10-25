@@ -1,3 +1,5 @@
+using Nocturne.Core.Models.Authorization;
+
 namespace Nocturne.Core.Contracts.Multitenancy;
 
 /// <summary>
@@ -8,7 +10,12 @@ namespace Nocturne.Core.Contracts.Multitenancy;
 /// <seealso cref="IMemberInviteService"/>
 public interface ITenantRoleService
 {
-    Task<List<TenantRoleDto>> GetRolesAsync(Guid tenantId, CancellationToken ct = default);
+    /// <summary>
+    /// Every role of <paramref name="tenantId"/>, each marked with whether
+    /// <paramref name="granterScopes"/> could confer it.
+    /// </summary>
+    Task<List<TenantRoleDto>> GetRolesAsync(
+        Guid tenantId, IReadOnlyCollection<string> granterScopes, CancellationToken ct = default);
 
     /// <summary>
     /// The roles of <paramref name="tenantId"/> that <paramref name="granterScopes"/> could confer:
@@ -21,16 +28,30 @@ public interface ITenantRoleService
     /// Returns a role by its ID within <paramref name="tenantId"/>, or null if the tenant has
     /// no such role. A role ID belonging to another tenant resolves to null.
     /// </summary>
-    Task<TenantRoleDto?> GetRoleByIdAsync(Guid tenantId, Guid roleId, CancellationToken ct = default);
+    Task<TenantRoleDto?> GetRoleByIdAsync(
+        Guid tenantId, Guid roleId, IReadOnlyCollection<string> granterScopes, CancellationToken ct = default);
 
     /// <summary>Creates a new custom role with the specified permissions.</summary>
-    Task<TenantRoleDto> CreateRoleAsync(Guid tenantId, string name, string? description, List<string> permissions, CancellationToken ct = default);
+    Task<TenantRoleDto> CreateRoleAsync(
+        Guid tenantId,
+        string name,
+        string? description,
+        List<string> permissions,
+        IReadOnlyCollection<string> granterScopes,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Updates a role's name, description, and permissions. Returns null when
     /// <paramref name="tenantId"/> has no role with that ID.
     /// </summary>
-    Task<TenantRoleDto?> UpdateRoleAsync(Guid tenantId, Guid roleId, string name, string? description, List<string> permissions, CancellationToken ct = default);
+    Task<TenantRoleDto?> UpdateRoleAsync(
+        Guid tenantId,
+        Guid roleId,
+        string name,
+        string? description,
+        List<string> permissions,
+        IReadOnlyCollection<string> granterScopes,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a role if it is not a system role and has no members assigned. A role ID
@@ -99,6 +120,10 @@ public record RoleGrantValidation(bool Ok, string? ErrorCode, string? ErrorDescr
 /// <summary>
 /// Projection of a tenant role including its permission set and member count.
 /// </summary>
+/// <param name="CanGrant">
+/// Whether the caller the role was read for may confer it: what
+/// <see cref="ITenantRoleService.ValidateRoleGrantAsync"/> would say for this role alone.
+/// </param>
 public record TenantRoleDto(
     Guid Id,
     string Name,
@@ -107,8 +132,12 @@ public record TenantRoleDto(
     List<string> Permissions,
     bool IsSystem,
     int MemberCount,
-    DateTime SysCreatedAt
-);
+    DateTime SysCreatedAt,
+    bool CanGrant
+)
+{
+    public RoleAccessLevel? AccessLevel => RoleAccessLevels.Of(Permissions);
+}
 
 /// <summary>
 /// Result of a role deletion attempt. Deletion fails if the role is a system role

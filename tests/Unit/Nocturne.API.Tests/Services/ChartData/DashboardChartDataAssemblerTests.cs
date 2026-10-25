@@ -30,7 +30,7 @@ public class DashboardChartDataAssemblerTests
             Thresholds = new ChartThresholdsDto { Low = 70, High = 180, VeryLow = 54, VeryHigh = 250, GlucoseYMax = 0 },
 
             BolusMarkers = new List<BolusMarkerDto> { new() { Time = 1700000000000L, Insulin = 2.0, TreatmentId = "t1", BolusType = BolusType.MealBolus, IsOverride = false, DataSource = "loop" } },
-            CarbMarkers = new List<CarbMarkerDto> { new() { Time = 1700000000000L, Carbs = 45.0, Label = "Lunch", TreatmentId = "t2", IsOffset = false, DataSource = "loop" } },
+            CarbMarkers = new List<CarbMarkerDto> { new() { Time = 1700000000000L, Carbs = 45.0, MealPeriod = MealPeriod.Lunch, TreatmentId = "t2", IsOffset = false, DataSource = "loop" } },
             DeviceEventMarkers = new List<DeviceEventMarkerDto> { new() { Time = 1700000000000L, EventType = DeviceEventType.SiteChange, Notes = "left arm", TreatmentId = "t3", Color = ChartColor.GlucoseVeryLow } },
             BgCheckMarkers = new List<BgCheckMarkerDto> { new() { Time = 1700000000000L, Glucose = 115.0, GlucoseType = "Finger", TreatmentId = "t4" } },
 

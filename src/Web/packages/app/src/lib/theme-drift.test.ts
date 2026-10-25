@@ -52,26 +52,8 @@ function parseFiles(paths: string[]): Declarations {
   return merged;
 }
 
-const pumpModeUtilityReason =
-  "chart-only pump-mode utilities; ui declares only --color-pump-mode-suspended";
-
 const chartOnly: Record<string, Record<string, string>> = {
-  nocturne: Object.fromEntries(
-    [
-      "automatic",
-      "limited",
-      "manual",
-      "boost",
-      "ease-off",
-      "sleep",
-      "exercise",
-      "off",
-      "liberty",
-    ].map((mode) => [
-      `@theme inline|--color-pump-mode-${mode}`,
-      pumpModeUtilityReason,
-    ])
-  ),
+  nocturne: {},
   trio: {},
 };
 

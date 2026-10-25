@@ -1,5 +1,6 @@
 using Moq;
 using Nocturne.Core.Clinical.Treatments;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -36,10 +37,7 @@ public class IobCalculatorParityTests
             .Setup(s => s.GetSensitivityAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DefaultSensitivity);
 
-        var basalRateResolver = new Mock<IBasalRateResolver>();
-        basalRateResolver
-            .Setup(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Func<long, double>)(_ => DefaultBasalRate));
+        var basalSegments = MockBasalSegments.Flat(DefaultBasalRate);
 
         _apsSnapshotRepo = new Mock<IApsSnapshotRepository>();
         _pumpSnapshotRepo = new Mock<IPumpSnapshotRepository>();
@@ -54,9 +52,10 @@ public class IobCalculatorParityTests
         _calculator = new IobCalculator(
             therapySettings.Object,
             sensitivityResolver.Object,
-            basalRateResolver.Object,
+            basalSegments.Object,
             _apsSnapshotRepo.Object,
-            _pumpSnapshotRepo.Object
+            _pumpSnapshotRepo.Object,
+            MockStateSpans.Empty().Object
         );
     }
 
@@ -72,10 +71,7 @@ public class IobCalculatorParityTests
             .Setup(s => s.GetSensitivityAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DefaultSensitivity);
 
-        var basalRateResolver = new Mock<IBasalRateResolver>();
-        basalRateResolver
-            .Setup(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Func<long, double>)(_ => DefaultBasalRate));
+        var basalSegments = MockBasalSegments.Flat(DefaultBasalRate);
 
         var apsRepo = new Mock<IApsSnapshotRepository>();
         apsRepo
@@ -86,7 +82,7 @@ public class IobCalculatorParityTests
             .Setup(r => r.GetAsync(It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Enumerable.Empty<PumpSnapshot>());
 
-        return new IobCalculator(therapySettings.Object, sensitivityResolver.Object, basalRateResolver.Object, apsRepo.Object, pumpRepo.Object);
+        return new IobCalculator(therapySettings.Object, sensitivityResolver.Object, basalSegments.Object, apsRepo.Object, pumpRepo.Object, MockStateSpans.Empty().Object);
     }
 
     private static IobCalculator CreateCalculatorWithSensitivity(double sens)
@@ -101,10 +97,7 @@ public class IobCalculatorParityTests
             .Setup(s => s.GetSensitivityAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(sens);
 
-        var basalRateResolver = new Mock<IBasalRateResolver>();
-        basalRateResolver
-            .Setup(b => b.BuildResolverAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Func<long, double>)(_ => DefaultBasalRate));
+        var basalSegments = MockBasalSegments.Flat(DefaultBasalRate);
 
         var apsRepo = new Mock<IApsSnapshotRepository>();
         apsRepo
@@ -115,7 +108,7 @@ public class IobCalculatorParityTests
             .Setup(r => r.GetAsync(It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Enumerable.Empty<PumpSnapshot>());
 
-        return new IobCalculator(therapySettings.Object, sensitivityResolver.Object, basalRateResolver.Object, apsRepo.Object, pumpRepo.Object);
+        return new IobCalculator(therapySettings.Object, sensitivityResolver.Object, basalSegments.Object, apsRepo.Object, pumpRepo.Object, MockStateSpans.Empty().Object);
     }
 
     private static Bolus MakeBolus(long mills, double insulin, TreatmentInsulinContext? insulinContext = null)

@@ -1,5 +1,6 @@
 using Moq;
 using Nocturne.Core.Clinical.Treatments;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -21,9 +22,10 @@ public class IobCobSeriesTests
     private static readonly IobCalculator Calculator = new(
         new Mock<ITherapySettingsResolver>(MockBehavior.Strict).Object,
         new Mock<ISensitivityResolver>(MockBehavior.Strict).Object,
-        new Mock<IBasalRateResolver>(MockBehavior.Strict).Object,
+        new Mock<IBasalSegmentService>(MockBehavior.Strict).Object,
         new Mock<IApsSnapshotRepository>(MockBehavior.Strict).Object,
-        new Mock<IPumpSnapshotRepository>(MockBehavior.Strict).Object);
+        new Mock<IPumpSnapshotRepository>(MockBehavior.Strict).Object,
+        new Mock<IStateSpanRepository>(MockBehavior.Strict).Object);
 
     private static TherapySnapshot Snapshot(double basalRate) => new(
         dia: 3.0,
@@ -49,7 +51,7 @@ public class IobCobSeriesTests
 
     private static IobCobTick TickAtNow(IEnumerable<Bolus> boluses, IEnumerable<TempBasal> temps, TherapyTimeline timeline) =>
         IobCobSeries.Build(
-                Calculator, new Mock<ICobCalculator>(MockBehavior.Strict).Object, boluses, [], temps, timeline, null,
+                Calculator, new Mock<ICobCalculator>(MockBehavior.Strict).Object, boluses, [], temps, timeline, new ScheduledBasal(timeline.BasalSegments(), []), null,
                 Now, Now, Now, 5 * Minute)
             .Single();
 
@@ -103,7 +105,7 @@ public class IobCobSeriesTests
 
     private static List<IobCobTick> TwoTicks(DeviceReadings device, long nowMills) =>
         IobCobSeries.Build(
-            Calculator, new Mock<ICobCalculator>(MockBehavior.Strict).Object, [], [], null, Flat(1.0), device,
+            Calculator, new Mock<ICobCalculator>(MockBehavior.Strict).Object, [], [], null, Flat(1.0), new ScheduledBasal(Flat(1.0).BasalSegments(), []), device,
             Now - 5 * Minute, Now, nowMills, 5 * Minute);
 
     private static DateTime At(long minutesFromNow) =>
@@ -143,5 +145,35 @@ public class IobCobSeriesTests
         Assert.Equal((0.9, IobCobSource.Device), (tick.Iob, tick.IobSource));
         Assert.Equal((15.0, IobCobSource.Device), (tick.Cob, tick.CobSource));
         Assert.Null(tick.BolusIob);
+    }
+
+    [Fact]
+    public void ABolusWithItsOwnLongerDia_IsInTheSeriesForAsLongAsTheSingleTickCountsIt()
+    {
+        var bolus = new Bolus
+        {
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(Now - 6 * 60 * Minute).UtcDateTime,
+            Insulin = 4,
+            InsulinContext = new TreatmentInsulinContext { Dia = 7, Peak = 75 },
+        };
+        var timeline = Flat(1.0);
+
+        var tick = TickAtNow([bolus], [], timeline);
+
+        var single = Calculator.CalcBolus(bolus, timeline.SnapshotAt(Now), Now).IobContrib;
+        Assert.True(single > 0);
+        Assert.Equal(single, tick.BolusIob!.Value, 3);
+    }
+
+    [Fact]
+    public void ATempBasalWithItsOwnLongerDia_IsInTheSeriesWhileItsInsulinIsOnBoard()
+    {
+        var temp = Temp(Now - 380 * Minute, Now - 350 * Minute, rate: 3);
+        temp.InsulinContext = new TreatmentInsulinContext { Dia = 7, Peak = 75 };
+        var timeline = Flat(1.0);
+
+        var tick = TickAtNow([], [temp], timeline);
+
+        Assert.True(tick.BasalIob > 0);
     }
 }

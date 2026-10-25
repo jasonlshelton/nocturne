@@ -69,6 +69,8 @@ public class DataSourceServiceDeleteDataSourceTests : IDisposable
         _auditContext,
         _connectorConfig.Object,
         Nocturne.API.Tests.Infrastructure.ProfileActivationTestDeps.Writer(context),
+        [],
+        [],
         NullLogger<DataSourceService>.Instance);
 
     /// <summary>The shape DeviceStatusDecomposer writes for a connector-imported snapshot.</summary>

@@ -115,7 +115,7 @@ public class TrackerAlertRuleSyncRearmPostgresTests(TrackerAlertRuleSyncRearmPos
         {
             Id = Guid.NewGuid(),
             TenantId = tenant,
-            UserId = "user-1",
+            CreatedBy = "user-1",
             Name = "Sensor",
             Mode = TrackerMode.Duration,
             LifespanHours = 240,
@@ -128,7 +128,6 @@ public class TrackerAlertRuleSyncRearmPostgresTests(TrackerAlertRuleSyncRearmPos
             TrackerDefinitionId = definition.Id,
             Hours = 24,
             Urgency = NotificationUrgency.Warn,
-            RespectQuietHours = true,
         });
         await using (var seed = Context(tenant, failure))
         {

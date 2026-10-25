@@ -66,6 +66,8 @@ public class DataSourceServiceDiscoveryTests : IDisposable
         Mock.Of<IAuditContext>(),
         _connectorConfig.Object,
         Nocturne.API.Tests.Infrastructure.ProfileActivationTestDeps.Writer(context),
+        [],
+        [],
         NullLogger<DataSourceService>.Instance);
 
     private async Task<List<DataSourceInfo>> DiscoverAsync()

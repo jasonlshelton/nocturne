@@ -10,6 +10,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Loader2 from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import { Artwork } from "@nocturne/watercolour";
   import * as tz from "$api/generated/timezoneTimelines.generated.remote";
   import { describeSubmitError } from "$lib/forms/submit-error";
   import type { TimezoneTimelineEntry } from "$api";
@@ -86,7 +87,7 @@
   }
 </script>
 
-<div class="mx-auto max-w-2xl space-y-6 p-4">
+<div class="@container mx-auto max-w-2xl space-y-6 p-4">
   <div class="space-y-1">
     <h1 class="text-xl font-semibold">Timezone history</h1>
     <p class="text-muted-foreground text-sm">
@@ -102,9 +103,18 @@
     </Card.Header>
     <Card.Content class="space-y-4">
       {#if entries.length === 0}
-        <p class="text-muted-foreground text-sm">
-          No entries yet. Your home timezone is filled in automatically on the next sync.
-        </p>
+        <div class="flex flex-col items-center gap-3 py-8 text-center">
+          <Artwork
+            artwork="world-globe"
+            palette="water"
+            motion="auto"
+            autoplay="once"
+            class="size-48"
+          />
+          <p class="text-muted-foreground text-sm">
+            No entries yet. Your home timezone is filled in automatically on the next sync.
+          </p>
+        </div>
       {:else}
         <ul class="divide-border divide-y">
           {#each entries as entry (entry.id)}
@@ -136,7 +146,7 @@
       <Card.Title>Add a location change</Card.Title>
     </Card.Header>
     <Card.Content class="space-y-4">
-      <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-3 @md:grid-cols-2">
         <div class="space-y-1.5">
           <Label for="tz-zone">Location (timezone)</Label>
           <TimezoneCombobox id="tz-zone" bind:value={newZone} />

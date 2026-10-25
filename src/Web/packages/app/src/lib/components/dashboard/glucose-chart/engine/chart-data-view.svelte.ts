@@ -6,6 +6,7 @@ import type {
   ChartSpanKind,
   TrackerCategory,
   ProfileActivationDto,
+  MealPeriod,
 } from "$api-clients";
 import type { PredictionData } from "$lib/api/prediction-data";
 import { STALE_THRESHOLD_MS } from "$lib/constants/staleness";
@@ -50,6 +51,7 @@ export interface CarbMarkerData {
   time: Date;
   carbs?: number;
   label?: string;
+  mealPeriod?: MealPeriod;
   treatmentId?: string;
   isOffset?: boolean;
   dataSource?: string;
