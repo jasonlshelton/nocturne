@@ -126,7 +126,7 @@ public class TotalIobAgreementTests
 
     private List<ApsIobCobPoint> ApsPoints(DateTime from, DateTime to) =>
         [.. _apsRows.Where(s => s.Timestamp >= from && s.Timestamp <= to).OrderBy(s => s.Timestamp)
-            .Select(s => new ApsIobCobPoint(s.Timestamp, s.Iob, s.Cob))];
+            .Select(s => new ApsIobCobPoint(s.Timestamp, s.Iob, s.Cob, null))];
 
     private List<PumpIobPoint> PumpPoints(DateTime from, DateTime to) =>
         [.. _pumpRows.Where(s => s.Timestamp >= from && s.Timestamp <= to).OrderBy(s => s.Timestamp)

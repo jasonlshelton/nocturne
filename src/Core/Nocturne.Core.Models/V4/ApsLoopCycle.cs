@@ -28,11 +28,17 @@ public sealed class ApsLoopCycle
     /// <inheritdoc cref="ApsSnapshot.ClosedLoop"/>
     public bool? ClosedLoop { get; init; }
 
+    /// <summary>The loop was closed at this cycle (<see cref="IsLoopClosed"/>), whether or not it enacted anything.</summary>
+    public bool LoopClosed => IsLoopClosed(ClosedLoop);
+
+    /// <summary>The cycle enacted its command with the loop closed.</summary>
+    public bool EnactedClosedLoop => Enacted && LoopClosed;
+
     /// <summary>
-    /// The cycle enacted its command with the loop closed: <see cref="Enacted"/>, unless
-    /// <see cref="ClosedLoop"/> says the loop was open.
+    /// Whether a snapshot's <see cref="ApsSnapshot.ClosedLoop"/> leaves the loop closed. Only false
+    /// says it was open, so a system that does not record it reads as closed.
     /// </summary>
-    public bool EnactedClosedLoop => Enacted && ClosedLoop != false;
+    public static bool IsLoopClosed(bool? closedLoop) => closedLoop != false;
 
     /// <summary>U/h.</summary>
     public double? EnactedRate { get; init; }

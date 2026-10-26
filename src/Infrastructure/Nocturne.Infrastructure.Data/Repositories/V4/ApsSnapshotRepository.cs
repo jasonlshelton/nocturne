@@ -53,7 +53,7 @@ public class ApsSnapshotRepository : SyncUpsertRepositoryBase<ApsSnapshot, ApsSn
         return await ctx.ApsSnapshots.AsNoTracking()
             .Where(e => e.Timestamp >= from && e.Timestamp <= to)
             .OrderBy(e => e.Timestamp)
-            .Select(e => new ApsIobCobPoint(e.Timestamp, e.Iob, e.Cob))
+            .Select(e => new ApsIobCobPoint(e.Timestamp, e.Iob, e.Cob, e.ClosedLoop))
             .ToListAsync(ct);
     }
 
