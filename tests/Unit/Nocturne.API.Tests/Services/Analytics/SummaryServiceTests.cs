@@ -6,6 +6,7 @@ using Moq;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Profiles;
+using Nocturne.API.Tests.Services.Profiles;
 using Nocturne.API.Tests.Services.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Legacy;
@@ -45,6 +46,9 @@ public class SummaryServiceTests
         _mockTherapySettings = new Mock<ITherapySettingsRepository>();
         _mockTherapySettings
             .Setup(x => x.GetDefaultsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _mockTherapySettings
+            .Setup(x => x.GetStoreIndexAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
         _mockLogger = new Mock<ILogger<SummaryService>>();
         Reading(NoInputs(), new IobResult(), new CobResult());
@@ -253,6 +257,10 @@ public class SummaryServiceTests
 
     private void ConfigureStore(List<TherapySettings> rows)
     {
+        List<BasalSchedule> basals = [];
+        List<CarbRatioSchedule> carbRatios = [];
+        List<SensitivitySchedule> sensitivities = [];
+        List<TargetRangeSchedule> targetRanges = [];
         _mockTherapySettings
             .Setup(r => r.GetByProfileNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string name, CancellationToken _) => rows.Where(r => r.ProfileName == name).ToList());
@@ -269,31 +277,36 @@ public class SummaryServiceTests
             _mockTherapySettings
                 .Setup(r => r.GetByIdAsync(row.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(row);
-            _mockBasal
-                .Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync([new BasalSchedule { ProfileName = row.ProfileName, Entries = [Schedule(basalValue)] }]);
-            _mockCarbRatio
-                .Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(
-                    [new CarbRatioSchedule { ProfileName = row.ProfileName, Entries = [Schedule(carbRatioValue)] }]
-                );
-            _mockSensitivity
-                .Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(
-                    [new SensitivitySchedule { ProfileName = row.ProfileName, Entries = [Schedule(40)] }]
-                );
-            _mockTargetRange
-                .Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(
-                    [
-                        new TargetRangeSchedule
-                        {
-                            ProfileName = row.ProfileName,
-                            Entries = [new TargetRangeEntry { Time = "00:00", Low = low, High = high, TimeAsSeconds = 0 }],
-                        },
-                    ]
-                );
+            basals.Add(new BasalSchedule
+            {
+                CorrelationId = correlationId,
+                ProfileName = row.ProfileName,
+                Entries = [Schedule(basalValue)],
+            });
+            carbRatios.Add(new CarbRatioSchedule
+            {
+                CorrelationId = correlationId,
+                ProfileName = row.ProfileName,
+                Entries = [Schedule(carbRatioValue)],
+            });
+            sensitivities.Add(new SensitivitySchedule
+            {
+                CorrelationId = correlationId,
+                ProfileName = row.ProfileName,
+                Entries = [Schedule(40)],
+            });
+            targetRanges.Add(new TargetRangeSchedule
+            {
+                CorrelationId = correlationId,
+                ProfileName = row.ProfileName,
+                Entries = [new TargetRangeEntry { Time = "00:00", Low = low, High = high, TimeAsSeconds = 0 }],
+            });
         }
+
+        _mockBasal.Serve(basals);
+        _mockCarbRatio.Serve(carbRatios);
+        _mockSensitivity.Serve(sensitivities);
+        _mockTargetRange.Serve(targetRanges);
     }
 
     private static ScheduleEntry Schedule(double value) =>

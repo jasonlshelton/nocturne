@@ -9,8 +9,9 @@ namespace Nocturne.Infrastructure.Data.Extensions;
 /// <summary>
 /// Soft-delete dedup helpers for the re-import guard. Blocking is decided from the
 /// <c>deleted_by_user</c> flag carried on each soft-deletable row (maintained by the
-/// audit interceptor and the bulk-delete helpers), so it is a single index seek with
-/// no audit-log scan or per-entity group-by. The rule itself is
+/// audit interceptor and the bulk-delete helpers), so it needs no audit-log scan or per-entity
+/// group-by. Its OR stays an index lookup only where each key has a live partial index and a
+/// <c>deleted_by_user</c> companion for the planner to combine. The rule itself is
 /// <see cref="SoftDeleteDedupExtensions.WhereBlocksRecreation{TEntity}"/>.
 /// </summary>
 public static class SoftDeleteDedupExtensions

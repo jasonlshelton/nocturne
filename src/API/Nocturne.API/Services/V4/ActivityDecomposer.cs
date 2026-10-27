@@ -433,7 +433,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
     /// The row each of <paramref name="originalIds"/> is written to, soft-deleted rows included: the
     /// live row, or else a system-swept tombstone, which the write revives in place because the primary
     /// key is derived from the id (<see cref="MapperHelpers.ParseIdToGuid"/>) and a fresh insert would
-    /// collide with it. An id only a user tombstone holds is returned in <c>UserDeleted</c> and must
+    /// collide with it within the tenant. An id only a user tombstone holds is returned in <c>UserDeleted</c> and must
     /// not be written (<see cref="SoftDeleteDedupExtensions.WhereBlocksRecreation{TEntity}"/>).
     /// </summary>
     private async Task<(Dictionary<string, TEntity> Rows, HashSet<string> UserDeleted)> ResolveByOriginalIdAsync<TEntity>(

@@ -178,6 +178,20 @@ describe("remoteQuery", () => {
     expect(resource.current).toBe(2);
   });
 
+  it("keeps re-reading its source through any number of refreshes", async () => {
+    let value = 1;
+    const resource = remoteQuery(() => value);
+
+    await resource.refresh();
+    value = 2;
+    expect(resource.current).toBe(2);
+    expect(await resource).toBe(2);
+
+    await resource.refresh();
+    value = 3;
+    expect(resource.current).toBe(3);
+  });
+
   it("is awaitable, as a query is in a template", async () => {
     const resource = remoteQuery(() => "ready");
 

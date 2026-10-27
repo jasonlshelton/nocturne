@@ -92,6 +92,8 @@ using JwtOptions = Nocturne.Core.Models.Configuration.JwtOptions;
 using OidcOptions = Nocturne.Core.Models.Configuration.OidcOptions;
 using OpenTelemetry.Metrics;
 using Nocturne.API.Services.Caching;
+using Nocturne.API.Services.Platform.InstanceKey;
+using Nocturne.API.Services.Platform.Releases;
 
 namespace Nocturne.API.Extensions;
 
@@ -410,6 +412,22 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<GitHubPrClient>();
         services.AddSingleton<ITranslationContributionService, GitHubTranslationService>();
         services.AddSingleton<IContentContributionService, GitHubContentService>();
+
+        services.AddSingleton<IOwnerNoticeLedger, OwnerNoticeLedger>();
+
+        // Release check: notices to tenant owners about new and newly installed releases
+        services.Configure<ReleaseCheckOptions>(configuration.GetSection(ReleaseCheckOptions.SectionName));
+        services.AddSingleton(RunningRelease.FromAssembly());
+        services.AddSingleton<IReleaseSource, GitHubReleaseClient>();
+        services.AddSingleton<IAutoUpdateProbe, WatchtowerProbe>();
+        services.AddHttpClient(WatchtowerProbe.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(5));
+        services.AddSingleton<ReleaseStatusService>();
+        services.AddHostedService<ReleaseNoticeService>();
+
+        services.AddSingleton<InstanceKeyCheck>();
+        services.AddTransient<UndecryptableSecretScanner>();
+        services.AddHostedService<InstanceKeyChangeService>();
+
         services.AddScoped<ITranslationDraftService, TranslationDraftService>();
 
         return services;
@@ -689,6 +707,7 @@ public static class ServiceRegistrationExtensions
     {
         // Demo mode
         services.AddSingleton<IDemoModeService, DemoModeService>();
+        services.AddSingleton<DemoUISettingsProxy>();
 
         services.AddSingleton<CacheFlights>();
         services.AddScoped<ITenantCache, TenantCache>();
@@ -1075,6 +1094,7 @@ public static class ServiceRegistrationExtensions
     {
         // Compression low detection
         services.AddScoped<ICompressionLowRepository, CompressionLowRepository>();
+        services.AddScoped<ICompressionLowNightWindowResolver, CompressionLowNightWindowResolver>();
         services.AddScoped<ICompressionLowService, CompressionLowService>();
         services.AddSingleton<CompressionLowDetectionService>();
         services.AddScoped<ICompressionLowDetectionService, CompressionLowDetection>();

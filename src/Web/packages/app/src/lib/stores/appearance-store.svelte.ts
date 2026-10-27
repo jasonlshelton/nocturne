@@ -22,7 +22,7 @@
  * field of the preferences blob.
  */
 
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { getContext, setContext } from "svelte";
 import { PersistedState } from "runed";
 import { setMode, mode, userPrefersMode } from "mode-watcher";
@@ -318,6 +318,15 @@ class SyncedPref<T> implements SyncedEntry {
       }
     }
     return this._fallback ?? this._value;
+  }
+
+  /** The value one request's preference layers give it, highest precedence first, else the default. */
+  resolve(layers: readonly UserDisplayPreferences[]): T {
+    for (const prefs of layers) {
+      const value = this._read(prefs);
+      if (value !== undefined && value !== null) return value;
+    }
+    return this._initial;
   }
 
   /** What this device holds for the preference: never the default, never a fallback. */

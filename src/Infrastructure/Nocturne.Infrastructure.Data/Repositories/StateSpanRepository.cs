@@ -44,6 +44,19 @@ public class StateSpanRepository : IStateSpanRepository
         ActivityStateSpanMapper.ActivityCategories.Select(c => c.ToString()).ToList();
 
     /// <summary>
+    /// Members removed from <see cref="StateSpanCategory"/> whose rows may still be stored. They
+    /// read back as <see cref="StateSpanCategory.PumpMode"/>, so the non-activity watermark counts them.
+    /// </summary>
+    private static readonly string[] RemovedCategories = ["TempBasal", "BasalDelivery"];
+
+    /// <summary>
+    /// Every <see cref="StateSpanCategory"/> name outside <see cref="ActivityCategories"/>, plus
+    /// <see cref="RemovedCategories"/>.
+    /// </summary>
+    private static readonly List<string> NonActivityCategories =
+        Enum.GetNames<StateSpanCategory>().Except(ActivityCategories).Concat(RemovedCategories).ToList();
+
+    /// <summary>
     /// Open spans per non-exclusive category that <see cref="GetByCategories"/> returns from
     /// before its window.
     /// </summary>
@@ -895,29 +908,39 @@ public class StateSpanRepository : IStateSpanRepository
     }
 
     /// <inheritdoc />
-    public async Task<DateTime?> GetLatestActivityTimestampAsync(
+    public Task<DateTime?> GetLatestActivityTimestampAsync(
         string source,
         CancellationToken cancellationToken = default
-    )
-    {
-        await using var db = await _contexts.CreateAsync(cancellationToken);
-        return await db.StateSpans
-            .AsNoTracking()
-            .Where(s => ActivityCategories.Contains(s.Category) && s.Source == source)
-            .MaxAsync(s => (DateTime?)s.StartTimestamp, cancellationToken);
-    }
+    ) => GetLatestStartAsync(source, ActivityCategories, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<DateTime?> GetLatestNonActivityTimestampAsync(
+    public Task<DateTime?> GetLatestNonActivityTimestampAsync(
         string source,
         CancellationToken cancellationToken = default
+    ) => GetLatestStartAsync(source, NonActivityCategories, cancellationToken);
+
+    /// <summary>
+    /// One <c>max</c> probe per category, because an <c>IN</c> list cannot use the min/max index
+    /// transform on <c>(tenant_id, source, category, start_timestamp DESC)</c> and would walk every
+    /// span of the source. The categories are a closed set, so the greatest probe is the answer.
+    /// </summary>
+    private async Task<DateTime?> GetLatestStartAsync(
+        string source,
+        IReadOnlyList<string> categories,
+        CancellationToken cancellationToken
     )
     {
-        await using var db = await _contexts.CreateAsync(cancellationToken);
-        return await db.StateSpans
-            .AsNoTracking()
-            .Where(s => !ActivityCategories.Contains(s.Category) && s.Source == source)
-            .MaxAsync(s => (DateTime?)s.StartTimestamp, cancellationToken);
+        await using var ctx = await _contexts.CreateAsync(cancellationToken);
+        var arms = categories.Select((_, i) => $$"""
+            SELECT max(s.start_timestamp) AS v FROM state_spans s
+            WHERE s.tenant_id = {0} AND s.deleted_at IS NULL
+              AND s.source = {1} AND s.category = {{{i + 2}}}
+            """);
+        var sql = $"SELECT max(p.v) AS \"Value\" FROM ({string.Join(" UNION ALL ", arms)}) p";
+        object[] parameters = [ctx.TenantId, source, .. categories];
+        return await ctx.Database
+            .SqlQueryRaw<DateTime?>(sql, parameters)
+            .SingleAsync(cancellationToken);
     }
 
     /// <summary>

@@ -38,7 +38,7 @@ public class DemoSessionControllerTests : IDisposable
         _sessionService
             .Setup(s => s.IssueSessionAsync(
                 It.IsAny<Guid>(), It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionTokenPair("access", "refresh", 3600));
+            .ReturnsAsync(new SessionTokenPair("access", "refresh", 3600, Guid.Empty));
     }
 
     [Fact]

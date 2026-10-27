@@ -25,6 +25,7 @@ public class ProfileHistoryTests
     private readonly Mock<ICarbRatioScheduleRepository> _carbRatioRepo = new();
     private readonly Mock<ISensitivityScheduleRepository> _sensitivityRepo = new();
     private readonly Mock<ITargetRangeScheduleRepository> _targetRangeRepo = new();
+    private readonly List<BasalSchedule> _basals = [];
     private readonly ProfileProjectionService _sut;
 
     public ProfileHistoryTests()
@@ -41,7 +42,10 @@ public class ProfileHistoryTests
             .ReturnsAsync([]);
         _therapyRepo.Setup(r => r.GetByProfileNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        _basalRepo.Serve(_basals);
         _therapyRepo.Setup(r => r.GetDocumentRowsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _therapyRepo.Setup(r => r.GetStoreIndexAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         _sut = new ProfileProjectionService(
@@ -123,14 +127,6 @@ public class ProfileHistoryTests
             .ReturnsAsync([]);
         _therapyRepo.Setup(r => r.GetByLegacyIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TherapySettings?)null);
-        _basalRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-        _carbRatioRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-        _sensitivityRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-        _targetRangeRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
 
         var page = await _sut.GetProfilesModifiedSinceAsync(Mills(Cursor), 10);
 
@@ -224,14 +220,7 @@ public class ProfileHistoryTests
         var correlationId = settings.CorrelationId!.Value;
         _therapyRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([settings]);
-        _basalRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([basal]);
-        _carbRatioRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-        _sensitivityRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-        _targetRangeRepo.Setup(r => r.GetByCorrelationIdAsync(correlationId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
+        _basals.Add(basal);
     }
 
     private void SetupDocument(params TherapySettings[] rows) =>
