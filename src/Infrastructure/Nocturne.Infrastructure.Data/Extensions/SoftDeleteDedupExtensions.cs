@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data.Entities.V4;
+using Nocturne.Infrastructure.Data.Mappers;
 
 namespace Nocturne.Infrastructure.Data.Extensions;
 
@@ -37,6 +38,14 @@ public static class SoftDeleteDedupExtensions
     public static IQueryable<TEntity> WhereBlocksRecreation<TEntity>(this IQueryable<TEntity> source)
         where TEntity : class, ISoftDeletable
         => source.Where(e => e.DeletedAt == null || EF.Property<bool>(e, DeletedByUserProperty));
+
+    /// <summary>
+    /// <see cref="WhereBlocksRecreation{TEntity}"/> for state spans. A span whose category is not
+    /// current (<see cref="StateSpanMapper.WhereCategoryIsCurrent"/>) is retired and blocks nothing,
+    /// even when the user deleted it, so a re-upload of its <c>OriginalId</c> writes a new span.
+    /// </summary>
+    public static IQueryable<StateSpanEntity> WhereBlocksSpanRecreation(this IQueryable<StateSpanEntity> source)
+        => source.WhereCategoryIsCurrent().WhereBlocksRecreation();
 
     /// <summary>
     /// The rows of <typeparamref name="TEntity"/> in the context's tenant whose latest delete was the

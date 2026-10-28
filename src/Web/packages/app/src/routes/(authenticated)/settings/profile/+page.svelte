@@ -163,7 +163,7 @@
     <Card variant="destructive">
       <CardContent class="py-8">
         <div class="text-center space-y-2">
-          <p class="text-destructive font-medium">Failed to load profiles</p>
+          <h1 class="text-destructive font-medium">Could not load profiles</h1>
           <p class="text-sm text-muted-foreground">
             {remoteErrorMessage(loadError, "An error occurred")}
           </p>

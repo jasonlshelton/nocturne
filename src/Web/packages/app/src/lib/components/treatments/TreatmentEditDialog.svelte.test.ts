@@ -3,12 +3,14 @@ import { page } from "vitest/browser";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { remoteForm, remoteQuery } from "#lib/test-stubs/remote-resource.js";
 
+const { createInsulin } = vi.hoisted(() => ({ createInsulin: vi.fn() }));
+
 let insulinsCurrent: unknown[] = [];
 let catalogCurrent: unknown[] = [];
 
 vi.mock("#lib/api/generated/patientRecords.generated.remote.js", () => ({
   getInsulins: () => remoteQuery(() => insulinsCurrent),
-  createInsulin: remoteForm(),
+  createInsulin: remoteForm((data: unknown) => createInsulin(data)),
 }));
 
 vi.mock("#lib/api/generated/insulinCatalogs.generated.remote.js", () => ({
@@ -82,5 +84,21 @@ describe("TreatmentEditDialog", () => {
     await expect.element(page.getByText("Brand / name")).toBeVisible();
     await expect.element(page.getByText("Duration of insulin action")).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Add insulin" })).toBeDisabled();
+  });
+
+  it("shows why the server refused the new insulin, and keeps the form", async () => {
+    createInsulin.mockRejectedValueOnce({ status: 400, body: { message: "That insulin already exists" } });
+    renderDialog({ kind: "bolus", data: { id: "b1", mills, insulin: 2 } });
+
+    await page.getByText("Select insulin...").click();
+    await page.getByRole("option", { name: "Add new insulin..." }).click();
+    await page.getByText("Select category").click();
+    await page.getByRole("option").first().click();
+    await page.getByLabelText("Brand / name").fill("Fiasp");
+    await page.getByRole("button", { name: "Add insulin" }).click();
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("That insulin already exists");
+    await expect.element(page.getByLabelText("Brand / name")).toHaveValue("Fiasp");
+    await expect.element(page.getByRole("button", { name: "Add insulin" })).toBeEnabled();
   });
 });

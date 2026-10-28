@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Health;
+using Nocturne.Core.Contracts.Audit;
+using Nocturne.Core.Contracts.Infrastructure;
 using Nocturne.API.Services.Realtime;
 using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Models;
@@ -105,6 +107,53 @@ public sealed class CrossTenantRecordIdTests(CrossTenantRecordIdFixture fixture)
 
     [Theory]
     [MemberData(nameof(SharedIds))]
+    public async Task Both_tenants_keep_a_food_with_the_same_id(string id)
+    {
+        await Foods(tenantA).CreateFoodAsync([new Food { Id = id, Name = "toast", Carbs = 15 }]);
+        await Foods(tenantB).CreateFoodAsync([new Food { Id = id, Name = "rice", Carbs = 45 }]);
+
+        Assert.Equal("toast", (await Tenant(tenantA).Foods.SingleAsync()).Name);
+        Assert.Equal("rice", (await Tenant(tenantB).Foods.SingleAsync()).Name);
+    }
+
+    [Theory]
+    [MemberData(nameof(SharedIds))]
+    public async Task Both_tenants_keep_a_superseded_state_span_with_the_same_ids(string id)
+    {
+        foreach (var (tenant, state) in new[] { (tenantA, "a"), (tenantB, "b") })
+            await StateSpans(tenant).BulkUpsertAsync(
+            [
+                TemporaryTarget($"{id}:older", state, timestamp),
+                TemporaryTarget(id, state, timestamp.AddHours(1)),
+            ]);
+
+        foreach (var (tenant, state) in new[] { (tenantA, "a"), (tenantB, "b") })
+        {
+            await using var db = Tenant(tenant);
+            var spans = await db.StateSpans.AsNoTracking().OrderBy(s => s.StartTimestamp).ToListAsync();
+            Assert.Equal([state, state], spans.Select(s => s.State));
+            Assert.Equal(spans[1].Id, spans[0].SupersededById);
+            Assert.Equal(timestamp.AddHours(1), spans[0].EndTimestamp);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SharedIds))]
+    public async Task Both_tenants_keep_a_sleep_session_and_its_stages_with_the_same_id(string id)
+    {
+        await new SleepSessionRepository(Tenant(tenantA).AsFactory()).UpsertSessionAsync(Sleep(id, SleepStageType.Deep));
+        await new SleepSessionRepository(Tenant(tenantB).AsFactory()).UpsertSessionAsync(Sleep(id, SleepStageType.Rem));
+
+        foreach (var (tenant, stage) in new[] { (tenantA, SleepStageType.Deep), (tenantB, SleepStageType.Rem) })
+        {
+            await using var db = Tenant(tenant);
+            var session = await db.SleepSessions.Include(s => s.Stages).AsNoTracking().SingleAsync();
+            Assert.Equal(stage.ToString(), Assert.Single(session.Stages).Stage);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SharedIds))]
     public async Task A_resent_record_updates_the_row_it_was_stored_as(string id)
     {
         await HeartRates(tenantB).CreateHeartRatesAsync([new HeartRate { Id = id, Timestamp = timestamp, Bpm = 90 }]);
@@ -133,6 +182,31 @@ public sealed class CrossTenantRecordIdTests(CrossTenantRecordIdFixture fixture)
         Code = code,
         Mills = 1_756_713_600_000,
     };
+
+    private StateSpan TemporaryTarget(string id, string state, DateTime start) => new()
+    {
+        Id = id,
+        OriginalId = id,
+        Category = StateSpanCategory.TemporaryTarget,
+        State = state,
+        StartTimestamp = start,
+        Source = Source,
+    };
+
+    private SleepSession Sleep(string id, SleepStageType stage) => new()
+    {
+        Id = id,
+        StartTime = timestamp,
+        EndTime = timestamp.AddHours(8),
+        Source = SleepSource.Oura,
+        Stages = [new SleepStageInterval { StartTime = timestamp, EndTime = timestamp.AddHours(1), Stage = stage }],
+    };
+
+    private FoodRepository Foods(Guid tenant) => new(Tenant(tenant).AsFactory(), NullLogger<FoodRepository>.Instance);
+
+    private StateSpanRepository StateSpans(Guid tenant) => new(
+        Tenant(tenant).AsFactory(), Mock.Of<IDeduplicationService>(), Mock.Of<IAuditContext>(),
+        NullLogger<StateSpanRepository>.Instance);
 
     private BodyWeightService BodyWeights(Guid tenant) => new(
         Tenant(tenant).AsFactory(), Processing<BodyWeight>(), Mock.Of<ISignalRBroadcastService>(),

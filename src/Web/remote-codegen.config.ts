@@ -34,6 +34,7 @@ export default {
   imports: {
     schemas: '#lib/api/generated/schemas.js',
     apiTypes: '#lib/api/index.js',
+    server: '#lib/api/remote-server.js',
   },
   nswagClientPath: './generated/nocturne-api-client',
   // Matches nswag.json: the client has no date reviver, so a date-time is the ISO

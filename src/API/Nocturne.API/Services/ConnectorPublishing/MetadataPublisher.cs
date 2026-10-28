@@ -245,7 +245,7 @@ internal sealed class MetadataPublisher : ConnectorPublisherBase, IMetadataPubli
             ids => HeldAsync(db => db.GetHeldOriginalIdsAsync<HeartRateEntity>(ids, cancellationToken), cancellationToken),
             ids => HeldAsync(db => db.GetHeldOriginalIdsAsync<StepCountEntity>(ids, cancellationToken), cancellationToken),
             ids => HeldAsync(db => db.GetHeldOriginalIdsAsync<SleepSessionEntity>(
-                ids, s => s.Source == ActivityStateSpanMapper.SleepSessionSource, cancellationToken), cancellationToken));
+                ids, s => s.Source == ActivityStateSpanMapper.StoredSleepSessionSource, cancellationToken), cancellationToken));
 
     private async Task<IReadOnlySet<string>> HeldAsync(
         Func<NocturneDbContext, Task<IReadOnlySet<string>>> held, CancellationToken ct)

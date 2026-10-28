@@ -41,13 +41,13 @@ vi.mock("#lib/components/reports/loop-analysis/SettingsEvidenceBody.svelte", asy
   default: (await import("#lib/test-stubs/Empty.test-stub.svelte")).default,
 }));
 
-vi.mock("$app/paths", () => import("#lib/test-stubs/app-paths.js"));
-
-vi.mock("#lib/hooks/date-params.svelte.js", () => ({
+vi.mock("#lib/hooks/date-params.svelte.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/hooks/date-params.svelte.js")>()),
   requireDateParamsContext: () => ({ fromDay: "2026-10-09", toDay: "2026-10-22" }),
 }));
 
-vi.mock("#lib/hooks/resource-context.svelte.js", () => ({
+vi.mock("#lib/hooks/resource-context.svelte.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/hooks/resource-context.svelte.js")>()),
   contextResource: <T>(create: () => { current: T | undefined }) => {
     const query = create();
     return { current: query.current, stale: false, error: null };

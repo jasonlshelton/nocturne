@@ -165,6 +165,7 @@ export const DOCS_NAV_SECTIONS: DocsNavSection[] = [
         items: [
             { href: "/docs/connecting-apps", label: "App authorization (PKCE)" },
             { href: "/docs/connecting-apps/device-flow", label: "Mobile & device flow" },
+            { href: "/docs/connecting-apps/aid-app-keys", label: "API keys for AID apps" },
         ],
     },
     {

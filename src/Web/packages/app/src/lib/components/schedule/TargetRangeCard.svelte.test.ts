@@ -47,4 +47,28 @@ describe("TargetRangeCard", () => {
     expect(entry.low).toBeCloseTo(90, 0);
     expect(entry.high).toBeCloseTo(144, 0);
   });
+
+  it("starts a new target range blank and saves only once both values are filled", async () => {
+    render(TargetRangeCard, { profileName: "Default", schedule: null });
+    await page.getByRole("button", { name: "Set target range" }).click();
+
+    const low = page.getByRole("spinbutton", { name: "Low from 00:00" });
+    const high = page.getByRole("spinbutton", { name: "High from 00:00" });
+    await expect.element(low).toHaveValue(null);
+    await expect.element(high).toHaveValue(null);
+    await expect.element(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await userEvent.fill(low, "5");
+    await userEvent.tab();
+    await expect.element(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await userEvent.fill(high, "8");
+    await userEvent.tab();
+    await page.getByRole("button", { name: "Save" }).click();
+
+    await expect.poll(() => profiles.create.mock.calls.length).toBe(1);
+    const [entry] = profiles.create.mock.calls[0][0].entries;
+    expect(entry.low).toBeCloseTo(90, 0);
+    expect(entry.high).toBeCloseTo(144, 0);
+  });
 });

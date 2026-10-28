@@ -123,7 +123,7 @@
   <div class="flex min-h-[60vh] items-center justify-center px-4">
     <div class="max-w-md space-y-4 text-center">
       <AlertTriangle class="mx-auto size-6 text-destructive" aria-hidden="true" />
-      <h2 class="text-xl font-semibold">Could not load reports</h2>
+      <h1 class="text-xl font-semibold">Could not load reports</h1>
       <p class="text-muted-foreground">
         {remoteErrorMessage(reportsResource.error, "An error occurred")}
       </p>

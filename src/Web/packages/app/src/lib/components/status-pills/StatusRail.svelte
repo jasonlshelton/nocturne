@@ -25,8 +25,7 @@
       instanceId: string,
       instanceName: string,
       category: TrackerCategory,
-      definitionId: string,
-      completionEventType?: string
+      definitionId: string
     ) => void;
     /** Shown ahead of the items, inside the same wrapping row. */
     leading?: Snippet;

@@ -169,6 +169,26 @@ public class TherapySettingsRepository : ProfileScopedRepositoryBase<TherapySett
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<TherapySettings>>> GetDocumentRowsAsync(
+        IReadOnlyCollection<string> documentIds,
+        CancellationToken ct = default
+    )
+    {
+        var ids = documentIds.Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0)
+            return new Dictionary<string, IReadOnlyList<TherapySettings>>();
+
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var rows = await DocumentRows(ctx).Where(d => ids.Contains(d.DocumentId)).ToListAsync(ct);
+        return rows
+            .GroupBy(d => d.DocumentId, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<TherapySettings>)g.Select(d => TherapySettingsMapper.ToDomainModel(d.Row)).ToList(),
+                StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
     public async Task SetDefaultAsync(Guid? id, CancellationToken ct = default)
     {
         await using var ctx = await ContextFactory.CreateAsync(ct);

@@ -71,7 +71,6 @@ using Nocturne.Core.Contracts.Sleep;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Legacy;
-using Nocturne.Core.Contracts.Monitoring;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Platform;
@@ -835,6 +834,7 @@ public static class ServiceRegistrationExtensions
         // caller invokes: it runs from the V4 device-event write chokepoint, which is what makes a
         // connector-ingested site change advance a tracker the same way a hand-entered one does.
         services.AddScoped<IDeviceEventReactor, TrackerTriggerService>();
+        services.AddScoped<TrackerDeviceEventWriter>();
         // Tracker notifications ride the alert engine: thresholds are synthesised into
         // managed tracker_age alert rules, backfilled once at startup for pre-existing
         // definitions (and self-healing if a managed rule is ever lost).
@@ -1059,7 +1059,6 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IConfigureOptions<LoopConfiguration>, LoopLegacyEnvironmentConfiguration>();
         services.AddScoped<ILoopService, LoopService>();
         services.AddScoped<IOpenApsService, OpenApsService>();
-        services.AddScoped<IPumpAlertService, PumpAlertService>();
 
         // In-app notifications
         services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();

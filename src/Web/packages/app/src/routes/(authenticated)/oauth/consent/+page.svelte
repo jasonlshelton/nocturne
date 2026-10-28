@@ -17,6 +17,7 @@
   import Loader2 from "@lucide/svelte/icons/loader-circle";
   import Globe from "@lucide/svelte/icons/globe";
   import { consentForm, getClientInfo } from "../oauth.remote";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
   import { getOAuthScopeDescription } from "#lib/constants/oauth-scopes.js";
   import { retainQuery } from "#lib/api/retain-query.svelte.js";
   import DeletionDisclosure from "#lib/components/auth/DeletionDisclosure.svelte";
@@ -83,6 +84,7 @@
   // and Approve each need their own keyed instance of the same remote function.
   const denyForm = $derived(consentForm.for("deny"));
   const approveForm = $derived(consentForm.for("approve"));
+  const submission = useSubmission();
 </script>
 
 <svelte:head>
@@ -291,10 +293,12 @@
           </div>
         {/each}
 
+        <FormError issues={submission.error} />
+
         <div class="flex gap-3">
           <form
             {...denyForm.enhance(async ({ submit }) => {
-              await submit();
+              await submission.run(submit);
             })}
             class="flex-1"
           >
@@ -319,7 +323,7 @@
           </form>
           <form
             {...approveForm.enhance(async ({ submit }) => {
-              await submit();
+              await submission.run(submit);
             })}
             class="flex-1"
           >

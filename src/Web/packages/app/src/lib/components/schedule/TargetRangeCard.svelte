@@ -16,7 +16,6 @@
   import { glucoseUnits } from "#lib/stores/appearance-store.svelte.js";
   import {
     bgLabel,
-    bgThresholds,
     convertToDisplayUnits,
     convertFromDisplayUnits,
     timeStringToSeconds,
@@ -56,8 +55,7 @@
         high: convertToDisplayUnits(e.high ?? 0, displayUnits),
       }));
     } else {
-      const { targetLow, targetHigh } = bgThresholds();
-      draft = [{ time: "00:00", low: targetLow, high: targetHigh }];
+      draft = [{ time: "00:00" }];
     }
     saveError = null;
     editing = true;

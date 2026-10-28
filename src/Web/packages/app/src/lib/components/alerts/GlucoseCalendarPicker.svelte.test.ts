@@ -36,4 +36,21 @@ describe("GlucoseCalendarPicker", () => {
     await expect.element(page.getByLabelText("Next month")).toBeVisible();
     await expect.element(page.getByText(NOTE)).not.toBeInTheDocument();
   });
+
+  it("fits a 360px viewport", async () => {
+    punchCard.response = { months: [] };
+    const original = [window.innerWidth, window.innerHeight] as const;
+    await page.viewport(360, 800);
+    try {
+      const screen = render(GlucoseCalendarPicker);
+      await expect.element(page.getByLabelText("Next month")).toBeVisible();
+
+      const box = screen.container.firstElementChild!.getBoundingClientRect();
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(360);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(360);
+    } finally {
+      await page.viewport(original[0], original[1]);
+    }
+  });
 });

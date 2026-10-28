@@ -6,8 +6,8 @@ using Nocturne.Core.Models.V4;
 namespace Nocturne.Infrastructure.Data.Tests.V4Goldens;
 
 /// <summary>
-/// The batch lookups a page of legacy profile documents reads its schedules through answer what the
-/// single-key lookups would, key by key.
+/// The batch lookups a page of legacy profile documents reads its schedules and therapy settings
+/// through answer what the single-key lookups would, key by key.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("V4 goldens")]
@@ -99,6 +99,57 @@ public class ScheduleRepositoryBatchReadTests
         var rows = await repo.GetByLegacyIdsAsync(["p:Day", "p:Night", "p:Gone", "p:Missing"]);
 
         rows.Select(r => r.ProfileName).Should().BeEquivalentTo(["Day", "Night"]);
+    }
+
+    [Fact]
+    public async Task ByProfileNames_ServesEveryRowUnderEachName_AndNoDeletedOne()
+    {
+        using var scope = await _fx.BeginTenantScopeAsync(Guid.NewGuid());
+        var repo = scope.ServiceProvider.GetRequiredService<ITherapySettingsRepository>();
+        await repo.BulkCreateAsync(
+        [
+            new TherapySettings { Timestamp = T0, ProfileName = "Day", LegacyId = "d-old" },
+            new TherapySettings { Timestamp = T0.AddHours(1), ProfileName = "Day", LegacyId = "d-new" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Night", LegacyId = "n" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Gone", LegacyId = "g" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Else", LegacyId = "e" },
+        ], WriteOrigin.Live, CancellationToken.None);
+        await repo.DeleteByLegacyIdAsync("g", WriteOrigin.Live, CancellationToken.None);
+
+        var rows = await repo.GetByProfileNamesAsync(["Day", "Night", "Gone", "Missing"]);
+
+        rows.Select(r => r.LegacyId).Should().BeEquivalentTo(["d-old", "d-new", "n"]);
+    }
+
+    [Fact]
+    public async Task DocumentRowsByIds_ServeWhatTheSingleDocumentReadServes_ForEachDocument()
+    {
+        using var scope = await _fx.BeginTenantScopeAsync(Guid.NewGuid());
+        var repo = scope.ServiceProvider.GetRequiredService<ITherapySettingsRepository>();
+        var own = new TherapySettings { Timestamp = T0, ProfileName = "Own" };
+        await repo.BulkCreateAsync(
+        [
+            new TherapySettings { Timestamp = T0, ProfileName = "Day", LegacyId = "doc1:Day" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Night", LegacyId = "doc1:Night" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Solo", LegacyId = "doc2" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Gone", LegacyId = "doc3:Gone" },
+            new TherapySettings { Timestamp = T0, ProfileName = "Else", LegacyId = "doc4:Else" },
+            own,
+        ], WriteOrigin.Live, CancellationToken.None);
+        await repo.DeleteByLegacyIdAsync("doc3:Gone", WriteOrigin.Live, CancellationToken.None);
+        var ownKey = TherapySettings.DocumentIdOf((await repo.GetByProfileNameAsync("Own")).Single());
+        string[] keys = ["doc1", "doc2", "doc3", ownKey, "missing"];
+
+        var batch = await repo.GetDocumentRowsAsync(keys);
+
+        batch.Keys.Should().BeEquivalentTo(["doc1", "doc2", ownKey]);
+        foreach (var key in keys)
+        {
+            var single = await repo.GetDocumentRowsAsync(key);
+            (batch.TryGetValue(key, out var rows) ? rows : []).Select(r => r.Id)
+                .Should().BeEquivalentTo(single.Select(r => r.Id), key);
+        }
+        batch["doc1"].Select(r => r.ProfileName).Should().BeEquivalentTo(["Day", "Night"]);
     }
 
     private static BasalSchedule Schedule(string profileName, DateTime timestamp, string legacyId) =>

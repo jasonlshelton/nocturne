@@ -1,6 +1,6 @@
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Component } from "svelte";
 import type { CoachMarkContext, MarkState } from "@nocturne/coach";
 import { page as pageState } from "$app/state";
@@ -19,8 +19,11 @@ import {
   LOOP_ANALYSIS_PAGES,
   type LoopAnalysisPage,
 } from "#lib/components/reports/loop-analysis/loop-analysis-pages.svelte.js";
+import { resetWatercolour } from "#lib/test-stubs/watercolour-deferral.svelte.js";
 import { remoteQuery } from "#lib/test-stubs/remote-resource.js";
 import Harness from "./LoopAnalysisTourHarness.test.svelte";
+
+vi.mock("#lib/watercolour-deferral.svelte.js", () => import("#lib/test-stubs/watercolour-deferral.svelte.js"));
 
 vi.mock("$app/state", async () => {
   const stub = await vi.importActual<typeof import("$app/state")>("$app/state");
@@ -40,13 +43,18 @@ vi.mock("#lib/api/generated/loopAnalysis.generated.remote.js", () => ({
   getSettingsEvidence: () => remoteQuery(served.get("settings-evidence") ?? settingsEvidenceResponse),
 }));
 
-vi.mock("$app/navigation", () => ({ goto: () => Promise.resolve() }));
+vi.mock("$app/navigation", async () => ({
+  ...(await vi.importActual<typeof import("$app/navigation")>("$app/navigation")),
+  goto: () => Promise.resolve(),
+}));
 
-vi.mock("#lib/hooks/date-params.svelte.js", () => ({
+vi.mock("#lib/hooks/date-params.svelte.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/hooks/date-params.svelte.js")>()),
   requireDateParamsContext: () => ({ fromDay: "2026-10-09", toDay: "2026-10-22" }),
 }));
 
-vi.mock("#lib/hooks/resource-context.svelte.js", () => ({
+vi.mock("#lib/hooks/resource-context.svelte.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/hooks/resource-context.svelte.js")>()),
   contextResource: <T>(create: () => { current: T | undefined }) => ({
     get current() {
       return create().current;
@@ -120,6 +128,8 @@ async function walkInPlace(ctx: CoachMarkContext): Promise<string[]> {
 }
 
 describe("Loop Analysis tours", () => {
+  afterEach(() => resetWatercolour());
+
   beforeEach(() => {
     served.clear();
   });

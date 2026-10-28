@@ -17,6 +17,7 @@
     approveDeviceForm,
     denyDeviceForm,
   } from "../oauth.remote";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
   import DeviceAppClaimNotice from "#lib/components/auth/DeviceAppClaimNotice.svelte";
   import DeviceScopeList from "#lib/components/oauth/DeviceScopeList.svelte";
   import DeletionDisclosure from "#lib/components/auth/DeletionDisclosure.svelte";
@@ -51,6 +52,8 @@
   const approved = $derived(approveDeviceForm.result && "success" in approveDeviceForm.result && approveDeviceForm.result.success);
 
   const denied = $derived(denyDeviceForm.result && "denied" in denyDeviceForm.result && denyDeviceForm.result.denied);
+
+  const submission = useSubmission();
 
   // Collect all form-level issues
   const allIssues = $derived([
@@ -146,10 +149,12 @@
           </div>
         {/each}
 
+        <FormError issues={submission.error} />
+
         <div class="flex gap-3">
           <form
             {...denyDeviceForm.enhance(async ({ submit }) => {
-              await submit();
+              await submission.run(submit);
             })}
             class="flex-1"
           >
@@ -168,7 +173,7 @@
           </form>
           <form
             {...approveDeviceForm.enhance(async ({ submit }) => {
-              await submit();
+              await submission.run(submit);
             })}
             class="flex-1"
           >
@@ -203,6 +208,7 @@
       </Card.Header>
 
       <Card.Content class="space-y-4">
+        <FormError issues={submission.error} />
         {#each lookupDeviceForm.fields.allIssues() ?? [] as issue, i (i)}
           <div
             class="flex items-start gap-3 rounded-md border border-destructive/20 bg-destructive/5 p-3"
@@ -214,7 +220,7 @@
 
         <form
           {...lookupDeviceForm.enhance(async ({ submit }) => {
-            await submit();
+            await submission.run(submit);
           })}
           class="space-y-4"
         >

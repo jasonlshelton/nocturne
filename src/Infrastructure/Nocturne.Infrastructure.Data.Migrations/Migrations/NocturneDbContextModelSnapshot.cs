@@ -1542,13 +1542,13 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("ExternalEntryId")
                         .HasDatabaseName("ix_connector_food_entries_external_entry_id");
 
-                    b.HasIndex("FoodId");
-
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_connector_food_entries_status");
 
                     b.HasIndex("SysCreatedAt")
                         .HasDatabaseName("ix_connector_food_entries_sys_created_at");
+
+                    b.HasIndex("TenantId", "FoodId");
 
                     b.HasIndex("TenantId", "ConnectorSource", "ExternalEntryId")
                         .IsUnique()
@@ -2018,6 +2018,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.FoodEntity", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
@@ -2126,10 +2130,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnName("sys_updated_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
                     b.Property<string>("Type")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -2146,7 +2146,7 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasDefaultValue("g")
                         .HasColumnName("unit");
 
-                    b.HasKey("Id");
+                    b.HasKey("TenantId", "Id");
 
                     b.HasIndex("Category")
                         .HasDatabaseName("ix_foods_category");
@@ -4355,16 +4355,18 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SleepSessionId")
-                        .HasDatabaseName("ix_sleep_biometric_samples_sleep_session_id");
-
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "SleepSessionId")
+                        .HasDatabaseName("ix_sleep_biometric_samples_tenant_id_sleep_session_id");
 
                     b.ToTable("sleep_biometric_samples");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.SleepSessionEntity", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
@@ -4479,10 +4481,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("start_time");
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
                     b.Property<string>("Timezone")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
@@ -4506,7 +4504,7 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
-                    b.HasKey("Id");
+                    b.HasKey("TenantId", "Id");
 
                     b.HasIndex("TenantId", "StartTime")
                         .IsDescending(false, true)
@@ -4555,16 +4553,18 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SleepSessionId")
-                        .HasDatabaseName("ix_sleep_stages_sleep_session_id");
-
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "SleepSessionId")
+                        .HasDatabaseName("ix_sleep_stages_tenant_id_sleep_session_id");
 
                     b.ToTable("sleep_stages");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.StateSpanEntity", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
@@ -4624,17 +4624,13 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("superseded_by_id");
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.HasKey("Id");
+                    b.HasKey("TenantId", "Id");
 
                     b.HasIndex("Category")
                         .HasDatabaseName("ix_state_spans_category");
@@ -4653,12 +4649,12 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsDescending()
                         .HasDatabaseName("ix_state_spans_start_timestamp");
 
-                    b.HasIndex("SupersededById")
-                        .HasDatabaseName("ix_state_spans_superseded_by_id");
-
                     b.HasIndex("Category", "StartTimestamp")
                         .IsDescending(false, true)
                         .HasDatabaseName("ix_state_spans_category_start");
+
+                    b.HasIndex("TenantId", "SupersededById")
+                        .HasDatabaseName("ix_state_spans_tenant_id_superseded_by_id");
 
                     b.HasIndex("TenantId", "StartTimestamp", "Id")
                         .IsDescending(false, true, true)
@@ -6055,13 +6051,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("CarbIntakeId")
                         .HasDatabaseName("ix_treatment_foods_carb_intake_id");
 
-                    b.HasIndex("FoodId")
-                        .HasDatabaseName("ix_treatment_foods_food_id");
-
                     b.HasIndex("SysCreatedAt")
                         .HasDatabaseName("ix_treatment_foods_sys_created_at");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "FoodId")
+                        .HasDatabaseName("ix_treatment_foods_tenant_id_food_id");
 
                     b.ToTable("treatment_foods");
                 });
@@ -6095,11 +6089,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FoodId")
-                        .HasDatabaseName("ix_user_food_favorites_food_id");
-
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_user_food_favorites_user_id");
+
+                    b.HasIndex("TenantId", "FoodId")
+                        .HasDatabaseName("ix_user_food_favorites_tenant_id_food_id");
 
                     b.HasIndex("TenantId", "UserId", "FoodId")
                         .IsUnique()
@@ -9877,16 +9871,16 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.ConnectorFoodEntryEntity", b =>
                 {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
-                        .WithMany()
-                        .HasForeignKey("FoodId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FoodId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Food");
                 });
@@ -10277,15 +10271,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.SleepBiometricSampleEntity", b =>
                 {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SleepSessionEntity", "SleepSession")
-                        .WithMany("BiometricSamples")
-                        .HasForeignKey("SleepSessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SleepSessionEntity", "SleepSession")
+                        .WithMany("BiometricSamples")
+                        .HasForeignKey("TenantId", "SleepSessionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -10303,15 +10297,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.SleepStageEntity", b =>
                 {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SleepSessionEntity", "SleepSession")
-                        .WithMany("Stages")
-                        .HasForeignKey("SleepSessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SleepSessionEntity", "SleepSession")
+                        .WithMany("Stages")
+                        .HasForeignKey("TenantId", "SleepSessionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -10320,16 +10314,16 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.StateSpanEntity", b =>
                 {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.StateSpanEntity", null)
-                        .WithMany()
-                        .HasForeignKey("SupersededById")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.StateSpanEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SupersededById")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.StepCountEntity", b =>
@@ -10615,16 +10609,16 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
-                        .WithMany()
-                        .HasForeignKey("FoodId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FoodId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("CarbIntake");
 
@@ -10633,15 +10627,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.UserFoodFavoriteEntity", b =>
                 {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
-                        .WithMany()
-                        .HasForeignKey("FoodId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.FoodEntity", "Food")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FoodId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

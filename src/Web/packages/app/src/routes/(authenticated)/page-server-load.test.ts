@@ -4,6 +4,7 @@ const { renderPlotSnapshot } = vi.hoisted(() => ({ renderPlotSnapshot: vi.fn(() 
 vi.mock("#lib/server/plot-snapshot.js", () => ({ renderPlotSnapshot, hasPlotSize: () => true }));
 
 const { load } = await import("./+page.server");
+const { load: layoutLoad } = await import("../+layout.server");
 
 type LoadEvent = Parameters<typeof load>[0];
 
@@ -15,7 +16,8 @@ const settingsClients = { uiSettings: { getUISettings }, predictions: { getStatu
 function runLoad(
   getDashboardChartData: ReturnType<typeof vi.fn>,
   isAuthenticated = true,
-  isDataRequest = false
+  isDataRequest = false,
+  viewer: { isShareHost?: boolean; isGuestSession?: boolean } = {}
 ) {
   vi.stubEnv("BASE_DOMAIN", "nocturne.run");
   return load({
@@ -23,6 +25,7 @@ function runLoad(
       apiClient: { chartData: { getDashboardChartData }, ...settingsClients },
       isAuthenticated,
       isShareHost: false,
+      ...viewer,
     },
     request: new Request("https://sleepy.nocturne.run/", { headers: { host: "sleepy.nocturne.run" } }),
     parent: async () => ({ tenantless: false, baseDomain: "nocturne.run", dashboardSlugs: [] }),
@@ -37,6 +40,47 @@ function runLoad(
 }
 
 describe("dashboard page load", () => {
+  it("draws the snapshot with the layers the root layout hands the client", async () => {
+    vi.stubEnv("BASE_DOMAIN", "nocturne.run");
+    const memberCookies = {
+      get: (name: string) =>
+        name === "nocturne-prefs" ? encodeURIComponent(JSON.stringify({ colorTheme: "mono" })) : undefined,
+    };
+    const locals = {
+      apiClient: {
+        chartData: { getDashboardChartData: vi.fn().mockResolvedValue({}) },
+        status: { getStatus: async () => ({ tenantSlug: null }) },
+        myPermissions: { getMyPermissions: async () => ({ scopes: [], limitTo24Hours: false }) },
+        ...settingsClients,
+      },
+      user: { preferences: { glucoseUnits: "mmol" }, defaultGlucoseUnits: "mg/dl" },
+      isAuthenticated: true,
+      isShareHost: false,
+      isGuestSession: false,
+    };
+    const request = new Request("https://sleepy.nocturne.run/", { headers: { host: "sleepy.nocturne.run" } });
+
+    await load({
+      locals,
+      request,
+      parent: async () => ({}),
+      cookies: memberCookies,
+      isDataRequest: false,
+    } as unknown as LoadEvent);
+    const layout = (await layoutLoad({
+      locals,
+      request,
+      cookies: memberCookies,
+      depends: vi.fn(),
+    } as unknown as Parameters<typeof layoutLoad>[0])) as { displayPreferences: unknown[] };
+
+    const [{ preferenceLayers }] = renderPlotSnapshot.mock.calls[0] as unknown as [
+      { preferenceLayers: unknown[] },
+    ];
+    expect(layout.displayPreferences.length).toBeGreaterThan(1);
+    expect(preferenceLayers).toEqual(layout.displayPreferences);
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     renderPlotSnapshot.mockClear();
@@ -67,6 +111,16 @@ describe("dashboard page load", () => {
 
     expect(data.plotSnapshot).toBe("<svg></svg>");
     expect(renderPlotSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["a share host", { isShareHost: true }],
+    ["a guest session", { isGuestSession: true }],
+  ])("renders no plot snapshot for %s", async (_name, viewer) => {
+    const data = await runLoad(vi.fn().mockResolvedValue({}), true, false, viewer);
+
+    expect(data.plotSnapshot).toBeNull();
+    expect(renderPlotSnapshot).not.toHaveBeenCalled();
   });
 
   it("renders no plot snapshot for a client navigation's data request", async () => {

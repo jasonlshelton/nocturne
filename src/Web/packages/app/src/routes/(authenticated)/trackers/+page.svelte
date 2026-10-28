@@ -589,7 +589,6 @@
   instanceName={completingInstance?.definitionName ?? "tracker"}
   category={completingDefinition?.category}
   definitionId={completingInstance?.definitionId}
-  completionEventType={completingDefinition?.completionEventType}
   onClose={() => {
     completingInstance = null;
     completingDefinition = null;

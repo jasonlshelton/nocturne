@@ -9,11 +9,13 @@ namespace Nocturne.Connectors.Core.Services;
 public class ConnectorConfigurationLoader<TConfig>(
     IConnectorRegistration<TConfig> registration,
     IConnectorConfigurationService configService,
-    ILogger<ConnectorConfigurationLoader<TConfig>> logger)
+    ILogger<ConnectorConfigurationLoader<TConfig>> logger,
+    TimeProvider timeProvider)
     : IConnectorConfigurationLoader<TConfig>
     where TConfig : BaseConnectorConfiguration, new()
 {
     private readonly ConnectorConfigurationReader<TConfig> _reader = new(registration, configService);
+    private readonly TimeProvider _timeProvider = timeProvider;
 
     public async Task<TConfig> LoadForTenantAsync(CancellationToken ct)
     {
@@ -89,7 +91,7 @@ public class ConnectorConfigurationLoader<TConfig>(
             await configService.UpdateHealthStateAsync(
                 registration.ConnectorName,
                 lastErrorMessage: message,
-                lastErrorAt: DateTime.UtcNow,
+                lastErrorAt: _timeProvider.GetUtcNow().UtcDateTime,
                 isHealthy: false,
                 ct: ct);
         }

@@ -39,6 +39,7 @@ vi.mock("#routes/(unauthenticated)/auth/auth.remote.js", () => ({
 import AuthenticatedLayoutHarness from "./AuthenticatedLayoutHarness.test.svelte";
 import SettingsLayout from "./settings/+layout.svelte";
 import InitOrderProbe, { probe } from "./InitOrderProbe.test.svelte";
+import StickyBarProbe from "./StickyBarProbe.test.svelte";
 import NavigationProbe, { navigationProbe } from "./NavigationProbe.test.svelte";
 import type { ShellSession } from "#lib/utils/shell-session.js";
 import { AuthStore } from "#lib/stores/auth-store.svelte.js";
@@ -147,6 +148,55 @@ describe("authenticated layout", () => {
       .element(page.getByRole("main").getByText("page content"))
       .toBeVisible();
     expect(page.getByRole("main").elements()).toHaveLength(1);
+  });
+
+  describe("banner strip", () => {
+    const stripOf = () =>
+      document.querySelector<HTMLElement>("[data-slot=banner]")!.parentElement!;
+    const barTop = () => page.getByTestId("sticky-bar").element().getBoundingClientRect().top;
+
+    async function renderWithBackupPrompt() {
+      render(AuthenticatedLayoutHarness, {
+        props: {
+          data: layoutData({ tenantless: false, showBackupSignInPrompt: true }),
+          section: StickyBarProbe,
+        },
+      });
+      await expect.element(page.getByText("Add a backup way to sign in")).toBeVisible();
+    }
+
+    const original = [window.innerWidth, window.innerHeight] as const;
+
+    afterEach(async () => {
+      window.scrollTo(0, 0);
+      await page.viewport(original[0], original[1]);
+    });
+
+    it("scrolls away on a phone and leaves a sticky bar under the mobile header", async () => {
+      await page.viewport(360, 640);
+      await renderWithBackupPrompt();
+      const headerBottom = 3.5 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+
+      expect(getComputedStyle(stripOf()).position).toBe("static");
+
+      window.scrollTo(0, 1000);
+      await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(500));
+
+      expect(barTop()).toBeCloseTo(headerBottom, 0);
+    });
+
+    it("pins above a sticky bar from the md breakpoint", async () => {
+      await page.viewport(1024, 768);
+      await renderWithBackupPrompt();
+
+      expect(getComputedStyle(stripOf()).position).toBe("sticky");
+
+      window.scrollTo(0, 1000);
+      await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(500));
+
+      expect(stripOf().getBoundingClientRect().top).toBe(0);
+      expect(barTop()).toBeCloseTo(stripOf().getBoundingClientRect().height, 0);
+    });
   });
 
   it("loads the command palette on its first toggle", async () => {

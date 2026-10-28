@@ -1,5 +1,6 @@
 <script lang="ts">
   import { isRecord } from "#lib/utils/type-guards.js";
+  import { useSubmission, type Submission } from "#lib/forms/index.js";
   import type { Bolus, CarbIntake, BGCheck, Note, DeviceEvent, BasalInjection } from "#lib/api/index.js";
   import { BolusType, GlucoseType, GlucoseUnit, DeviceEventType } from "#lib/api/index.js";
   import type { EntryRecord, EntryCategoryId } from "#lib/constants/entry-categories.js";
@@ -359,6 +360,35 @@
     }
   }
 
+  const bolusSubmission = useSubmission();
+  const carbsSubmission = useSubmission();
+  const bgCheckSubmission = useSubmission();
+  const noteSubmission = useSubmission();
+  const deviceEventSubmission = useSubmission();
+  const basalInjectionSubmission = useSubmission();
+
+  async function saveSection(
+    section: Submission,
+    submit: () => Promise<boolean>,
+    result: () => unknown,
+    failure: string,
+    finish: () => void,
+    onSaved?: (saved: unknown) => void | Promise<void>,
+  ) {
+    try {
+      let saved: unknown;
+      await section.run(submit, async () => {
+        saved = result();
+        if (!saved) return false;
+        realtimeStore?.noteTreatmentWrite();
+        await onSaved?.(saved);
+      });
+      if (section.error || !saved) saveError ??= section.error ?? failure;
+    } finally {
+      finish();
+    }
+  }
+
   function checkAllDone() {
     if (bolusFormDone && carbsFormDone && bgCheckFormDone && noteFormDone && deviceEventFormDone && basalInjectionFormDone) {
       if (!saveError) {
@@ -366,7 +396,7 @@
         open = false;
         onClose();
       } else {
-        toast.error("Failed to save entry");
+        toast.error(saveError);
       }
       isSaving = false;
     }
@@ -451,16 +481,9 @@
   <form
     bind:this={bolusFormRef}
     class="hidden"
-    {...activeBolusForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeBolusForm.result) {
-        realtimeStore?.noteTreatmentWrite();
-        bolusFormDone = true;
-      } else {
-        saveError = "Failed to save bolus";
-        bolusFormDone = true;
-      }
-    })}
+    {...activeBolusForm.enhance(({ submit }) =>
+      saveSection(bolusSubmission, submit, () => activeBolusForm.result, "Failed to save bolus", () => (bolusFormDone = true)),
+    )}
   >
     {#if existingBolusRecord?.data.id}
       <input {...updateBolusForm.fields.id.as("hidden", existingBolusRecord.data.id)} />
@@ -497,26 +520,19 @@
   <form
     bind:this={carbsFormRef}
     class="hidden"
-    {...activeCarbsForm.enhance(async ({ submit }) => {
-      await submit();
-      const result = activeCarbsForm.result;
-      if (result) {
-        realtimeStore?.noteTreatmentWrite();
+    {...activeCarbsForm.enhance(({ submit }) =>
+      saveSection(carbsSubmission, submit, () => activeCarbsForm.result, "Failed to save carb intake", () => (carbsFormDone = true), async (saved) => {
         // If creating with pending foods, add them
         if (!existingCarbsRecord?.data.id && carbsPendingFoods.length > 0) {
-          const newId = isRecord(result) ? result.id : undefined;
+          const newId = isRecord(saved) ? saved.id : undefined;
           if (typeof newId === "string" && newId) {
             for (const pf of carbsPendingFoods) {
               await addCarbIntakeFood({ id: newId, request: pf.request });
             }
           }
         }
-        carbsFormDone = true;
-      } else {
-        saveError = "Failed to save carb intake";
-        carbsFormDone = true;
-      }
-    })}
+      }),
+    )}
   >
     {#if existingCarbsRecord?.data.id}
       <input {...updateCarbIntakeForm.fields.id.as("hidden", existingCarbsRecord.data.id)} />
@@ -540,16 +556,9 @@
   <form
     bind:this={bgCheckFormRef}
     class="hidden"
-    {...activeBGCheckForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeBGCheckForm.result) {
-        realtimeStore?.noteTreatmentWrite();
-        bgCheckFormDone = true;
-      } else {
-        saveError = "Failed to save BG check";
-        bgCheckFormDone = true;
-      }
-    })}
+    {...activeBGCheckForm.enhance(({ submit }) =>
+      saveSection(bgCheckSubmission, submit, () => activeBGCheckForm.result, "Failed to save BG check", () => (bgCheckFormDone = true)),
+    )}
   >
     {#if existingBGCheckRecord?.data.id}
       <input {...updateBGCheckForm.fields.id.as("hidden", existingBGCheckRecord.data.id)} />
@@ -566,16 +575,9 @@
   <form
     bind:this={noteFormRef}
     class="hidden"
-    {...activeNoteForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeNoteForm.result) {
-        realtimeStore?.noteTreatmentWrite();
-        noteFormDone = true;
-      } else {
-        saveError = "Failed to save note";
-        noteFormDone = true;
-      }
-    })}
+    {...activeNoteForm.enhance(({ submit }) =>
+      saveSection(noteSubmission, submit, () => activeNoteForm.result, "Failed to save note", () => (noteFormDone = true)),
+    )}
   >
     {#if existingNoteRecord?.data.id}
       <input {...updateNoteForm.fields.id.as("hidden", existingNoteRecord.data.id)} />
@@ -591,16 +593,9 @@
   <form
     bind:this={deviceEventFormRef}
     class="hidden"
-    {...activeDeviceEventForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeDeviceEventForm.result) {
-        realtimeStore?.noteTreatmentWrite();
-        deviceEventFormDone = true;
-      } else {
-        saveError = "Failed to save device event";
-        deviceEventFormDone = true;
-      }
-    })}
+    {...activeDeviceEventForm.enhance(({ submit }) =>
+      saveSection(deviceEventSubmission, submit, () => activeDeviceEventForm.result, "Failed to save device event", () => (deviceEventFormDone = true)),
+    )}
   >
     {#if existingDeviceEventRecord?.data.id}
       <input {...updateDeviceEventForm.fields.id.as("hidden", existingDeviceEventRecord.data.id)} />
@@ -619,16 +614,9 @@
   <form
     bind:this={basalInjectionFormRef}
     class="hidden"
-    {...activeBasalInjectionForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeBasalInjectionForm.result) {
-        realtimeStore?.noteTreatmentWrite();
-        basalInjectionFormDone = true;
-      } else {
-        saveError = "Failed to save basal injection";
-        basalInjectionFormDone = true;
-      }
-    })}
+    {...activeBasalInjectionForm.enhance(({ submit }) =>
+      saveSection(basalInjectionSubmission, submit, () => activeBasalInjectionForm.result, "Failed to save basal injection", () => (basalInjectionFormDone = true)),
+    )}
   >
     {#if existingBasalInjectionRecord?.data.id}
       <input {...updateBasalInjectionForm.fields.id.as("hidden", existingBasalInjectionRecord.data.id)} />

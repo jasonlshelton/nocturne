@@ -37,8 +37,7 @@
       instanceId: string,
       instanceName: string,
       category: TrackerCategory,
-      definitionId: string,
-      completionEventType?: string
+      definitionId: string
     ) => void;
   }
 
@@ -92,8 +91,7 @@
       instance.id!,
       label,
       instance.category ?? definition?.category ?? TrackerCategory.Custom,
-      (instance.definitionId ?? definition?.id ?? "").toString(),
-      definition?.completionEventType
+      (instance.definitionId ?? definition?.id ?? "").toString()
     );
   }
 </script>

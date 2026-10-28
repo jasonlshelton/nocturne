@@ -112,7 +112,7 @@ public class IobCobReaderTests
         var current = await Live(NewReader());
 
         current.Iob.Iob.Should().Be(1.254);
-        IobResult.FormatDisplay(current.Iob.Iob).Should().Be("1.25");
+        current.Iob.Display.Should().Be("1.25");
         current.Iob.Source.Should().Be("OpenAPS");
         current.Cob.Cob.Should().Be(23);
         current.Cob.Source.Should().Be("OpenAPS");
@@ -205,7 +205,7 @@ public class IobCobReaderTests
         var current = await Live(NewReader());
 
         current.Iob.Iob.Should().Be(0);
-        IobResult.FormatDisplay(current.Iob.Iob).Should().Be("0");
+        current.Iob.Display.Should().Be("0");
         current.Cob.Cob.Should().Be(0);
         current.HasIob.Should().BeFalse();
         current.HasCob.Should().BeFalse();

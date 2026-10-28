@@ -378,7 +378,7 @@ public class IobCalculatorTests
     }
 
     [Fact]
-    public async Task CalculateTotalAsync_DeviceTotal_IsPassedThroughUnchanged()
+    public async Task CalculateTotalAsync_DeviceTotal_IsRoundedToThreeDecimalsOnly()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         _pumpSnapshotRepo
@@ -388,7 +388,7 @@ public class IobCalculatorTests
                 new PumpSnapshot
                 {
                     Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(now - 2 * 60 * 1000).UtcDateTime,
-                    Iob = 1.23456,
+                    Iob = 2.2049,
                     BolusIob = 0.98765,
                 },
             });
@@ -397,7 +397,8 @@ public class IobCalculatorTests
         var result = await _calculator.CalculateTotalAsync(
             [], [Temp(now - 30 * Minute, now, rate: 0, origin: TempBasalOrigin.Suspended)], now);
 
-        Assert.Equal(1.23456, result.Iob);
+        Assert.Equal(2.205, result.Iob);
+        Assert.Equal("2.21", result.Display);
         Assert.Equal(0.98765, result.BolusIob);
         Assert.Null(result.BasalIob);
         Assert.Equal("Pump", result.Source);

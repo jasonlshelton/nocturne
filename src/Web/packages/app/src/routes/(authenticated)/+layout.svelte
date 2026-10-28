@@ -283,15 +283,15 @@
   <Sidebar.Provider>
     <AppSidebar user={data.user} isPlatformAdmin={data.isPlatformAdmin} isPlatformAccessGrant={data.isPlatformAccessGrant} isGuestSession={data.isGuestSession} currentSlug={data.tenantSlug} baseDomain={data.baseDomain} tenantless={data.tenantless} tenantTargets={data.tenantTargets} />
     <!-- --app-sticky-top is the top of the usable viewport below the app chrome (the visible
-         MobileHeader plus the banner strip); page-level sticky bars pin to it with the
-         header's 300ms transition. -->
+         MobileHeader on a phone, where the banner strip scrolls away; the banner strip from md);
+         page-level sticky bars pin to it with the header's 300ms transition. -->
     <Sidebar.Inset
-      class="min-w-0 [--app-sticky-top:calc(var(--mobile-header-offset,0px)_+_var(--app-banner-height))] md:[--app-sticky-top:var(--app-banner-height)]"
+      class="min-w-0 [--app-sticky-top:var(--mobile-header-offset,0px)] md:[--app-sticky-top:var(--app-banner-height)]"
       style="--app-banner-height: {bannerStripHeight}px"
     >
       <MobileHeader />
       <div
-        class="@container sticky top-(--mobile-header-offset,0px) z-40 transition-all duration-300 md:top-0"
+        class="@container z-40 md:sticky md:top-0"
         bind:offsetHeight={bannerStripHeight}
       >
           {#if data.isDemo}

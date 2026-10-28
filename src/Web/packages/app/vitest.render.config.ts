@@ -50,6 +50,14 @@ export default defineConfig({
         ),
       },
       {
+        find: "$app/paths",
+        replacement: fileURLToPath(new URL("./src/lib/test-stubs/app-paths.ts", import.meta.url)),
+      },
+      {
+        find: "$app/server",
+        replacement: fileURLToPath(new URL("./src/lib/test-stubs/app-server.ts", import.meta.url)),
+      },
+      {
         find: "$app/state",
         replacement: fileURLToPath(new URL("./src/lib/test-stubs/app-state.ts", import.meta.url)),
       },

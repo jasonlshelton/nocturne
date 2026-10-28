@@ -325,9 +325,9 @@
     <Card.Root variant="destructive" class="max-w-md">
       <Card.Content class="py-8">
         <div class="text-center">
-          <p class="font-medium text-destructive">
-            Failed to load calendar data
-          </p>
+          <h1 class="font-medium text-destructive">
+            Could not load the calendar
+          </h1>
           <p class="text-sm text-muted-foreground mt-1">
             {remoteErrorMessage(punchCardError, "An error occurred")}
           </p>
@@ -460,7 +460,6 @@
   instanceName={completingInstance?.definitionName ?? "tracker"}
   category={completingDefinition?.category}
   definitionId={completingInstance?.definitionId}
-  completionEventType={completingDefinition?.completionEventType}
   defaultCompletedAt={completingDefaultDate ?? undefined}
   onClose={handleCompletionDialogClose}
   onComplete={handleCompletionComplete}

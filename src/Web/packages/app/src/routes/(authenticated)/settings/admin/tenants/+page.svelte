@@ -302,7 +302,7 @@
       <Info class="h-4 w-4" />
       <Alert.Title>Tenant created</Alert.Title>
       <Alert.Description>
-        <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+        <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-xs"
           >{createdSlug}</code
         > is ready. Switch to it from the tenant selector in the sidebar.
       </Alert.Description>
@@ -316,7 +316,7 @@
       <Alert.Description class="flex items-start justify-between gap-4">
         <span>
           All app sessions were invalidated. Reconfigure your apps to use
-          <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+          <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-xs"
             >{"{slug}"}.{transitionStatus?.baseDomain}</code
           >.
         </span>

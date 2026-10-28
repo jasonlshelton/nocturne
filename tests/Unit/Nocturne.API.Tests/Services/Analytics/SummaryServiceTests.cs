@@ -539,6 +539,24 @@ public class SummaryServiceTests
         result.Battery.Should().Be(85);
     }
 
+    [Theory]
+    [InlineData(0.125, 0.13)]
+    [InlineData(-0.125, -0.12)]
+    [InlineData(-3.7067, -3.71)]
+    public async Task ConstructStateAsync_RoundsBwpAsJavaScriptMathRound(double bolusEstimate, double expected)
+    {
+        _mockPropertiesService
+            .Setup(x => x.GetAllPropertiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, object>
+            {
+                ["bwp"] = new Dictionary<string, object> { ["bolusEstimate"] = bolusEstimate },
+            });
+
+        var result = await _service.ConstructStateAsync(CancellationToken.None);
+
+        result.Bwp.Should().Be(expected, "Nightscout's summary is Math.round(bolusEstimate * 100) / 100, which rounds a half up");
+    }
+
     [Fact]
     public async Task ConstructStateAsync_WithNoIobCobData_WritesNullIobNullCobAndZeroBwp()
     {
@@ -605,6 +623,36 @@ public class SummaryServiceTests
     }
 
     [Fact]
+    public async Task ConstructStateAsync_WithAProfileAndInsulinButNoCarbs_WritesZeroCob()
+    {
+        _mockPropertiesService
+            .Setup(x => x.GetAllPropertiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, object> { ["profile"] = new Dictionary<string, object?>() });
+        Reading(
+            new IobCobInputs([new Bolus { Timestamp = DateTime.UtcNow, Insulin = 1 }], [], []),
+            new IobResult { Iob = 1 },
+            new CobResult()
+        );
+
+        var json = await StateJsonAsync();
+
+        json["cob"]!.GetValue<int>().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ConstructStateAsync_WithAProfileAndNoTreatments_WritesNullCob()
+    {
+        _mockPropertiesService
+            .Setup(x => x.GetAllPropertiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, object> { ["profile"] = new Dictionary<string, object?>() });
+        Reading(NoInputs(), new IobResult(), new CobResult());
+
+        var json = await StateJsonAsync();
+
+        json["cob"].Should().BeNull();
+    }
+
+    [Fact]
     public async Task ConstructStateAsync_WithAFailedCobCalculation_WritesNullCob()
     {
         Reading(
@@ -623,8 +671,9 @@ public class SummaryServiceTests
     [InlineData(2.3456, 24.6, 2.35, 25)]
     [InlineData(0.125, 24.5, 0.13, 25)]
     [InlineData(-0.125, 0.5, -0.12, 1)]
+    [InlineData(0.015, 0.4, 0.02, 0)]
     [InlineData(2.344, 24.4, 2.34, 24)]
-    public async Task ConstructStateAsync_RoundsIobAndCobHalfUpAsJavaScriptDoes(
+    public async Task ConstructStateAsync_RoundsIobAndCobHalfUp_AsJavaScriptsMathRound(
         double iob,
         double cob,
         double expectedIob,

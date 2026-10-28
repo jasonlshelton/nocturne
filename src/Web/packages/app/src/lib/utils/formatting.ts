@@ -126,29 +126,6 @@ export function bgValue(mgdl: number): number {
   return convertToDisplayUnits(mgdl, glucoseUnits.current);
 }
 
-/**
- * Get standard glucose range thresholds in user's preferred units
- * @returns Object with common threshold values
- */
-export function bgThresholds(): {
-  urgentLow: number;
-  low: number;
-  targetLow: number;
-  targetHigh: number;
-  high: number;
-  urgentHigh: number;
-} {
-  const units = glucoseUnits.current;
-  return {
-    urgentLow: convertToDisplayUnits(54, units),
-    low: convertToDisplayUnits(70, units),
-    targetLow: convertToDisplayUnits(70, units),
-    targetHigh: convertToDisplayUnits(180, units),
-    high: convertToDisplayUnits(180, units),
-    urgentHigh: convertToDisplayUnits(250, units),
-  };
-}
-
 // =============================================================================
 // Time Formatting (auto-detect format from global preference)
 // =============================================================================

@@ -183,7 +183,7 @@ describe("therapy settings, nothing yet", () => {
     const devices = page.getByRole("link", { name: "Open Devices in a new tab" });
     await expect.element(devices).toHaveAttribute("target", "_blank");
     await expect.element(devices).toHaveAttribute("rel", "noopener");
-    await expect.element(devices).toHaveAttribute("href", "/(unauthenticated)/setup/(guided)/devices");
+    await expect.element(devices).toHaveAttribute("href", "/setup/devices");
   });
 
   it("keeps both target fields when a block's low and high are cleared", async () => {
@@ -299,7 +299,7 @@ describe("therapy settings, synced from an app", () => {
       .toHaveTextContent("If no app sends your settings to Nocturne, you can find them on the profile page and change the target range there. Basal rates, carb ratios and insulin sensitivity cannot be changed in Nocturne yet.");
     await expect
       .element(page.getByTestId("therapy-mismatch").getByRole("link", { name: "profile page" }))
-      .toHaveAttribute("href", "/(authenticated)/settings/profile");
+      .toHaveAttribute("href", "/settings/profile");
   });
 
   it("offers nothing to confirm once confirmed", async () => {

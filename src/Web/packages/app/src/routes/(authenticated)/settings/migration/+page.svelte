@@ -440,7 +440,15 @@
               <form
                 {...testConnectionForm.enhance(async ({ submit }) => {
                   connectionTestResult = null;
-                  await submit();
+                  try {
+                    await submit();
+                  } catch (err) {
+                    connectionTestResult = {
+                      success: false,
+                      message: describeSubmitError(err, "Connection test failed"),
+                    };
+                    return;
+                  }
                   const result = testConnectionForm.result;
                   if (result) {
                     connectionTestResult = {
@@ -485,7 +493,12 @@
               <form
                 {...startMigrationForm.enhance(async ({ submit }) => {
                   error = null;
-                  await submit();
+                  try {
+                    await submit();
+                  } catch (err) {
+                    error = describeSubmitError(err, "Failed to start migration");
+                    return;
+                  }
                   const jobInfo = startMigrationForm.result;
                   if (jobInfo?.id) {
                     activeTab = "progress";

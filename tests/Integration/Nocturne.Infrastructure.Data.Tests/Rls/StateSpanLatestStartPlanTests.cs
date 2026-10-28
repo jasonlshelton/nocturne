@@ -30,7 +30,7 @@ public class StateSpanLatestStartPlanTests(RlsCompletenessFixture fx)
     public Task NonActivity_ProbesTheIndexOncePerCategory() =>
         AssertProbesAsync(
             (repository, source) => repository.GetLatestNonActivityTimestampAsync(source),
-            arms: 8);
+            arms: 6);
 
     private async Task AssertProbesAsync(
         Func<StateSpanRepository, string, Task<DateTime?>> read, int arms)
@@ -39,7 +39,7 @@ public class StateSpanLatestStartPlanTests(RlsCompletenessFixture fx)
         await PlanTestSupport.SeedAsync(
             fx, tenant, "state_spans",
             "(id, tenant_id, category, state, start_timestamp, source, created_at, updated_at)",
-            $"gen_random_uuid(), @tid, (ARRAY['PumpMode','PumpConnectivity','Override','Profile','Exercise','Illness','Travel','DataExclusion','TemporaryTarget','Motion','TempBasal','BasalDelivery'])[1 + g % 12], 's', now() - make_interval(mins => g), '{Source}', now(), now()",
+            $"gen_random_uuid(), @tid, (ARRAY['PumpMode','PumpConnectivity','Override','Profile','Exercise','Illness','Travel','DataExclusion','TemporaryTarget','Motion'])[1 + g % 10], 's', now() - make_interval(mins => g), '{Source}', now(), now()",
             Rows);
 
         await using var conn = await fx.OpenAppConnectionAsync();

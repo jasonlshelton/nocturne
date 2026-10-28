@@ -1,68 +1,81 @@
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
-import { formCoerce } from "#lib/api/generated/form-utils.generated.js";
-import {
-  CreateBolusRequestSchema,
-  CreateCarbIntakeRequestSchema,
-  UpdateBolusRequestSchema,
-  UpdateCarbIntakeRequestSchema,
-  UpsertBGCheckRequestSchema,
-  UpsertNoteRequestSchema,
-  UpsertDeviceEventRequestSchema,
-  UpdateBasalInjectionRequestSchema,
-} from "#lib/api/generated/schemas.js";
 import type { EntryRecord } from "#lib/constants/entry-categories.js";
 
-// What each form was submitted with, keyed by module and export, as the browser built it.
-const { submitted, capturingForm } = vi.hoisted(() => {
-  const submitted: Record<string, [string, string][]> = {};
-  const capturingForm = (key: string, fields: unknown) => ({
-    fields,
-    pending: 0,
-    result: { id: "saved" },
-    enhance: (callback: (helpers: { submit: () => Promise<void> }) => Promise<void>) => ({
-      onsubmit: (event: Event) => {
-        event.preventDefault();
-        submitted[key] = [...new FormData(event.target as HTMLFormElement)].map(([k, v]) => [k, String(v)]);
-        void callback({ submit: async () => {} });
-      },
-    }),
-  });
-  return { submitted, capturingForm };
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("svelte-sonner", () => ({ toast: { success: vi.fn(), error: toastError } }));
+
+// What each form's handler received once its schema accepted the post, keyed by record kind and
+// `create` or `update`.
+const handlers = vi.hoisted(() => {
+  const names = ["bolus", "carbs", "bgCheck", "note", "deviceEvent", "basalInjection"];
+  return Object.fromEntries(
+    names.flatMap((name) => [
+      [`${name}.create`, vi.fn(async (_request: unknown) => ({ id: "saved" }))],
+      [`${name}.update`, vi.fn(async (_request: unknown) => ({ id: "saved" }))],
+    ]),
+  );
 });
 
-async function formsOf(
-  original: () => Promise<Record<string, unknown>>,
-  module: string,
-  names: Record<string, string>,
-) {
-  const { remoteFormFields } = await import("#lib/test-stubs/remote-resource.js");
-  const forms = Object.fromEntries(
-    Object.entries(names).map(([exported, key]) => [exported, capturingForm(`${module}.${key}`, remoteFormFields())]),
-  );
-  return { ...(await original()), ...forms };
+// Built with the `form` the generated module imports, so a submission meets the schema as the
+// generated `create` and `update` forms do.
+async function kit() {
+  const { form } = await import("#lib/api/remote-server.js");
+  const { formCoerce } = await import("#lib/api/generated/form-utils.generated.js");
+  const { z } = await import("zod");
+  const schemas = await import("#lib/api/generated/schemas.js");
+  return { form, formCoerce, z, schemas };
 }
 
-vi.mock("#lib/api/generated/bolus.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "bolus", { create: "create", update: "update" }),
-);
-vi.mock("#lib/api/generated/nutritions.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "carbs", { createCarbIntake: "create", updateCarbIntake: "update" }),
-);
-vi.mock("#lib/api/generated/bgChecks.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "bgCheck", { create: "create", update: "update" }),
-);
-vi.mock("#lib/api/generated/notes.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "note", { create: "create", update: "update" }),
-);
-vi.mock("#lib/api/generated/deviceEvents.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "deviceEvent", { create: "create", update: "update" }),
-);
-vi.mock("#lib/api/generated/basalInjections.generated.remote.js", (importOriginal) =>
-  formsOf(importOriginal, "basalInjection", { create: "create", update: "update" }),
-);
+vi.mock("#lib/api/generated/bolus.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    create: form(formCoerce(schemas.CreateBolusRequestSchema), handlers["bolus.create"]),
+    update: form(formCoerce(z.object({ id: z.string(), request: schemas.UpdateBolusRequestSchema })), handlers["bolus.update"]),
+  };
+});
+vi.mock("#lib/api/generated/nutritions.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    createCarbIntake: form(formCoerce(schemas.CreateCarbIntakeRequestSchema), handlers["carbs.create"]),
+    updateCarbIntake: form(formCoerce(z.object({ id: z.string(), request: schemas.UpdateCarbIntakeRequestSchema })), handlers["carbs.update"]),
+  };
+});
+vi.mock("#lib/api/generated/bgChecks.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    create: form(formCoerce(schemas.UpsertBGCheckRequestSchema), handlers["bgCheck.create"]),
+    update: form(formCoerce(z.object({ id: z.string(), request: schemas.UpsertBGCheckRequestSchema })), handlers["bgCheck.update"]),
+  };
+});
+vi.mock("#lib/api/generated/notes.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    create: form(formCoerce(schemas.UpsertNoteRequestSchema), handlers["note.create"]),
+    update: form(formCoerce(z.object({ id: z.string(), request: schemas.UpsertNoteRequestSchema })), handlers["note.update"]),
+  };
+});
+vi.mock("#lib/api/generated/deviceEvents.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    create: form(formCoerce(schemas.UpsertDeviceEventRequestSchema), handlers["deviceEvent.create"]),
+    update: form(formCoerce(z.object({ id: z.string(), request: schemas.UpsertDeviceEventRequestSchema })), handlers["deviceEvent.update"]),
+  };
+});
+vi.mock("#lib/api/generated/basalInjections.generated.remote.js", async (importOriginal) => {
+  const { form, formCoerce, z, schemas } = await kit();
+  return {
+    ...(await importOriginal<object>()),
+    create: form(formCoerce(schemas.CreateBasalInjectionRequestSchema), handlers["basalInjection.create"]),
+    update: form(formCoerce(z.object({ id: z.string(), request: schemas.UpdateBasalInjectionRequestSchema })), handlers["basalInjection.update"]),
+  };
+});
 vi.mock("#lib/api/generated/patientRecords.generated.remote.js", async () => {
   const { remoteQuery } = await import("#lib/test-stubs/remote-resource.js");
   return { getInsulins: () => remoteQuery(() => []) };
@@ -73,30 +86,13 @@ vi.mock("#lib/hooks/dialog-history.svelte.js", () => ({ useDialogHistory: () => 
 
 import EntryEditDialog from "./EntryEditDialog.svelte";
 
-/** The posted fields as kit hands them to the schema: typed by their prefix, nested by their dots. */
-function posted(key: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [name, raw] of submitted[key] ?? []) {
-    const [, prefix, path] = /^(?:(n|b):)?(.*)$/.exec(name)!;
-    const value = prefix === "n" ? Number(raw) : prefix === "b" ? raw === "on" : raw;
-    const keys = path.split(".");
-    let target = out;
-    for (const k of keys.slice(0, -1)) target = (target[k] ??= {}) as Record<string, unknown>;
-    target[keys.at(-1)!] = value;
-  }
-  return out;
-}
-
-function issues(schema: z.ZodType, key: string) {
-  return formCoerce(schema).safeParse(posted(key)).error?.issues;
-}
-
 const at = Date.UTC(2026, 9, 27, 7, 30);
 const id = (n: number) => `0192f0e4-0000-7000-8000-00000000000${n}`;
 
 describe("EntryEditDialog saves", () => {
   beforeEach(() => {
-    for (const key of Object.keys(submitted)) delete submitted[key];
+    for (const handler of Object.values(handlers)) handler.mockClear();
+    toastError.mockClear();
   });
 
   it("creates a meal bolus as the create schemas take it", async () => {
@@ -104,10 +100,23 @@ describe("EntryEditDialog saves", () => {
 
     await page.getByRole("button", { name: "Create" }).click();
 
-    await vi.waitFor(() => expect(Object.keys(submitted)).toEqual(expect.arrayContaining(["bolus.create", "carbs.create"])));
-    expect(posted("bolus.create")).not.toHaveProperty("mills");
-    expect(issues(CreateBolusRequestSchema, "bolus.create")).toBeUndefined();
-    expect(issues(CreateCarbIntakeRequestSchema, "carbs.create")).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(handlers["bolus.create"]).toHaveBeenCalledOnce();
+      expect(handlers["carbs.create"]).toHaveBeenCalledOnce();
+    });
+    expect(handlers["bolus.create"].mock.calls[0][0]).not.toHaveProperty("mills");
+  });
+
+  it("stops saving and stays open when the server refuses a record", async () => {
+    handlers["bolus.create"].mockRejectedValueOnce({ status: 400, body: { message: "Insulin is too high" } });
+    const onClose = vi.fn();
+    render(EntryEditDialog, { open: true, entry: null, onClose });
+
+    await page.getByRole("button", { name: "Create" }).click();
+
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith("Insulin is too high"));
+    await expect.element(page.getByRole("button", { name: "Create" })).toBeEnabled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("saves each kind of record under request, as its update schema takes it", async () => {
@@ -124,16 +133,14 @@ describe("EntryEditDialog saves", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
 
     const kinds = ["bolus", "carbs", "bgCheck", "note", "deviceEvent", "basalInjection"];
-    await vi.waitFor(() => expect(Object.keys(submitted)).toEqual(expect.arrayContaining(kinds.map((k) => `${k}.update`))));
+    await vi.waitFor(() => {
+      for (const kind of kinds) expect(handlers[`${kind}.update`], kind).toHaveBeenCalledOnce();
+    });
 
-    const update = (request: z.ZodType) => z.object({ id: z.string(), request });
-    expect(posted("bolus.update")).toMatchObject({ id: id(1), request: { insulin: 2, timestamp: new Date(at).toISOString() } });
-    expect(issues(update(UpdateBolusRequestSchema), "bolus.update")).toBeUndefined();
-    expect(issues(update(UpdateCarbIntakeRequestSchema), "carbs.update")).toBeUndefined();
-    expect(issues(update(UpsertBGCheckRequestSchema), "bgCheck.update")).toBeUndefined();
-    expect(issues(update(UpsertNoteRequestSchema), "note.update")).toBeUndefined();
-    expect(issues(update(UpsertDeviceEventRequestSchema), "deviceEvent.update")).toBeUndefined();
-    expect(issues(update(UpdateBasalInjectionRequestSchema), "basalInjection.update")).toBeUndefined();
+    expect(handlers["bolus.update"].mock.calls[0][0]).toMatchObject({
+      id: id(1),
+      request: { insulin: 2, timestamp: new Date(at).toISOString() },
+    });
   });
 
   it("keeps the optional fields a record already holds", async () => {
@@ -163,21 +170,18 @@ describe("EntryEditDialog saves", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
 
     const kinds = ["bolus", "carbs", "deviceEvent", "basalInjection"];
-    await vi.waitFor(() => expect(Object.keys(submitted)).toEqual(expect.arrayContaining(kinds.map((k) => `${k}.update`))));
+    await vi.waitFor(() => {
+      for (const kind of kinds) expect(handlers[`${kind}.update`], kind).toHaveBeenCalledOnce();
+    });
 
-    expect(posted("bolus.update")).toMatchObject({
+    const received = (kind: string) => handlers[`${kind}.update`].mock.calls[0][0];
+    expect(received("bolus")).toMatchObject({
       request: { duration: 30, programmed: 2.5, delivered: 2, insulinType: "Fiasp", unabsorbed: 0.5 },
     });
-    expect(posted("carbs.update")).toMatchObject({ request: { carbTime: 15, absorptionTime: 180 } });
-    expect(posted("deviceEvent.update")).toMatchObject({ request: { notes: "New site" } });
-    expect(posted("basalInjection.update")).toMatchObject({
+    expect(received("carbs")).toMatchObject({ request: { carbTime: 15, absorptionTime: 180 } });
+    expect(received("deviceEvent")).toMatchObject({ request: { notes: "New site" } });
+    expect(received("basalInjection")).toMatchObject({
       request: { notes: "Evening", patientInsulinId: id(7) },
     });
-
-    const update = (request: z.ZodType) => z.object({ id: z.string(), request });
-    expect(issues(update(UpdateBolusRequestSchema), "bolus.update")).toBeUndefined();
-    expect(issues(update(UpdateCarbIntakeRequestSchema), "carbs.update")).toBeUndefined();
-    expect(issues(update(UpsertDeviceEventRequestSchema), "deviceEvent.update")).toBeUndefined();
-    expect(issues(update(UpdateBasalInjectionRequestSchema), "basalInjection.update")).toBeUndefined();
   });
 });

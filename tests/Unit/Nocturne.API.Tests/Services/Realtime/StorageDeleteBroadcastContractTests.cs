@@ -641,6 +641,9 @@ public class StorageDeleteBroadcastContractTests
     {
         var stateSpans = new Mock<IStateSpanService>();
         stateSpans
+            .Setup(s => s.GetActivityByIdAsync(RecordGuid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Activity { Id = RecordGuid, Type = "exercise" });
+        stateSpans
             .Setup(s => s.DeleteActivityAsync(RecordGuid, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IReadOnlyList<string>)[RecordGuid]);
 
@@ -656,6 +659,9 @@ public class StorageDeleteBroadcastContractTests
     public async Task ActivityService_SleepDelete_SendsTheUuidVerbatim()
     {
         var sleep = new Mock<ISleepService>();
+        sleep
+            .Setup(s => s.GetSessionByIdAsync(Guid.Parse(RecordGuid), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SleepSession { Id = RecordGuid, Source = SleepSource.Manual });
         sleep
             .Setup(s => s.DeleteSessionAsync(Guid.Parse(RecordGuid), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);

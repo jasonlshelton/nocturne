@@ -35,6 +35,7 @@ export default defineConfig({
       "$app/env/private": fileURLToPath(new URL("./src/lib/test-stubs/app-env-vars.ts", import.meta.url)),
       "$app/env/public": fileURLToPath(new URL("./src/lib/test-stubs/app-env-vars.ts", import.meta.url)),
       "$app/env": fileURLToPath(new URL("./src/lib/test-stubs/app-environment-node.ts", import.meta.url)),
+      "$app/paths": fileURLToPath(new URL("./src/lib/test-stubs/app-paths.ts", import.meta.url)),
     },
   },
 });

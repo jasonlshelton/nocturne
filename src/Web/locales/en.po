@@ -930,6 +930,7 @@ msgstr "Connection successful{0}. <0/>"
 
 #: src/lib/components/admin/OidcProviderDialog.svelte
 #: src/routes/(authenticated)/settings/migration/+page.svelte
+#: src/routes/(authenticated)/settings/migration/+page.svelte
 msgid "Connection test failed"
 msgstr "Connection test failed"
 
@@ -3749,9 +3750,8 @@ msgstr "Entry updated"
 msgid "Entry created"
 msgstr "Entry created"
 
-#: src/lib/components/entries/EntryEditDialog.svelte
-msgid "Failed to save entry"
-msgstr "Failed to save entry"
+#~ msgid "Failed to save entry"
+#~ msgstr "Failed to save entry"
 
 #: src/lib/components/entries/EntryEditDialog.svelte
 msgid "Entry deleted"
@@ -3764,6 +3764,7 @@ msgid "Failed to delete entry"
 msgstr "Failed to delete entry"
 
 #: src/lib/components/entries/EntryEditDialog.svelte
+#: src/lib/components/meals/MealBolusDialog.svelte
 #: src/lib/components/meals/MealBolusDialog.svelte
 msgid "Failed to save bolus"
 msgstr "Failed to save bolus"
@@ -7134,10 +7135,8 @@ msgstr "Rescheduled"
 msgid "Missed"
 msgstr "Missed"
 
-#: src/lib/components/trackers/TrackerCompletionDialog.svelte
-#: src/lib/components/trackers/TrackerStartDialog.svelte
-msgid "Nocturne Tracker"
-msgstr "Nocturne Tracker"
+#~ msgid "Nocturne Tracker"
+#~ msgstr "Nocturne Tracker"
 
 #. 0: instanceName
 #: src/lib/components/trackers/TrackerCompletionDialog.svelte
@@ -7257,28 +7256,22 @@ msgstr "{0} record{1} selected"
 #~ msgid "<0/> Delete Selected"
 #~ msgstr "<0/> Delete Selected"
 
-#: src/lib/components/treatments/EventTypeCombobox.svelte
 #: src/lib/components/treatments/edit-dialog/DeviceEventFormFields.svelte
 msgid "Select event type..."
 msgstr "Select event type..."
 
-#: src/lib/components/treatments/EventTypeCombobox.svelte
-msgid "Search or enter event type..."
-msgstr "Search or enter event type..."
+#~ msgid "Search or enter event type..."
+#~ msgstr "Search or enter event type..."
 
-#. 0: searchValue.trim()
-#: src/lib/components/treatments/EventTypeCombobox.svelte
-msgid "Use \"{0}\" as custom type"
-msgstr "Use \"{0}\" as custom type"
+#~ msgid "Use \"{0}\" as custom type"
+#~ msgstr "Use \"{0}\" as custom type"
 
-#: src/lib/components/treatments/EventTypeCombobox.svelte
 #: src/lib/components/treatments/edit-dialog/DeviceEventFormFields.svelte
 msgid "No event types found."
 msgstr "No event types found."
 
-#: src/lib/components/treatments/EventTypeCombobox.svelte
-msgid "<0/> Create new event type..."
-msgstr "<0/> Create new event type..."
+#~ msgid "<0/> Create new event type..."
+#~ msgstr "<0/> Create new event type..."
 
 #~ msgid "<0/> None (don't create event)"
 #~ msgstr "<0/> None (don't create event)"
@@ -7700,6 +7693,8 @@ msgid "{0} minor"
 msgstr "{0} minor"
 
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
+#: src/lib/components/trackers/TrackerEditorDialog.svelte
+#: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/routes/(authenticated)/compatibility/+page.svelte
 #: src/routes/(authenticated)/settings/account/+page.svelte
 msgid "None"
@@ -7768,9 +7763,8 @@ msgstr "NC: {0}"
 #~ msgid "Calendar view is still available"
 #~ msgstr "Calendar view is still available"
 
-#: src/routes/(authenticated)/calendar/+page.svelte
-msgid "Failed to load calendar data"
-msgstr "Failed to load calendar data"
+#~ msgid "Failed to load calendar data"
+#~ msgstr "Failed to load calendar data"
 
 #: src/routes/(authenticated)/+layout.svelte
 #: src/routes/(authenticated)/calendar/+page.svelte
@@ -12275,6 +12269,7 @@ msgstr "Your API secret"
 #~ msgstr "Connected successfully! Found {0} entries and {1} treatments."
 
 #: src/routes/(authenticated)/settings/migration/+page.svelte
+#: src/routes/(authenticated)/settings/migration/+page.svelte
 msgid "Failed to start migration"
 msgstr "Failed to start migration"
 
@@ -12732,9 +12727,8 @@ msgstr "Delay"
 msgid "Loading profiles..."
 msgstr "Loading profiles..."
 
-#: src/routes/(authenticated)/settings/profile/+page.svelte
-msgid "Failed to load profiles"
-msgstr "Failed to load profiles"
+#~ msgid "Failed to load profiles"
+#~ msgstr "Failed to load profiles"
 
 #~ msgid "<0/> Packing Calculator"
 #~ msgstr "<0/> Packing Calculator"
@@ -14438,18 +14432,15 @@ msgstr "No leaves to evaluate."
 msgid "Resolved"
 msgstr "Resolved"
 
-#: src/lib/components/alerts/GlucoseCalendarPicker.svelte
-#: src/lib/components/alerts/GlucoseRangeCalendarPicker.svelte
+#: src/lib/components/alerts/GlucoseMonthGrid.svelte
 msgid "Previous month"
 msgstr "Previous month"
 
-#: src/lib/components/alerts/GlucoseCalendarPicker.svelte
-#: src/lib/components/alerts/GlucoseRangeCalendarPicker.svelte
+#: src/lib/components/alerts/GlucoseMonthGrid.svelte
 msgid "loading…"
 msgstr "loading…"
 
-#: src/lib/components/alerts/GlucoseCalendarPicker.svelte
-#: src/lib/components/alerts/GlucoseRangeCalendarPicker.svelte
+#: src/lib/components/alerts/GlucoseMonthGrid.svelte
 msgid "Next month"
 msgstr "Next month"
 
@@ -26312,21 +26303,21 @@ msgstr "Compared with {0}."
 msgid "<0/> Loop Analysis uses a maximum of 90 days. For a longer range, it uses only the most recent 90 days."
 msgstr "<0/> Loop Analysis uses a maximum of 90 days. For a longer range, it uses only the most recent 90 days."
 
-#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisHarness.test.svelte
+#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisFiltersStandIn.test.svelte
 msgid "Filters panel"
 msgstr "Filters panel"
 
 #: src/routes/(authenticated)/reports/loop-analysis/FiltersPanelHarness.test.svelte
-#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisHarness.test.svelte
+#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisFiltersStandIn.test.svelte
 msgid "Open filters"
 msgstr "Open filters"
 
 #: src/lib/components/layout/ReportsFilterSidebar.svelte
-#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisHarness.test.svelte
+#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisFiltersStandIn.test.svelte
 msgid "Apply filters"
 msgstr "Apply filters"
 
-#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisHarness.test.svelte
+#: src/routes/(authenticated)/reports/loop-analysis/LoopAnalysisFiltersStandIn.test.svelte
 msgid "Reset filters"
 msgstr "Reset filters"
 
@@ -28578,8 +28569,7 @@ msgstr "Silence an alarm for all members for a time"
 #~ msgid "Silence Alarms"
 #~ msgstr "Silence Alarms"
 
-#: src/lib/components/alerts/GlucoseCalendarPicker.svelte
-#: src/lib/components/alerts/GlucoseRangeCalendarPicker.svelte
+#: src/lib/components/alerts/GlucoseMonthGrid.svelte
 msgid "This calendar cannot show each day's glucose trace."
 msgstr "This calendar cannot show each day's glucose trace."
 
@@ -29401,18 +29391,15 @@ msgstr "{0} failed {1}: time, status, page and message"
 msgid "Off - Do not show on dashboard"
 msgstr "Off - Do not show on dashboard"
 
-#: src/lib/components/trackers/TrackerEditorDialog.svelte
-#: src/lib/components/trackers/TrackerEditorDialog.svelte
-msgid "None - do not create event"
-msgstr "None - do not create event"
+#~ msgid "None - do not create event"
+#~ msgstr "None - do not create event"
 
 #: src/lib/components/trackers/tracker-notification-editor.svelte
 msgid "Each threshold is delivered through a managed alert rule. Use Channels to open that rule. A new threshold gets its rule after you save the tracker."
 msgstr "Each threshold is delivered through a managed alert rule. Use Channels to open that rule. A new threshold gets its rule after you save the tracker."
 
-#: src/lib/components/treatments/EventTypeCombobox.svelte
-msgid "<0/> None (do not create event)"
-msgstr "<0/> None (do not create event)"
+#~ msgid "<0/> None (do not create event)"
+#~ msgstr "<0/> None (do not create event)"
 
 #: ../portal/src/lib/components/docs/DocsFeedback.svelte
 msgid "Thank you. Consider <0>donating<0/></0> to support our work."
@@ -33539,6 +33526,7 @@ msgstr "Add insulin"
 msgid "<0/> Add insulin"
 msgstr "<0/> Add insulin"
 
+#: src/lib/components/patient/PatientInsulinManager.svelte
 #: src/lib/components/patient/PatientInsulinManager.svelte
 msgid "Edit insulin"
 msgstr "Edit insulin"
@@ -38345,3 +38333,19 @@ msgstr "Alert webhooks: {0}"
 #: src/lib/components/notifications/InstanceKeyChanged.svelte
 msgid "The instance key changed. Nocturne cannot read the saved secrets for these items. Enter each secret again."
 msgstr "The instance key changed. Nocturne cannot read the saved secrets for these items. Enter each secret again."
+
+#: src/lib/components/ui/duration-input/duration-input.svelte
+msgid "Use a whole number of hours."
+msgstr "Use a whole number of hours."
+
+#: src/routes/(authenticated)/calendar/+page.svelte
+msgid "Could not load the calendar"
+msgstr "Could not load the calendar"
+
+#: src/routes/(authenticated)/settings/profile/+page.svelte
+msgid "Could not load profiles"
+msgstr "Could not load profiles"
+
+#: src/routes/(authenticated)/StickyBarProbe.test.svelte
+msgid "bar"
+msgstr "bar"

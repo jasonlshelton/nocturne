@@ -1,4 +1,4 @@
-import { resolve } from "$app/paths";
+import { reportPagePath } from "#lib/navigation/report-navigation.svelte.js";
 import type { ReadonlyURLSearchParams } from "$app/state";
 
 export const LOOP_ANALYSIS_PAGES = [
@@ -34,6 +34,5 @@ export function loopAnalysisPageIntros(): Record<LoopAnalysisPage, string> {
 
 /** The resolved path of a Loop Analysis page, with the query string the report is shown with. */
 export function loopAnalysisPath(page: LoopAnalysisPage, search: ReadonlyURLSearchParams, hash = ""): string {
-  const query = search.toString();
-  return `${resolve(`reports/loop-analysis/${page}`)}${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`;
+  return reportPagePath(`/reports/loop-analysis/${page}`, search, hash);
 }

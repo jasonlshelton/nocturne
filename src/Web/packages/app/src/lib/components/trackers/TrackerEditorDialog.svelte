@@ -7,10 +7,10 @@
   import * as Select from "#lib/components/ui/select/index.js";
   import { DurationInput } from "#lib/components/ui/duration-input/index.js";
   import { TrackerNotificationEditor, type TrackerNotification } from "#lib/components/trackers/index.js";
-  import EventTypeCombobox from "#lib/components/treatments/EventTypeCombobox.svelte";
   import { Artwork } from "water-ui";
   import { batteryArtwork } from "#lib/watercolour-icons.js";
   import * as trackersRemote from "#lib/api/generated/trackers.generated.remote.js";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
   import { tick } from "svelte";
   import {
     TrackerCategory,
@@ -89,6 +89,10 @@
       : formTriggerEventTypes.filter((t) => t !== eventType);
   }
 
+  const noDeviceEvent = "none";
+  const deviceEventTypesQuery = trackersRemote.getDeviceEventTypes();
+  const deviceEventTypes = $derived(deviceEventTypesQuery.current ?? []);
+
   const endEventTypesQuery = trackersRemote.getEndEventTypes();
   const endEventTypes = $derived(endEventTypesQuery.current ?? []);
 
@@ -150,6 +154,26 @@
 
   const createForm = $derived(createRemote.for("create"));
   const updateForm = $derived(updateRemote.for(editingDefinition?.id ?? ""));
+
+  const submission = useSubmission();
+  // A keyed form keeps its issues across openings, so show them only once this opening submits.
+  let submitted = $state(false);
+
+  $effect(() => {
+    if (open) {
+      submission.clear();
+      submitted = false;
+    }
+  });
+
+  async function save(submit: () => Promise<boolean>) {
+    submitted = true;
+    await submission.run(submit, async () => {
+      await tick();
+      open = false;
+    });
+  }
+
   /** The fields a definition is submitted under: the update form nests them under `request`. */
   type DefinitionFields = typeof createForm.fields | typeof updateForm.fields.request;
 
@@ -450,12 +474,8 @@
     <input {...fields.isFavorite.as("hidden", true)} />
   {/if}
   <input {...fields.icon.as("hidden", formIcon)} />
-  {#if formStartEventType}
-    <input {...fields.startEventType.as("hidden", formStartEventType)} />
-  {/if}
-  {#if formCompletionEventType}
-    <input {...fields.completionEventType.as("hidden", formCompletionEventType)} />
-  {/if}
+  <input {...fields.startEventType.as("hidden", formStartEventType ?? "")} />
+  <input {...fields.completionEventType.as("hidden", formCompletionEventType ?? "")} />
 
   <div class="space-y-2">
     <Label for="dashboardVisibility">Dashboard visibility</Label>
@@ -519,24 +539,46 @@
 
     <div class="space-y-2">
       <Label for="startEventType" size="sm">Create event on start</Label>
-      <EventTypeCombobox
-        bind:value={formStartEventType}
-        onSelect={(type) => (formStartEventType = type)}
-        placeholder="None - do not create event"
-      />
+      {@render deviceEventPicker(
+        "startEventType",
+        formStartEventType,
+        (type) => (formStartEventType = type),
+      )}
     </div>
 
     <div class="space-y-2">
       <Label for="completionEventType" size="sm">
         Create event on completion
       </Label>
-      <EventTypeCombobox
-        bind:value={formCompletionEventType}
-        onSelect={(type) => (formCompletionEventType = type)}
-        placeholder="None - do not create event"
-      />
+      {@render deviceEventPicker(
+        "completionEventType",
+        formCompletionEventType,
+        (type) => (formCompletionEventType = type),
+      )}
     </div>
   </div>
+{/snippet}
+
+{#snippet deviceEventPicker(
+  id: string,
+  value: string | undefined,
+  onSelect: (type: string | undefined) => void,
+)}
+  <Select.Root
+    type="single"
+    value={value ?? noDeviceEvent}
+    onValueChange={(selected) => onSelect(selected === noDeviceEvent ? undefined : selected)}
+  >
+    <Select.Trigger {id} data-testid={id}>
+      {value || "None"}
+    </Select.Trigger>
+    <Select.Content>
+      <Select.Item value={noDeviceEvent} label="None" />
+      {#each deviceEventTypes as eventType (eventType)}
+        <Select.Item value={eventType} label={eventType} />
+      {/each}
+    </Select.Content>
+  </Select.Root>
 {/snippet}
 
 <Dialog.Root bind:open>
@@ -551,18 +593,16 @@
     </Dialog.Header>
 
     {#if isNewDefinition}
-      <form
-        {...createForm.enhance(async ({ submit }) => {
-          await submit();
-          if (createForm.result) {
-            await tick();
-            open = false;
-          }
-        })}
-      >
+      <form {...createForm.enhance(({ submit }) => save(submit))}>
         <div class="space-y-6 py-4">
           {@render definitionFormFields(createForm.fields)}
         </div>
+
+        <FormError
+          issues={submission.error ?? (submitted ? createForm.fields.allIssues() : undefined)}
+          focusOnShow
+          class="mb-4"
+        />
 
         <Dialog.Footer>
           <Button
@@ -581,19 +621,17 @@
         </Dialog.Footer>
       </form>
     {:else}
-      <form
-        {...updateForm.enhance(async ({ submit }) => {
-          await submit();
-          if (updateForm.result) {
-            await tick();
-            open = false;
-          }
-        })}
-      >
+      <form {...updateForm.enhance(({ submit }) => save(submit))}>
         <input {...updateForm.fields.id.as("hidden", editingDefinition?.id ?? "")} />
         <div class="space-y-6 py-4">
           {@render definitionFormFields(updateForm.fields.request)}
         </div>
+
+        <FormError
+          issues={submission.error ?? (submitted ? updateForm.fields.allIssues() : undefined)}
+          focusOnShow
+          class="mb-4"
+        />
 
         <Dialog.Footer>
           <Button

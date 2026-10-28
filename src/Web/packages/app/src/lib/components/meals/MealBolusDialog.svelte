@@ -17,7 +17,7 @@
   } from "#lib/api/generated/bolus.generated.remote.js";
   import { toast } from "svelte-sonner";
   import { tryGetRealtimeStore } from "#lib/stores/realtime-store.svelte.js";
-  import { useToastSubmission } from "#lib/forms/index.js";
+  import { useSubmission, useToastSubmission } from "#lib/forms/index.js";
   import Syringe from "@lucide/svelte/icons/syringe";
   import Plus from "@lucide/svelte/icons/plus";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -38,6 +38,7 @@
   let isSaving = $state(false);
   let deletingBolusId = $state<string | null>(null);
   const deletion = useToastSubmission("Failed to delete bolus");
+  const saving = useSubmission({ fallback: "Failed to save bolus" });
 
   const realtimeStore = tryGetRealtimeStore();
 
@@ -164,14 +165,14 @@
     bind:this={formRef}
     class="hidden"
     {...activeForm.enhance(async ({ submit }) => {
-      await submit();
-      if (activeForm.result) {
+      const submitted = await saving.run(submit);
+      if (submitted && activeForm.result) {
         realtimeStore?.noteTreatmentWrite();
         toast.success(editingBolus ? "Bolus updated" : "Bolus added");
         onSave();
         returnToList();
       } else {
-        toast.error("Failed to save bolus");
+        toast.error(saving.error ?? "Failed to save bolus");
       }
       isSaving = false;
     })}

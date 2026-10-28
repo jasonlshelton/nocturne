@@ -36,8 +36,7 @@
       instanceId: string,
       instanceName: string,
       category: TrackerCategory,
-      definitionId: string,
-      completionEventType?: string
+      definitionId: string
     ) => void;
     /** Opens the conversion of the legacy ages with one kind selected. */
     onCreateTracker?: (kind: LegacyConsumableKind) => void;

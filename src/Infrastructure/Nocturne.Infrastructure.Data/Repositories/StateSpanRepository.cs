@@ -44,17 +44,10 @@ public class StateSpanRepository : IStateSpanRepository
         ActivityStateSpanMapper.ActivityCategories.Select(c => c.ToString()).ToList();
 
     /// <summary>
-    /// Members removed from <see cref="StateSpanCategory"/> whose rows may still be stored. They
-    /// read back as <see cref="StateSpanCategory.PumpMode"/>, so the non-activity watermark counts them.
-    /// </summary>
-    private static readonly string[] RemovedCategories = ["TempBasal", "BasalDelivery"];
-
-    /// <summary>
-    /// Every <see cref="StateSpanCategory"/> name outside <see cref="ActivityCategories"/>, plus
-    /// <see cref="RemovedCategories"/>.
+    /// Every <see cref="StateSpanCategory"/> name outside <see cref="ActivityCategories"/>.
     /// </summary>
     private static readonly List<string> NonActivityCategories =
-        Enum.GetNames<StateSpanCategory>().Except(ActivityCategories).Concat(RemovedCategories).ToList();
+        StateSpanMapper.CategoryNames.Except(ActivityCategories).ToList();
 
     /// <summary>
     /// Open spans per non-exclusive category that <see cref="GetByCategories"/> returns from
@@ -405,7 +398,7 @@ public class StateSpanRepository : IStateSpanRepository
 
         return await db.StateSpans.IgnoreQueryFilters()
             .Where(s => s.TenantId == db.TenantId && originalIds.Contains(s.OriginalId))
-            .WhereBlocksRecreation()
+            .WhereBlocksSpanRecreation()
             .OrderByDescending(s => s.DeletedAt)
             .ToListAsync(cancellationToken);
     }
@@ -652,6 +645,7 @@ public class StateSpanRepository : IStateSpanRepository
         await using var db = await _contexts.CreateAsync(cancellationToken);
         var rowIds = ids.Select(id => Guid.TryParse(id, out var rowId) ? rowId : (Guid?)null).ToList();
         var deleted = await db.StateSpans.IgnoreQueryFilters().AsNoTracking()
+            .WhereCategoryIsCurrent()
             .Where(s => s.TenantId == db.TenantId
                         && s.DeletedAt != null
                         && ((s.OriginalId != null && ids.Contains(s.OriginalId)) || rowIds.Contains(s.Id)))
@@ -854,16 +848,8 @@ public class StateSpanRepository : IStateSpanRepository
         // Group results by category
         var result = categories.ToDictionary(c => c, c => new List<StateSpan>());
 
-        foreach (var entity in entities)
-        {
-            if (
-                Enum.TryParse<StateSpanCategory>(entity.Category, true, out var category)
-                && result.ContainsKey(category)
-            )
-            {
-                result[category].Add(StateSpanMapper.ToDomainModel(entity));
-            }
-        }
+        foreach (var span in entities.Select(StateSpanMapper.ToDomainModel))
+            result[span.Category].Add(span);
 
         return result;
     }

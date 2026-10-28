@@ -122,20 +122,17 @@
   let completingInstanceName = $state("");
   let completingCategory = $state<TrackerCategory | undefined>(undefined);
   let completingDefinitionId = $state<string | undefined>(undefined);
-  let completingCompletionEventType = $state<string | undefined>(undefined);
 
   function handleTrackerComplete(
     instanceId: string,
     instanceName: string,
     category: TrackerCategory,
-    definitionId: string,
-    completionEventType?: string
+    definitionId: string
   ) {
     completingInstanceId = instanceId;
     completingInstanceName = instanceName;
     completingCategory = category;
     completingDefinitionId = definitionId;
-    completingCompletionEventType = completionEventType;
     trackerCompletionDialog.open = true;
   }
 
@@ -145,7 +142,6 @@
     completingInstanceName = "";
     completingCategory = undefined;
     completingDefinitionId = undefined;
-    completingCompletionEventType = undefined;
   }
 </script>
 
@@ -220,7 +216,6 @@
     instanceName={completingInstanceName}
     category={completingCategory}
     definitionId={completingDefinitionId}
-    completionEventType={completingCompletionEventType}
     onClose={handleCompletionDialogClose}
   />
 {/if}

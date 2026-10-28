@@ -33,6 +33,7 @@ vi.mock("#lib/api/generated/trackers.generated.remote.js", async () => {
     getPresets: query(() => data.presets),
     getEndEventTypes: query(() => []),
     getTriggerEventTypes: query(() => data.triggerEventTypes),
+    getDeviceEventTypes: query(() => []),
     createDefinition: form(),
     updateDefinition: form(),
   };

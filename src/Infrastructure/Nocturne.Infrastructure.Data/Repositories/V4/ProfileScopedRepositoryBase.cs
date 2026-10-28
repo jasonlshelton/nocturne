@@ -115,6 +115,21 @@ public abstract class ProfileScopedRepositoryBase<TModel, TEntity> : V4Repositor
         return entities.Select(ToDomain).ToList();
     }
 
+    /// <inheritdoc cref="IProfileScopedRepository{TRecord}.GetByProfileNamesAsync" />
+    public async Task<IEnumerable<TModel>> GetByProfileNamesAsync(
+        IEnumerable<string> profileNames, CancellationToken ct = default)
+    {
+        var names = profileNames.Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length == 0) return [];
+
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var entities = await ctx.Set<TEntity>()
+            .AsNoTracking()
+            .Where(e => names.Contains(e.ProfileName))
+            .ToListAsync(ct);
+        return entities.Select(ToDomain).ToList();
+    }
+
     /// <inheritdoc cref="IProfileScopedRepository{TRecord}.GetByLegacyIdsAsync" />
     public async Task<IEnumerable<TModel>> GetByLegacyIdsAsync(
         IEnumerable<string> legacyIds, CancellationToken ct = default)

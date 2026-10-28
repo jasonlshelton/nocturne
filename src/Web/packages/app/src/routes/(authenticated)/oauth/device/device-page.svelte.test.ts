@@ -3,17 +3,11 @@ import { render } from "vitest-browser-svelte";
 import { page as browserPage } from "vitest/browser";
 import { page } from "$app/state";
 
-const { formStub } = vi.hoisted(() => ({
-  formStub: (result: unknown) => ({
-    result,
-    pending: 0,
-    enhance: () => ({}),
-  }),
-}));
+const { approveDevice } = vi.hoisted(() => ({ approveDevice: vi.fn() }));
 
 vi.mock("../oauth.remote", async () => {
-  const { remoteFormFields } = await import("#lib/test-stubs/remote-resource.js");
-  const form = (result: unknown) => ({ ...formStub(result), fields: remoteFormFields() });
+  const { remoteForm, remoteFormFields } = await import("#lib/test-stubs/remote-resource.js");
+  const form = (result: unknown) => ({ result, pending: 0, enhance: () => ({}), fields: remoteFormFields() });
   return {
     lookupDeviceForm: form({
       deviceInfo: {
@@ -24,7 +18,7 @@ vi.mock("../oauth.remote", async () => {
         deletionAccess: "ReadWrite",
       },
     }),
-    approveDeviceForm: form(undefined),
+    approveDeviceForm: remoteForm((data: unknown) => approveDevice(data)),
     denyDeviceForm: form(undefined),
   };
 });
@@ -62,5 +56,15 @@ describe("device approval", () => {
     await expect
       .element(browserPage.getByText("This app cannot delete your data."))
       .not.toBeInTheDocument();
+  });
+
+  it("shows why the server refused the approval, and keeps Approve usable", async () => {
+    approveDevice.mockRejectedValueOnce({ status: 400, body: { message: "The code has expired" } });
+    render(DevicePage);
+
+    await browserPage.getByRole("button", { name: "Approve" }).click();
+
+    await expect.element(browserPage.getByRole("alert")).toHaveTextContent("The code has expired");
+    await expect.element(browserPage.getByRole("button", { name: "Approve" })).toBeEnabled();
   });
 });

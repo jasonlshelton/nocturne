@@ -38,6 +38,10 @@ public interface IProfileScopedRepository<TRecord> : ILegacyKeyedRepository<TRec
     Task<IEnumerable<TRecord>> GetNewestByProfileNamesAsync(
         IEnumerable<string> profileNames, CancellationToken ct = default);
 
+    /// <summary>Every record filed under any of <paramref name="profileNames"/>, in one query.</summary>
+    Task<IEnumerable<TRecord>> GetByProfileNamesAsync(
+        IEnumerable<string> profileNames, CancellationToken ct = default);
+
     /// <summary>Every record stored under any of <paramref name="legacyIds"/>, in one query.</summary>
     Task<IEnumerable<TRecord>> GetByLegacyIdsAsync(IEnumerable<string> legacyIds, CancellationToken ct = default);
 

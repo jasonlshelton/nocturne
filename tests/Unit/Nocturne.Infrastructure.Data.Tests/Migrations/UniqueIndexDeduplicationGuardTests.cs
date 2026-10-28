@@ -62,6 +62,7 @@ public class UniqueIndexDeduplicationGuardTests
     private static readonly IReadOnlySet<string> WidenedPrimaryKeyMigrations = new HashSet<string>(StringComparer.Ordinal)
     {
         "20261027134107_ScopeClientIdKeysToTenant",
+        "20261027160711_ScopeReferencedClientIdKeysToTenant",
     };
 
     [Fact]

@@ -4,6 +4,7 @@
   import { Button } from "#lib/components/ui/button/index.js";
   import { Badge } from "#lib/components/ui/badge/index.js";
   import * as Card from "#lib/components/ui/card/index.js";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
   import * as Dialog from "#lib/components/ui/dialog/index.js";
   import { ConfirmDialog } from "#lib/components/ui/confirm-dialog/index.js";
   import Syringe from "@lucide/svelte/icons/syringe";
@@ -35,6 +36,8 @@
   let { variant = "dialog" }: Props = $props();
 
   const insulinList = new InsulinListState();
+  const inlineSubmission = useSubmission();
+  const dialogSubmission = useSubmission();
 
   // ── Helpers ──────────────────────────────────────────────────────
 
@@ -112,6 +115,7 @@
     inlineConcentration = 100;
     inlineRole = InsulinRole.Bolus;
     showInlineForm = false;
+    inlineSubmission.clear();
   }
 
   // ── Dialog variant state ────────────────────────────────────────
@@ -204,6 +208,7 @@
       insulinRole = InsulinRole.Bolus;
       insulinIsPrimary = false;
     }
+    dialogSubmission.clear();
     dialogOpen = true;
   }
 
@@ -268,11 +273,13 @@
       </Card.Header>
       <form
         {...insulinList.createForm.enhance(async ({ submit }) => {
-          await submit();
-          if (insulinList.createForm.result) resetInlineForm();
+          await inlineSubmission.run(submit, () => {
+            if (insulinList.createForm.result) resetInlineForm();
+          });
         })}
       >
         <Card.Content class="space-y-4">
+          <FormError issues={inlineSubmission.error} />
           <InsulinFormFields
             fields={insulinList.createForm.fields}
             bind:category={inlineCategory}
@@ -321,7 +328,13 @@
       </form>
     </Card.Root>
   {:else}
-    <Button variant="outline" onclick={() => (showInlineForm = true)}>
+    <Button
+      variant="outline"
+      onclick={() => {
+        inlineSubmission.clear();
+        showInlineForm = true;
+      }}
+    >
       <Plus class="h-4 w-4 mr-1" />
       Add insulin
     </Button>
@@ -386,6 +399,7 @@
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Edit insulin"
               onclick={() => openDialog(insulin)}
             >
               <Pencil class="h-4 w-4" />
@@ -427,10 +441,12 @@
 
       <form
         {...activeForm.enhance(async ({ submit }) => {
-          await submit();
-          if (activeForm.result) dialogOpen = false;
+          await dialogSubmission.run(submit, () => {
+            if (activeForm.result) dialogOpen = false;
+          });
         })}
       >
+        <FormError issues={dialogSubmission.error} />
         {#if editing?.id}
           <input {...insulinList.updateForm.fields.id.as("hidden", editing.id)} />
         {/if}

@@ -1,3 +1,4 @@
+import { resolve } from "$app/paths";
 import { a1cLabel } from "#lib/utils/a1c-formatting.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = any;
@@ -395,6 +396,15 @@ export function reportCategories(): ReportCategory[] {
       ],
     },
   ];
+}
+
+/**
+ * The path of a report page under the app's base, with the query string it is shown with. `resolve`
+ * takes only the route ids and pathnames SvelteKit generated, not a registry's runtime `href`.
+ */
+export function reportPagePath(href: string, search: { toString(): string } = "", hash = ""): string {
+  const query = search.toString().replace(/^\?/, "");
+  return `${resolve("").replace(/\/$/, "")}${href}${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`;
 }
 
 /** A report's full title: a page of a report made of several is named with that report. */

@@ -85,12 +85,12 @@ public class StateSpanLatestStartTests : IAsyncLifetime
     [Theory]
     [InlineData("TempBasal")]
     [InlineData("BasalDelivery")]
-    public async Task NonActivity_CountsAStoredRemovedCategory(string removed)
+    public async Task NeitherWatermarkCountsACategoryOutsideTheEnum(string removed)
     {
-        await SeedAsync(Span(removed, "a", 4), Span("Exercise", "a", 9));
+        await SeedAsync(Span(removed, "a", 9), Span("PumpMode", "a", 4), Span("Exercise", "a", 3));
 
         (await LatestAsync(r => r.GetLatestNonActivityTimestampAsync("a"))).Should().Be(Origin.AddDays(4));
-        (await LatestAsync(r => r.GetLatestActivityTimestampAsync("a"))).Should().Be(Origin.AddDays(9));
+        (await LatestAsync(r => r.GetLatestActivityTimestampAsync("a"))).Should().Be(Origin.AddDays(3));
     }
 
     [Fact]

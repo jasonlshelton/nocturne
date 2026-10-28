@@ -14,10 +14,10 @@
  * `undefined`, not `[]`, when there is nothing to report: the framework builds
  * its issue map with `flatten_issues`, which yields `{}` for no issues, so the
  * lookup misses and the `?.map` short-circuits. Callers have to be written
- * against that.
+ * against that. A form built with `form()`'s arguments submits; see `remoteForm`.
  *
- * Not mirrored: reactivity beyond overrides, per-argument caching, schema
- * validation, and form submission. Adding or releasing an override re-renders
+ * Not mirrored: reactivity beyond overrides and form state, and per-argument
+ * caching. Adding or releasing an override re-renders
  * whatever read `current`, but the getters otherwise read a snapshot rather than
  * a signal, so nothing re-renders when a pending resource settles; a test that needs a value on
  * screen builds the resource with `remoteQuery`, which is settled before the
@@ -25,6 +25,7 @@
  * reactivity that source has.
  */
 import { createSubscriber } from "svelte/reactivity";
+import type { StandardSchema } from "#lib/api/kit-form-key.js";
 
 export interface RemoteQueryStub<T> extends PromiseLike<T> {
   readonly current: T | undefined;
@@ -269,11 +270,6 @@ export function remoteCommand<T>(
   return stub;
 }
 
-/**
- * Every field reports no issues, because the stub runs no schema and has
- * nothing to report. An unrecognised property nests, so a path of any depth
- * answers.
- */
 /** The props kit's `as()` gives a control, without the form id it suffixes onto the name. */
 function fieldProps(name: string, type: string, value: unknown): Record<string, unknown> {
   const prefix =
@@ -293,54 +289,182 @@ function fieldProps(name: string, type: string, value: unknown): Record<string, 
   return props;
 }
 
+interface FormIssue {
+  path: (string | number)[];
+  message: string;
+}
+
+type FormHandler = (data: never) => unknown;
+
 /**
  * A remote form's `fields`, for a test that builds its own form stand-in: any path, each with
  * `issues`, `allIssues`, `value`, `set` and `as`, the last answering the name kit would give it.
+ * An unrecognised property nests, so a path of any depth answers.
  */
 export function remoteFormFields(): unknown {
   return fieldProxy();
 }
 
-function fieldProxy(path: string[] = []): unknown {
+function fieldProxy(
+  path: string[] = [],
+  issuesOf: () => FormIssue[] = () => []
+): unknown {
   // As kit builds it: an index is `[n]`, a key is `.key`.
   const name = path
     .map((key, i) => (/^\d+$/.test(key) ? `[${key}]` : i === 0 ? key : `.${key}`))
     .join("");
 
+  const within = (issue: FormIssue, exact: boolean) =>
+    (!exact || issue.path.length === path.length) &&
+    path.every((key, i) => String(issue.path[i]) === key);
+
+  const answer = (exact: boolean) => () => {
+    const found = issuesOf().filter((issue) => within(issue, exact));
+    return found.length > 0 ? found : undefined;
+  };
+
   return new Proxy(() => undefined, {
     get(target, prop) {
       if (typeof prop === "symbol") return Reflect.get(target, prop);
-      if (prop === "issues" || prop === "allIssues") return () => undefined;
+      if (prop === "issues") return answer(true);
+      if (prop === "allIssues") return answer(false);
       if (prop === "value") return () => undefined;
       if (prop === "set") return (value: unknown) => value;
       if (prop === "as") return (type: string, value?: unknown) => fieldProps(name, type, value);
-      return fieldProxy([...path, prop]);
+      return fieldProxy([...path, prop], issuesOf);
     },
   });
 }
 
 /**
- * The instance the framework's server build returns, where `pending` is always
- * 0 and `result` always undefined. Nothing here submits, so the client build's
- * counting `pending` would have nothing to count.
+ * The input kit's `convert_formdata` builds from a submitted form: an `n:` or `b:` name prefix
+ * types the value, and dots and `[n]` nest it.
  */
-export function remoteForm() {
-  const action = "?/remote=stub";
-  const instance: Record<string, unknown> = { method: "POST", action };
+function formInput(data: FormData): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
 
-  // `method` and `action` are the framework's only enumerable own properties
-  // on the server instance, and the two the caller spreads onto a <form>. The
-  // client instance additionally carries an attachment under a symbol key,
-  // which drives submission the stub does not implement.
-  Object.defineProperties(instance, {
-    enhance: { value: () => ({ method: "POST", action }) },
-    fields: { get: () => fieldProxy() },
-    result: { get: () => undefined },
-    pending: { get: () => 0 },
-    preflight: { value: () => instance },
-    validate: { value: async () => {} },
-    for: { value: () => instance },
-  });
+  for (const name of new Set(data.keys())) {
+    const values = data.getAll(name).filter((v): v is string => typeof v === "string");
+    const [, type, field] = /^(?:([nb]):)?(.*)$/.exec(name)!;
+    const isArray = field.endsWith("[]");
+    const keys = (isArray ? field.slice(0, -2) : field).split(/\.|\[|\]/).filter(Boolean);
+    const coerce = (value: string) =>
+      type === "n" ? (value === "" ? undefined : parseFloat(value)) : type === "b" ? value === "on" : value;
 
-  return instance;
+    let target = input;
+    keys.slice(0, -1).forEach((key, i) => {
+      target = (target[key] ??= /^\d+$/.test(keys[i + 1]) ? [] : {}) as Record<string, unknown>;
+    });
+    target[keys.at(-1)!] = isArray ? values.map(coerce) : coerce(values[0]);
+  }
+
+  return input;
+}
+
+/**
+ * A remote form, as the framework's client build hands it back. Without a handler it is the
+ * server build's instance: nothing a test does submits it, `pending` stays 0 and `result`
+ * undefined.
+ *
+ * Given `form()`'s arguments, an enhanced form submits the way kit's does. The browser builds the
+ * input from the form's controls, a `.for(key)` instance adds `id: key` when the form posts no
+ * `id`, and the schema validates the result. Its issues reach `fields.issues()` and
+ * `fields.allIssues()`, and `submit()` resolves false. Otherwise the handler's return value
+ * becomes `result` and `submit()` resolves true, and a handler that throws rejects `submit()`.
+ * A rejection the enhance callback lets through is left unhandled, as kit hands it to its error
+ * page.
+ */
+export function remoteForm(
+  schemaOrHandler?: StandardSchema | "unchecked" | FormHandler,
+  handler?: FormHandler
+) {
+  const schema = typeof schemaOrHandler === "object" ? schemaOrHandler : undefined;
+  const run = typeof schemaOrHandler === "function" ? schemaOrHandler : handler;
+  const keyed = new Map<string, Record<string, unknown>>();
+
+  const create = (key?: string | number | boolean) => {
+    const action = key === undefined ? "?/remote=stub" : `?/remote=stub/${JSON.stringify(key)}`;
+    const instance: Record<string, unknown> = { method: "POST", action };
+
+    let result: unknown = undefined;
+    let issues: FormIssue[] = [];
+    let pending = 0;
+    let changed: (() => void) | null = null;
+    const subscribe = createSubscriber((update) => {
+      changed = update;
+      return () => {
+        changed = null;
+      };
+    });
+    const read = <T>(value: () => T) => () => {
+      subscribe();
+      return value();
+    };
+
+    async function submit(data: Record<string, unknown>): Promise<boolean> {
+      pending++;
+      changed?.();
+      try {
+        const validated = await schema?.["~standard"].validate(data);
+        issues = (validated?.issues ?? []).map((issue) => ({
+          message: issue.message,
+          path: (issue.path ?? []).map((segment) => {
+            const key = typeof segment === "object" ? segment.key : segment;
+            return typeof key === "number" ? key : String(key);
+          }),
+        }));
+        if (issues.length > 0) {
+          result = undefined;
+          return false;
+        }
+        result = await run?.(data as never);
+        return true;
+      } catch (error) {
+        result = undefined;
+        issues = [];
+        throw error;
+      } finally {
+        pending--;
+        changed?.();
+      }
+    }
+
+    type EnhanceCallback = (helpers: { submit: () => Promise<boolean>; element: HTMLFormElement }) => unknown;
+
+    // `method` and `action` are the framework's only enumerable own properties
+    // on the instance, and the two the caller spreads onto a <form>.
+    Object.defineProperties(instance, {
+      enhance: {
+        value: (callback: EnhanceCallback) => ({
+          method: "POST",
+          action,
+          onsubmit: (event: SubmitEvent) => {
+            if (!run) return;
+            event.preventDefault();
+            const element = event.currentTarget as HTMLFormElement;
+            const data = formInput(new FormData(element, event.submitter));
+            if (key !== undefined && !("id" in data)) data.id = key;
+            void callback({ submit: () => submit(data), element });
+          },
+        }),
+      },
+      fields: { get: () => fieldProxy([], read(() => issues)) },
+      result: { get: read(() => result) },
+      pending: { get: read(() => pending) },
+      preflight: { value: () => instance },
+      validate: { value: async () => {} },
+      for: {
+        value: (forKey: string | number | boolean) => {
+          const cacheKey = JSON.stringify(forKey);
+          let found = keyed.get(cacheKey);
+          if (!found) keyed.set(cacheKey, (found = create(forKey)));
+          return found;
+        },
+      },
+    });
+
+    return instance;
+  };
+
+  return create();
 }

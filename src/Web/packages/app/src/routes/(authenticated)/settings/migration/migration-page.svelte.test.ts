@@ -231,6 +231,19 @@ describe("settings/migration running job", () => {
     await expect.element(page.getByText("Copying entries")).toBeVisible();
   });
 
+  it("shows why the server refused to start the import", async () => {
+    history = [];
+
+    render(MigrationPage, {});
+    await expect.element(page.getByRole("tab", { name: /History/ })).toBeVisible();
+
+    await remote.enhanceCallback!({
+      submit: () => Promise.reject({ status: 400, body: { message: "The Nightscout address is not reachable" } }),
+    });
+
+    await expect.element(page.getByText("The Nightscout address is not reachable")).toBeVisible();
+  });
+
   it("stops polling when the page is unmounted", async () => {
     history = [
       entry({

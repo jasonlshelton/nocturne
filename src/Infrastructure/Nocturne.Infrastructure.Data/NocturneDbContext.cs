@@ -1020,8 +1020,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<TreatmentFoodEntity>()
-            .HasIndex(tf => tf.FoodId)
-            .HasDatabaseName("ix_treatment_foods_food_id");
+            .HasIndex(tf => new { tf.TenantId, tf.FoodId })
+            .HasDatabaseName("ix_treatment_foods_tenant_id_food_id");
 
         modelBuilder
             .Entity<TreatmentFoodEntity>()
@@ -1035,8 +1035,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<UserFoodFavoriteEntity>()
-            .HasIndex(f => f.FoodId)
-            .HasDatabaseName("ix_user_food_favorites_food_id");
+            .HasIndex(f => new { f.TenantId, f.FoodId })
+            .HasDatabaseName("ix_user_food_favorites_tenant_id_food_id");
 
         modelBuilder
             .Entity<UserFoodFavoriteEntity>()
@@ -1427,14 +1427,14 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<StateSpanEntity>()
-            .HasIndex(s => s.SupersededById)
-            .HasDatabaseName("ix_state_spans_superseded_by_id");
+            .HasIndex(s => new { s.TenantId, s.SupersededById })
+            .HasDatabaseName("ix_state_spans_tenant_id_superseded_by_id");
 
         modelBuilder
             .Entity<StateSpanEntity>()
             .HasOne<StateSpanEntity>()
             .WithMany()
-            .HasForeignKey(s => s.SupersededById)
+            .HasForeignKey(s => new { s.TenantId, s.SupersededById })
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder
@@ -1486,25 +1486,25 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             .Entity<SleepStageEntity>()
             .HasOne(s => s.SleepSession)
             .WithMany(ss => ss.Stages)
-            .HasForeignKey(s => s.SleepSessionId)
+            .HasForeignKey(s => new { s.TenantId, s.SleepSessionId })
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder
             .Entity<SleepBiometricSampleEntity>()
             .HasOne(b => b.SleepSession)
             .WithMany(ss => ss.BiometricSamples)
-            .HasForeignKey(b => b.SleepSessionId)
+            .HasForeignKey(b => new { b.TenantId, b.SleepSessionId })
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder
             .Entity<SleepStageEntity>()
-            .HasIndex(s => s.SleepSessionId)
-            .HasDatabaseName("ix_sleep_stages_sleep_session_id");
+            .HasIndex(s => new { s.TenantId, s.SleepSessionId })
+            .HasDatabaseName("ix_sleep_stages_tenant_id_sleep_session_id");
 
         modelBuilder
             .Entity<SleepBiometricSampleEntity>()
-            .HasIndex(b => b.SleepSessionId)
-            .HasDatabaseName("ix_sleep_biometric_samples_sleep_session_id");
+            .HasIndex(b => new { b.TenantId, b.SleepSessionId })
+            .HasDatabaseName("ix_sleep_biometric_samples_tenant_id_sleep_session_id");
 
         // Sources dedupe per tenant: the identifier alone must not be unique, or tenant B
         // migrating from the same URL as tenant A would collide with (and read) A's source row.
@@ -2134,12 +2134,15 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
         ScopeKeyToTenant(modelBuilder.Entity<HeartRateEntity>());
         ScopeKeyToTenant(modelBuilder.Entity<BodyWeightEntity>());
         ScopeKeyToTenant(modelBuilder.Entity<SystemEventEntity>());
+        ScopeKeyToTenant(modelBuilder.Entity<FoodEntity>());
+        ScopeKeyToTenant(modelBuilder.Entity<StateSpanEntity>());
+        ScopeKeyToTenant(modelBuilder.Entity<SleepSessionEntity>());
 
         modelBuilder
             .Entity<ConnectorFoodEntryEntity>()
             .HasOne(e => e.Food)
             .WithMany()
-            .HasForeignKey(e => e.FoodId)
+            .HasForeignKey(e => new { e.TenantId, e.FoodId })
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder
@@ -2333,7 +2336,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             entity
                 .HasOne(tf => tf.Food)
                 .WithMany()
-                .HasForeignKey(tf => tf.FoodId)
+                .HasForeignKey(tf => new { tf.TenantId, tf.FoodId })
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -2342,7 +2345,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             entity
                 .HasOne(f => f.Food)
                 .WithMany()
-                .HasForeignKey(f => f.FoodId)
+                .HasForeignKey(f => new { f.TenantId, f.FoodId })
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

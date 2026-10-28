@@ -1,6 +1,6 @@
 import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Component } from "svelte";
 import { page as pageState } from "$app/state";
 import {
@@ -12,6 +12,7 @@ import {
   type PredictionAccuracyResponse,
   type SettingsEvidenceReport,
 } from "#lib/api/index.js";
+import { releaseWatercolour, resetWatercolour } from "#lib/test-stubs/watercolour-deferral.svelte.js";
 import { remoteQuery } from "#lib/test-stubs/remote-resource.js";
 import { ALL_SCOPES, profileResponse } from "#lib/components/reports/loop-analysis/daily-profile.test-fixtures.js";
 import { eventResponse } from "#lib/components/reports/loop-analysis/event-response.test-fixtures.js";
@@ -29,6 +30,8 @@ const calls = vi.hoisted(() => ({
   /** Whether a goto moves the page's URL, as SvelteKit's does, rather than only being recorded. */
   navigate: false,
 }));
+
+vi.mock("#lib/watercolour-deferral.svelte.js", () => import("#lib/test-stubs/watercolour-deferral.svelte.js"));
 
 // The pages read `page.url` reactively; the shared stub's is a plain property.
 vi.mock("$app/state", async () => {
@@ -63,8 +66,10 @@ vi.mock("#lib/api/generated/loopAnalysis.generated.remote.js", () => {
 });
 
 vi.mock("$app/navigation", async () => {
+  const stub = await vi.importActual<typeof import("$app/navigation")>("$app/navigation");
   const { page: state } = await import("$app/state");
   return {
+    ...stub,
     goto: (url: string, options?: unknown) => {
       calls.goto.push([url, options]);
       if (calls.navigate) state.url = new URL(url, "http://localhost") as typeof state.url;
@@ -73,11 +78,20 @@ vi.mock("$app/navigation", async () => {
   };
 });
 
-vi.mock("#lib/hooks/date-params.svelte.js", () => ({
-  requireDateParamsContext: () => ({ fromDay: "2026-10-09", toDay: "2026-10-22" }),
-}));
+// The reports layout's real range seeds the URL with a goto, which these tests count.
+vi.mock("#lib/hooks/date-params.svelte.js", async (importOriginal) => {
+  const range = { fromDay: "2026-10-09", toDay: "2026-10-22" };
+  return {
+    ...(await importOriginal<typeof import("#lib/hooks/date-params.svelte.js")>()),
+    useDateParams: () => range,
+    setDateParamsContext: () => {},
+    createSharedRangeUse: () => ({ consumed: false }),
+    requireDateParamsContext: () => range,
+  };
+});
 
-vi.mock("#lib/hooks/resource-context.svelte.js", () => ({
+vi.mock("#lib/hooks/resource-context.svelte.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/hooks/resource-context.svelte.js")>()),
   contextResource: <T>(create: () => { current: T | undefined }, options?: { errorTitle?: string }) => {
     calls.created.push(options?.errorTitle ?? "");
     return {
@@ -139,9 +153,16 @@ function lastGoto() {
 const switcher = () => page.getByRole("navigation", { name: "Loop Analysis pages" });
 const hrefOf = (link: ReturnType<typeof page.getByRole>) =>
   new URL(link.element().getAttribute("href")!, "http://localhost");
+/** The element a pointer at the centre of the given one lands on. */
+function hit(element: Element) {
+  const box = element.getBoundingClientRect();
+  return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+}
 const distinct = (list: unknown[] = []) => new Set(list.map((q) => JSON.stringify(q)));
 
 describe("Loop Analysis pages", () => {
+  afterEach(() => resetWatercolour());
+
   beforeEach(() => {
     calls.fetched = {};
     calls.goto.length = 0;
@@ -175,6 +196,8 @@ describe("Loop Analysis pages", () => {
 
   it("links every page under the filters on screen, marking the one open", async () => {
     await open("loop-health", "?days=30&weekdays=6&excludeExercise=true");
+    releaseWatercolour();
+    await vi.waitFor(() => expect(document.querySelector("[data-report-root] canvas")).toBeTruthy());
 
     const labels = ["Daily profile", "Meals and events", "Prediction accuracy", "Loop health", "Settings evidence"];
     for (const [i, name] of labels.entries()) {
@@ -183,6 +206,8 @@ describe("Loop Analysis pages", () => {
       expect(href.searchParams.get("days")).toBe("30");
       expect(href.searchParams.get("weekdays")).toBe("6");
       expect(href.searchParams.get("excludeExercise")).toBe("true");
+      const link = switcher().getByRole("link", { name }).element();
+      expect(link.contains(hit(link)), name).toBe(true);
     }
     await expect.element(switcher().getByRole("link", { name: "Loop health" })).toHaveAttribute("aria-current", "page");
     await expect.element(switcher().getByRole("link", { name: "Daily profile" })).not.toHaveAttribute("aria-current");

@@ -65,7 +65,7 @@ public class IobCalculator(
                 deviceResult.TreatmentIob = bolusResult.Iob;
             }
 
-            return AddDisplay(deviceResult);
+            return deviceResult;
         }
 
         return await LocalTotalAsync(bolusResult, tempBasals, time, deliveredUntil, ct);
@@ -83,7 +83,7 @@ public class IobCalculator(
             ? await FromTempBasalsAsync(tempBasals, time, Math.Min(deliveredUntil ?? time, time), ct)
             : null;
 
-        return AddDisplay(Total(bolusResult, basalResult));
+        return Total(bolusResult, basalResult);
     }
 
     /// <inheritdoc />
@@ -440,7 +440,7 @@ public class IobCalculator(
 
         return new IobResult
         {
-            Iob = reading.Iob!.Value,
+            Iob = RoundToThreeDecimals(reading.Iob!.Value),
             BolusIob = reading.BolusIob,
             BasalIob = reading.BasalIob,
             Source = reading.Name,
@@ -452,18 +452,8 @@ public class IobCalculator(
 
     #region Helper Methods
 
-    private static IobResult AddDisplay(IobResult iob)
-    {
-        iob.Display = IobResult.FormatDisplay(iob.Iob);
-        iob.DisplayLine = $"IOB: {iob.Display}U";
-
-        return iob;
-    }
-
-    private static double RoundToThreeDecimals(double num)
-    {
-        return Math.Round(num + double.Epsilon, 3);
-    }
+    /// <summary>Nightscout's <c>roundToThreeDecimals</c>, which rounds a midpoint up; Nightscout's IOB is never negative.</summary>
+    private static double RoundToThreeDecimals(double num) => Math.Round(num, 3, MidpointRounding.AwayFromZero);
 
     #endregion
 }

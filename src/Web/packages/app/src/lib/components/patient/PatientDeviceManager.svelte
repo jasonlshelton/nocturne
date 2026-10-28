@@ -36,6 +36,7 @@
     aidAlgorithmLabels,
   } from "./labels";
   import { DeviceListState } from "./state.svelte";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
   import { EmptyState } from "#lib/components/shared/index.js";
   import DeviceNameCombobox from "./DeviceNameCombobox.svelte";
   import { trackerNote } from "./device-catalog";
@@ -48,6 +49,8 @@
   let { variant = "dialog" }: Props = $props();
 
   const deviceList = new DeviceListState();
+  const inlineSubmission = useSubmission();
+  const dialogSubmission = useSubmission();
 
   // ── Category icons (for inline variant) ─────────────────────────
 
@@ -103,6 +106,7 @@
     inlineCatalogId = "";
     inlineAidAlgorithm = "";
     showInlineForm = false;
+    inlineSubmission.clear();
   }
 
   // ── Dialog variant state ────────────────────────────────────────
@@ -177,6 +181,7 @@
       deviceIsCurrent = true;
       deviceNotes = "";
     }
+    dialogSubmission.clear();
     dialogOpen = true;
   }
 
@@ -267,11 +272,13 @@
       </Card.Header>
       <form
         {...deviceList.createForm.enhance(async ({ submit }) => {
-          await submit();
-          if (deviceList.createForm.result) resetInlineForm();
+          await inlineSubmission.run(submit, () => {
+            if (deviceList.createForm.result) resetInlineForm();
+          });
         })}
       >
         <Card.Content class="@container space-y-4">
+          <FormError issues={inlineSubmission.error} />
           <div class="grid gap-4 @sm:grid-cols-2">
             <div class="space-y-2 @sm:col-span-2">
               <Label for="device-name-inline">Device</Label>
@@ -359,7 +366,13 @@
       </form>
     </Card.Root>
   {:else}
-    <Button variant="outline" onclick={() => (showInlineForm = true)}>
+    <Button
+      variant="outline"
+      onclick={() => {
+        inlineSubmission.clear();
+        showInlineForm = true;
+      }}
+    >
       <Plus class="h-4 w-4 mr-1" />
       Add device
     </Button>
@@ -522,10 +535,12 @@
 
       <form
         {...activeForm.enhance(async ({ submit }) => {
-          await submit();
-          if (activeForm.result) dialogOpen = false;
+          await dialogSubmission.run(submit, () => {
+            if (activeForm.result) dialogOpen = false;
+          });
         })}
       >
+        <FormError issues={dialogSubmission.error} />
         {#if editing?.id}
           <input {...deviceList.updateForm.fields.id.as("hidden", editing.id)} />
         {/if}

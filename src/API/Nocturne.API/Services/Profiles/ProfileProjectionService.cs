@@ -124,12 +124,15 @@ public class ProfileProjectionService : IProfileProjectionService
             foreach (var settings in await OwnersAsync(schedules, ct))
                 candidates.TryAdd(settings.Id, new HistoryRecord<TherapySettings>(settings, Deleted: false));
 
+            var grouped = candidates.Values
+                .GroupBy(c => TherapySettings.DocumentIdOf(c.Record), StringComparer.Ordinal)
+                .ToList();
+            var liveRows = await _therapyRepo.GetDocumentRowsAsync(grouped.Select(g => g.Key).ToList(), ct);
+
             var documents = new List<(string Key, IReadOnlyList<TherapySettings> Rows, bool Live, long? DeletedAt)>();
-            foreach (var document in candidates.Values
-                         .GroupBy(c => TherapySettings.DocumentIdOf(c.Record), StringComparer.Ordinal))
+            foreach (var document in grouped)
             {
-                var live = await _therapyRepo.GetDocumentRowsAsync(document.Key, ct);
-                documents.Add(live.Count > 0
+                documents.Add(liveRows.TryGetValue(document.Key, out var live) && live.Count > 0
                     ? (document.Key, live, true,
                         document.Where(c => c.Deleted).Select(c => (long?)Stamp(c.Record)).Max())
                     : (document.Key, document.Select(c => c.Record).ToList(), false, null));
@@ -201,31 +204,21 @@ public class ProfileProjectionService : IProfileProjectionService
     private async Task<List<TherapySettings>> OwnersAsync(
         IReadOnlyList<IV4Record> schedules, CancellationToken ct)
     {
-        var owners = new List<TherapySettings>();
+        var namesByCorrelation = schedules
+            .Where(s => s.CorrelationId is not null)
+            .GroupBy(s => s.CorrelationId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(s => ((IProfileScoped)s).ProfileName).ToHashSet());
 
-        foreach (var group in schedules
-                     .Where(s => s.CorrelationId is not null)
-                     .GroupBy(s => s.CorrelationId!.Value))
-        {
-            var names = group.Select(s => ((IProfileScoped)s).ProfileName).ToHashSet();
-            owners.AddRange((await _therapyRepo.GetByCorrelationIdAsync(group.Key, ct))
-                .Where(t => names.Contains(t.ProfileName)));
-        }
+        var owners = (await _therapyRepo.GetByCorrelationIdsAsync(namesByCorrelation.Keys, ct))
+            .Where(t => t.CorrelationId is { } id && namesByCorrelation[id].Contains(t.ProfileName))
+            .ToList();
 
-        foreach (var legacyId in schedules
-                     .Select(s => s.LegacyId)
-                     .Where(id => !string.IsNullOrEmpty(id))
-                     .Distinct())
-        {
-            if (await _therapyRepo.GetByLegacyIdAsync(legacyId!, ct) is { } settings)
-                owners.Add(settings);
-        }
+        owners.AddRange(await _therapyRepo.GetByLegacyIdsAsync(
+            schedules.Select(s => s.LegacyId).Where(id => !string.IsNullOrEmpty(id)).Select(id => id!), ct));
 
-        foreach (var name in schedules.Select(s => ((IProfileScoped)s).ProfileName).Distinct())
-        {
-            owners.AddRange((await _therapyRepo.GetByProfileNameAsync(name, ct))
-                .Where(t => t.CorrelationId is null));
-        }
+        owners.AddRange((await _therapyRepo.GetByProfileNamesAsync(
+                schedules.Select(s => ((IProfileScoped)s).ProfileName), ct))
+            .Where(t => t.CorrelationId is null));
 
         return owners;
     }

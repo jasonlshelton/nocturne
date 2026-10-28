@@ -54,7 +54,8 @@
 		padding: 10px 16px;
 		align-items: center;
 		position: sticky;
-		top: 0;
+		top: var(--app-sticky-top, 0px);
+		transition: top 300ms cubic-bezier(0.4, 0, 0.2, 1);
 		z-index: 5;
 		background: var(--card);
 		border-bottom: 1px solid var(--border);

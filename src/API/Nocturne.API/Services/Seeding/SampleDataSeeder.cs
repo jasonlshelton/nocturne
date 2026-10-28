@@ -820,6 +820,35 @@ public class SampleDataSeeder
         return spans.Count;
     }
 
+    internal sealed record DeviceSeed(
+        Nocturne.Core.Models.V4.DeviceCategory Category,
+        string Manufacturer,
+        string Model,
+        Nocturne.Core.Models.V4.AidAlgorithm? Aid,
+        string? Serial);
+
+    internal static readonly DeviceSeed[] DeviceRoster =
+    [
+        new(Nocturne.Core.Models.V4.DeviceCategory.CGM, "Dexcom", "G7", null, DemoCoverageSeeds.PrimaryCgmSerial),
+        new(Nocturne.Core.Models.V4.DeviceCategory.CGM, "Dexcom", "G6", null, DemoCoverageSeeds.ComparisonCgmSerial),
+        new(Nocturne.Core.Models.V4.DeviceCategory.InsulinPump, "Insulet", "Omnipod DASH",
+            Nocturne.Core.Models.V4.AidAlgorithm.Trio, null),
+        new(Nocturne.Core.Models.V4.DeviceCategory.GlucoseMeter, "Ascensia", "Contour Next One", null, null),
+    ];
+
+    internal static PatientDeviceEntity BuildDevice(DeviceSeed seed, Guid tenantId) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        TenantId = tenantId,
+        DeviceCategory = seed.Category.ToString(),
+        Manufacturer = seed.Manufacturer,
+        Model = seed.Model,
+        SerialNumber = seed.Serial,
+        AidAlgorithm = seed.Aid?.ToString(),
+        StartDate = DateOnly.FromDateTime(DateTime.Today.AddMonths(-8)),
+        IsCurrent = true,
+    };
+
     /// <summary>
     /// The patient record singleton, the device roster (CGM, pod, meter), and
     /// the current insulin — the /settings/patient page and device attribution
@@ -841,34 +870,14 @@ public class SampleDataSeeder
         record.DateOfBirth ??= new DateOnly(1992, 4, 17);
         record.Timezone ??= DemoTherapyProfile.LocalIanaTimezone();
 
-        var deviceSeeds = new (string Category, string Manufacturer, string Model, string? Aid, string? Serial)[]
-        {
-            ("cgm", "Dexcom", "G7", null, DemoCoverageSeeds.PrimaryCgmSerial),
-            ("cgm", "Dexcom", "G6", null, DemoCoverageSeeds.ComparisonCgmSerial),
-            ("pump", "Insulet", "Omnipod DASH", DemoDeviceStatusGenerator.DeviceName, null),
-            ("meter", "Ascensia", "Contour Next One", null, null),
-        };
-        foreach (var (category, manufacturer, model, aid, serial) in deviceSeeds)
+        foreach (var seed in DeviceRoster)
         {
             var existing = await db.PatientDevices
-                .FirstOrDefaultAsync(d => d.Manufacturer == manufacturer && d.Model == model, ct);
+                .FirstOrDefaultAsync(d => d.Manufacturer == seed.Manufacturer && d.Model == seed.Model, ct);
             if (existing is null)
-            {
-                db.PatientDevices.Add(new PatientDeviceEntity
-                {
-                    Id = Guid.CreateVersion7(),
-                    TenantId = db.TenantId,
-                    DeviceCategory = category,
-                    Manufacturer = manufacturer,
-                    Model = model,
-                    SerialNumber = serial,
-                    AidAlgorithm = aid,
-                    StartDate = DateOnly.FromDateTime(DateTime.Today.AddMonths(-8)),
-                    IsCurrent = true,
-                });
-            }
-            else if (existing.SerialNumber is null && serial is not null)
-                existing.SerialNumber = serial;
+                db.PatientDevices.Add(BuildDevice(seed, db.TenantId));
+            else if (existing.SerialNumber is null && seed.Serial is not null)
+                existing.SerialNumber = seed.Serial;
         }
 
         if (!await db.PatientInsulins.AnyAsync(ct))

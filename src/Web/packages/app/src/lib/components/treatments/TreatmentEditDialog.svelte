@@ -47,6 +47,7 @@
   import BasalInjectionFormFields from "./edit-dialog/BasalInjectionFormFields.svelte";
   import LinkedRecordsPanel from "./edit-dialog/LinkedRecordsPanel.svelte";
   import InsulinFormFields from "#lib/components/patient/InsulinFormFields.svelte";
+  import { FormError, useSubmission } from "#lib/forms/index.js";
 
   interface Props {
     open: boolean;
@@ -213,6 +214,7 @@
 
   function resetAddForm() {
     showAddInsulin = false;
+    addInsulinSubmission.clear();
     addCategory = "";
     addFormulationId = "";
     addName = "";
@@ -224,6 +226,7 @@
   }
 
   const addInsulinForm = patientRemote.createInsulin;
+  const addInsulinSubmission = useSubmission();
 
   function isBasalFlag(value: unknown): boolean {
     return typeof value === "boolean" ? value : false;
@@ -510,7 +513,10 @@
           <BolusFormFields
             bind:form={bolusForm}
             {patientInsulins}
-            onAddInsulin={() => showAddInsulin = !showAddInsulin}
+            onAddInsulin={() => {
+              addInsulinSubmission.clear();
+              showAddInsulin = !showAddInsulin;
+            }}
           />
         {:else if activeRecord.kind === "carbs"}
           <CarbsFormFields bind:form={carbsForm} />
@@ -585,23 +591,25 @@
         <form
           class="border rounded-lg p-4 space-y-4 bg-muted/30 mt-4"
           {...addInsulinForm.enhance(async ({ submit }) => {
-            await submit();
-            if (addInsulinForm.result) {
-              const created: PatientInsulin = addInsulinForm.result;
-              if (created?.id) {
-                bolusForm.patientInsulinId = created.id;
-                bolusForm.insulinType = created.name ?? "";
-                if (created.role === InsulinRole.Basal || created.role === InsulinRole.Both) {
-                  bolusForm.isBasalInsulin = true;
+            await addInsulinSubmission.run(submit, () => {
+              if (addInsulinForm.result) {
+                const created: PatientInsulin = addInsulinForm.result;
+                if (created?.id) {
+                  bolusForm.patientInsulinId = created.id;
+                  bolusForm.insulinType = created.name ?? "";
+                  if (created.role === InsulinRole.Basal || created.role === InsulinRole.Both) {
+                    bolusForm.isBasalInsulin = true;
+                  }
                 }
+                resetAddForm();
               }
-              resetAddForm();
-            }
+            });
           })}
         >
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-medium">Add new insulin</h4>
           </div>
+          <FormError issues={addInsulinSubmission.error} />
           <div class="space-y-4">
             <InsulinFormFields
               fields={addInsulinForm.fields}
