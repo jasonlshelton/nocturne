@@ -48,12 +48,12 @@ public class ApsSnapshotCurvesBackfillCompletionPostgresTests(
         var options = new DbContextOptionsBuilder<NocturneDbContext>().UseNpgsql(database.AppConnectionString).Options;
         await using (var first = new NocturneDbContext(options))
         {
-            await ApsSnapshotCurvesBackfillService.RecordCompletionAsync(first, tenant, CancellationToken.None);
+            await ApsSnapshotCurvesBackfillService.RecordCompletionAsync(first, tenant, TimeProvider.System, CancellationToken.None);
         }
 
         await using var db = new NocturneDbContext(options);
         var second = await Record.ExceptionAsync(() =>
-            ApsSnapshotCurvesBackfillService.RecordCompletionAsync(db, tenant, CancellationToken.None));
+            ApsSnapshotCurvesBackfillService.RecordCompletionAsync(db, tenant, TimeProvider.System, CancellationToken.None));
 
         second.Should().BeNull();
         var rows = await db.BackfillCompletions.AsNoTracking().Where(c => c.TenantId == tenant).ToListAsync();

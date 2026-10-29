@@ -24,6 +24,7 @@ public class PredictionService : IPredictionService
     private readonly ITargetRangeResolver _targetRange;
     private readonly ITherapySettingsResolver _therapySettings;
     private readonly IPatientInsulinRepository _insulins;
+    private readonly TimeProvider _time;
     private readonly ILogger<PredictionService> _logger;
 
     public PredictionService(
@@ -35,6 +36,7 @@ public class PredictionService : IPredictionService
         ITargetRangeResolver targetRange,
         ITherapySettingsResolver therapySettings,
         IPatientInsulinRepository insulins,
+        TimeProvider timeProvider,
         ILogger<PredictionService> logger)
     {
         _store = store;
@@ -45,6 +47,7 @@ public class PredictionService : IPredictionService
         _targetRange = targetRange;
         _therapySettings = therapySettings;
         _insulins = insulins;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -54,7 +57,7 @@ public class PredictionService : IPredictionService
         DateTimeOffset? asOf = null,
         CancellationToken cancellationToken = default)
     {
-        var now = asOf ?? DateTimeOffset.UtcNow;
+        var now = asOf ?? _time.GetUtcNow();
         var nowMills = now.ToUnixTimeMilliseconds();
 
         // Check if oref library is available

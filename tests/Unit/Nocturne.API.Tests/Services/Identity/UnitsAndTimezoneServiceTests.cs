@@ -199,11 +199,12 @@ public class UnitsAndTimezoneServiceTests
     {
         return new UnitsAndTimezoneService(
             new TestNocturneDbContextFactory(Context()), _tenants.Object, _records.Object, _connectors.Object, _migrations.Object, _cache.Object,
+            TimeProvider.System,
             NullLogger<UnitsAndTimezoneService>.Instance);
     }
 
     private NocturneDbContext Context() => new(_options) { TenantId = TenantId };
 
     private static UISettingsService UiSettings(NocturneDbContext db) =>
-        new(new TestNocturneDbContextFactory(db), NullLogger<UISettingsService>.Instance);
+        new(new TestNocturneDbContextFactory(db), TimeProvider.System, NullLogger<UISettingsService>.Instance);
 }

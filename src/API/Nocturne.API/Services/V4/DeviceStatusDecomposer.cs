@@ -34,6 +34,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
     private readonly IDeviceService _deviceService;
     private readonly IAuditContext _auditContext;
     private readonly ILoopClosedLoopStamper _closedLoop;
+    private readonly TimeProvider _time;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -50,6 +51,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         IDeviceService deviceService,
         IAuditContext auditContext,
         ILoopClosedLoopStamper closedLoop,
+        TimeProvider timeProvider,
         ILogger<DeviceStatusDecomposer> logger)
         : base(logger)
     {
@@ -61,6 +63,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         _deviceService = deviceService;
         _auditContext = auditContext;
         _closedLoop = closedLoop;
+        _time = timeProvider;
     }
 
     /// <summary>
@@ -553,7 +556,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
 
     private const int OverrideQueryLimit = 10;
 
-    private static StateSpan BuildOverrideSpan(DeviceStatus ds, string? legacyId)
+    private StateSpan BuildOverrideSpan(DeviceStatus ds, string? legacyId)
     {
         var timestamp = ResolveTimestamp(ds);
         DateTime? end = ds.Override!.Duration is > 0
@@ -709,7 +712,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
     /// The sub-objects and unknown top-level keys with no typed snapshot of their own, or
     /// <see langword="null"/> when the device status carries none.
     /// </summary>
-    private static V4Models.DeviceStatusExtras? BuildExtras(DeviceStatus ds, Guid correlationId)
+    private V4Models.DeviceStatusExtras? BuildExtras(DeviceStatus ds, Guid correlationId)
     {
         var extras = new Dictionary<string, object?>();
 
@@ -1042,7 +1045,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
     /// An OpenAPS/AAPS/Trio payload wins over a Loop one; <see langword="null"/> when the device
     /// status carries neither.
     /// </summary>
-    internal static V4Models.ApsSnapshot? MapToApsSnapshot(
+    internal V4Models.ApsSnapshot? MapToApsSnapshot(
         DeviceStatus ds, string? legacyId, string? source, Guid? correlationId)
     {
         if (ds.OpenAps != null)
@@ -1051,7 +1054,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         return ds.Loop != null ? MapToApsSnapshotFromLoop(ds, legacyId, source, correlationId) : null;
     }
 
-    private static V4Models.ApsSnapshot MapToApsSnapshotFromOpenAps(
+    private V4Models.ApsSnapshot MapToApsSnapshotFromOpenAps(
         DeviceStatus ds, string? legacyId, string? source, Guid? correlationId)
     {
         var command = ApsSnapshotCurves.FreshestOpenApsCommand(ds.OpenAps!);
@@ -1090,7 +1093,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         return snapshot;
     }
 
-    private static V4Models.ApsSnapshot MapToApsSnapshotFromLoop(
+    private V4Models.ApsSnapshot MapToApsSnapshotFromLoop(
         DeviceStatus ds, string? legacyId, string? source, Guid? correlationId)
     {
         var snapshot = new V4Models.ApsSnapshot
@@ -1120,7 +1123,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         return snapshot;
     }
 
-    private static V4Models.PumpSnapshot MapToPumpSnapshot(
+    private V4Models.PumpSnapshot MapToPumpSnapshot(
         DeviceStatus ds, string? legacyId, string? source, Guid? correlationId)
     {
         return new V4Models.PumpSnapshot
@@ -1150,7 +1153,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         };
     }
 
-    private static V4Models.UploaderSnapshot MapToUploaderSnapshot(
+    private V4Models.UploaderSnapshot MapToUploaderSnapshot(
         DeviceStatus ds, string? legacyId, string? source, Guid? correlationId)
     {
         return new V4Models.UploaderSnapshot
@@ -1198,7 +1201,7 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
     /// <see cref="ApsSnapshotCurves.FreshestOpenApsCommand"/> timestamp > Loop timestamp > Pump clock > CreatedAt >
     /// Loop predicted start date > now.
     /// </summary>
-    internal static DateTime ResolveTimestamp(DeviceStatus ds)
+    internal DateTime ResolveTimestamp(DeviceStatus ds)
     {
         if (ds.Mills > 0)
             return DateTimeOffset.FromUnixTimeMilliseconds(ds.Mills).UtcDateTime;
@@ -1223,10 +1226,10 @@ public class DeviceStatusDecomposer : DecomposerBase, IDeviceStatusDecomposer, I
         if (ParseTimestampToDateTime(ds.Loop?.Predicted?.StartDate) is { } predictedTime)
             return predictedTime;
 
-        return DateTime.UtcNow;
+        return _time.GetUtcNow().UtcDateTime;
     }
 
-    private static long ResolveStatusMills(DeviceStatus ds) =>
+    private long ResolveStatusMills(DeviceStatus ds) =>
         ResolveTimestamp(ds).ToMills();
 
     private static DateTime? ParseTimestampToDateTime(string? timestamp) =>

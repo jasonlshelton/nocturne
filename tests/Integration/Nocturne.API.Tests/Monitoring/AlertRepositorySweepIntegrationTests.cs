@@ -24,6 +24,7 @@ namespace Nocturne.API.Tests.Integration.Monitoring;
 /// <see cref="TenantConnectionInterceptor"/> the app uses, so <c>context.TenantId</c> drives the
 /// <c>app.current_tenant_id</c> session variable exactly as in production.
 /// </summary>
+[Collection(ApiIntegrationShards.Three)]
 [Trait("Category", "Integration")]
 public class AlertRepositorySweepIntegrationTests : ApiIntegrationTestBase
 {

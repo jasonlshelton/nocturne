@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Multitenancy;
 using Nocturne.Connectors.Core.Utilities;
@@ -21,6 +22,7 @@ public class MemberInviteServiceTests : IDisposable
     private readonly NocturneDbContext _dbContext;
     private readonly Mock<IJwtService> _jwtService;
     private readonly Mock<ITenantService> _tenantService;
+    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 29, 12, 0, 0, TimeSpan.Zero));
     private readonly MemberInviteService _service;
 
     private readonly Guid _tenantId = Guid.CreateVersion7();
@@ -56,8 +58,9 @@ public class MemberInviteServiceTests : IDisposable
             _dbContext.AsFactory(),
             _jwtService.Object,
             _tenantService.Object,
-            new TenantRoleService(_dbContext.AsFactory()),
+            new TenantRoleService(_dbContext.AsFactory(), _time),
             Options.Create(new BaseDomainOptions { BaseDomain = BaseDomain }),
+            _time,
             logger.Object);
 
         // Seed tenant and subjects
@@ -121,7 +124,7 @@ public class MemberInviteServiceTests : IDisposable
         result.InviteUrl.Should().Be($"https://{BaseDomain}/join?token={FakeToken}");
         result.CreatedByName.Should().Be("Creator User");
         result.Id.Should().NotBeEmpty();
-        result.ExpiresAt.Should().BeAfter(DateTime.UtcNow);
+        result.ExpiresAt.Should().Be(_time.GetUtcNow().UtcDateTime.AddDays(7));
 
         // Verify entity was persisted
         var entity = await _dbContext.MemberInvites.FirstOrDefaultAsync();
@@ -322,13 +325,50 @@ public class MemberInviteServiceTests : IDisposable
             [_followerRoleId]);
 
         var invite = await _dbContext.MemberInvites.FirstAsync();
-        invite.ExpiresAt = DateTime.UtcNow.AddDays(-1);
+        invite.ExpiresAt = _time.GetUtcNow().UtcDateTime.AddDays(-1);
         await _dbContext.SaveChangesAsync();
 
         var result = await _service.AcceptInviteAsync(FakeToken, _acceptorSubjectId, _tenantId);
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be("expired");
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public async Task AcceptInviteAsync_IsRefusedFromTheExpiryInstantOnward(int secondsFromExpiry, bool expired)
+    {
+        var created = await _service.CreateInviteAsync(
+            _tenantId,
+            _creatorSubjectId,
+            OwnerPermissions,
+            [_followerRoleId],
+            expiresInDays: 7);
+        AcceptorJoinsOnAdd();
+        _time.SetUtcNow(new DateTimeOffset(created.ExpiresAt, TimeSpan.Zero).AddSeconds(secondsFromExpiry));
+
+        var result = await _service.AcceptInviteAsync(FakeToken, _acceptorSubjectId, _tenantId);
+
+        result.Success.Should().Be(!expired);
+        if (expired)
+            result.ErrorCode.Should().Be("expired");
+    }
+
+    [Fact]
+    public async Task GetInviteByTokenAsync_ReportsExpiryFromTheClock()
+    {
+        var created = await _service.CreateInviteAsync(
+            _tenantId, _creatorSubjectId, OwnerPermissions, [_followerRoleId], expiresInDays: 7);
+
+        (await _service.GetInviteByTokenAsync(FakeToken, _tenantId))!.IsValid.Should().BeTrue();
+
+        _time.SetUtcNow(new DateTimeOffset(created.ExpiresAt, TimeSpan.Zero));
+
+        var info = await _service.GetInviteByTokenAsync(FakeToken, _tenantId);
+        info!.IsExpired.Should().BeTrue();
+        info.IsValid.Should().BeFalse();
     }
 
     [Fact]
@@ -341,7 +381,7 @@ public class MemberInviteServiceTests : IDisposable
             [_followerRoleId]);
 
         var invite = await _dbContext.MemberInvites.FirstAsync();
-        invite.RevokedAt = DateTime.UtcNow;
+        invite.RevokedAt = _time.GetUtcNow().UtcDateTime;
         await _dbContext.SaveChangesAsync();
 
         var result = await _service.AcceptInviteAsync(FakeToken, _acceptorSubjectId, _tenantId);
@@ -506,6 +546,19 @@ public class MemberInviteServiceTests : IDisposable
             OwnerPermissions,
             [_followerRoleId]);
 
+        AcceptorJoinsOnAdd();
+
+        var result = await _service.AcceptInviteAsync(FakeToken, _acceptorSubjectId, _tenantId);
+
+        result.Success.Should().BeTrue();
+        result.MembershipId.Should().NotBeNull();
+
+        var invite = await _dbContext.MemberInvites.FirstAsync();
+        invite.UseCount.Should().Be(1);
+    }
+
+    private void AcceptorJoinsOnAdd()
+    {
         _tenantService
             .Setup(s => s.AddMemberAsync(
                 _tenantId, _acceptorSubjectId, It.IsAny<List<Guid>>(), It.IsAny<List<string>?>(),
@@ -521,14 +574,6 @@ public class MemberInviteServiceTests : IDisposable
                 _dbContext.SaveChanges();
             })
             .Returns(Task.CompletedTask);
-
-        var result = await _service.AcceptInviteAsync(FakeToken, _acceptorSubjectId, _tenantId);
-
-        result.Success.Should().BeTrue();
-        result.MembershipId.Should().NotBeNull();
-
-        var invite = await _dbContext.MemberInvites.FirstAsync();
-        invite.UseCount.Should().Be(1);
     }
 
     /// <summary>
@@ -556,7 +601,7 @@ public class MemberInviteServiceTests : IDisposable
             TokenHash = "hash-minted-for-the-other-tenant",
             RoleIds = [],
             DirectPermissions = [Scope.GlucoseRead],
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            ExpiresAt = _time.GetUtcNow().UtcDateTime.AddDays(7),
         });
         await _dbContext.SaveChangesAsync();
 

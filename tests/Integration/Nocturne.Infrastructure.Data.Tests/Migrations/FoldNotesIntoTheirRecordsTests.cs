@@ -48,11 +48,10 @@ public class FoldNotesIntoTheirRecordsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("fold_notes_into_records");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "fold_notes_into_records");
         _migratorConnectionString = database.MigratorConnectionString;
         _superuserConnectionString = database.SuperuserConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(targetMigration: null);

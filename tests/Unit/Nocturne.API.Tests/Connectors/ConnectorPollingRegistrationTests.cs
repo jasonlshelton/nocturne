@@ -123,6 +123,7 @@ public class ConnectorPollingRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(new ConnectorSyncBudget());
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton(ActiveTenantSnapshotTestDoubles.Unread());
         services.AddSingleton(nudge);
         using var provider = services.BuildServiceProvider();
@@ -150,6 +151,7 @@ public class ConnectorPollingRegistrationTests
         services.AddApiCoreServices(new ConfigurationBuilder().Build());
         services.AddSingleton(Mock.Of<IDbContextFactory<NocturneDbContext>>().AsNocturneFactory());
         services.AddSingleton(new ConnectorSyncBudget());
+        services.AddSingleton(TimeProvider.System);
         using var provider = services.BuildServiceProvider();
         var registered = provider.GetRequiredService<ActiveTenantSnapshot>();
 
@@ -294,10 +296,7 @@ public class ConnectorPollingRegistrationTests
             .Distinct()];
 
     [ConnectorRegistration("PollingTest", "polling-test", "POLLINGTEST", "PollingTest")]
-    private sealed class PollingTestConfiguration : BaseConnectorConfiguration
-    {
-        protected override void ValidateSourceSpecificConfiguration() { }
-    }
+    private sealed class PollingTestConfiguration : BaseConnectorConfiguration;
 
     private sealed class RecordingConnectorService : IConnectorService<PollingTestConfiguration>
     {
@@ -350,7 +349,8 @@ public class ConnectorPollingRegistrationTests
             serviceProvider,
             new ConnectorSyncBudget(),
             ActiveTenantSnapshotTestDoubles.Unread(),
-            NullLogger<ConnectorBackgroundService<RecordingConnectorService, PollingTestConfiguration>>.Instance)
+            NullLogger<ConnectorBackgroundService<RecordingConnectorService, PollingTestConfiguration>>.Instance,
+            TimeProvider.System)
     {
         public Task<SyncResult> SyncAsync(
             IServiceProvider scopeProvider,

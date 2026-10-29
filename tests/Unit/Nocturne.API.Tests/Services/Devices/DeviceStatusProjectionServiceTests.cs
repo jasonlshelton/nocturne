@@ -44,6 +44,7 @@ public class DeviceStatusProjectionServiceTests
             _uploaderRepo.Object,
             _stateSpanRepo.Object,
             _extrasRepo.Object,
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
     }
 

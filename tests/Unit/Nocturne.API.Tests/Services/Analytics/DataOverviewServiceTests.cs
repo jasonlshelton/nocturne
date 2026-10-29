@@ -92,7 +92,7 @@ public class DataOverviewServiceTests : IDisposable
             new TenantClockResolver(_therapySettings.Object, _readContext, NullLogger<TenantClockResolver>.Instance),
             mockStatisticsService.Object,
             TestTenantCache.Create(distributed: _distributed.Object, tenantId: TenantId),
-            _logger
+            TimeProvider.System, _logger
         );
     }
 
@@ -297,7 +297,7 @@ public class DataOverviewServiceTests : IDisposable
             new TenantClockResolver(_therapySettings.Object, _readContext, NullLogger<TenantClockResolver>.Instance),
             Mock.Of<IStatisticsService>(),
             TestTenantCache.Create(tenantId: TenantId),
-            _logger
+            TimeProvider.System, _logger
         );
 
         _dbContext.SensorGlucose.Add(new SensorGlucoseEntity

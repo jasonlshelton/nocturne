@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
@@ -297,6 +298,24 @@ public class TandemE2eSyncTests
         fixture.Publisher.SensorGlucoses.Should().HaveCount(2);
         fixture.Publisher.Boluses.Should().HaveCount(1);
         fixture.Publisher.TempBasals.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// A pump that reports no newest-event time is read up to the clock, so the fetch ends on the
+    /// clock's day rather than on the day the pump last wrote.
+    /// </summary>
+    [Fact]
+    public async Task Pump_reporting_no_newest_event_is_read_up_to_the_clock()
+    {
+        var fixture = new Fixture(
+            pumperJson: PumperJson.Replace("\"maxDateOfEvents\": \"2026-05-18T10:19:55\", ", ""),
+            clock: new FakeTimeProvider(new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero)));
+
+        await fixture.RunAsync();
+
+        fixture.Requests.Should()
+            .ContainSingle(r => r.Path.Contains("/pump-logs/")).Subject
+            .Path.Should().Contain("endDate=2026-05-16T23%3A59%3A59Z");
     }
 
     /// <summary>
@@ -865,7 +884,8 @@ public class TandemE2eSyncTests
             string pumpLogsJson = PumpLogsJson,
             DateTime? latestEntry = null,
             DateTime? latestTreatment = null,
-            bool servesEveryWindow = false)
+            bool servesEveryWindow = false,
+            TimeProvider? clock = null)
         {
             // Default watermarks put the catch-up start just before the pump's available range so
             // the sync window is deterministic (no dependence on "now" via the initial-sync floor).
@@ -896,7 +916,8 @@ public class TandemE2eSyncTests
                 Mock.Of<IRetryDelayStrategy>(),
                 new FakeTandemAuthTokenProvider(),
                 Publisher,
-                new InMemoryCursorStore());
+                new InMemoryCursorStore(),
+                clock);
         }
 
         public void ServePumper(string pumperJson) => _responses["/api/reports/bff/pumper/"] = pumperJson;

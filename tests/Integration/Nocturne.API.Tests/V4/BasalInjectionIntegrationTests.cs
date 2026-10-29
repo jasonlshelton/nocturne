@@ -17,6 +17,7 @@ namespace Nocturne.API.Tests.Integration.V4;
 /// flow that the partial unique index permits, and Row Level Security tenant
 /// isolation.
 /// </summary>
+[Collection(ApiIntegrationShards.One)]
 [Trait("Category", "Integration")]
 public class BasalInjectionIntegrationTests : ApiIntegrationTestBase
 {

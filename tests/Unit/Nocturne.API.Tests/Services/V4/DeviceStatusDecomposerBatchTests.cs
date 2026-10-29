@@ -64,7 +64,7 @@ public class DeviceStatusDecomposerBatchTests : IDisposable
             _deviceServiceMock.Object,
             Mock.Of<IAuditContext>(),
             Mock.Of<ILoopClosedLoopStamper>(),
-            NullLogger<DeviceStatusDecomposer>.Instance);
+            TimeProvider.System, NullLogger<DeviceStatusDecomposer>.Instance);
     }
 
     public void Dispose()

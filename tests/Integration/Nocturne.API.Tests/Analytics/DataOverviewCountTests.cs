@@ -13,6 +13,7 @@ using Xunit.Abstractions;
 
 namespace Nocturne.API.Tests.Integration.Analytics;
 
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class DataOverviewCountTests(ApiIntegrationTestFixture fixture, ITestOutputHelper output)
     : ApiIntegrationTestBase(fixture, output)

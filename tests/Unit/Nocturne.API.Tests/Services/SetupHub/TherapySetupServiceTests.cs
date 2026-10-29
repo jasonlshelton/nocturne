@@ -63,7 +63,8 @@ public class TherapySetupServiceTests : IDisposable
             new CarbRatioScheduleRepository(_factory, _audit, NullLogger<CarbRatioScheduleRepository>.Instance),
             new SensitivityScheduleRepository(_factory, _audit, NullLogger<SensitivityScheduleRepository>.Instance),
             new TargetRangeScheduleRepository(_factory, _audit, NullLogger<TargetRangeScheduleRepository>.Instance),
-            patients.Object);
+            patients.Object,
+            TimeProvider.System);
     }
 
     private SetupHubService Hub() => new(_factory, [new TherapyItem(_factory)]);
@@ -76,7 +77,7 @@ public class TherapySetupServiceTests : IDisposable
         new TargetRangeScheduleRepository(_factory, _audit, NullLogger<TargetRangeScheduleRepository>.Instance),
         TempBasalTestDeps.NoReresolution(),
         Moq.Mock.Of<ILoopClosedLoopStamper>(),
-        NullLogger<ProfileDecomposer>.Instance);
+        TimeProvider.System, NullLogger<ProfileDecomposer>.Instance);
 
     private static readonly DateTime ProfileMadeAt = new(2026, 3, 1, 8, 0, 0, DateTimeKind.Utc);
 

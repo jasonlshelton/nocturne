@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Nocturne.Core.Constants;
 using Nocturne.API.Services.SetupHub;
 using Nocturne.API.Services.SetupHub.Items;
@@ -46,7 +47,7 @@ public class SetupHubServiceTests
         return new(factory, new ISetupHubItem[]
         {
             // Registered out of order on purpose: the key decides the hub order.
-            new AboutItem(factory), new SharingItem(factory), new TherapyItem(factory),
+            new AboutItem(factory), new SharingItem(factory, TimeProvider.System), new TherapyItem(factory),
             DevicesItemOver(db), new AlertsItem(factory), new ConnectDataItem(factory),
         });
     }
@@ -272,6 +273,23 @@ public class SetupHubServiceTests
         await _db.SaveChangesAsync();
 
         (await SharingStateAsync()).Should().Be(SetupHubItemState.Open, "done never reverts, so only a live link may reach it");
+    }
+
+    [Fact]
+    public async Task Sharing_AnInviteAndAGuestLinkCountUntilTheInstantTheyExpire()
+    {
+        var expiry = new DateTimeOffset(2026, 10, 29, 3, 0, 0, TimeSpan.Zero);
+        var clock = new FakeTimeProvider(expiry.AddTicks(-1));
+        AddMember();
+        AddInvite(expiry.UtcDateTime);
+        AddGrant(OAuthGrantTypes.Guest, expiresAt: expiry.UtcDateTime);
+        await _db.SaveChangesAsync();
+        var item = new SharingItem(new TestNocturneDbContextFactory(_db), clock);
+
+        (await item.WorksAsync(CancellationToken.None)).Should().BeTrue();
+
+        clock.SetUtcNow(expiry);
+        (await item.WorksAsync(CancellationToken.None)).Should().BeFalse();
     }
 
     [Theory]

@@ -129,7 +129,7 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
         if (!activeTypes.Contains(SyncDataType.Profiles))
             return;
 
-        var profile = new TandemProfileMapper(_logger).Map(device.Settings?.Details);
+        var profile = new TandemProfileMapper(_logger).Map(device.Settings?.Details, Clock.GetUtcNow().UtcDateTime);
         if (profile == null)
             return;
 
@@ -196,7 +196,8 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
         TandemConnectorConfiguration config, CancellationToken cancellationToken)
     {
         // The pump's newest event is a hard ceiling: there is nothing above it to ask for.
-        var ceiling = ParseWallClockUtc(device.MaxDateOfEvents, time) ?? DateTime.UtcNow;
+        var now = Clock.GetUtcNow().UtcDateTime;
+        var ceiling = ParseWallClockUtc(device.MaxDateOfEvents, time) ?? now;
         var end = request.To is { } until && until < ceiling ? until : ceiling;
 
         var start = await ResolveStartAsync(request, config, device, time);
@@ -266,7 +267,7 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
         var fetchedThrough = fetchTo < ceiling ? null : (DateTime?)ceiling;
 
         return await PublishEventsAsync(
-            groups, activeTypes, fetchedThrough, window, cgm, bolus, basal, deviceEvents,
+            groups, activeTypes, fetchedThrough, window, now, cgm, bolus, basal, deviceEvents,
             systemEvents, userMode, deviceStatus, result, config, cancellationToken);
     }
 
@@ -296,7 +297,7 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
     /// <returns>What the run has to say about a span it could not close, or <c>null</c>.</returns>
     private async Task<string?> PublishEventsAsync(
         IReadOnlyDictionary<TandemEventClass, List<TandemPumpEvent>> groups,
-        HashSet<SyncDataType> activeTypes, DateTime? fetchedThrough, PublishWindow? window,
+        HashSet<SyncDataType> activeTypes, DateTime? fetchedThrough, PublishWindow? window, DateTime now,
         TandemCgmMapper cgm, TandemBolusMapper bolus, TandemBasalMapper basal,
         TandemDeviceEventMapper deviceEvents, TandemSystemEventMapper systemEvents,
         TandemUserModeMapper userMode, TandemDeviceStatusMapper deviceStatus,
@@ -310,11 +311,11 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
 
         if (groups.TryGetValue(TandemEventClass.CgmReading, out var cgmEvents))
             await PublishRecordTypeAsync(result, SyncDataType.Glucose, activeTypes,
-                cgm.Map(cgmEvents), PublishSensorGlucoseDataAsync, config, cancellationToken);
+                cgm.Map(cgmEvents, now), PublishSensorGlucoseDataAsync, config, cancellationToken);
 
         if (groups.TryGetValue(TandemEventClass.Bolus, out var bolusEvents))
         {
-            var decomposed = bolus.Map(bolusEvents);
+            var decomposed = bolus.Map(bolusEvents, now);
             await PublishRecordTypeAsync(result, SyncDataType.Boluses, activeTypes,
                 Inside(decomposed.Boluses, record => record.Timestamp),
                 PublishBolusDataAsync, config, cancellationToken);
@@ -329,7 +330,7 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
         string? unclosed = null;
         if (groups.TryGetValue(TandemEventClass.Basal, out var basalEvents))
         {
-            var spans = basal.Map(basalEvents, fetchedThrough, config.IgnoreZeroUnitBasal);
+            var spans = basal.Map(basalEvents, fetchedThrough, config.IgnoreZeroUnitBasal, now);
 
             // The padded day held no further delivery event, so this span ran longer than the day
             // the fetch reached past the window and is the tenant's to chase, not silently absent.
@@ -346,7 +347,7 @@ public class TandemConnectorService : BaseConnectorService<TandemConnectorConfig
         var devEvents = Concat(groups, TandemEventClass.Cartridge, TandemEventClass.CgmStartJoinStop,
             TandemEventClass.BasalSuspension, TandemEventClass.BasalResume);
         await PublishRecordTypeAsync(result, SyncDataType.DeviceEvents, activeTypes,
-            deviceEvents.Map(devEvents), PublishDeviceEventDataAsync, config, cancellationToken);
+            deviceEvents.Map(devEvents, now), PublishDeviceEventDataAsync, config, cancellationToken);
 
         var sysEvents = Concat(groups, TandemEventClass.Alarm, TandemEventClass.CgmAlert);
         await PublishRecordTypeAsync(result, SyncDataType.DeviceEvents, activeTypes,

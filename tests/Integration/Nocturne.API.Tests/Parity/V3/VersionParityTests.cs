@@ -8,6 +8,7 @@ namespace Nocturne.API.Tests.Integration.Parity.V3;
 /// Parity tests for /api/v3/version endpoint.
 /// Returns API version information.
 /// </summary>
+[Collection(ParityShards.Two)]
 public class VersionParityTests : ParityTestBase
 {
     public VersionParityTests(ParityTestFixture fixture, ITestOutputHelper output)

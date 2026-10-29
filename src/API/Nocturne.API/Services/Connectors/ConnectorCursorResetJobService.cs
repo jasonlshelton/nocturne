@@ -57,15 +57,18 @@ public interface IConnectorCursorResetJobService
 /// <inheritdoc cref="IConnectorCursorResetJobService"/>
 public class ConnectorCursorResetJobService : IConnectorCursorResetJobService
 {
+    private readonly TimeProvider _time;
     private readonly ILogger<ConnectorCursorResetJobService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConcurrentDictionary<Guid, ConnectorResetJob> _jobs = new();
 
     /// <summary>Initializes a new instance of <see cref="ConnectorCursorResetJobService"/>.</summary>
     public ConnectorCursorResetJobService(
+        TimeProvider timeProvider,
         ILogger<ConnectorCursorResetJobService> logger,
         IServiceProvider serviceProvider)
     {
+        _time = timeProvider;
         _logger = logger;
         _serviceProvider = serviceProvider;
     }
@@ -102,6 +105,7 @@ public class ConnectorCursorResetJobService : IConnectorCursorResetJobService
             from,
             dataTypes,
             connectors.Connectors.Select(c => c.ConnectorName),
+            _time,
             _logger,
             _serviceProvider);
         // Record the job before the work starts. The in-process task cannot survive an API
@@ -196,7 +200,8 @@ internal sealed class ConnectorResetJob : IConnectorResetProgress
     private readonly ILogger _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly CancellationTokenSource _cts = new();
-    private readonly DateTime _createdAt = DateTime.UtcNow;
+    private readonly TimeProvider _time;
+    private readonly DateTime _createdAt;
 
     // Preserves the configured order from enumeration; updated in place as connectors progress.
     private readonly ConcurrentDictionary<string, ConnectorResetConnectorProgress> _connectors = new();
@@ -214,6 +219,7 @@ internal sealed class ConnectorResetJob : IConnectorResetProgress
         DateTime? from,
         List<SyncDataType>? dataTypes,
         IEnumerable<string> connectorNames,
+        TimeProvider time,
         ILogger logger,
         IServiceProvider serviceProvider)
     {
@@ -222,6 +228,8 @@ internal sealed class ConnectorResetJob : IConnectorResetProgress
         _tenantSlug = tenantSlug;
         _from = from;
         _dataTypes = dataTypes;
+        _time = time;
+        _createdAt = time.GetUtcNow().UtcDateTime;
         _logger = logger;
         _serviceProvider = serviceProvider;
 
@@ -249,7 +257,7 @@ internal sealed class ConnectorResetJob : IConnectorResetProgress
 
     public async Task ExecuteAsync()
     {
-        _startedAt = DateTime.UtcNow;
+        _startedAt = _time.GetUtcNow().UtcDateTime;
         _state = ConnectorResetJobState.Running;
         var ct = _cts.Token;
         await PersistSnapshotAsync(CancellationToken.None);
@@ -296,7 +304,7 @@ internal sealed class ConnectorResetJob : IConnectorResetProgress
         }
         finally
         {
-            _completedAt = DateTime.UtcNow;
+            _completedAt = _time.GetUtcNow().UtcDateTime;
             await PersistSnapshotAsync(CancellationToken.None);
         }
     }

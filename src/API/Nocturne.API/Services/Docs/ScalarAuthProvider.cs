@@ -68,7 +68,8 @@ public sealed class ScalarAuthProvider
     /// domain and the tenant's stored slug, and the only part a caller influences is the scheme,
     /// which <see cref="RedirectUriValidator"/> narrows to https on a public host and http on
     /// loopback. So one tenant can accumulate at most one entry per deployment origin, and a
-    /// deployment has one. Kept rather than deleted because the row is written by an
+    /// deployment has one, plus the <c>/scalar</c> entry registered before the redirect URI took
+    /// its trailing slash. Kept rather than deleted because the row is written by an
     /// unauthenticated request, so the bound must not rest on that argument staying true.
     /// </remarks>
     internal const int MaxRedirectUris = 5;
@@ -87,6 +88,7 @@ public sealed class ScalarAuthProvider
     private readonly RedirectUriValidator _redirectUriValidator;
     private readonly IMemoryCache _cache;
     private readonly BaseDomainOptions _baseDomain;
+    private readonly TimeProvider _time;
     private readonly ILogger<ScalarAuthProvider> _logger;
 
     public ScalarAuthProvider(
@@ -96,6 +98,7 @@ public sealed class ScalarAuthProvider
         RedirectUriValidator redirectUriValidator,
         IMemoryCache cache,
         IOptions<BaseDomainOptions> baseDomain,
+        TimeProvider timeProvider,
         ILogger<ScalarAuthProvider> logger)
     {
         _factory = factory;
@@ -104,6 +107,7 @@ public sealed class ScalarAuthProvider
         _redirectUriValidator = redirectUriValidator;
         _cache = cache;
         _baseDomain = baseDomain.Value;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -218,7 +222,9 @@ public sealed class ScalarAuthProvider
             ? resolved.CanonicalHost
             : $"{resolved.CanonicalHost}:{basePort}";
 
-        return $"{scheme}://{authority}/scalar";
+        // Trailing slash: Scalar answers /scalar with a redirect to scalar/ that drops the query,
+        // and with it the code and state its popup is waiting to read.
+        return $"{scheme}://{authority}/scalar/";
     }
 
     /// <summary>
@@ -396,7 +402,7 @@ public sealed class ScalarAuthProvider
 
             registered.Add(redirectUri);
             client.RedirectUris = JsonSerializer.Serialize(registered);
-            client.UpdatedAt = DateTime.UtcNow;
+            client.UpdatedAt = _time.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(token);
             return client.ClientId;
         }, ct: ct);

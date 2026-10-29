@@ -85,6 +85,12 @@ public class TestNocturneDbContext : NocturneDbContext
 
         modelBuilder.Entity<TestNonAuditableEntity>(e => e.ClearQueryFilters());
     }
+
+    private static readonly SqliteSchemaTemplate Schema = new(connection =>
+        new TestNocturneDbContext(new DbContextOptionsBuilder<NocturneDbContext>().UseSqlite(connection).Options));
+
+    /// <summary>Gives <paramref name="connection"/> this context's schema, from <see cref="SqliteSchemaTemplate"/>.</summary>
+    public static void CreateSchema(SqliteConnection connection) => Schema.CopyInto(connection);
 }
 
 #endregion
@@ -100,8 +106,10 @@ public class MutationAuditInterceptorTests : IDisposable
 
     public MutationAuditInterceptorTests()
     {
-        _connection = new SqliteConnection("Filename=:memory:");
-        _connection.Open();
+        var connection = new SqliteConnection("Filename=:memory:");
+        connection.Open();
+        TestNocturneDbContext.CreateSchema(connection);
+        _connection = connection;
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         httpContextAccessor.Setup(x => x.HttpContext).Returns((HttpContext)null!);
@@ -118,7 +126,6 @@ public class MutationAuditInterceptorTests : IDisposable
             .Options;
 
         using var context = CreateContext();
-        context.Database.EnsureCreated();
 
         // Seed the tenant so FK constraints are satisfied
         context.Tenants.Add(new TenantEntity { Id = _tenantId, Slug = "test" });

@@ -50,6 +50,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
     private readonly IAlertReferenceService _referenceService;
     private readonly AlertRuleRearm _rearm;
     private readonly AlertRuleRetirement _retirement;
+    private readonly TimeProvider _time;
     private readonly ILogger<TrackerAlertRuleSyncService> _logger;
 
     /// <summary>Initialises a new <see cref="TrackerAlertRuleSyncService"/>.</summary>
@@ -59,6 +60,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
         IAlertReferenceService referenceService,
         AlertRuleRearm rearm,
         AlertRuleRetirement retirement,
+        TimeProvider timeProvider,
         ILogger<TrackerAlertRuleSyncService> logger)
     {
         _contextFactory = contextFactory;
@@ -66,6 +68,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
         _referenceService = referenceService;
         _rearm = rearm;
         _retirement = retirement;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -190,7 +193,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
                 rule.ConditionType = AlertConditionType.TrackerAge;
                 rule.ScopeClass = scopeClass;
                 rule.Severity = severity;
-                rule.UpdatedAt = DateTime.UtcNow;
+                rule.UpdatedAt = _time.GetUtcNow().UtcDateTime;
                 keptRuleIds.Add(rule.Id);
             }
             else
@@ -208,8 +211,8 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
                     ManagedBy = tag,
                     IsEnabled = true,
                     ClientConfiguration = "{}",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
+                    CreatedAt = _time.GetUtcNow().UtcDateTime,
+                    UpdatedAt = _time.GetUtcNow().UtcDateTime,
                 };
 
                 created.Channels.Add(InAppChannel(tenantId, created.Id, recipient));
@@ -289,7 +292,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
                 if (rule.IsEnabled)
                     disabled.Add(rule.Id);
                 rule.IsEnabled = false;
-                rule.UpdatedAt = DateTime.UtcNow;
+                rule.UpdatedAt = _time.GetUtcNow().UtcDateTime;
                 _logger.LogWarning(
                     "Managed rule {RuleId} ('{RuleName}') is referenced by alert_state rule(s) {ReferencingIds}; disabled instead of deleted",
                     rule.Id, rule.Name, string.Join(", ", referencing));
@@ -346,7 +349,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
             existing.Name = name;
             existing.ScopeClass = scopeClass;
             existing.Severity = severity;
-            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedAt = _time.GetUtcNow().UtcDateTime;
             keptRuleIds.Add(existing.Id);
             return;
         }
@@ -363,8 +366,8 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
             ManagedBy = tag,
             IsEnabled = true,
             ClientConfiguration = "{}",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = _time.GetUtcNow().UtcDateTime,
+            UpdatedAt = _time.GetUtcNow().UtcDateTime,
         };
         created.Channels.Add(InAppChannel(tenantId, created.Id, recipient));
         db.AlertRules.Add(created);
@@ -385,7 +388,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
         return recipient?.ToString() ?? string.Empty;
     }
 
-    private static AlertRuleChannelEntity InAppChannel(Guid tenantId, Guid ruleId, string recipient) => new()
+    private AlertRuleChannelEntity InAppChannel(Guid tenantId, Guid ruleId, string recipient) => new()
     {
         Id = Guid.CreateVersion7(),
         TenantId = tenantId,
@@ -393,7 +396,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
         ChannelType = ChannelType.InApp,
         Destination = recipient,
         SortOrder = 0,
-        CreatedAt = DateTime.UtcNow,
+        CreatedAt = _time.GetUtcNow().UtcDateTime,
     };
 
     /// <summary>

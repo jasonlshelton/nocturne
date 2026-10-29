@@ -62,7 +62,7 @@ public class GlookoFetchRetryTests
             Server = GlookoConstants.RegionEU,
         };
 
-        return new GlookoSyncContext(config, DataSources.GlookoConnector, NullLogger.Instance)
+        return new GlookoSyncContext(config, DataSources.GlookoConnector, NullLogger.Instance, TimeProvider.System)
         {
             SessionCookie = "_logbook-web_session=sess",
         };

@@ -51,7 +51,7 @@ public class DeviceStatusDecomposerTests : IDisposable
             _deviceServiceMock.Object,
             Mock.Of<IAuditContext>(),
             Mock.Of<ILoopClosedLoopStamper>(),
-            NullLogger<DeviceStatusDecomposer>.Instance);
+            TimeProvider.System, NullLogger<DeviceStatusDecomposer>.Instance);
     }
 
     public void Dispose()
@@ -954,7 +954,7 @@ public class DeviceStatusDecomposerTests : IDisposable
         var ds = HeldTempBasalStatus(enactedTimestamp, suggestedTimestamp);
         ds.Mills = 0;
 
-        DeviceStatusDecomposer.ResolveTimestamp(ds)
+        _decomposer.ResolveTimestamp(ds)
             .Should().Be(DateTimeOffset.Parse(expected).UtcDateTime);
     }
 
@@ -966,9 +966,9 @@ public class DeviceStatusDecomposerTests : IDisposable
         withIobTime.Mills = 0;
         withIobTime.OpenAps!.Iob = new OpenApsIobData { Time = "2026-10-04T23:19:00Z" };
 
-        DeviceStatusDecomposer.ResolveTimestamp(withMills)
+        _decomposer.ResolveTimestamp(withMills)
             .Should().Be(DateTimeOffset.FromUnixTimeMilliseconds(1700000000000).UtcDateTime);
-        DeviceStatusDecomposer.ResolveTimestamp(withIobTime)
+        _decomposer.ResolveTimestamp(withIobTime)
             .Should().Be(new DateTime(2026, 10, 4, 23, 19, 0, DateTimeKind.Utc));
     }
 
@@ -2067,7 +2067,7 @@ public class DeviceStatusDecomposerTests : IDisposable
             new DeviceService(deviceRepo.Object, patientDeviceRepo.Object, MockTenantAccessor.Create().Object, DeviceDateClockDoubles.Utc()),
             Mock.Of<IAuditContext>(),
             Mock.Of<ILoopClosedLoopStamper>(),
-            NullLogger<DeviceStatusDecomposer>.Instance);
+            TimeProvider.System, NullLogger<DeviceStatusDecomposer>.Instance);
     }
 
     private static V4Models.PatientDevice MakeDatedPatientDevice() => new()

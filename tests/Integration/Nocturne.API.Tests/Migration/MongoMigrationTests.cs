@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 
 namespace Nocturne.API.Tests.Integration.Migration;
 
-[Collection("ApiIntegration")]
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class MongoMigrationTests : ApiIntegrationTestBase, IClassFixture<MigrationTestFixture>
 {

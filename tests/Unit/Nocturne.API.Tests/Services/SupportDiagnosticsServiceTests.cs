@@ -32,7 +32,7 @@ public class SupportDiagnosticsServiceTests
             .ReturnsAsync([]);
 
         var broken = NewContext();
-        var uiSettings = new UISettingsService(broken.AsFactory(), NullLogger<UISettingsService>.Instance);
+        var uiSettings = new UISettingsService(broken.AsFactory(), TimeProvider.System, NullLogger<UISettingsService>.Instance);
         await broken.DisposeAsync();
 
         var sut = new SupportDiagnosticsService(

@@ -23,6 +23,7 @@ namespace Nocturne.API.Tests.Integration;
 /// applies them, so the version in force at a time is the one whose document started last before it.
 /// Every test names its own profile store, so no profile version a test before it cached answers for it.
 /// </summary>
+[Collection(ApiIntegrationShards.Two)]
 [Trait("Category", "Integration")]
 public class ProfileVersionStartIntegrationTests : ApiIntegrationTestBase
 {

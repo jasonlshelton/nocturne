@@ -26,6 +26,7 @@ namespace Nocturne.API.Services.Profiles;
 public class UISettingsService : IUISettingsService
 {
     private readonly INocturneDbContextFactory _contexts;
+    private readonly TimeProvider _time;
     private readonly ILogger<UISettingsService> _logger;
 
     private const string SettingsKeyPrefix = SettingsKeys.UiSettingsPrefix;
@@ -38,9 +39,13 @@ public class UISettingsService : IUISettingsService
         WriteIndented = false,
     };
 
-    public UISettingsService(INocturneDbContextFactory contexts, ILogger<UISettingsService> logger)
+    public UISettingsService(
+        INocturneDbContextFactory contexts,
+        TimeProvider timeProvider,
+        ILogger<UISettingsService> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -393,7 +398,7 @@ public class UISettingsService : IUISettingsService
         CancellationToken cancellationToken
     )
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
 
         var entity = await db.Settings.FirstOrDefaultAsync(
             s => s.Key == key,

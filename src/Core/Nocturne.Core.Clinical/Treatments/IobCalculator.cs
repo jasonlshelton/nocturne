@@ -87,14 +87,12 @@ public class IobCalculator(
     }
 
     /// <inheritdoc />
-    public IobContribution CalcBolus(Bolus bolus, long? time = null)
+    public IobContribution CalcBolus(Bolus bolus, long currentTime)
     {
         if (bolus.Insulin <= 0)
         {
             return new IobContribution { IobContrib = 0, ActivityContrib = 0 };
         }
-
-        var currentTime = time ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         var dia = bolus.InsulinContext?.Dia
             ?? therapySettings.GetDIAAsync(currentTime, null).GetAwaiter().GetResult();
@@ -193,10 +191,8 @@ public class IobCalculator(
     }
 
     /// <inheritdoc />
-    public IobResult FromBoluses(List<Bolus> boluses, long? time = null)
+    public IobResult FromBoluses(List<Bolus> boluses, long currentTime)
     {
-        var currentTime = time ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
         // Every bolus reads DIA and sensitivity at currentTime, so each is resolved once for the
         // batch rather than per bolus: a resolver call is several database round-trips, and an
         // automated-bolus history holds dozens of boluses inside one DIA window. Lazy, so a batch

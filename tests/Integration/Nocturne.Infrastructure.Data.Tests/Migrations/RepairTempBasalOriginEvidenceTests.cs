@@ -72,10 +72,9 @@ public class RepairTempBasalOriginEvidenceFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("repair_temp_basal_origin_evidence");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "repair_temp_basal_origin_evidence");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(null);

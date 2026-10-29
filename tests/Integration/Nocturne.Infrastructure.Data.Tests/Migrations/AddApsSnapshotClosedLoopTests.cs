@@ -49,11 +49,10 @@ public class AddApsSnapshotClosedLoopFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("add_aps_snapshot_closed_loop");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "add_aps_snapshot_closed_loop");
         _migratorConnectionString = database.MigratorConnectionString;
         _superuserConnectionString = database.SuperuserConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
         await ReadAsync(_migratorConnectionString, AfterUp);

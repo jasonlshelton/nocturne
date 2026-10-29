@@ -40,10 +40,9 @@ public sealed class RetireUiSettingsAggregateFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("retire_ui_settings_aggregate");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "retire_ui_settings_aggregate");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(null);
         await ReadAsync();

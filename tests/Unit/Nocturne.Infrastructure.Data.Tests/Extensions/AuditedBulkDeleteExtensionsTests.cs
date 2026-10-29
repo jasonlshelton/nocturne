@@ -24,11 +24,12 @@ public class AuditedBulkDeleteExtensionsTests : IDisposable
 
     public AuditedBulkDeleteExtensionsTests()
     {
-        _connection = new SqliteConnection("Filename=:memory:");
-        _connection.Open();
+        var connection = new SqliteConnection("Filename=:memory:");
+        connection.Open();
+        TestNocturneDbContext.CreateSchema(connection);
+        _connection = connection;
 
         using var context = CreateContext();
-        context.Database.EnsureCreated();
         context.Tenants.Add(new TenantEntity { Id = _tenantId, Slug = "test" });
         context.SaveChanges();
     }

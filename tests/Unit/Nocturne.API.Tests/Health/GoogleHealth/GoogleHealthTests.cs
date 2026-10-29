@@ -9,6 +9,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Controllers.V4.Health;
 using Nocturne.API.Multitenancy;
@@ -69,6 +70,7 @@ public class GoogleHealthTests : IDisposable
         services.AddSingleton(db.AsFactory());
         services.AddSingleton(Mock.Of<ITenantAccessor>());
         services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<IConnectorSyncCursorStore, ConnectorSyncCursorStore>();
         using var provider = services.BuildServiceProvider();
         var coordinator = new GoogleHealthCoordinator(provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System);
@@ -105,7 +107,7 @@ public class GoogleHealthTests : IDisposable
         }
         db.TenantId = tenantId;
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         string[] types = ["heart-rate", "steps", "weight", "sleep"];
         var emptyRun = await writer.BeginReconciliationAsync(types, from, from.AddDays(1), default);
         foreach (var type in types) await writer.StageReconciliationIdsAsync(emptyRun, type, ["", " "], default);
@@ -149,7 +151,7 @@ public class GoogleHealthTests : IDisposable
         var from = DateTimeOffset.UtcNow.AddDays(-1);
         db.TenantId = tenantId;
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         var run = await writer.BeginReconciliationAsync(["steps"], from, from.AddDays(1), default);
         var identifiers = Enumerable.Range(0, 100_000).Select(index => "id-" + index).ToArray();
         await writer.StageReconciliationIdsAsync(run, "steps", identifiers, default);
@@ -183,6 +185,7 @@ public class GoogleHealthTests : IDisposable
             new TenantEntity { Id = otherTenantId, Slug = "other-sleep", DisplayName = "Other sleep", IsActive = true });
         var from = new DateTimeOffset(2026, 9, 5, 0, 0, 0, TimeSpan.Zero);
         var to = from.AddDays(1);
+        var reconciledAt = new DateTimeOffset(2026, 10, 29, 3, 4, 5, TimeSpan.Zero);
         SleepSessionEntity Session(string identifier, DateTimeOffset end, string source = "Google", string app = "Google Health") => new()
         {
             Id = Guid.NewGuid(), OriginalId = identifier, Source = source, SourceApp = app,
@@ -208,7 +211,7 @@ public class GoogleHealthTests : IDisposable
         await db.SaveChangesAsync();
         db.TenantId = tenantId;
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), new FakeTimeProvider(reconciledAt), NullLogger<GoogleHealthReadingWriter>.Instance);
 
         var run = await writer.BeginReconciliationAsync(["sleep"], from, to, default);
         await writer.StageReconciliationIdsAsync(run, "sleep", ["retained"], default);
@@ -230,7 +233,7 @@ public class GoogleHealthTests : IDisposable
             .ToListAsync();
         Assert.Equal(9, stored.Count);
         var stale = Assert.Single(stored, session => session.OriginalId == "stale-overnight");
-        Assert.NotNull(stale.DeletedAt);
+        Assert.Equal(reconciledAt.UtcDateTime, stale.DeletedAt);
         Assert.False(stale.DeletedByUser);
         var deleted = Assert.Single(stored, session => session.OriginalId == "user-deleted");
         Assert.Equal(userDeletedAt, deleted.DeletedAt);
@@ -259,7 +262,7 @@ public class GoogleHealthTests : IDisposable
         sleepService.Setup(value => value.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
             .Returns<SleepSession, CancellationToken>(repository.UpsertSessionAsync);
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), sleepService.Object, db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), sleepService.Object, db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         var start = new DateTime(2026, 9, 1, 22, 0, 0, DateTimeKind.Utc);
         var otherSource = await repository.UpsertSessionAsync(new SleepSession
         {
@@ -345,16 +348,34 @@ public class GoogleHealthTests : IDisposable
     [Fact]
     public void Import_selection_and_history_are_validated()
     {
+        var service = Service(new TestConnectorStore(), new StubHandler(_ => Json("{}")), Guid.NewGuid());
         var options = Options();
         options.DataTypes = [];
         options.ImportFrom = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        GoogleHealthService.ValidateOptions(options);
+        service.ValidateOptions(options);
 
         options.DataTypes = ["body-fat"];
-        Assert.Throws<GoogleHealthException>(() => GoogleHealthService.ValidateOptions(options));
+        Assert.Throws<GoogleHealthException>(() => service.ValidateOptions(options));
         options.DataTypes = ["weight"];
         options.ImportFrom = DateTimeOffset.UtcNow.AddDays(2);
-        Assert.Throws<GoogleHealthException>(() => GoogleHealthService.ValidateOptions(options));
+        Assert.Throws<GoogleHealthException>(() => service.ValidateOptions(options));
+    }
+
+    [Fact]
+    public void Import_start_may_be_at_most_a_day_ahead_of_the_clock()
+    {
+        var now = new DateTimeOffset(2026, 10, 29, 3, 0, 0, TimeSpan.Zero);
+        var service = Service(new TestConnectorStore(), new StubHandler(_ => Json("{}")), Guid.NewGuid(),
+            time: new FakeTimeProvider(now));
+        var options = Options();
+        options.DataTypes = ["weight"];
+
+        options.ImportFrom = now.AddDays(1);
+        service.ValidateOptions(options);
+
+        options.ImportFrom = now.AddDays(1).AddTicks(1);
+        var rejected = Assert.Throws<GoogleHealthException>(() => service.ValidateOptions(options));
+        Assert.Equal("invalid_configuration", rejected.Message);
     }
 
     [Fact]
@@ -615,7 +636,7 @@ public class GoogleHealthTests : IDisposable
         sleepService.Setup(value => value.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()))
             .Returns<SleepSession, CancellationToken>(repository.UpsertSessionAsync);
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), sleepService.Object, db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), sleepService.Object, db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         var start = new DateTime(2026, 9, 1, 22, 0, 0, DateTimeKind.Utc);
         await repository.UpsertSessionAsync(new SleepSession
         {
@@ -978,7 +999,7 @@ public class GoogleHealthTests : IDisposable
         var writer = new GoogleHealthReadingWriter(
             Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
             Mock.Of<IBodyWeightService>(), Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db),
-            NullLogger<GoogleHealthReadingWriter>.Instance);
+            TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
 
         var from = DateTimeOffset.UtcNow.AddDays(-1);
         var to = DateTimeOffset.UtcNow;
@@ -1007,7 +1028,7 @@ public class GoogleHealthTests : IDisposable
         sleep.Setup(service => service.UpsertSessionAsync(next, It.IsAny<CancellationToken>()))
             .ReturnsAsync(next);
         var writer = new GoogleHealthReadingWriter(Mock.Of<IHeartRateService>(), Mock.Of<IStepCountService>(),
-            Mock.Of<IBodyWeightService>(), sleep.Object, db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<IBodyWeightService>(), sleep.Object, db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
 
         await writer.WriteAsync([], [deleted, next], 2, default);
 
@@ -1030,7 +1051,7 @@ public class GoogleHealthTests : IDisposable
             .ReturnsAsync([]);
         var writer = new GoogleHealthReadingWriter(
             heartRates.Object, Mock.Of<IStepCountService>(), Mock.Of<IBodyWeightService>(),
-            Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         var readings = Enumerable.Range(0, 5).Select(index => new GoogleHealthReading
         {
             DataType = "heart-rate", Mills = index, Value = 60 + index
@@ -1057,7 +1078,7 @@ public class GoogleHealthTests : IDisposable
             .ReturnsAsync([]);
         var writer = new GoogleHealthReadingWriter(
             heartRates.Object, Mock.Of<IStepCountService>(), Mock.Of<IBodyWeightService>(),
-            Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), NullLogger<GoogleHealthReadingWriter>.Instance);
+            Mock.Of<ISleepService>(), db.AsFactory(), TenantOf(db), TimeProvider.System, NullLogger<GoogleHealthReadingWriter>.Instance);
         var readings = new[]
         {
             new GoogleHealthReading { DataType = "heart-rate", Mills = 1, Value = 60 },
@@ -1709,7 +1730,8 @@ public class GoogleHealthTests : IDisposable
         GoogleHealthPlatformOptions? platform = null,
         IGoogleHealthReadingWriter? writer = null,
         Nocturne.Core.Models.V4.BiologicalSex? sex = null,
-        IGoogleHealthGrantHolders? holders = null)
+        IGoogleHealthGrantHolders? holders = null,
+        TimeProvider? time = null)
     {
         var platformOptions = Microsoft.Extensions.Options.Options.Create(platform ?? Platform());
         var tenant = new Mock<ITenantAccessor>();
@@ -1742,6 +1764,7 @@ public class GoogleHealthTests : IDisposable
             platformOptions,
             OAuthState,
             writer ?? Mock.Of<IGoogleHealthReadingWriter>(),
+            time ?? TimeProvider.System,
             NullLogger<GoogleHealthService>.Instance);
     }
 

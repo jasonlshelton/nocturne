@@ -18,13 +18,16 @@ public class LibreLinkAuthTokenProvider(
     IConnectorServerResolver<LibreLinkUpConnectorConfiguration> serverResolver,
     ITenantAccessor tenantAccessor,
     ILogger<LibreLinkAuthTokenProvider> logger,
-    IRetryDelayStrategy retryDelayStrategy
+    IRetryDelayStrategy retryDelayStrategy,
+    TimeProvider? timeProvider = null
 ) : AuthTokenProviderBase<LibreLinkUpConnectorConfiguration>(httpClient, tokenCache, serverResolver, tenantAccessor, logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private readonly IRetryDelayStrategy _retryDelayStrategy =
         retryDelayStrategy
@@ -114,7 +117,7 @@ public class LibreLinkAuthTokenProvider(
 
         if (string.IsNullOrEmpty(token)) return (null, DateTime.MinValue, null);
 
-        var expiresAt = DateTime.UtcNow.AddHours(24);
+        var expiresAt = _timeProvider.GetUtcNow().UtcDateTime.AddHours(24);
 
         _logger.LogInformation(
             "LibreLinkUp authentication successful, token expires at {ExpiresAt}",

@@ -325,7 +325,7 @@ public class CountControllerTests
         Mock<IDeviceStatusGroupRepository> groups, Mock<IApsSnapshotRepository>? aps = null) =>
         new(groups.Object, (aps ?? new Mock<IApsSnapshotRepository>()).Object, Mock.Of<IPumpSnapshotRepository>(),
             Mock.Of<IUploaderSnapshotRepository>(), Mock.Of<IStateSpanRepository>(),
-            Mock.Of<IDeviceStatusExtrasRepository>(), NullLogger<DeviceStatusProjectionService>.Instance);
+            Mock.Of<IDeviceStatusExtrasRepository>(), TimeProvider.System, NullLogger<DeviceStatusProjectionService>.Instance);
 
     private static LegacyCountResult[] Rows(ActionResult<LegacyCountResult[]> result) =>
         result.Result.Should().BeOfType<OkObjectResult>().Subject

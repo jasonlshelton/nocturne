@@ -45,7 +45,8 @@ public class AlertDeliveryServiceTestFireTests
             Mock.Of<ISignalRBroadcastService>(),
             alarmRelay ?? Mock.Of<IEngineAlarmRelay>(),
             serviceProvider,
-            NullLogger<AlertDeliveryService>.Instance);
+            NullLogger<AlertDeliveryService>.Instance,
+            TimeProvider.System);
         return (service, factory);
     }
 

@@ -22,6 +22,7 @@ public sealed class GoogleHealthReadingWriter(
     ISleepService sleep,
     INocturneDbContextFactory contexts,
     ITenantAccessor tenant,
+    TimeProvider time,
     ILogger<GoogleHealthReadingWriter> logger) : IGoogleHealthReadingWriter
 {
     public const string Source = DataSources.GoogleHealthConnector;
@@ -74,7 +75,7 @@ public sealed class GoogleHealthReadingWriter(
         await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var deletedAt = DateTime.UtcNow;
+            var deletedAt = time.GetUtcNow().UtcDateTime;
             foreach (var (type, identifiers) in run.Identifiers)
             {
                 // An empty provider result is not evidence that previously imported data was deleted.

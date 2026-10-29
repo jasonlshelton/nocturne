@@ -44,6 +44,7 @@ public class NightscoutConnectorBackgroundService
     /// <param name="budget">The process-wide budget.</param>
     /// <param name="activeTenants">The active tenants every poller reads.</param>
     /// <param name="logger">Logger instance for this background service.</param>
+    /// <param name="timeProvider">Clock the schedule is computed against.</param>
     /// <param name="nudge">Delivers configuration writes for this connector.</param>
     /// <param name="metrics">Connector sync instruments.</param>
     /// <param name="runGuard">Refuses a sync for a key another run already holds.</param>
@@ -52,11 +53,12 @@ public class NightscoutConnectorBackgroundService
         ConnectorSyncBudget budget,
         ActiveTenantSnapshot activeTenants,
         ILogger<NightscoutConnectorBackgroundService> logger,
+        TimeProvider timeProvider,
         ConnectorPollerNudge? nudge = null,
         ConnectorSyncMetrics? metrics = null,
         TenantRunGuard? runGuard = null
     )
-        : base(serviceProvider, budget, activeTenants, logger, nudge, metrics, runGuard) { }
+        : base(serviceProvider, budget, activeTenants, logger, timeProvider, nudge, metrics, runGuard) { }
 
     /// <inheritdoc />
     protected override async Task StartRealtimeListenersAsync(CancellationToken cancellationToken)

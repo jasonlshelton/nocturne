@@ -51,8 +51,9 @@ public class MembershipRequestServiceTests : IDisposable
         _service = new MembershipRequestService(
             _dbContext.AsFactory(),
             _tenantService.Object,
-            new TenantRoleService(_dbContext.AsFactory()),
+            new TenantRoleService(_dbContext.AsFactory(), TimeProvider.System),
             _notificationService.Object,
+            TimeProvider.System,
             NullLogger<MembershipRequestService>.Instance);
 
         SeedData();

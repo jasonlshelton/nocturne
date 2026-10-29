@@ -56,7 +56,7 @@ public class AlertAcknowledgeEndpointTests
     }
 
     private AlertReceiptService Receipts =>
-        new(_contextFactoryMock.Object);
+        new(_contextFactoryMock.Object, TimeProvider.System);
 
     private AlertsController CreateController()
     {

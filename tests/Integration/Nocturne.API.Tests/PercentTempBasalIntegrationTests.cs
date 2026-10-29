@@ -18,6 +18,7 @@ namespace Nocturne.API.Tests.Integration;
 /// their schedule-derived rates following later schedule and activation writes. Every test names its
 /// own profile store, so no profile version a test before it cached answers for it.
 /// </summary>
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class PercentTempBasalIntegrationTests : ApiIntegrationTestBase
 {

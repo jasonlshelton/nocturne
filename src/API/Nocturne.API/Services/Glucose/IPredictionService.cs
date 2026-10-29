@@ -19,7 +19,7 @@ public interface IPredictionService
     /// to oref — is pinned to that instant. Used by <c>AlertReplayService</c> so a
     /// <c>predicted</c> rule can be evaluated at historical replay ticks against the
     /// state the user actually had at that tick. <c>null</c> preserves the live behavior
-    /// (anchored at <see cref="DateTimeOffset.UtcNow"/>).
+    /// (anchored at the implementation's <see cref="TimeProvider"/> clock).
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when no glucose readings or device status data are available.</exception>
     Task<GlucosePredictionResponse> GetPredictionsAsync(

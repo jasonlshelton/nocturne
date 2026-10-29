@@ -8,10 +8,7 @@ namespace Nocturne.Connectors.Core.Tests.Services;
 
 public class AuthenticationFailureReasonTests
 {
-    private sealed class TestConfig : BaseConnectorConfiguration
-    {
-        protected override void ValidateSourceSpecificConfiguration() { }
-    }
+    private sealed class TestConfig : BaseConnectorConfiguration;
 
     private sealed class TestConnectorService : BaseConnectorService<TestConfig>
     {

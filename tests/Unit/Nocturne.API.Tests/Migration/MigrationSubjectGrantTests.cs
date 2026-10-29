@@ -223,7 +223,8 @@ public class MigrationSubjectGrantTests
             },
             tenant,
             NullLogger.Instance,
-            provider);
+            provider,
+            TimeProvider.System);
 
         await job.ExecuteAsync(CancellationToken.None);
         job.GetStatus().State.Should().Be(MigrationJobState.Completed);
@@ -493,7 +494,7 @@ public class MigrationSubjectGrantTests
                 Mode = MigrationMode.Api,
                 CreatedAt = DateTime.UtcNow,
             },
-            tenant, NullLogger.Instance, provider);
+            tenant, NullLogger.Instance, provider, TimeProvider.System);
 
         await job.ExecuteAsync(CancellationToken.None);
 

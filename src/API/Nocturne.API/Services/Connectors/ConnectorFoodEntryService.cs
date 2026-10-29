@@ -20,16 +20,19 @@ public class ConnectorFoodEntryService : IConnectorFoodEntryService
 {
     private readonly INocturneDbContextFactory _contexts;
     private readonly IMealMatchingService _mealMatchingService;
+    private readonly TimeProvider _time;
     private readonly ILogger<ConnectorFoodEntryService> _logger;
 
     public ConnectorFoodEntryService(
         INocturneDbContextFactory contexts,
         IMealMatchingService mealMatchingService,
+        TimeProvider timeProvider,
         ILogger<ConnectorFoodEntryService> logger
     )
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _mealMatchingService = mealMatchingService ?? throw new ArgumentNullException(nameof(mealMatchingService));
+        _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -283,7 +286,7 @@ public class ConnectorFoodEntryService : IConnectorFoodEntryService
             return 0;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         foreach (var entry in removed)
         {
             entry.Status = ConnectorFoodEntryStatus.Deleted;

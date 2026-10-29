@@ -19,6 +19,7 @@ public class MembershipRequestService : IMembershipRequestService
     private readonly ITenantService _tenantService;
     private readonly ITenantRoleService _tenantRoleService;
     private readonly IInAppNotificationService _notificationService;
+    private readonly TimeProvider _time;
     private readonly ILogger<MembershipRequestService> _logger;
 
     public MembershipRequestService(
@@ -26,12 +27,14 @@ public class MembershipRequestService : IMembershipRequestService
         ITenantService tenantService,
         ITenantRoleService tenantRoleService,
         IInAppNotificationService notificationService,
+        TimeProvider timeProvider,
         ILogger<MembershipRequestService> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _tenantService = tenantService;
         _tenantRoleService = tenantRoleService;
         _notificationService = notificationService;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -59,7 +62,7 @@ public class MembershipRequestService : IMembershipRequestService
             SubjectId = subjectId,
             Message = message,
             Status = "pending",
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = _time.GetUtcNow().UtcDateTime,
         };
 
         db.MembershipRequests.Add(entity);
@@ -186,7 +189,7 @@ public class MembershipRequestService : IMembershipRequestService
 
         request.Status = "approved";
         request.DecidedBySubjectId = decidedBySubjectId;
-        request.DecidedAt = DateTime.UtcNow;
+        request.DecidedAt = _time.GetUtcNow().UtcDateTime;
         request.RoleIds = roleIds;
         await db.SaveChangesAsync(ct);
 
@@ -224,7 +227,7 @@ public class MembershipRequestService : IMembershipRequestService
 
         request.Status = "denied";
         request.DecidedBySubjectId = decidedBySubjectId;
-        request.DecidedAt = DateTime.UtcNow;
+        request.DecidedAt = _time.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation(

@@ -45,7 +45,7 @@ public sealed record AlertReceipt(
 /// Records that someone saw an alarm, and reads those records back. A receipt changes nothing about
 /// the alert: it neither acknowledges nor mutes, for the viewer or anyone else.
 /// </summary>
-public sealed class AlertReceiptService(INocturneDbContextFactory contexts)
+public sealed class AlertReceiptService(INocturneDbContextFactory contexts, TimeProvider timeProvider)
 {
     /// <summary>
     /// Records that <paramref name="actor"/> saw the excursion. Recording it twice keeps the first.
@@ -71,7 +71,7 @@ public sealed class AlertReceiptService(INocturneDbContextFactory contexts)
         var label = actor.Kind == AlertReceiptActorKind.Guest
             ? await db.OAuthGrants.Where(g => g.Id == actor.Id).Select(g => g.Label).FirstOrDefaultAsync(ct)
             : actor.Label;
-        var seenAt = DateTime.UtcNow;
+        var seenAt = timeProvider.GetUtcNow().UtcDateTime;
 
         db.AlertExcursionReceipts.Add(new AlertExcursionReceiptEntity
         {

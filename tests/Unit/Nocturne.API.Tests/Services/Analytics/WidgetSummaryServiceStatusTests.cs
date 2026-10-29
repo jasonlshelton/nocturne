@@ -175,6 +175,6 @@ public class WidgetSummaryServiceStatusTests
             new AlertRepository(contextFactory.Object),
             MockTenantAccessor.Create(tenantId: _tenantId).Object,
             categoryReadContext.Object,
-            NullLogger<WidgetSummaryService>.Instance);
+            TimeProvider.System, NullLogger<WidgetSummaryService>.Instance);
     }
 }

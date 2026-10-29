@@ -16,7 +16,7 @@ namespace Nocturne.Core.Clinical.Tests.Statistics;
 /// </summary>
 public class StatisticsServiceHourlyDeliveryTests
 {
-    private readonly StatisticsService _sut = new();
+    private readonly StatisticsService _sut = new(TimeProvider.System);
 
     private static readonly DateTime StartDate = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime EndDate = new(2024, 1, 31, 0, 0, 0, DateTimeKind.Utc);

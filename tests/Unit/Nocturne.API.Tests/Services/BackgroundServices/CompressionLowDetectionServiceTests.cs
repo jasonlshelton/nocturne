@@ -733,6 +733,7 @@ public class CompressionLowDetectionServiceTests
         var context = new NocturneDbContext(options) { TenantId = TenantId };
         var settingsService = new UISettingsService(
             context.AsFactory(),
+            TimeProvider.System,
             NullLogger<UISettingsService>.Instance
         );
         await context.DisposeAsync();

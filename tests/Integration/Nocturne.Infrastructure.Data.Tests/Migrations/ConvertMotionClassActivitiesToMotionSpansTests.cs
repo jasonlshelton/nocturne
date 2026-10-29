@@ -73,11 +73,10 @@ public class ConvertMotionClassActivitiesToMotionSpansFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("convert_motion_class");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "convert_motion_class");
         _migratorConnectionString = database.MigratorConnectionString;
         _superuserConnectionString = database.SuperuserConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(targetMigration: null);

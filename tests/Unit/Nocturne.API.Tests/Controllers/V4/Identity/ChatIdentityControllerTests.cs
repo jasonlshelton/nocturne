@@ -38,11 +38,11 @@ public class ChatIdentityControllerTests : IDisposable
         _db = TestDbContextFactory.CreateSqlite();
         _service = new ChatIdentityService(
             new ChatIdentityDirectoryService(
-                _db.ContextFactory.AsNocturneFactory(), Mock.Of<ILogger<ChatIdentityDirectoryService>>()),
+                _db.ContextFactory.AsNocturneFactory(), TimeProvider.System, Mock.Of<ILogger<ChatIdentityDirectoryService>>()),
             new ChatIdentityPendingLinkService(
-                _db.ContextFactory.AsNocturneFactory(), Mock.Of<ILogger<ChatIdentityPendingLinkService>>()),
+                _db.ContextFactory.AsNocturneFactory(), TimeProvider.System, Mock.Of<ILogger<ChatIdentityPendingLinkService>>()),
             _db.ContextFactory.AsNocturneFactory(),
-            Mock.Of<ILogger<ChatIdentityService>>());
+            TimeProvider.System, Mock.Of<ILogger<ChatIdentityService>>());
 
         _tenantId = NewTenant();
         _otherTenantId = NewTenant();
@@ -276,7 +276,7 @@ public class ChatIdentityControllerTests : IDisposable
     public async Task GetPending_names_the_chat_account_the_token_would_link()
     {
         var token = await new ChatIdentityPendingLinkService(
-                _db.ContextFactory.AsNocturneFactory(), Mock.Of<ILogger<ChatIdentityPendingLinkService>>())
+                _db.ContextFactory.AsNocturneFactory(), TimeProvider.System, Mock.Of<ILogger<ChatIdentityPendingLinkService>>())
             .CreateAsync(Platform, CallerChatUser, "sam_t", null, "connect-slash", CancellationToken.None);
 
         var result = await CreateController().GetPending(token, CancellationToken.None);

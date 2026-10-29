@@ -78,7 +78,8 @@ public class AuthorizationServiceCrudTests : IDisposable
             _mockDirectGrantService.Object,
             _mockJwtService.Object,
             _dbContext.AsFactory(),
-            _categoryReadContext
+            _categoryReadContext,
+            TimeProvider.System
         );
     }
 

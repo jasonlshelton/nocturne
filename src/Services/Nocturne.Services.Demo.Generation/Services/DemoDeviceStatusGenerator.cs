@@ -33,13 +33,14 @@ public static class DemoDeviceStatusGenerator
     /// The loop cycle of one simulation step; null when the loop could not cycle (a site change, a
     /// sensor warm-up, the phone out of range).
     /// </summary>
-    public static DeviceStatus? ForStep(DemoTimeStep step, double targetGlucose, double baseBasalRate)
+    public static DeviceStatus? ForStep(DemoTimeStep step, DemoClock clock, double targetGlucose, double baseBasalRate)
     {
         if (step.Loop is not (DemoLoopState.Closed or DemoLoopState.Manual))
             return null;
 
         return Create(
-            step.Time,
+            step.Utc,
+            clock,
             step.Entry.GlucoseMgdl(),
             step.Iob,
             step.Cob,
@@ -57,11 +58,12 @@ public static class DemoDeviceStatusGenerator
 
     /// <summary>
     /// Builds the device status for one simulation step (historical) or one
-    /// realtime tick. <paramref name="localTime"/> is the step's local time;
-    /// the emitted mills convert via its Kind.
+    /// realtime tick. <paramref name="time"/> is the step's instant, or a
+    /// wall-clock time in the clock's zone; see <see cref="DemoClock.ToUtc"/>.
     /// </summary>
     public static DeviceStatus Create(
-        DateTime localTime,
+        DateTime time,
+        DemoClock clock,
         double glucose,
         double iob,
         double cob,
@@ -76,8 +78,10 @@ public static class DemoDeviceStatusGenerator
         double? maxSafeBasalRate = null,
         bool enacted = true)
     {
-        var mills = new DateTimeOffset(localTime).ToUnixTimeMilliseconds();
-        var isoTime = new DateTimeOffset(localTime).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        var utc = clock.ToUtc(time);
+        var localTime = clock.ToLocal(utc);
+        var mills = utc.ToMills();
+        var isoTime = utc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
         var rng = DayScenarios.RngFor(localTime.Date, $"devicestatus:{localTime.Hour}:{localTime.Minute}");
 
         var eventualBg = EstimateEventualBg(glucose, iob, cob, effectiveIsf, effectiveCarbRatio, targetGlucose);
@@ -136,8 +140,8 @@ public static class DemoDeviceStatusGenerator
         {
             Device = DeviceName,
             Mills = mills,
-            CreatedAt = new DateTimeOffset(localTime).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-            UtcOffset = (int)TimeZoneInfo.Local.GetUtcOffset(localTime).TotalMinutes,
+            CreatedAt = isoTime,
+            UtcOffset = (int)clock.Zone.GetUtcOffset(utc).TotalMinutes,
             OpenAps = new OpenApsStatus
             {
                 Suggested = suggested,

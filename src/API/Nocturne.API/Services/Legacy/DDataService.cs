@@ -35,6 +35,7 @@ public class DDataService : IDDataService
     private readonly IFoodRepository _food;
     private readonly IActivityService _activities;
     private readonly IStoreSizeReader _storeSize;
+    private readonly TimeProvider _time;
     private readonly ILogger<DDataService> _logger;
 
     private static readonly (string EventType, long WindowMills)[] FrameLatestTreatments =
@@ -66,8 +67,10 @@ public class DDataService : IDDataService
         IFoodRepository food,
         IActivityService activities,
         IStoreSizeReader storeSize,
+        TimeProvider timeProvider,
         ILogger<DDataService> logger)
     {
+        _time = timeProvider;
         _store = store;
         _treatments = treatments;
         _profiles = profiles;
@@ -90,7 +93,7 @@ public class DDataService : IDDataService
         CancellationToken cancellationToken = default
     )
     {
-        var isLive = Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - timestamp) < LiveFrameWindowMills;
+        var isLive = Math.Abs(_time.GetUtcNow().ToUnixTimeMilliseconds() - timestamp) < LiveFrameWindowMills;
         var frame = await LoadDDataAsync(
             new DDataFrame
             {
@@ -150,7 +153,7 @@ public class DDataService : IDDataService
     /// <inheritdoc />
     public async Task<DData> GetCurrentDDataAsync(CancellationToken cancellationToken = default)
     {
-        var currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var currentTime = _time.GetUtcNow().ToUnixTimeMilliseconds();
         return await GetDDataAsync(currentTime, cancellationToken);
     }
 

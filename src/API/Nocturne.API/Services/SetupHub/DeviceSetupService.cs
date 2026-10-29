@@ -41,6 +41,7 @@ public partial class DeviceSetupService(
     ITrackerAlertRuleSyncService trackerRuleSync,
     ITherapySettingsResolver therapySettings,
     ConsumableTrackerWriter trackerWriter,
+    TimeProvider time,
     ILogger<DeviceSetupService> logger)
 {
     /// <summary>How far back data counts as evidence of what is in use now.</summary>
@@ -121,7 +122,7 @@ public partial class DeviceSetupService(
 
     /// <summary>The insulin action time in use now, resolved as insulin on board resolves it.</summary>
     public Task<InsulinActionTime> ActionTimeAsync(CancellationToken ct) =>
-        therapySettings.GetActionTimeAsync(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ct: ct);
+        therapySettings.GetActionTimeAsync(time.GetUtcNow().ToUnixTimeMilliseconds(), ct: ct);
 
     /// <summary>
     /// Records a confirmed guess, or the catalogue entry it was swapped for, as the current device of
@@ -167,7 +168,7 @@ public partial class DeviceSetupService(
         var zone = TimeZoneInfo.TryFindSystemTimeZoneById(await therapySettings.GetTimezoneAsync(ct: ct) ?? "", out var found)
             ? found
             : TimeZoneInfo.Utc;
-        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone));
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(time.GetUtcNow().UtcDateTime, zone));
     }
 
     /// <summary>
@@ -484,7 +485,7 @@ public partial class DeviceSetupService(
     private async Task<Evidence> GatherEvidenceAsync(CancellationToken ct)
     {
         await using var db = await contexts.CreateAsync(ct);
-        var since = DateTime.UtcNow - EvidenceWindow;
+        var since = time.GetUtcNow().UtcDateTime - EvidenceWindow;
         var found = new List<DeviceEvidence>();
 
         var readingLabel = await db.SensorGlucose

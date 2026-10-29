@@ -41,10 +41,9 @@ public sealed class RepairEpochProfileVersionsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("repair_epoch_profiles");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "repair_epoch_profiles");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(null);
         await ReadAsync(AfterUp);

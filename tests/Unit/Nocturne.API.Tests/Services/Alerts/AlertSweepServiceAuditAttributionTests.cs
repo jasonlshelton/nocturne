@@ -74,7 +74,8 @@ public class AlertSweepServiceAuditAttributionTests
 
         var sut = new AlertSweepService(
             services.BuildServiceProvider(),
-            NullLogger<AlertSweepService>.Instance);
+            NullLogger<AlertSweepService>.Instance,
+            TimeProvider.System);
 
         // Act
         await sut.EvaluateWallClockRulesAsync(CancellationToken.None);

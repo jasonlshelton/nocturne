@@ -23,10 +23,9 @@ public class UnverifyKnownClientsWithForeignRedirectUrisFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("unverify_known_clients");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "unverify_known_clients");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(MigrationUnderTest);
     }

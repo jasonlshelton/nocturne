@@ -29,10 +29,9 @@ public class SingleDefaultTherapySettingsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("single_default_therapy");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "single_default_therapy");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

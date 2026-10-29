@@ -33,6 +33,7 @@ public class DeviceStatusProjectionService
     private readonly IUploaderSnapshotRepository _uploaderRepo;
     private readonly IStateSpanRepository _stateSpanRepo;
     private readonly IDeviceStatusExtrasRepository _extrasRepo;
+    private readonly TimeProvider _time;
     private readonly ILogger<DeviceStatusProjectionService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -54,6 +55,7 @@ public class DeviceStatusProjectionService
         IUploaderSnapshotRepository uploaderRepo,
         IStateSpanRepository stateSpanRepo,
         IDeviceStatusExtrasRepository extrasRepo,
+        TimeProvider timeProvider,
         ILogger<DeviceStatusProjectionService> logger)
     {
         _groupRepo = groupRepo;
@@ -62,6 +64,7 @@ public class DeviceStatusProjectionService
         _uploaderRepo = uploaderRepo;
         _stateSpanRepo = stateSpanRepo;
         _extrasRepo = extrasRepo;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -297,7 +300,7 @@ public class DeviceStatusProjectionService
             }
 
             extras ??= (await _extrasRepo.GetByCorrelationIdsAsync(correlationIds, ct)).FirstOrDefault();
-            var timestamp = aps?.Timestamp ?? pump?.Timestamp ?? uploader?.Timestamp ?? extras?.Timestamp ?? DateTime.UtcNow;
+            var timestamp = aps?.Timestamp ?? pump?.Timestamp ?? uploader?.Timestamp ?? extras?.Timestamp ?? _time.GetUtcNow().UtcDateTime;
             var overrides = await _stateSpanRepo.GetByCategory(
                 StateSpanCategory.Override,
                 from: timestamp.AddMinutes(-1),

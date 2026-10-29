@@ -18,7 +18,7 @@ public class SampleDataSeederDeviceRosterTests
     {
         var seed = SampleDataSeeder.DeviceRoster.Single(d => d.Model == model);
 
-        var device = PatientDeviceMapper.ToDomainModel(SampleDataSeeder.BuildDevice(seed, Guid.NewGuid()));
+        var device = PatientDeviceMapper.ToDomainModel(SampleDataSeeder.BuildDevice(seed, Guid.NewGuid(), new DateOnly(2026, 3, 15)));
 
         device.DeviceCategory.Should().Be(expected);
     }
@@ -28,7 +28,7 @@ public class SampleDataSeederDeviceRosterTests
     {
         var seed = SampleDataSeeder.DeviceRoster.Single(d => d.Model == "Omnipod DASH");
 
-        var device = PatientDeviceMapper.ToDomainModel(SampleDataSeeder.BuildDevice(seed, Guid.NewGuid()));
+        var device = PatientDeviceMapper.ToDomainModel(SampleDataSeeder.BuildDevice(seed, Guid.NewGuid(), new DateOnly(2026, 3, 15)));
 
         device.AidAlgorithm.Should().Be(AidAlgorithm.Trio);
     }

@@ -337,6 +337,7 @@ public class TimeQueryFindTests
             new Mock<IUploaderSnapshotRepository>().Object,
             new Mock<IStateSpanRepository>().Object,
             new Mock<IDeviceStatusExtrasRepository>().Object,
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
 
         var service = new TimeQueryService(

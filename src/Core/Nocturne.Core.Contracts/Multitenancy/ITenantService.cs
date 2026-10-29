@@ -77,6 +77,14 @@ public interface ITenantService
     /// <summary>Checks whether a slug is valid and available for use.</summary>
     Task<SlugValidationResult> ValidateSlugAsync(string slug, CancellationToken ct = default);
 
+    /// <summary>
+    /// <see cref="ValidateSlugAsync(string, CancellationToken)"/>, except that a reserved name passes
+    /// when <paramref name="allowReserved"/> is set. Reserved names keep the platform's own subdomains
+    /// out of tenants' hands. Only the dev-only seed endpoint sets it (enabled in Development, or by
+    /// <c>NOCTURNE_ENABLE_DEV_ONLY_ENDPOINTS</c>), which already hands out owner sessions to anyone.
+    /// </summary>
+    Task<SlugValidationResult> ValidateSlugAsync(string slug, bool allowReserved, CancellationToken ct = default);
+
     /// <summary>Creates a new tenant and its owner subject in a single operation, using either a passkey credential or an OIDC identity.</summary>
     /// <exception cref="ProvisionConflictException">
     /// The credential names an owner subject id that already exists. Only an already-linked OIDC

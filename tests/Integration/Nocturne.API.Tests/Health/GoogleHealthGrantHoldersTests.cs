@@ -208,6 +208,7 @@ public sealed class GoogleHealthGrantHoldersTests(GoogleHealthPostgresFixture fi
         services.AddSingleton(Mock.Of<IHostEnvironment>());
         services.AddScoped<IAuditContext, AuditContext>();
         services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<IConnectorConfigurationService, ConnectorConfigurationService>();
         return services.BuildServiceProvider();
     }

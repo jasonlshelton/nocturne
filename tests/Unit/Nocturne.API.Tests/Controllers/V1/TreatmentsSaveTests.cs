@@ -29,7 +29,7 @@ public class TreatmentsSaveTests
     {
         _controller = new TreatmentsController(
             _service.Object,
-            new DocumentProcessingService(NullLogger<DocumentProcessingService>.Instance),
+            new DocumentProcessingService(TimeProvider.System, NullLogger<DocumentProcessingService>.Instance),
             TimeProvider.System,
             NullLogger<TreatmentsController>.Instance)
         {

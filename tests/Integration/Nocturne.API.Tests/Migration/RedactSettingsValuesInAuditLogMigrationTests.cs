@@ -42,10 +42,9 @@ public sealed class RedactSettingsValuesInAuditLogFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("redact_settings_audit");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "redact_settings_audit");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(null);
         await ReadAsync();

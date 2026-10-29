@@ -15,6 +15,7 @@ namespace Nocturne.API.Services.Devices;
 public class DeviceAgeService : IDeviceAgeService
 {
     private readonly IDeviceEventRepository _repository;
+    private readonly TimeProvider _time;
     private readonly ILogger<DeviceAgeService> _logger;
 
     // NIGHTSCOUT-COMPAT: upstream CAGE reads Site Change alone. A pod change, however it is reported,
@@ -38,9 +39,13 @@ public class DeviceAgeService : IDeviceAgeService
     private static readonly DeviceAgePreferences DefaultInsulinPrefs = new() { Info = 44, Warn = 48, Urgent = 72 };
     private static readonly DeviceAgePreferences DefaultBatteryPrefs = new() { Info = 312, Warn = 336, Urgent = 360 };
 
-    public DeviceAgeService(IDeviceEventRepository repository, ILogger<DeviceAgeService> logger)
+    public DeviceAgeService(
+        IDeviceEventRepository repository,
+        TimeProvider timeProvider,
+        ILogger<DeviceAgeService> logger)
     {
         _repository = repository;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -99,7 +104,7 @@ public class DeviceAgeService : IDeviceAgeService
         return CreateDeviceAgeInfo(latestEvent, effectivePrefs, "BAGE", "Pump battery");
     }
 
-    private static DeviceAgeInfo CreateDeviceAgeInfo(
+    private DeviceAgeInfo CreateDeviceAgeInfo(
         DeviceEvent? deviceEvent,
         DeviceAgePreferences prefs,
         string group,
@@ -118,7 +123,7 @@ public class DeviceAgeService : IDeviceAgeService
             };
         }
 
-        var ageSpan = DateTime.UtcNow - deviceEvent.Timestamp;
+        var ageSpan = _time.GetUtcNow().UtcDateTime - deviceEvent.Timestamp;
         var totalHours = ageSpan.TotalHours;
         var age = (int)totalHours;
         var days = age / 24;

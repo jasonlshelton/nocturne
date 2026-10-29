@@ -24,11 +24,14 @@ public class MyFitnessPalAuthTokenProvider(
     IConnectorServerResolver<MyFitnessPalConnectorConfiguration> serverResolver,
     ITenantAccessor tenantAccessor,
     ILogger<MyFitnessPalAuthTokenProvider> logger,
-    IRetryDelayStrategy retryDelayStrategy)
+    IRetryDelayStrategy retryDelayStrategy,
+    TimeProvider? timeProvider = null)
     : AuthTokenProviderBase<MyFitnessPalConnectorConfiguration>(httpClient, tokenCache, serverResolver, tenantAccessor, logger)
 {
     public const string RefreshTokenMetadataKey = "RefreshToken";
     public const string UserIdMetadataKey = "UserId";
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private readonly IRetryDelayStrategy _retryDelayStrategy =
         retryDelayStrategy ?? throw new ArgumentNullException(nameof(retryDelayStrategy));
@@ -52,7 +55,7 @@ public class MyFitnessPalAuthTokenProvider(
         var lifetime = token.ExpiresIn > 0
             ? TimeSpan.FromSeconds(token.ExpiresIn)
             : MyFitnessPalConstants.DefaultTokenLifetime;
-        var expiresAt = DateTime.UtcNow.Add(lifetime);
+        var expiresAt = _timeProvider.GetUtcNow().UtcDateTime.Add(lifetime);
 
         var metadata = new Dictionary<string, string>();
         if (!string.IsNullOrEmpty(token.RefreshToken))

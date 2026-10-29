@@ -336,6 +336,7 @@ public class LegacyReadCountCapTests
             Mock.Of<IUploaderSnapshotRepository>(),
             Mock.Of<IStateSpanRepository>(),
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             Mock.Of<ILogger<DeviceStatusProjectionService>>()
         );
 

@@ -31,6 +31,7 @@ public abstract class SimpleEntityService<TDomain, TEntity>
     protected readonly INocturneDbContextFactory Contexts;
     protected readonly IDocumentProcessingService DocumentProcessingService;
     protected readonly ISignalRBroadcastService SignalRBroadcastService;
+    protected readonly TimeProvider Time;
     protected readonly ILogger Logger;
 
     /// <summary>
@@ -38,12 +39,14 @@ public abstract class SimpleEntityService<TDomain, TEntity>
     /// </summary>
     /// <param name="documentProcessingService">Service for HTML sanitization and document preprocessing.</param>
     /// <param name="signalRBroadcastService">Service for broadcasting storage events to connected clients.</param>
+    /// <param name="timeProvider">The clock that stamps soft deletes.</param>
     /// <param name="logger">The logger instance.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required parameter is <see langword="null"/>.</exception>
     protected SimpleEntityService(
         INocturneDbContextFactory contexts,
         IDocumentProcessingService documentProcessingService,
         ISignalRBroadcastService signalRBroadcastService,
+        TimeProvider timeProvider,
         ILogger logger
     )
     {
@@ -54,6 +57,7 @@ public abstract class SimpleEntityService<TDomain, TEntity>
         SignalRBroadcastService =
             signalRBroadcastService
             ?? throw new ArgumentNullException(nameof(signalRBroadcastService));
+        Time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -430,7 +434,7 @@ public abstract class SimpleEntityService<TDomain, TEntity>
             }
 
             if (entity is ISoftDeletable softDeletable)
-                softDeletable.DeletedAt = DateTime.UtcNow;
+                softDeletable.DeletedAt = Time.GetUtcNow().UtcDateTime;
             else
                 EntitySet(db).Remove(entity);
             await db.SaveChangesAsync(cancellationToken);

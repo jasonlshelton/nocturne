@@ -69,15 +69,15 @@ public class AlertSweepService : BackgroundService
     /// </summary>
     /// <param name="serviceProvider">Root service provider for creating per-sweep DI scopes.</param>
     /// <param name="logger">The logger instance.</param>
-    /// <param name="timeProvider">Clock for snooze expiry; the system clock when omitted.</param>
+    /// <param name="timeProvider">Clock for snooze expiry.</param>
     public AlertSweepService(
         IServiceProvider serviceProvider,
         ILogger<AlertSweepService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider timeProvider)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)

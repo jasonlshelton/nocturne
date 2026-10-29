@@ -6,7 +6,7 @@ namespace Nocturne.Core.Clinical.Tests.Statistics;
 
 public class StatisticsServiceReportsTests
 {
-    private readonly StatisticsService _service = new();
+    private readonly StatisticsService _service = new(TimeProvider.System);
     private static readonly DateTime June1 = new(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTimeOffset Now = new(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
 

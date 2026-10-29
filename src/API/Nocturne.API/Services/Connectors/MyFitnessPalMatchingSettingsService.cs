@@ -24,14 +24,17 @@ public class MyFitnessPalMatchingSettingsService : IMyFitnessPalMatchingSettings
     };
 
     private readonly INocturneDbContextFactory _contexts;
+    private readonly TimeProvider _time;
     private readonly ILogger<MyFitnessPalMatchingSettingsService> _logger;
 
     public MyFitnessPalMatchingSettingsService(
         INocturneDbContextFactory contexts,
+        TimeProvider timeProvider,
         ILogger<MyFitnessPalMatchingSettingsService> logger
     )
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -78,7 +81,7 @@ public class MyFitnessPalMatchingSettingsService : IMyFitnessPalMatchingSettings
         try
         {
             var jsonValue = JsonSerializer.Serialize(settings, JsonOptions);
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.GetUtcNow();
 
             var entity = await db.Settings.FirstOrDefaultAsync(
                 s => s.Key == SettingsKey,

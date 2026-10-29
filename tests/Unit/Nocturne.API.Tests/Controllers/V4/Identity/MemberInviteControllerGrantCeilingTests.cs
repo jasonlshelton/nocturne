@@ -133,7 +133,7 @@ public sealed class MemberInviteControllerGrantCeilingTests : IDisposable
             Mock.Of<ITenantService>(),
             // The real service, not a mock: the tenant check and the ceiling are the properties
             // under test, and a mock would assert the mock.
-            new TenantRoleService(_dbContext.AsFactory()),
+            new TenantRoleService(_dbContext.AsFactory(), TimeProvider.System),
             Mock.Of<ITenantMemberService>(),
             tenantAccessor.Object,
             _dbContext.AsFactory())

@@ -362,8 +362,8 @@ public class NightscoutConnectorServiceBase<TConfig> : BaseConnectorService<TCon
     ///     pagination loop. Anchoring the bound to "now" keeps every request explicitly
     ///     dated; requests that already carry a bound pass through unchanged.
     /// </summary>
-    private static DateTime? AnchorUnboundedFetch(DateTime? from, DateTime? to) =>
-        from is null && to is null ? DateTime.UtcNow : to;
+    internal static DateTime? AnchorUnboundedFetch(DateTime? from, DateTime? to, DateTime now) =>
+        from is null && to is null ? now : to;
 
     /// <summary>Outcome of one crawled collection, spanning every page of the crawl.</summary>
     private sealed record PagedCrawlOutcome(int Count, bool Success)
@@ -527,7 +527,7 @@ public class NightscoutConnectorServiceBase<TConfig> : BaseConnectorService<TCon
     {
         var pages = BackwardTimePager.PageAsync<T>(
             from,
-            AnchorUnboundedFetch(from, to),
+            AnchorUnboundedFetch(from, to, Clock.GetUtcNow().UtcDateTime),
             _currentConfig.MaxCount,
             BackwardTimePager.WidestPageSize(_currentConfig.MaxCount),
             async (bound, count) =>
@@ -588,7 +588,7 @@ public class NightscoutConnectorServiceBase<TConfig> : BaseConnectorService<TCon
         Action<T[]>? observe = null)
         where T : ProcessableDocumentBase
     {
-        var anchoredTo = AnchorUnboundedFetch(from, to);
+        var anchoredTo = AnchorUnboundedFetch(from, to, Clock.GetUtcNow().UtcDateTime);
 
         return FetchPagesAsync<T>(
             from - BackwardTimePager.CreatedAtOffsetEnvelope,

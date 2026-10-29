@@ -287,7 +287,7 @@ public class CompressionLowDetectionService : BackgroundService
                     Confidence = confidence,
                     Status = CompressionLowStatus.Pending,
                     NightOf = nightOf,
-                    CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    CreatedAt = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
                     LowestGlucose = candidate.LowestGlucose,
                     DropRate = candidate.MaxDropRate,
                     RecoveryMinutes = candidate.RecoveryMinutes

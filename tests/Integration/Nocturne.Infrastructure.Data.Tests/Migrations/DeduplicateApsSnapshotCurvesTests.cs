@@ -50,10 +50,9 @@ public class DeduplicateApsSnapshotCurvesFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("dedup_aps_curves");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "dedup_aps_curves");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(targetMigration: null);

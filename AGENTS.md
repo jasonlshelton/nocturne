@@ -12,7 +12,7 @@ aspire run
 
 If there is already an instance of the application running it will prompt to stop the existing instance. The `nocturne-api` resource runs under `dotnet watch`: method-body edits hot-reload, and a rude edit restarts only the API process. You only need to restart the application if code under `src/Aspire/` is changed, but if you experience problems it can be useful to reset everything to the starting state.
 
-The Aspire dashboard is off by default (`Aspire__OptionalServices__AspireDashboard__Enabled=true aspire run` turns it on). Without it, use `aspire describe`, `aspire logs <resource>` and `aspire resource <resource> <command>` (e.g. `aspire resource nocturne-api restart`; the tenant commands such as seed-tenant live on `nocturne-postgres-server`). Dev auto-login is on by default; start with `NOCTURNE_DEV_AUTO_LOGIN=false` when testing auth itself.
+The Aspire dashboard is off by default (`Aspire__OptionalServices__AspireDashboard__Enabled=true aspire run` turns it on). Without it, use `aspire describe`, `aspire logs <resource>` and `aspire resource <resource> <command>` (e.g. `aspire resource nocturne-api restart`; the tenant commands such as seed-tenant live on `nocturne-postgres-server`). A stack with no tenants seeds a `dev` tenant with sample data on start (`https://dev.nocturne.localhost:1612`), and dev auto-login signs you in. Start with `Dev__AutoLogin=false` when testing auth itself, and add `Dev__AutoSeed__Enabled=false` to reach the first-run wizard.
 
 ## Development Commands
 

@@ -54,7 +54,8 @@ public class ConnectorSyncCursorStoreTests : IDisposable
     }
 
     private ConnectorSyncCursorStore Store(NocturneDbContext db) =>
-        new(db.AsFactory(), NullLogger<ConnectorSyncCursorStore>.Instance);
+        new(db.AsFactory(), TimeProvider.System,
+        NullLogger<ConnectorSyncCursorStore>.Instance);
 
     [Theory]
     [InlineData("[]")]

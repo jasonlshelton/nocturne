@@ -29,7 +29,7 @@ public class ActivityDecomposerBatchTests : IDisposable
         _decomposer = new ActivityDecomposer(
             _context.AsFactory(),
             _stateSpanRepoMock.Object,
-            NullLogger<ActivityDecomposer>.Instance);
+            TimeProvider.System, NullLogger<ActivityDecomposer>.Instance);
     }
 
     public void Dispose()

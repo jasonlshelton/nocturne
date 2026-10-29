@@ -34,6 +34,7 @@ public sealed class GoogleHealthService(
     IOptions<GoogleHealthPlatformOptions> platformOptions,
     GoogleHealthOAuthState oauthState,
     IGoogleHealthReadingWriter writer,
+    TimeProvider time,
     ILogger<GoogleHealthService> logger) : IGoogleHealthService, IConnectorDataPurge
 {
     private const string InventoryKey = "inventory";
@@ -150,7 +151,7 @@ public sealed class GoogleHealthService(
         }
     }
 
-    public static void ValidateOptions(GoogleHealthOptions options)
+    public void ValidateOptions(GoogleHealthOptions options)
     {
         if (options.DataTypes is null || options.DataTypes.Length > 32 ||
             options.DataTypes.Distinct().Count() != options.DataTypes.Length ||
@@ -159,7 +160,7 @@ public sealed class GoogleHealthService(
         if (options.HistoryDays is < 1 or > 90 ||
             options.ImportFrom is { } importFrom &&
             (importFrom < new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero) ||
-             importFrom > DateTimeOffset.UtcNow.AddDays(1)))
+             importFrom > time.GetUtcNow().AddDays(1)))
             throw new GoogleHealthException("invalid_configuration");
     }
 
@@ -194,7 +195,7 @@ public sealed class GoogleHealthService(
         else if (!string.IsNullOrWhiteSpace(configuration.RefreshToken))
             throw new GoogleHealthException("disconnect_first");
         var verifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
-        var expires = DateTimeOffset.UtcNow.Add(FlowLifetime);
+        var expires = time.GetUtcNow().Add(FlowLifetime);
         var state = oauthState.Protect(tenantSlug, expires);
         var flow = new GoogleHealthCoordinator.Flow(state, verifier, subject, expires);
         var secrets = await connectorConfigurations.GetSecretsAsync(GoogleHealthConnectorService.ConnectorName, ct);
@@ -231,7 +232,7 @@ public sealed class GoogleHealthService(
             var flowJson = flowSecrets.GetValueOrDefault("oauthFlow");
             var flow = flowJson is null ? null : JsonSerializer.Deserialize<GoogleHealthCoordinator.Flow>(flowJson, Json);
             if (flow is null ||
-                flow.Expires <= DateTimeOffset.UtcNow || flow.SubjectId != subject ||
+                flow.Expires <= time.GetUtcNow() || flow.SubjectId != subject ||
                 string.IsNullOrEmpty(callback.State) ||
                 !CryptographicOperations.FixedTimeEquals(
                     Encoding.UTF8.GetBytes(flow.State), Encoding.UTF8.GetBytes(callback.State)))
@@ -273,7 +274,7 @@ public sealed class GoogleHealthService(
                 GoogleHealthConnectorService.ConnectorName,
                 lastErrorMessage: GoogleHealthErrorCode.Encode(
                     error.Message, error.DataType is null ? null : [error.DataType]),
-                lastErrorAt: DateTime.UtcNow,
+                lastErrorAt: time.GetUtcNow().UtcDateTime,
                 isHealthy: false,
                 ct: CancellationToken.None);
             throw error;
@@ -303,7 +304,7 @@ public sealed class GoogleHealthService(
             await connectorConfigurations.UpdateHealthStateAsync(
                 GoogleHealthConnectorService.ConnectorName,
                 lastErrorMessage: GoogleHealthErrorCode.Encode("activation_failed"),
-                lastErrorAt: DateTime.UtcNow,
+                lastErrorAt: time.GetUtcNow().UtcDateTime,
                 isHealthy: false,
                 ct: CancellationToken.None);
         }
@@ -347,7 +348,7 @@ public sealed class GoogleHealthService(
         await connectorConfigurations.UpdateHealthStateAsync(
             GoogleHealthConnectorService.ConnectorName,
             lastErrorMessage: revokeFailed ? "revoke_in_google" : string.Empty,
-            lastErrorAt: revokeFailed ? DateTime.UtcNow : DateTime.MinValue,
+            lastErrorAt: revokeFailed ? time.GetUtcNow().UtcDateTime : DateTime.MinValue,
             isHealthy: !revokeFailed,
             ct: CancellationToken.None);
         await coordinator.FinishDisconnectAsync(TenantId, request);
@@ -431,7 +432,7 @@ public sealed class GoogleHealthService(
             if (string.IsNullOrWhiteSpace(configuration.RefreshToken))
                 throw new GoogleHealthException("configure_first");
             var session = await sessions.RefreshAsync(configuration, force: false, previewCt);
-            var to = DateTimeOffset.UtcNow;
+            var to = time.GetUtcNow();
             var inventory = await sessions.WithAccessTokenAsync(configuration, session.AccessToken!,
                 token => ReadInventoryAsync(token, configuration.ParsedGrantedScopes(), to - PreviewWindow, to, previewCt),
                 previewCt);
@@ -448,7 +449,7 @@ public sealed class GoogleHealthService(
             await sessions.ClearAsync(removeAccount: false, subject, revoke: ex.Message == "client_changed", ct);
             await connectorConfigurations.UpdateHealthStateAsync(GoogleHealthConnectorService.ConnectorName,
                 lastErrorMessage: GoogleHealthErrorCode.Encode(ex.Message, ex.DataType is null ? null : [ex.DataType]),
-                lastErrorAt: DateTime.UtcNow, isHealthy: false, ct: ct);
+                lastErrorAt: time.GetUtcNow().UtcDateTime, isHealthy: false, ct: ct);
             throw;
         }
         return await StatusAsync(ct);

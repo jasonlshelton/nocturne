@@ -320,6 +320,7 @@ public class LegacyPostBodyTests
             Mock.Of<IUploaderSnapshotRepository>(),
             Mock.Of<IStateSpanRepository>(),
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
         var single = $$"""{"app":"AAPS","Device":"openaps://phone","Mills":{{Millis}}}""";
         var malformed = """{"app":"AAPS","Device":"openaps://phone","Mills":"abc"}""";
@@ -355,7 +356,7 @@ public class LegacyPostBodyTests
             .ReturnsAsync((IEnumerable<Treatment> t, CancellationToken _) => new BulkWrite<Treatment>(t.ToList(), 0));
         return WithContext(new LegacyV1.TreatmentsController(
             service.Object,
-            new DocumentProcessingService(NullLogger<DocumentProcessingService>.Instance),
+            new DocumentProcessingService(TimeProvider.System, NullLogger<DocumentProcessingService>.Instance),
             TimeProvider.System,
             NullLogger<LegacyV1.TreatmentsController>.Instance));
     }

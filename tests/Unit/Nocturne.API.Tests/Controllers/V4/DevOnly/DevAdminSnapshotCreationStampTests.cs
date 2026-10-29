@@ -87,7 +87,7 @@ public class DevAdminSnapshotCreationStampTests : IDisposable
             Mock.Of<ISecretEncryptionService>(),
             Mock.Of<ITenantService>(),
             new MemoryCache(new MemoryCacheOptions()),
-            NullLogger<DevAdminController>.Instance);
+            TimeProvider.System, NullLogger<DevAdminController>.Instance);
 
     private static TenantSnapshotDto SnapshotOf(Guid id, string slug) =>
         new()

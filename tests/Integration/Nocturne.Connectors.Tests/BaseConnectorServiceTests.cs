@@ -92,13 +92,7 @@ public class BaseConnectorServiceTests
 /// <summary>
 /// Test connector configuration for unit testing
 /// </summary>
-public class TestConnectorConfiguration : BaseConnectorConfiguration
-{
-    protected override void ValidateSourceSpecificConfiguration()
-    {
-        // No specific validation needed for test connector
-    }
-}
+public class TestConnectorConfiguration : BaseConnectorConfiguration;
 
 /// <summary>
 /// Test implementation of BaseConnectorService

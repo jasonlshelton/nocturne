@@ -32,10 +32,9 @@ public class MigratedSecretHolderFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("secret_holder");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "secret_holder");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

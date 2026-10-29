@@ -118,7 +118,8 @@ internal static class MigrationJobHarness
         ILogger? logger = null,
         string nightscoutUrl = "https://example-nightscout.invalid",
         TenantContext? owner = null,
-        Guid? tenantId = null)
+        Guid? tenantId = null,
+        TimeProvider? time = null)
     {
         var tenant = owner ?? NewTenant(tenantId);
 
@@ -139,7 +140,8 @@ internal static class MigrationJobHarness
             },
             tenant,
             logger ?? NullLogger.Instance,
-            provider);
+            provider,
+            time ?? TimeProvider.System);
 
         onCreated?.Invoke(job);
 

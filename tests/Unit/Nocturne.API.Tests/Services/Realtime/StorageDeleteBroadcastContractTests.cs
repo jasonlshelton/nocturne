@@ -628,7 +628,7 @@ public class StorageDeleteBroadcastContractTests
             context.AsFactory(),
             Mock.Of<IDocumentProcessingService>(),
             capture.Broadcast,
-            NullLogger<HeartRateService>.Instance
+            TimeProvider.System, NullLogger<HeartRateService>.Instance
         ).DeleteHeartRateAsync(RecordGuid);
 
         deleted.Should().BeTrue();

@@ -171,6 +171,7 @@ public class V3FilterOperatorMergeTests
             Mock.Of<IUploaderSnapshotRepository>(),
             Mock.Of<IStateSpanRepository>(),
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
 
         var controller = new DeviceStatusController(

@@ -58,10 +58,9 @@ public class RouteAlertChannelsToMembersFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("route_alert_channels");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "route_alert_channels");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

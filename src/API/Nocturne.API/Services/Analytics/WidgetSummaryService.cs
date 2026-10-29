@@ -35,6 +35,7 @@ public class WidgetSummaryService : IWidgetSummaryService
     private readonly IAlertRepository _alertRepository;
     private readonly ITenantAccessor _tenantAccessor;
     private readonly ICategoryReadContext _categoryReadContext;
+    private readonly TimeProvider _time;
     private readonly ILogger<WidgetSummaryService> _logger;
 
     /// <summary>
@@ -52,9 +53,11 @@ public class WidgetSummaryService : IWidgetSummaryService
         IAlertRepository alertRepository,
         ITenantAccessor tenantAccessor,
         ICategoryReadContext categoryReadContext,
+        TimeProvider timeProvider,
         ILogger<WidgetSummaryService> logger
     )
     {
+        _time = timeProvider;
         _entryService = entryService;
         _iobCobReader = iobCobReader;
         _apsSnapshots = apsSnapshots;
@@ -74,7 +77,7 @@ public class WidgetSummaryService : IWidgetSummaryService
         CancellationToken cancellationToken = default
     )
     {
-        var currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var currentTime = _time.GetUtcNow().ToUnixTimeMilliseconds();
         var response = new V4SummaryResponse
         {
             ServerMills = currentTime,
@@ -198,7 +201,7 @@ public class WidgetSummaryService : IWidgetSummaryService
     {
         try
         {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
 
             var reading = await _iobCobReader.ReadTotalAsync(now, live: true, cancellationToken);
             response.Iob = Math.Round(reading.Iob.Iob * 100) / 100;
@@ -267,7 +270,7 @@ public class WidgetSummaryService : IWidgetSummaryService
             }
             else if (definition.Mode == TrackerMode.Event && instance.ScheduledAt.HasValue)
             {
-                var hoursUntil = (instance.ScheduledAt.Value - DateTime.UtcNow).TotalHours;
+                var hoursUntil = (instance.ScheduledAt.Value - _time.GetUtcNow().UtcDateTime).TotalHours;
                 status.HoursUntilEvent = Math.Round(hoursUntil * 10) / 10;
             }
 
@@ -280,7 +283,7 @@ public class WidgetSummaryService : IWidgetSummaryService
     /// <summary>
     /// Calculate the current urgency level for a tracker instance based on notification thresholds
     /// </summary>
-    private static NotificationUrgency CalculateTrackerUrgency(
+    private NotificationUrgency CalculateTrackerUrgency(
         TrackerInstanceEntity instance,
         TrackerDefinitionEntity definition
     )
@@ -324,7 +327,7 @@ public class WidgetSummaryService : IWidgetSummaryService
         // For Event mode, check against hours until scheduled time
         else if (definition.Mode == TrackerMode.Event && instance.ScheduledAt.HasValue)
         {
-            var hoursUntilEvent = (instance.ScheduledAt.Value - DateTime.UtcNow).TotalHours;
+            var hoursUntilEvent = (instance.ScheduledAt.Value - _time.GetUtcNow().UtcDateTime).TotalHours;
 
             foreach (var threshold in thresholds)
             {

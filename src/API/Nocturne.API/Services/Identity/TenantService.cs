@@ -38,6 +38,7 @@ public partial class TenantService : ITenantService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITenantRoleService _roleService;
     private readonly GrantRevocationService _grantRevocation;
+    private readonly TimeProvider _time;
     private readonly ILogger<TenantService> _logger;
 
     private static readonly HashSet<string> ReservedSlugs =
@@ -84,6 +85,7 @@ public partial class TenantService : ITenantService
         IHttpClientFactory httpClientFactory,
         ITenantRoleService roleService,
         GrantRevocationService grantRevocation,
+        TimeProvider timeProvider,
         ILogger<TenantService> logger)
     {
         _factory = factory;
@@ -92,6 +94,7 @@ public partial class TenantService : ITenantService
         _httpClientFactory = httpClientFactory;
         _roleService = roleService;
         _grantRevocation = grantRevocation;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -446,14 +449,18 @@ public partial class TenantService : ITenantService
             .ToListAsync(ct);
     }
 
-    public async Task<SlugValidationResult> ValidateSlugAsync(string slug, CancellationToken ct = default)
+    public Task<SlugValidationResult> ValidateSlugAsync(string slug, CancellationToken ct = default) =>
+        ValidateSlugAsync(slug, allowReserved: false, ct);
+
+    public async Task<SlugValidationResult> ValidateSlugAsync(
+        string slug, bool allowReserved, CancellationToken ct = default)
     {
         var normalized = slug.ToLowerInvariant().Trim();
 
         if (!SlugPattern().IsMatch(normalized))
             return new SlugValidationResult(false, "Slug must be 3-63 characters, alphanumeric and hyphens only, no leading/trailing hyphens");
 
-        if (ReservedSlugs.Contains(normalized))
+        if (!allowReserved && ReservedSlugs.Contains(normalized))
             return new SlugValidationResult(false, "This name is reserved");
 
         await using var context = await _factory.CreatePlatformAsync(ct);
@@ -632,14 +639,14 @@ public partial class TenantService : ITenantService
                         OidcSubjectId = oidcIdentity.OidcSubjectId,
                         Issuer = normalizedIssuer!,
                         Email = oidcIdentity.Email,
-                        LinkedAt = DateTime.UtcNow,
+                        LinkedAt = _time.GetUtcNow().UtcDateTime,
                     });
                 }
                 else
                 {
                     // Identity already links to the owner subject resolved above;
                     // just record the reuse.
-                    existingIdentity.LastUsedAt = DateTime.UtcNow;
+                    existingIdentity.LastUsedAt = _time.GetUtcNow().UtcDateTime;
                 }
             }
             await context.SaveChangesAsync(token);

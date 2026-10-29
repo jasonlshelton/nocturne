@@ -31,6 +31,7 @@ public class DataOverviewService : IDataOverviewService
     private readonly TenantClockResolver _tenantClock;
     private readonly IStatisticsService _statisticsService;
     private readonly ITenantCache _cache;
+    private readonly TimeProvider _time;
     private readonly ILogger<DataOverviewService> _logger;
 
     /// <summary>
@@ -42,15 +43,18 @@ public class DataOverviewService : IDataOverviewService
     /// <param name="tenantClock">Resolver for the tenant's local clock.</param>
     /// <param name="statisticsService">Statistics service for per-day metric aggregation.</param>
     /// <param name="cache">Cross-request cache for the eHbA1c timeline, keyed per year and source.</param>
+    /// <param name="timeProvider">The clock for the current year and the eHbA1c window end.</param>
     /// <param name="logger">The logger instance.</param>
     public DataOverviewService(
         INocturneDbContextFactory factory,
         TenantClockResolver tenantClock,
         IStatisticsService statisticsService,
         ITenantCache cache,
+        TimeProvider timeProvider,
         ILogger<DataOverviewService> logger
     )
     {
+        _time = timeProvider;
         _factory = factory;
         _tenantClock = tenantClock;
         _statisticsService = statisticsService;
@@ -86,7 +90,7 @@ public class DataOverviewService : IDataOverviewService
             // bare MAX() over every table — so one bad row would otherwise stretch the
             // list to its year and open the report on a century of empty ones. Clamping
             // both ends keeps the range non-empty when every record is future-dated.
-            var currentYear = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz).Year;
+            var currentYear = TimeZoneInfo.ConvertTime(_time.GetUtcNow(), tz).Year;
             var minYear = Math.Min(minLocal.Year, currentYear);
             var maxYear = Math.Min(maxLocal.Year, currentYear);
 
@@ -606,7 +610,7 @@ public class DataOverviewService : IDataOverviewService
             dailyCount[dayIndex]++;
         }
 
-        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var localNow = TimeZoneInfo.ConvertTime(_time.GetUtcNow(), tz);
         var points = BuildEHbA1cPoints(dailySum, dailyCount, localRangeStart, EHbA1cWindowDays, year, localNow.Date);
         var response = new EHbA1cTimelineResponse { Year = year, Points = points };
 

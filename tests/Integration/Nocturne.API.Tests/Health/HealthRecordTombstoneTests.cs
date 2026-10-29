@@ -44,11 +44,11 @@ public sealed class HealthRecordTombstoneTests(HealthRecordTombstoneFixture fixt
         await using var db = Context();
         db.TenantId = tenantId;
         var heartRates = new HeartRateService(db.AsFactory(), Processing<HeartRate>(),
-            Mock.Of<ISignalRBroadcastService>(), NullLogger<HeartRateService>.Instance);
+            Mock.Of<ISignalRBroadcastService>(), TimeProvider.System, NullLogger<HeartRateService>.Instance);
         var stepCounts = new StepCountService(db.AsFactory(), Processing<StepCount>(),
-            Mock.Of<ISignalRBroadcastService>(), NullLogger<StepCountService>.Instance);
+            Mock.Of<ISignalRBroadcastService>(), TimeProvider.System, NullLogger<StepCountService>.Instance);
         var bodyWeights = new BodyWeightService(db.AsFactory(), Processing<BodyWeight>(),
-            Mock.Of<ISignalRBroadcastService>(), NullLogger<BodyWeightService>.Instance);
+            Mock.Of<ISignalRBroadcastService>(), TimeProvider.System, NullLogger<BodyWeightService>.Instance);
         var heartRateId = Guid.NewGuid().ToString();
         var stepCountId = Guid.NewGuid().ToString();
         var bodyWeightId = Guid.NewGuid().ToString();

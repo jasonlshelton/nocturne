@@ -35,7 +35,8 @@ public class AlertSetupService(
     ISecretEncryptionService encryption,
     IAlertDeliveryService delivery,
     AlertRuleRearm rearm,
-    AlertRuleRetirement retirement)
+    AlertRuleRetirement retirement,
+    TimeProvider time)
 {
     private const decimal MinThresholdMgdl = 40;
     private const decimal MaxThresholdMgdl = 400;
@@ -145,7 +146,7 @@ public class AlertSetupService(
         var units = await UnitsAsync(db, callerId, ct);
         var starters = await StartersAsync(db, tracking: true, ct);
         var tenantId = db.TenantId;
-        var now = DateTime.UtcNow;
+        var now = time.GetUtcNow().UtcDateTime;
         var rearmed = new List<Guid>();
         var retired = new List<Guid>();
 
@@ -294,7 +295,7 @@ public class AlertSetupService(
         if (!whileClosed && !acknowledgedOpenPageOnly)
             throw new InvalidOperationException("Alerts on this device show only while Nocturne is open, which needs acknowledging.");
 
-        instance.ReceiptConfirmedAt ??= DateTime.UtcNow;
+        instance.ReceiptConfirmedAt ??= time.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct);
         return await GetAsync(callerId, ct);
     }
@@ -327,7 +328,7 @@ public class AlertSetupService(
                 ChannelType = ChannelType.InApp,
                 Destination = destination,
                 SortOrder = urgentLow.Channels.Count,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = time.GetUtcNow().UtcDateTime,
             });
         }
         else if (!alerted && existing is not null)

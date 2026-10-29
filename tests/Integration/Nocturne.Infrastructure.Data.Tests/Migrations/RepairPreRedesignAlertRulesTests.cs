@@ -77,10 +77,9 @@ public class RepairPreRedesignAlertRulesFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("repair_pre_redesign_alert_rules");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "repair_pre_redesign_alert_rules");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         ReadBefore = (await ReadEnumsThroughEfAsync(Wizard)).Exception;
 

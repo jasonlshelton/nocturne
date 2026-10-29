@@ -53,6 +53,7 @@ public class DemoGenerationTests
                 return new DemoTimeStep
                 {
                     Time = time,
+                    Utc = time.ToUniversalTime(),
                     Entry = new Entry
                     {
                         Mills = new DateTimeOffset(time).ToUnixTimeMilliseconds(),
@@ -80,7 +81,7 @@ public class DemoGenerationTests
         comparison.Mills.Should().Be(new DateTimeOffset(from.AddMinutes(57)).ToUnixTimeMilliseconds());
         comparison.Sgv.Should().BeInRange(118, 122);
 
-        var nadir = DemoCoverageSeeds.CompressionNadirMills(night);
+        var nadir = DemoCoverageSeeds.CompressionNadirMills(night, DemoTestClock.Host);
         var detector = new CompressionLowDetectionService(
             Mock.Of<IServiceProvider>(),
             ActiveTenantSnapshotTestDoubles.Unread(),
@@ -104,6 +105,7 @@ public class DemoGenerationTests
         var end = new DateTime(2026, 10, 20, 4, 4, 0);
         var generator = new DemoDataGenerator(
             Options.Create(new DemoModeConfiguration { BackfillDays = 14, RandomSeed = seed }),
+            DemoTestClock.Host,
             NullLogger<DemoDataGenerator>.Instance,
             NullLoggerFactory.Instance);
         var readings = generator.GenerateHistoricalTimeline(end)
@@ -124,7 +126,7 @@ public class DemoGenerationTests
         foreach (var night in nights)
         {
             var (windowStart, windowEnd) = TimeZoneHelper.GetOvernightWindow(night, TimeZoneInfo.Local);
-            var nadir = DemoCoverageSeeds.CompressionNadirMills(night);
+            var nadir = DemoCoverageSeeds.CompressionNadirMills(night, DemoTestClock.Host);
             var overnight = readings
                 .Where(entry => entry.Mills >= windowStart && entry.Mills <= windowEnd)
                 .ToList();
@@ -192,11 +194,11 @@ public class DemoGenerationTests
     [Fact]
     public void DeviceLifecycle_ScheduleIsDeterministicChronologicalAndCoversAllKinds()
     {
-        var today = new DateTime(2026, 3, 17);
-        var schedule = DemoDeviceLifecycle.GenerateSchedule(today, 30);
+        var now = new DateTime(2026, 3, 17, 23, 0, 0);
+        var schedule = DemoDeviceLifecycle.GenerateSchedule(now, 30, DemoTestClock.Host);
 
         schedule.Should().BeEquivalentTo(
-            DemoDeviceLifecycle.GenerateSchedule(today, 30),
+            DemoDeviceLifecycle.GenerateSchedule(now, 30, DemoTestClock.Host),
             o => o.WithStrictOrdering());
         schedule.Should().BeInAscendingOrder(e => e.TimestampUtc);
         foreach (var spec in DemoDeviceLifecycle.TrackerSpecs)
@@ -210,9 +212,9 @@ public class DemoGenerationTests
     public void HealthGenerator_ActivityIsDeterministicAndPlausible()
     {
         var day = new DateTime(2026, 3, 17);
-        var (heartRates, steps) = DemoHealthDataGenerator.GenerateDailyActivity(day, "dev-sample");
+        var (heartRates, steps) = DemoHealthDataGenerator.GenerateDailyActivity(day, "dev-sample", DemoTestClock.Host);
 
-        var (heartRates2, steps2) = DemoHealthDataGenerator.GenerateDailyActivity(day, "dev-sample");
+        var (heartRates2, steps2) = DemoHealthDataGenerator.GenerateDailyActivity(day, "dev-sample", DemoTestClock.Host);
         heartRates.Select(h => (h.Timestamp, h.Bpm))
             .Should().BeEquivalentTo(heartRates2.Select(h => (h.Timestamp, h.Bpm)));
         steps.Select(s => (s.Timestamp, s.Metric))
@@ -235,9 +237,9 @@ public class DemoGenerationTests
         var sickDay = dates.First(d => DayScenarios.For(d) == DayScenario.SickDay);
 
         var exerciseSteps = DemoHealthDataGenerator
-            .GenerateDailyActivity(exerciseDay, "dev-sample").StepCounts.Sum(s => s.Metric);
+            .GenerateDailyActivity(exerciseDay, "dev-sample", DemoTestClock.Host).StepCounts.Sum(s => s.Metric);
         var sickSteps = DemoHealthDataGenerator
-            .GenerateDailyActivity(sickDay, "dev-sample").StepCounts.Sum(s => s.Metric);
+            .GenerateDailyActivity(sickDay, "dev-sample", DemoTestClock.Host).StepCounts.Sum(s => s.Metric);
 
         exerciseSteps.Should().BeGreaterThan(sickSteps * 3);
     }
@@ -246,7 +248,7 @@ public class DemoGenerationTests
     public void HealthGenerator_SleepSessionIsInternallyConsistent()
     {
         var morning = new DateTime(2026, 3, 17);
-        var session = DemoHealthDataGenerator.GenerateSleepSession(morning, "dev-sample");
+        var session = DemoHealthDataGenerator.GenerateSleepSession(morning, "dev-sample", DemoTestClock.Host);
 
         session.EndTime.Should().BeAfter(session.StartTime);
         session.TotalSleepMs.Should().Be(
@@ -257,7 +259,7 @@ public class DemoGenerationTests
         session.OriginalId.Should().Be($"dev-sample:sleep:{session.StartTime:yyyy-MM-dd}");
 
         // Deterministic per night.
-        DemoHealthDataGenerator.GenerateSleepSession(morning, "dev-sample")
+        DemoHealthDataGenerator.GenerateSleepSession(morning, "dev-sample", DemoTestClock.Host)
             .DurationMs.Should().Be(session.DurationMs);
     }
 
@@ -270,9 +272,9 @@ public class DemoGenerationTests
         var normalNights = dates.Where(d => DayScenarios.For(d) == DayScenario.Normal).Take(5);
 
         var poorAvg = poorNights.Average(d =>
-            DemoHealthDataGenerator.GenerateSleepSession(d, "dev-sample").Efficiency!.Value);
+            DemoHealthDataGenerator.GenerateSleepSession(d, "dev-sample", DemoTestClock.Host).Efficiency!.Value);
         var normalAvg = normalNights.Average(d =>
-            DemoHealthDataGenerator.GenerateSleepSession(d, "dev-sample").Efficiency!.Value);
+            DemoHealthDataGenerator.GenerateSleepSession(d, "dev-sample", DemoTestClock.Host).Efficiency!.Value);
 
         poorAvg.Should().BeLessThan(normalAvg);
     }

@@ -35,7 +35,7 @@ internal static class UISettingsControllerHarness
     )
     {
         return NewController(
-            new UISettingsService(dbContext.AsFactory(), NullLogger<UISettingsService>.Instance),
+            new UISettingsService(dbContext.AsFactory(), TimeProvider.System, NullLogger<UISettingsService>.Instance),
             demoMode
         );
     }

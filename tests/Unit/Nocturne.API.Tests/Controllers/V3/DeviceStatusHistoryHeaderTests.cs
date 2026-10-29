@@ -85,6 +85,7 @@ public class DeviceStatusHistoryHeaderTests
             Mock.Of<IUploaderSnapshotRepository>(),
             Mock.Of<IStateSpanRepository>(),
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
 
         return new DeviceStatusController(

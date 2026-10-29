@@ -49,6 +49,7 @@ public class SleepReportServiceTests
             _patientRecord.Object,
             _db.AsFactory(),
             _caller.Object,
+            TimeProvider.System,
             NullLogger<SleepReportService>.Instance);
     }
 

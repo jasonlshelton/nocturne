@@ -36,7 +36,7 @@ public class ActivityServiceTests
     private static readonly Nocturne.API.Services.V4.ActivityDecomposer Classifier = new(
         Mock.Of<Nocturne.Infrastructure.Data.Services.INocturneDbContextFactory>(),
         Mock.Of<Nocturne.Core.Contracts.Repositories.IStateSpanRepository>(),
-        Microsoft.Extensions.Logging.Abstractions.NullLogger<Nocturne.API.Services.V4.ActivityDecomposer>.Instance);
+        TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<Nocturne.API.Services.V4.ActivityDecomposer>.Instance);
 
     public ActivityServiceTests()
     {
@@ -494,7 +494,7 @@ public class ActivityServiceTests
             _mockStateSpanService.Object,
             _mockSleepService.Object,
             new Nocturne.API.Services.Legacy.DocumentProcessingService(
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<
                     Nocturne.API.Services.Legacy.DocumentProcessingService>.Instance),
             _mockSignalRBroadcastService.Object,
             Mock.Of<IDataEventSink<Activity>>(),
@@ -581,7 +581,7 @@ public class ActivityServiceTests
             _mockStateSpanService.Object,
             _mockSleepService.Object,
             new Nocturne.API.Services.Legacy.DocumentProcessingService(
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<
                     Nocturne.API.Services.Legacy.DocumentProcessingService>.Instance),
             _mockSignalRBroadcastService.Object,
             Mock.Of<IDataEventSink<Activity>>(),

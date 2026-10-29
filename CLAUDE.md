@@ -57,19 +57,23 @@ cd src/Web/packages/app && pnpm run check
 # Lint the frontend before pushing (CI gate: no errors, warnings capped in each package's lint:ci)
 cd src/Web && pnpm --recursive --no-bail run lint:ci
 
-# Seed a loginable tenant with sample data (stack must be running; see README
-# "Multitenancy and Passkeys"). Response has url + loginLink (browser session).
+# A stack with no tenants (fresh clone, every worktree) seeds a `dev` tenant with
+# 30 days of sample data before the web app starts: https://dev.nocturne.localhost:1612
+# (worktree ports are dynamic; `aspire describe` lists it as "Dev tenant").
+# Seed another loginable tenant (`dev` is taken). Response has url + loginLink.
 curl -X POST http://localhost:1610/api/v4/dev-only/admin/seed-tenant \
   -H "Content-Type: application/json" \
-  -d '{"slug":"sleepy","displayName":"Sleepy","ownerUsername":"dev","sampleData":true}'
+  -d '{"slug":"test","displayName":"Test","ownerUsername":"dev","sampleData":true}'
 
 # End-to-end smoke of the local stack (seed -> data -> login link -> tenant UI)
 dotnet run scripts/dev-smoke.cs
 
 # Auto-login is on by default: the web login page signs in as the tenant's
 # first owner instead of showing the passkey UI. Turn it off when testing auth
-# itself. See the dev-tenant-api skill.
-NOCTURNE_DEV_AUTO_LOGIN=false aspire start
+# itself, and turn off the auto-seed too to reach the first-run wizard. Both
+# live under `Dev` in the AppHost appsettings. See the dev-tenant-api skill.
+Dev__AutoLogin=false aspire start
+Dev__AutoSeed__Enabled=false Dev__AutoLogin=false aspire start
 
 # Aspire dashboard (off by default; or set it in AppHost appsettings/user-secrets)
 Aspire__OptionalServices__AspireDashboard__Enabled=true aspire start

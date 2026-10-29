@@ -36,7 +36,7 @@ public class StepCountServiceDedupTests
             context.AsFactory(),
             processing.Object,
             Mock.Of<ISignalRBroadcastService>(),
-            NullLogger<StepCountService>.Instance);
+            TimeProvider.System, NullLogger<StepCountService>.Instance);
 
         return (service, context);
     }

@@ -20,6 +20,7 @@ namespace Nocturne.API.Tests.Integration.Monitoring;
 /// The legacy-age fallbacks at <c>/api/v4/trackers/legacy-fallbacks</c> and their conversion at
 /// <c>/api/v4/trackers/from-legacy</c>, against the real database and alert engine.
 /// </summary>
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class TrackerLegacyFallbackIntegrationTests(ApiIntegrationTestFixture fixture, ITestOutputHelper output)
     : ApiIntegrationTestBase(fixture, output)

@@ -26,6 +26,7 @@ public class SummaryService : ISummaryService
     private readonly IActiveProfileResolver _activeProfileResolver;
     private readonly ITherapySettingsRepository _therapySettingsRepository;
     private readonly IProfileProjectionService _profileProjection;
+    private readonly TimeProvider _time;
     private readonly ILogger<SummaryService> _logger;
 
     private static readonly JsonSerializerOptions StoredEntryOptions = new()
@@ -51,9 +52,11 @@ public class SummaryService : ISummaryService
         IActiveProfileResolver activeProfileResolver,
         ITherapySettingsRepository therapySettingsRepository,
         IProfileProjectionService profileProjection,
+        TimeProvider timeProvider,
         ILogger<SummaryService> logger
     )
     {
+        _time = timeProvider;
         _ddataService = ddataService;
         _propertiesService = propertiesService;
         _iobCobReader = iobCobReader;
@@ -71,7 +74,7 @@ public class SummaryService : ISummaryService
     {
         try
         {
-            var currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var currentTime = _time.GetUtcNow().ToUnixTimeMilliseconds();
             var ddata = await _ddataService.GetDDataAsync(currentTime, cancellationToken);
             var sgvs = ProcessSgvs(ddata.Sgvs, hours);
             var profileName = await _activeProfileResolver.GetProfileNameAsync(
@@ -101,7 +104,7 @@ public class SummaryService : ISummaryService
     public List<SummarySgv> ProcessSgvs(List<Entry> sgvs, int hours)
     {
         var bgData = new List<SummarySgv>();
-        var dataCap = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (hours * 60 * 60 * 1000);
+        var dataCap = _time.GetUtcNow().ToUnixTimeMilliseconds() - (hours * 60 * 60 * 1000);
 
         foreach (var bg in sgvs.OrderBy(e => e.Mills))
         {
@@ -131,7 +134,7 @@ public class SummaryService : ISummaryService
     {
         var result = new SummaryTreatments();
         var tempBasals = new List<Treatment>();
-        var dataCap = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (hours * 60 * 60 * 1000);
+        var dataCap = _time.GetUtcNow().ToUnixTimeMilliseconds() - (hours * 60 * 60 * 1000);
 
         foreach (var treatment in treatments)
         {
@@ -220,7 +223,7 @@ public class SummaryService : ISummaryService
         temps.Add(
             new SummaryTempBasal
             {
-                Start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 24 * 60 * 60 * 1000,
+                Start = _time.GetUtcNow().ToUnixTimeMilliseconds() - 24 * 60 * 60 * 1000,
                 Duration = 0,
                 Absolute = 0,
             }
@@ -228,7 +231,7 @@ public class SummaryService : ISummaryService
         temps.Add(
             new SummaryTempBasal
             {
-                Start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Start = _time.GetUtcNow().ToUnixTimeMilliseconds(),
                 Duration = 0,
                 Absolute = 0,
             }
@@ -289,7 +292,7 @@ public class SummaryService : ISummaryService
         try
         {
             return await _iobCobReader.ReadTotalAsync(
-                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                _time.GetUtcNow().ToUnixTimeMilliseconds(),
                 live: true,
                 cancellationToken
             );

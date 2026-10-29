@@ -101,7 +101,12 @@ public class MemberInviteEntity : ITenantScoped
     /// Whether the invite is currently expired
     /// </summary>
     [NotMapped]
-    public bool IsExpired => DateTime.UtcNow >= ExpiresAt;
+    public bool IsExpired => IsExpiredAt(DateTime.UtcNow);
+
+    /// <summary>
+    /// Whether the invite is expired at <paramref name="now"/>; the expiry instant itself is expired.
+    /// </summary>
+    public bool IsExpiredAt(DateTime now) => now >= ExpiresAt;
 
     /// <summary>
     /// Whether the invite has been revoked
@@ -119,7 +124,12 @@ public class MemberInviteEntity : ITenantScoped
     /// Whether the invite is currently valid for use
     /// </summary>
     [NotMapped]
-    public bool IsValid => !IsExpired && !IsRevoked && !IsExhausted;
+    public bool IsValid => IsValidAt(DateTime.UtcNow);
+
+    /// <summary>
+    /// Whether the invite is valid for use at <paramref name="now"/>.
+    /// </summary>
+    public bool IsValidAt(DateTime now) => !IsExpiredAt(now) && !IsRevoked && !IsExhausted;
 
     /// <summary>
     /// Navigation property to the tenant the invite is for

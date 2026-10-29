@@ -20,6 +20,7 @@ public class NotificationResolutionService : BackgroundService
 
     private readonly IServiceProvider _serviceProvider;
     private readonly ActiveTenantSnapshot _activeTenants;
+    private readonly TimeProvider _time;
     private readonly ILogger<NotificationResolutionService> _logger;
 
     /// <summary>
@@ -32,15 +33,18 @@ public class NotificationResolutionService : BackgroundService
     /// </summary>
     /// <param name="serviceProvider">Service provider for creating scoped services</param>
     /// <param name="activeTenants">The active tenants to evaluate</param>
+    /// <param name="timeProvider">Clock the resolution conditions are evaluated against</param>
     /// <param name="logger">Logger</param>
     public NotificationResolutionService(
         IServiceProvider serviceProvider,
         ActiveTenantSnapshot activeTenants,
+        TimeProvider timeProvider,
         ILogger<NotificationResolutionService> logger
     )
     {
         _serviceProvider = serviceProvider;
         _activeTenants = activeTenants;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -119,7 +123,7 @@ public class NotificationResolutionService : BackgroundService
 
         _logger.LogDebug("Evaluating {Count} notifications with resolution conditions", notifications.Count);
 
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
 
         foreach (var notification in notifications)
         {

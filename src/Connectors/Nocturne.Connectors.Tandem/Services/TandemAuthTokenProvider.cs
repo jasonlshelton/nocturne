@@ -22,9 +22,12 @@ public class TandemAuthTokenProvider(
     IConnectorServerResolver<TandemConnectorConfiguration> serverResolver,
     ITenantAccessor tenantAccessor,
     ILogger<TandemAuthTokenProvider> logger,
-    IRetryDelayStrategy retryDelayStrategy)
+    IRetryDelayStrategy retryDelayStrategy,
+    TimeProvider? timeProvider = null)
     : AuthTokenProviderBase<TandemConnectorConfiguration>(httpClient, tokenCache, serverResolver, tenantAccessor, logger)
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private readonly IRetryDelayStrategy _retryDelayStrategy =
         retryDelayStrategy ?? throw new ArgumentNullException(nameof(retryDelayStrategy));
 
@@ -117,7 +120,7 @@ public class TandemAuthTokenProvider(
             if (accountId != null)
                 metadata[AccountIdKey] = accountId;
 
-            var expiresAt = DateTime.UtcNow.AddSeconds(tokens.ExpiresIn > 0 ? tokens.ExpiresIn : 3600);
+            var expiresAt = _timeProvider.GetUtcNow().UtcDateTime.AddSeconds(tokens.ExpiresIn > 0 ? tokens.ExpiresIn : 3600);
 
             return (tokens.AccessToken, expiresAt, metadata, false);
         }

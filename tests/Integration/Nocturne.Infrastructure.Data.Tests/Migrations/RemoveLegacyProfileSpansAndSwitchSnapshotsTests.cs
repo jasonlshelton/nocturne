@@ -79,12 +79,11 @@ public class RemoveLegacyProfileSpansAndSwitchSnapshotsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("remove_legacy_profile_spans");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(BeforeActivations, "remove_legacy_profile_spans");
         _migratorConnectionString = database.MigratorConnectionString;
         _superuserConnectionString = database.SuperuserConnectionString;
         _priorMigration = await PriorMigrationAsync();
 
-        await MigrateToAsync(BeforeActivations);
         await SeedSpansAsync();
         await MigrateToAsync(_priorMigration);
         await SeedLinksAndProfileRowsAsync();

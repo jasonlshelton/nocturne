@@ -19,7 +19,7 @@ namespace Nocturne.Core.Clinical.Statistics;
 /// <seealso cref="IStatisticsService"/>
 /// <seealso cref="Entry"/>
 /// <seealso cref="Treatment"/>
-public partial class StatisticsService : IStatisticsService
+public partial class StatisticsService(TimeProvider timeProvider) : IStatisticsService
 {
     /// <summary>
     /// The low end of the 20-600 mg/dL range the Kovatchev risk scale is constructed over, where
@@ -3186,7 +3186,7 @@ public partial class StatisticsService : IStatisticsService
                 {
                     Start = 0,
                     End = 0,
-                    TimeOfAnalysis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    TimeOfAnalysis = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
                 },
                 BasicStats = new BasicGlucoseStats(),
                 TimeInRange = new TimeInRangeMetrics { Thresholds = CopyOf(config.Thresholds) },
@@ -3213,7 +3213,7 @@ public partial class StatisticsService : IStatisticsService
             {
                 Start = timeStart,
                 End = timeEnd,
-                TimeOfAnalysis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                TimeOfAnalysis = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
             },
             BasicStats = basicStats,
             TimeInRange = timeInRange,

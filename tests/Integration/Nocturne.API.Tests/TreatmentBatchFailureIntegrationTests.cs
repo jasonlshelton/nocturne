@@ -25,6 +25,7 @@ namespace Nocturne.API.Tests.Integration;
 /// answered and skipped, one that fails for the store's state stops the batch with what came
 /// before it committed.
 /// </summary>
+[Collection(ApiIntegrationShards.One)]
 [Trait("Category", "Integration")]
 public class TreatmentBatchFailureIntegrationTests(ApiIntegrationTestFixture fixture, ITestOutputHelper output)
     : ApiIntegrationTestBase(fixture, output)

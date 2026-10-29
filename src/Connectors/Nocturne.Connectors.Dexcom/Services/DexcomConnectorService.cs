@@ -58,7 +58,7 @@ public class DexcomConnectorService : BaseConnectorService<DexcomConnectorConfig
         var batchData = await FetchBatchDataAsync(config, since, cancellationToken);
         if (batchData == null) return [];
 
-        var records = _sensorGlucoseMapper.MapBatchData(batchData).ToList();
+        var records = _sensorGlucoseMapper.MapBatchData(batchData, Clock.GetUtcNow().UtcDateTime).ToList();
         _logger.LogInformation(
             "[{ConnectorSource}] Retrieved {Count} SensorGlucose records from Dexcom",
             ConnectorSource,
@@ -153,9 +153,10 @@ public class DexcomConnectorService : BaseConnectorService<DexcomConnectorConfig
     private async Task<DexcomEntry[]?> FetchRawDataCoreAsync(
         DexcomConnectorConfiguration config, string sessionId, DateTime? since, CancellationToken cancellationToken)
     {
-        var startTime = CalculateStartTime(since, DateTime.UtcNow);
+        var now = Clock.GetUtcNow().UtcDateTime;
+        var startTime = CalculateStartTime(since, now);
 
-        var timeDiff = DateTime.UtcNow - startTime;
+        var timeDiff = now - startTime;
         var maxCount = Math.Ceiling(timeDiff.TotalMinutes / 5);
         var minutes = (int)(maxCount * 5);
 

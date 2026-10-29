@@ -95,6 +95,7 @@ public static class DevIdentityFixtureSeeder
     public static async Task<List<Guid>> SeedAsync(
         NocturneDbContext db,
         IConfiguration configuration,
+        TimeProvider time,
         ILogger logger,
         CancellationToken ct = default)
     {
@@ -171,7 +172,7 @@ public static class DevIdentityFixtureSeeder
                     Transports = credential.Transports,
                     Label = credential.Label ?? "dev fixture",
                     AaGuid = credential.AaGuid,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = time.GetUtcNow().UtcDateTime,
                 });
                 seeded++;
             }

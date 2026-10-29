@@ -39,6 +39,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
     private readonly IJwtService _jwtService;
     private readonly INocturneDbContextFactory _contexts;
     private readonly ICategoryReadContext _categoryReadContext;
+    private readonly TimeProvider _time;
     private readonly PermissionTrie _permissionTrie;
     private readonly Dictionary<string, Permission> _seenPermissions = new();
     private readonly object _permissionsLock = new();
@@ -59,7 +60,8 @@ public class AuthorizationService : IAuthorizationService, IDisposable
         IDirectGrantService directGrantService,
         IJwtService jwtService,
         INocturneDbContextFactory contexts,
-        ICategoryReadContext categoryReadContext
+        ICategoryReadContext categoryReadContext,
+        TimeProvider timeProvider
     )
     {
         _configuration = configuration;
@@ -70,6 +72,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
         _jwtService = jwtService;
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _categoryReadContext = categoryReadContext;
+        _time = timeProvider;
         _permissionTrie = new PermissionTrie();
 
         // Initialize with common permissions
@@ -106,7 +109,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
 
         var live = db.OAuthGrants
             .AsNoTracking()
-            .Where(DirectGrantTokenHandler.IsLiveDirectGrant(DateTime.UtcNow));
+            .Where(DirectGrantTokenHandler.IsLiveDirectGrant(_time.GetUtcNow().UtcDateTime));
 
         var grant = await live.FirstOrDefaultAsync(g => g.TokenHash == tokenHash);
 
@@ -158,14 +161,14 @@ public class AuthorizationService : IAuthorizationService, IDisposable
         {
             await db.OAuthGrants
                 .Where(g => g.Id == grant.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(g => g.LastUsedAt, DateTime.UtcNow));
+                .ExecuteUpdateAsync(s => s.SetProperty(g => g.LastUsedAt, _time.GetUtcNow().UtcDateTime));
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to update last used metadata for grant {GrantId}", grant.Id);
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var exp = now.Add(ExchangedJwtLifetime);
 
         return new AuthorizationResponse
@@ -194,7 +197,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
 
         var roles = await _roleService.GetAllRolesAsync();
 
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
 
         foreach (var role in roles)
         {
@@ -453,7 +456,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
 
             var grant = await db.OAuthGrants
                 .Where(g => g.SubjectId == deviceSubjectId)
-                .Where(DirectGrantTokenHandler.IsLiveDirectGrant(DateTime.UtcNow))
+                .Where(DirectGrantTokenHandler.IsLiveDirectGrant(_time.GetUtcNow().UtcDateTime))
                 .FirstOrDefaultAsync(g => g.Id == guid);
 
             if (grant == null)
@@ -537,7 +540,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
         db.OAuthGrants
             .AsNoTracking()
             .Where(g => g.SubjectId == deviceSubjectId)
-            .Where(DirectGrantTokenHandler.IsLiveDirectGrant(DateTime.UtcNow));
+            .Where(DirectGrantTokenHandler.IsLiveDirectGrant(_time.GetUtcNow().UtcDateTime));
 
 
     /// <summary>
@@ -788,7 +791,7 @@ public class AuthorizationService : IAuthorizationService, IDisposable
 
         _permissionTrie.Add(commonPermissions);
 
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         lock (_permissionsLock)
         {
             foreach (var permission in commonPermissions)

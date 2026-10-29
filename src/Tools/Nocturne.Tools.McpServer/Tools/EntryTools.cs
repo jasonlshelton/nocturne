@@ -163,13 +163,14 @@ public static class EntryTools
     [McpServerTool]
     [Description("[Legacy v1] Get glucose statistics. Prefer GetGlucoseStatistics in GlucoseTools (v4) for new queries.")]
     public static async Task<string> GetLegacyGlucoseStatistics(
+        TimeProvider timeProvider,
         [Description("Number of hours to analyze (default: 24)")] int hours = 24,
         [Description("Entry type to analyze (default: sgv)")] string type = "sgv"
     )
     {
         try
         {
-            var endTime = DateTime.UtcNow;
+            var endTime = timeProvider.GetUtcNow().UtcDateTime;
             var startTime = endTime.AddHours(-hours);
 
             var endpoint =
@@ -226,6 +227,7 @@ public static class EntryTools
     [McpServerTool]
     [Description("[Legacy v1] Create a new glucose entry via the v1 API.")]
     public static async Task<string> CreateEntry(
+        TimeProvider timeProvider,
         [Description("Glucose value in mg/dL")] double glucose,
         [Description("Entry type (sgv, mbg, cal)")] string type = "sgv",
         [Description("Direction trend (Flat, SingleUp, DoubleUp, etc.)")] string? direction = null,
@@ -258,7 +260,7 @@ public static class EntryTools
             }
             else
             {
-                entry.Date = DateTime.UtcNow;
+                entry.Date = timeProvider.GetUtcNow().UtcDateTime;
             }
 
             var result = await ApiService.PostAsync("api/v1/entries", entry);
@@ -273,13 +275,14 @@ public static class EntryTools
     [McpServerTool]
     [Description("[Legacy v1] Get entry count by type. Prefer v4 glucose endpoints for new queries.")]
     public static async Task<string> GetEntryCount(
+        TimeProvider timeProvider,
         [Description("Number of hours to look back (default: 24)")] int hours = 24,
         [Description("Group by type (true/false, default: true)")] bool groupByType = true
     )
     {
         try
         {
-            var endTime = DateTime.UtcNow;
+            var endTime = timeProvider.GetUtcNow().UtcDateTime;
             var startTime = endTime.AddHours(-hours);
 
             var endpoint =

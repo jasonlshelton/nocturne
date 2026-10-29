@@ -59,7 +59,7 @@ public class DataOverviewServiceNonPrimarySqlTests : IDisposable
                 NullLogger<TenantClockResolver>.Instance),
             new Mock<IStatisticsService>().WithRealTimeInRange().Object,
             TestTenantCache.Create(),
-            NullLogger<DataOverviewService>.Instance);
+            TimeProvider.System, NullLogger<DataOverviewService>.Instance);
     }
 
     public void Dispose()

@@ -39,7 +39,7 @@ public class ActivityStoredRecordScopeTests
     private readonly ActivityDecomposer _decomposer = new(
         Mock.Of<INocturneDbContextFactory>(),
         Mock.Of<IStateSpanRepository>(),
-        NullLogger<ActivityDecomposer>.Instance);
+        TimeProvider.System, NullLogger<ActivityDecomposer>.Instance);
     private readonly ActivityService _service;
     private readonly DefaultHttpContext _httpContext = new();
 

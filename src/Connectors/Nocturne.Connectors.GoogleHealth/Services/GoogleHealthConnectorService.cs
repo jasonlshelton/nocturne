@@ -49,12 +49,12 @@ public sealed class GoogleHealthConnectorService(
         ISyncProgressReporter? progressReporter = null) =>
         since is { } requestedFrom
             ? base.SyncDataAsync(new SyncRequest { From = requestedFrom }, config, cancellationToken, progressReporter)
-            : base.SyncDataAsync(config, cancellationToken, DateTime.UtcNow, progressReporter);
+            : base.SyncDataAsync(config, cancellationToken, Clock.GetUtcNow().UtcDateTime, progressReporter);
 
     // Google Health owns its health cursors; a base glucose watermark must not become a repair bound.
     protected override SyncRequest CreateBackgroundSyncRequest(DateTime? since) => new();
 
-    // Matches GoogleHealthConnectorConfiguration's own validation floor for an explicit ImportFrom.
+    // Matches GoogleHealthService.ValidateOptions' floor for an explicit ImportFrom.
     private static readonly DateTimeOffset EarliestSupportedDate = new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     private const string BackfillCursorKey = "backfillCursorDate";

@@ -86,6 +86,7 @@ public class V3CreateResponseTests
                 uploaders.Object,
                 Mock.Of<IStateSpanRepository>(),
                 Mock.Of<IDeviceStatusExtrasRepository>(),
+                TimeProvider.System,
                 NullLogger<DeviceStatusProjectionService>.Instance),
             decomposer.Object,
             Mock.Of<IWriteSideEffects>(),

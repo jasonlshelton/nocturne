@@ -440,7 +440,7 @@ public class ProfileDecomposerTests
                 Mock<ITargetRangeScheduleRepository, TargetRangeSchedule>(null, [], onUpsert),
                 TempBasalTestDeps.NoReresolution(),
                 Moq.Mock.Of<ILoopClosedLoopStamper>(),
-                NullLogger<ProfileDecomposer>.Instance);
+                TimeProvider.System, NullLogger<ProfileDecomposer>.Instance);
         }
 
         private TRepo Mock<TRepo, TRecord>(

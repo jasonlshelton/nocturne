@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
@@ -105,6 +106,29 @@ public class TidepoolConnectorServiceTests
         fixture.PublishedBoluses.Should().HaveCount(3);
         fixture.PublishedCarbIntakes.Should().ContainSingle()
             .Which.Carbs.Should().Be(40);
+    }
+
+    [Fact]
+    public async Task SyncDataAsync_StampsPublishedTreatmentsWithTheServiceClock()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero));
+        var handler = new TidepoolFakeHandler
+        {
+            BolusJson = """[{ "id": "b1", "time": "2026-03-01T08:00:00Z", "normal": 1.5 }]""",
+            FoodJson = """
+                [{ "id": "f1", "time": "2026-03-01T09:00:00Z", "nutrition": { "carbohydrate": { "net": 40 } } }]
+                """,
+        };
+        var fixture = new ServiceFixture(handler, withPublisher: true, clock: clock);
+
+        await fixture.Service.SyncDataAsync(
+            new SyncRequest { DataTypes = [SyncDataType.Boluses, SyncDataType.CarbIntake] },
+            fixture.Config,
+            CancellationToken.None);
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        fixture.PublishedBoluses.Should().ContainSingle().Which.CreatedAt.Should().Be(now);
+        fixture.PublishedCarbIntakes.Should().ContainSingle().Which.CreatedAt.Should().Be(now);
     }
 
     /// <summary>
@@ -247,7 +271,8 @@ public class TidepoolConnectorServiceTests
         internal ServiceFixture(
             TidepoolFakeHandler handler,
             bool withPublisher = false,
-            TidepoolConnectorConfiguration? config = null)
+            TidepoolConnectorConfiguration? config = null,
+            TimeProvider? clock = null)
         {
             Config = config ?? new TidepoolConnectorConfiguration
             {
@@ -264,11 +289,12 @@ public class TidepoolConnectorServiceTests
 
             var tokenProvider = new TidepoolAuthTokenProvider(
                 new HttpClient(handler),
-                new ConnectorTokenCache(),
+                new ConnectorTokenCache(clock),
                 serverResolver,
                 tenantAccessor.Object,
                 NullLogger<TidepoolAuthTokenProvider>.Instance,
-                Mock.Of<IRetryDelayStrategy>());
+                Mock.Of<IRetryDelayStrategy>(),
+                clock);
 
             IConnectorPublisher? publisher = null;
             if (withPublisher)
@@ -304,7 +330,8 @@ public class TidepoolConnectorServiceTests
                 Mock.Of<IRetryDelayStrategy>(),
                 Mock.Of<IRateLimitingStrategy>(),
                 tokenProvider,
-                publisher);
+                publisher,
+                clock);
         }
     }
 

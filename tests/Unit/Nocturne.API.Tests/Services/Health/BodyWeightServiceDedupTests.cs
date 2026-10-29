@@ -36,7 +36,7 @@ public class BodyWeightServiceDedupTests
             context.AsFactory(),
             processing.Object,
             Mock.Of<ISignalRBroadcastService>(),
-            NullLogger<BodyWeightService>.Instance);
+            TimeProvider.System, NullLogger<BodyWeightService>.Instance);
 
         return (service, context);
     }

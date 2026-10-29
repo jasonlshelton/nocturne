@@ -23,14 +23,16 @@ public class BodyWeightService
 {
     /// <param name="documentProcessingService">Service that applies field processing (e.g. identifier generation) before save.</param>
     /// <param name="signalRBroadcastService">Service used to broadcast entity changes over SignalR.</param>
+    /// <param name="timeProvider">Clock that stamps soft deletes.</param>
     /// <param name="logger">Logger instance for this service.</param>
     public BodyWeightService(
         INocturneDbContextFactory contexts,
         IDocumentProcessingService documentProcessingService,
         ISignalRBroadcastService signalRBroadcastService,
+        TimeProvider timeProvider,
         ILogger<BodyWeightService> logger
     )
-        : base(contexts, documentProcessingService, signalRBroadcastService, logger) { }
+        : base(contexts, documentProcessingService, signalRBroadcastService, timeProvider, logger) { }
 
     protected override DbSet<BodyWeightEntity> EntitySet(NocturneDbContext db) => db.BodyWeights;
     protected override string CollectionName => "bodyweight";

@@ -53,7 +53,7 @@ public class DevAuthController : ControllerBase
     /// <summary>
     /// Log in as a tenant member without a WebAuthn ceremony and set the normal
     /// session cookies. Navigating a browser to this URL on a tenant subdomain
-    /// (e.g. https://sleepy.nocturne.localhost:1612/api/v4/dev-only/auth/login)
+    /// (e.g. https://dev.nocturne.localhost:1612/api/v4/dev-only/auth/login)
     /// leaves it authenticated and redirects into the app. The tenant resolves
     /// from the ?tenant slug, else from the request host; the member from
     /// ?username, else the first owner-role member, else the first member.

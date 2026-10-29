@@ -573,6 +573,6 @@ public class UISettingsServiceTests
 
     private static UISettingsService NewService(NocturneDbContext context)
     {
-        return new UISettingsService(context.AsFactory(), NullLogger<UISettingsService>.Instance);
+        return new UISettingsService(context.AsFactory(), TimeProvider.System, NullLogger<UISettingsService>.Instance);
     }
 }

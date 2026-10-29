@@ -27,17 +27,21 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
 
     private readonly INocturneDbContextFactory _contexts;
     private readonly IStateSpanRepository _stateSpanRepository;
+    private readonly TimeProvider _time;
     private readonly ILogger<ActivityDecomposer> _logger;
 
     /// <param name="stateSpanRepository">Repository for bulk-creating regular activities as StateSpans.</param>
+    /// <param name="timeProvider">Clock that stamps soft deletes.</param>
     /// <param name="logger">Logger instance for this decomposer.</param>
     public ActivityDecomposer(
         INocturneDbContextFactory contexts,
         IStateSpanRepository stateSpanRepository,
+        TimeProvider timeProvider,
         ILogger<ActivityDecomposer> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _stateSpanRepository = stateSpanRepository;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -232,7 +236,7 @@ public class ActivityDecomposer : IActivityDecomposer, IDecomposer<Activity>
     {
         await using var db = await _contexts.CreateAsync(ct);
         var deleted = 0;
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
 
         var heartRateEntity = await db.HeartRates.FirstOrDefaultAsync(
             h => h.OriginalId == legacyId,

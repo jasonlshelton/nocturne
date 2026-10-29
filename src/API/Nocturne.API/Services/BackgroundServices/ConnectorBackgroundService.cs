@@ -96,6 +96,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
     protected virtual TimeSpan PerTenantSyncTimeout => TimeSpan.FromMinutes(3);
 
     private readonly ConnectorSyncBudget _budget;
+    private readonly TimeProvider _timeProvider;
     private readonly ConnectorSyncMetrics? _metrics;
 
     /// <summary>
@@ -103,6 +104,8 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
     /// singleton so a manual sync of the same tenant and connector makes the scheduled one skip.
     /// </summary>
     private readonly TenantRunGuard? _runGuard;
+
+    private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
 
     /// <summary>The active tenants, shared by every poller.</summary>
     protected readonly ActiveTenantSnapshot ActiveTenants;
@@ -114,6 +117,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
     /// <param name="budget">The process-wide budget.</param>
     /// <param name="activeTenants">The active tenants every poller reads.</param>
     /// <param name="logger">Logger instance.</param>
+    /// <param name="timeProvider">Clock the schedule is computed against.</param>
     /// <param name="nudge">Delivers configuration writes for this connector; absent, a change is noticed on the tenant's next scheduled look.</param>
     /// <param name="metrics">Connector sync instruments; absent, the sync runs unmeasured.</param>
     /// <param name="runGuard">Refuses a sync for a key another run already holds; absent, no exclusion.</param>
@@ -122,6 +126,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
         ConnectorSyncBudget budget,
         ActiveTenantSnapshot activeTenants,
         ILogger logger,
+        TimeProvider timeProvider,
         ConnectorPollerNudge? nudge = null,
         ConnectorSyncMetrics? metrics = null,
         TenantRunGuard? runGuard = null
@@ -131,6 +136,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
         ActiveTenants = activeTenants ?? throw new ArgumentNullException(nameof(activeTenants));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _metrics = metrics;
         _runGuard = runGuard;
         nudge?.Subscribe(ConnectorName, RequestImmediateSync);
@@ -145,7 +151,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
     /// <param name="tenantId">The tenant to sync immediately.</param>
     protected void RequestImmediateSync(Guid tenantId)
     {
-        var now = DateTime.UtcNow;
+        var now = UtcNow;
 
         // The schedule is cleared ahead of the debounce: the debounce protects the sync itself from
         // an event storm, whereas a look costs one configuration read, and a tenant's enable flow
@@ -267,7 +273,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
 
     private async Task SuperviseRealtimeListenersAsync(CancellationToken stoppingToken)
     {
-        var now = DateTime.UtcNow;
+        var now = UtcNow;
         if (now - _lastRealtimeSupervision < RealtimeSupervisionInterval)
             return;
 
@@ -462,7 +468,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
     private async Task SyncAllTenantsAsync(CancellationToken stoppingToken)
     {
         var activeTenants = await ActiveTenants.GetAsync(stoppingToken);
-        var now = DateTime.UtcNow;
+        var now = UtcNow;
         var tenants = activeTenants
             .Where(t => !_nextCheckByTenant.TryGetValue(t.Id, out var nextCheck) || nextCheck <= now)
             .ToList();
@@ -570,7 +576,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
             return;
         }
 
-        var now = DateTime.UtcNow;
+        var now = UtcNow;
         if (!config.Enabled || config.SyncIntervalMinutes <= 0)
         {
             _nextCheckByTenant[tenantId] = now + UnconfiguredRecheckInterval;
@@ -655,7 +661,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
 
             await UpdateHealthStateAsync(
                 scope.ServiceProvider,
-                lastSuccessfulSync: DateTime.UtcNow,
+                lastSuccessfulSync: UtcNow,
                 isHealthy: true,
                 lastErrorMessage: string.Empty,
                 lastErrorAt: DateTime.MinValue,
@@ -683,7 +689,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
                 scope.ServiceProvider,
                 isHealthy: false,
                 lastErrorMessage: errorMessage,
-                lastErrorAt: DateTime.UtcNow,
+                lastErrorAt: UtcNow,
                 cancellationToken: stoppingToken);
         }
     }
@@ -703,7 +709,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
         DateTime? aligned;
         try
         {
-            aligned = await GetAlignedSyncTimeAsync(scopeProvider, config, DateTime.UtcNow, cancellationToken);
+            aligned = await GetAlignedSyncTimeAsync(scopeProvider, config, UtcNow, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -717,7 +723,7 @@ public abstract class ConnectorBackgroundService<TConfig> : BackgroundService
         if (aligned is not { } at)
             return;
 
-        var earliest = DateTime.UtcNow + MinimumAlignedSyncSpacing;
+        var earliest = UtcNow + MinimumAlignedSyncSpacing;
         if (at < earliest)
             at = earliest;
 
@@ -750,10 +756,11 @@ public class ConnectorBackgroundService<TService, TConfig>(
     ConnectorSyncBudget budget,
     ActiveTenantSnapshot activeTenants,
     ILogger<ConnectorBackgroundService<TService, TConfig>> logger,
+    TimeProvider timeProvider,
     ConnectorPollerNudge? nudge = null,
     ConnectorSyncMetrics? metrics = null,
     TenantRunGuard? runGuard = null)
-    : ConnectorBackgroundService<TConfig>(serviceProvider, budget, activeTenants, logger, nudge, metrics, runGuard)
+    : ConnectorBackgroundService<TConfig>(serviceProvider, budget, activeTenants, logger, timeProvider, nudge, metrics, runGuard)
     where TService : class, IConnectorService<TConfig>
     where TConfig : BaseConnectorConfiguration
 {

@@ -110,6 +110,7 @@ public class ConnectorCursorResetService : IConnectorCursorResetService
     private readonly INocturneDbContextFactory _dbFactory;
     private readonly IConnectorSyncService _syncService;
     private readonly ITenantAccessor _tenantAccessor;
+    private readonly TimeProvider _time;
     private readonly ILogger<ConnectorCursorResetService> _logger;
 
     /// <summary>Initializes a new instance of <see cref="ConnectorCursorResetService"/>.</summary>
@@ -117,11 +118,13 @@ public class ConnectorCursorResetService : IConnectorCursorResetService
         INocturneDbContextFactory dbFactory,
         IConnectorSyncService syncService,
         ITenantAccessor tenantAccessor,
+        TimeProvider timeProvider,
         ILogger<ConnectorCursorResetService> logger)
     {
         _dbFactory = dbFactory;
         _syncService = syncService;
         _tenantAccessor = tenantAccessor;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -164,7 +167,7 @@ public class ConnectorCursorResetService : IConnectorCursorResetService
         var request = new SyncRequest
         {
             From = from,
-            To = DateTime.UtcNow,
+            To = _time.GetUtcNow().UtcDateTime,
             DataTypes = dataTypes ?? [],
         };
 

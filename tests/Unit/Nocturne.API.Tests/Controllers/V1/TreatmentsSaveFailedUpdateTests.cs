@@ -61,7 +61,7 @@ public class TreatmentsSaveFailedUpdateTests
 
         _controller = new TreatmentsController(
             service,
-            new DocumentProcessingService(NullLogger<DocumentProcessingService>.Instance),
+            new DocumentProcessingService(TimeProvider.System, NullLogger<DocumentProcessingService>.Instance),
             TimeProvider.System,
             NullLogger<TreatmentsController>.Instance)
         {

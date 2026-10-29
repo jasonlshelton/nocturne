@@ -229,6 +229,7 @@ public class V3DeviceStatusFindTests
                 Mock.Of<IUploaderSnapshotRepository>(),
                 stateSpans.Object,
                 Mock.Of<IDeviceStatusExtrasRepository>(),
+                TimeProvider.System,
                 NullLogger<DeviceStatusProjectionService>.Instance),
             Mock.Of<IDeviceStatusDecomposer>(),
             Mock.Of<IWriteSideEffects>(),

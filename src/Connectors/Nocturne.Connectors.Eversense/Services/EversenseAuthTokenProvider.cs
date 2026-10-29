@@ -18,9 +18,12 @@ public class EversenseAuthTokenProvider(
     IConnectorServerResolver<EversenseConnectorConfiguration> serverResolver,
     ITenantAccessor tenantAccessor,
     ILogger<EversenseAuthTokenProvider> logger,
-    IRetryDelayStrategy retryDelayStrategy)
+    IRetryDelayStrategy retryDelayStrategy,
+    TimeProvider? timeProvider = null)
     : AuthTokenProviderBase<EversenseConnectorConfiguration>(httpClient, tokenCache, serverResolver, tenantAccessor, logger)
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private readonly IRetryDelayStrategy _retryDelayStrategy =
         retryDelayStrategy ?? throw new ArgumentNullException(nameof(retryDelayStrategy));
 
@@ -51,7 +54,7 @@ public class EversenseAuthTokenProvider(
         if (token == null)
             return (null, DateTime.MinValue, null);
 
-        var expiresAt = DateTime.UtcNow.AddSeconds(token.ExpiresIn);
+        var expiresAt = _timeProvider.GetUtcNow().UtcDateTime.AddSeconds(token.ExpiresIn);
         _logger.LogInformation(
             "Eversense Now authentication successful, token expires at {ExpiresAt}",
             expiresAt);

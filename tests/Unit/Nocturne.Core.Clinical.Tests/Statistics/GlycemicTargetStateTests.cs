@@ -6,7 +6,7 @@ namespace Nocturne.Core.Clinical.Tests.Statistics;
 
 public class GlycemicTargetStateTests
 {
-    private readonly StatisticsService _service = new();
+    private readonly StatisticsService _service = new(TimeProvider.System);
 
     [Theory]
     [InlineData(6.9, true, true)]

@@ -121,7 +121,7 @@ public class ClockFaceAlertsGateTests
         tenant.Setup(t => t.TenantId).Returns(_tenant);
 
         return new ClockFaceAlertsController(
-            _faces.Object, contexts, new AlertReceiptService(contexts), members.Object, tenant.Object)
+            _faces.Object, contexts, new AlertReceiptService(contexts, TimeProvider.System), members.Object, tenant.Object)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

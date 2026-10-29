@@ -42,6 +42,7 @@ public class ConnectorFoodEntryServiceTests
     private ConnectorFoodEntryService NewService(NocturneDbContext context) =>
         new(context.AsFactory(),
             _mealMatchingMock.Object,
+            TimeProvider.System,
             Mock.Of<ILogger<ConnectorFoodEntryService>>());
 
     private static ConnectorFoodEntryImport Import(

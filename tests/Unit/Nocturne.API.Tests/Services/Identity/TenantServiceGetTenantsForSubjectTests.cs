@@ -41,6 +41,7 @@ public sealed class TenantServiceGetTenantsForSubjectTests : IDisposable
         Mock.Of<IHttpClientFactory>(),
         Mock.Of<ITenantRoleService>(),
         new GrantRevocationService(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
+        TimeProvider.System,
         Mock.Of<ILogger<TenantService>>());
 
     /// <param name="role">A role seed slug, as every membership an invite creates carries one.</param>

@@ -22,6 +22,7 @@ namespace Nocturne.API.Tests.Integration.Hubs;
 /// recorded is set on it (<see cref="Nocturne.API.Hubs.HubConnectionReader"/>). <c>LoadRetro</c> reads
 /// through that scope.
 /// </summary>
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class LongPollingReaderIntegrationTests(ApiIntegrationTestFixture fixture, ITestOutputHelper output)
     : ApiIntegrationTestBase(fixture, output)

@@ -126,6 +126,7 @@ internal sealed class DocsTenantFixture : IDisposable
             new Mock<ITenantService>().Object,
             TestPublicAccessCache.Create(),
             Mock.Of<ITenantCache>(),
+            TimeProvider.System,
             new Mock<ILogger<DemoTenantService>>().Object);
 
         return new ScalarAuthProvider(
@@ -135,7 +136,7 @@ internal sealed class DocsTenantFixture : IDisposable
             new RedirectUriValidator(),
             cache ?? new MemoryCache(new MemoryCacheOptions()),
             Options.Create(new BaseDomainOptions { BaseDomain = BaseDomain }),
-            new Mock<ILogger<ScalarAuthProvider>>().Object);
+            TimeProvider.System, new Mock<ILogger<ScalarAuthProvider>>().Object);
     }
 
     public void Dispose() => _db.Dispose();

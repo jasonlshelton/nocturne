@@ -14,6 +14,7 @@ public static class GlucoseTools
     [McpServerTool]
     [Description("Get recent sensor glucose (CGM) readings. Returns timestamped glucose values with trend direction.")]
     public static async Task<string> GetRecentGlucose(
+        TimeProvider timeProvider,
         [Description("Number of hours to look back (default: 6)")] int hours = 6,
         [Description("Maximum number of readings to return (default: 50, max: 500)")] int limit = 50,
         [Description("Sort order: timestamp_desc (newest first) or timestamp_asc (oldest first)")] string sort = "timestamp_desc"
@@ -21,7 +22,7 @@ public static class GlucoseTools
     {
         try
         {
-            var from = ToolBase.ToIso(DateTime.UtcNow.AddHours(-hours));
+            var from = ToolBase.ToIso(timeProvider.GetUtcNow().UtcDateTime.AddHours(-hours));
             var endpoint = ToolBase.BuildQuery("api/v4/glucose/sensor", new()
             {
                 ["from"] = from,
@@ -69,12 +70,13 @@ public static class GlucoseTools
     [McpServerTool]
     [Description("Calculate glucose statistics (average, median, min, max, standard deviation, time-in-range) from recent sensor readings.")]
     public static async Task<string> GetGlucoseStatistics(
+        TimeProvider timeProvider,
         [Description("Number of hours to analyze (default: 24)")] int hours = 24
     )
     {
         try
         {
-            var from = ToolBase.ToIso(DateTime.UtcNow.AddHours(-hours));
+            var from = ToolBase.ToIso(timeProvider.GetUtcNow().UtcDateTime.AddHours(-hours));
             var endpoint = ToolBase.BuildQuery("api/v4/glucose/sensor", new()
             {
                 ["from"] = from,
@@ -133,13 +135,14 @@ public static class GlucoseTools
     [McpServerTool]
     [Description("Get recent meter (fingerstick) glucose readings.")]
     public static async Task<string> GetMeterReadings(
+        TimeProvider timeProvider,
         [Description("Number of hours to look back (default: 24)")] int hours = 24,
         [Description("Maximum number of readings (default: 50)")] int limit = 50
     )
     {
         try
         {
-            var from = ToolBase.ToIso(DateTime.UtcNow.AddHours(-hours));
+            var from = ToolBase.ToIso(timeProvider.GetUtcNow().UtcDateTime.AddHours(-hours));
             var endpoint = ToolBase.BuildQuery("api/v4/glucose/meter", new()
             {
                 ["from"] = from,

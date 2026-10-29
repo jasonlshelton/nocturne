@@ -25,6 +25,7 @@ namespace Nocturne.API.Tests.Integration;
 /// LoopFollow, LoopCaregiver and AAPS followers read them back through the v1 and v3 treatment reads,
 /// and Loop deletes them by the id it uploaded them under.
 /// </summary>
+[Collection(ApiIntegrationShards.Two)]
 [Trait("Category", "Integration")]
 public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
 {

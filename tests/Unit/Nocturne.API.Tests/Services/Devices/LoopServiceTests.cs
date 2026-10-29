@@ -45,7 +45,7 @@ public class LoopServiceTests
             .Setup(x => x.SendAsync(It.IsAny<ApplePush>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ApnsResponse.Successful());
 
-        _loopService = new LoopService(_mockLogger.Object, options, _mockApnsClientFactory.Object);
+        _loopService = new LoopService(_mockLogger.Object, options, _mockApnsClientFactory.Object, TimeProvider.System);
     }
 
     [Parity]
@@ -82,7 +82,8 @@ public class LoopServiceTests
         var invalidLoopService = new LoopService(
             _mockLogger.Object,
             invalidOptions,
-            _mockApnsClientFactory.Object
+            _mockApnsClientFactory.Object,
+            TimeProvider.System
         );
 
         var data = new LoopNotificationData { EventType = "loop-completed" };

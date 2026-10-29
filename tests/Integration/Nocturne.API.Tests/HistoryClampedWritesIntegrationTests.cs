@@ -14,6 +14,7 @@ namespace Nocturne.API.Tests.Integration;
 /// to write when that is dated earlier: a lab result from last quarter, a weight from last week, a
 /// sensor change logged late, which completes the run it replaces at that earlier time.
 /// </summary>
+[Collection(ApiIntegrationShards.Three)]
 [Trait("Category", "Integration")]
 public class HistoryClampedWritesIntegrationTests : ApiIntegrationTestBase
 {

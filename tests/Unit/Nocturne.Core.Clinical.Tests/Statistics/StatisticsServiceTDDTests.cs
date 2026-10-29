@@ -26,7 +26,7 @@ public class StatisticsServiceTDDTests
 
     public StatisticsServiceTDDTests()
     {
-        _sut = new StatisticsService();
+        _sut = new StatisticsService(TimeProvider.System);
     }
 
     #region CalculateTreatmentSummary — Basic Scenarios

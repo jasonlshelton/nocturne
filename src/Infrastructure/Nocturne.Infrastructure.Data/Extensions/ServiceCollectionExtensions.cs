@@ -73,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(new HistoryCommitMargin(TimeSpan.FromMilliseconds(config.HistoryCommitMarginMilliseconds)));
         services.TryAddSingleton<TenantConnectionInterceptor>();
         services.TryAddSingleton<MutationAuditInterceptor>();
+        services.TryAddSingleton<PreparedStatementRepairInterceptor>();
 
         // Audit config cache (singleton — uses IDbContextFactory internally)
         services.TryAddSingleton<ITenantAuditConfigCache, TenantAuditConfigCache>();
@@ -114,7 +115,8 @@ public static class ServiceCollectionExtensions
                 options.EnableServiceProviderCaching();
                 options.AddInterceptors(
                     sp.GetRequiredService<TenantConnectionInterceptor>(),
-                    sp.GetRequiredService<MutationAuditInterceptor>());
+                    sp.GetRequiredService<MutationAuditInterceptor>(),
+                    sp.GetRequiredService<PreparedStatementRepairInterceptor>());
             }
         );
 

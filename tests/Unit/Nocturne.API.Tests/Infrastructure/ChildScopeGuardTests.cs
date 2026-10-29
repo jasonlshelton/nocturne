@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -23,9 +24,12 @@ namespace Nocturne.API.Tests.Infrastructure;
 /// a delegate or a reflection call that names none of these.
 /// </remarks>
 [Trait("Category", "Unit")]
-public class ChildScopeGuardTests
+public partial class ChildScopeGuardTests
 {
     private const string JobScope = nameof(TenantJobScope);
+
+    /// <summary>What a helper's declared type names; see <see cref="ReturnsScope"/>.</summary>
+    private const string ScopeType = "ServiceScope";
 
     private const string Seam = "src/Infrastructure/Nocturne.Infrastructure.Data/Services/TenantJobScope.cs";
 
@@ -158,18 +162,25 @@ public class ChildScopeGuardTests
     [InlineData("class C { static readonly Func<IServiceScope> Make = () => p.CreateScope(); void M() { using var s = Make(); } }", "C.Make,C.M")]
     [InlineData("class C { IServiceScope Helper() => p.CreateScope(); } class D { void M() { var s = Helper(); } }", "C.Helper")]
     [InlineData("class C { IServiceScope Helper() => p.CreateScope(); } class D { void M(C c) { using var s = c.Helper(); } }", "C.Helper,D.M")]
+    [InlineData("class C { void M(IServiceProvider p) { using var s = p.Create\\u0053cope(); } }", "C.M")]
     [InlineData("class C { void M() { var s = TenantJobScope.OpenFor(p, r, \"a\"); } }", null)]
     [InlineData("class C { void M() { var s = File.Open(path); } }", null)]
     [InlineData("class C { void M() { var s = Open(path); } }", null)]
     public void FindsTheOpeningMember(string source, string? expected)
     {
         var tree = CSharpSyntaxTree.ParseText(source);
-        var members = OpeningMembers(tree, ScopeHelpers([tree]));
+        var helpers = ScopeHelpers([tree]);
+        var members = OpeningMembers(tree, helpers);
 
         if (expected is null)
             members.Should().BeEmpty();
         else
             members.Should().Equal(expected.Split(','));
+
+        if (helpers.Count > 0)
+            MayDeclareHelper(source).Should().BeTrue("the scan does not parse a file this filter turns away");
+        if (members.Count > 0)
+            MayOpen(source, helpers.Keys).Should().BeTrue("the scan does not parse a file this filter turns away");
     }
 
     /// <summary>
@@ -228,7 +239,7 @@ public class ChildScopeGuardTests
     }
 
     private static bool ReturnsScope(TypeSyntax type) =>
-        type.ToString().Contains("ServiceScope", StringComparison.Ordinal);
+        type.ToString().Contains(ScopeType, StringComparison.Ordinal);
 
     private static List<string> OpeningMembers(SyntaxTree tree, Dictionary<string, HashSet<string>> helpers) =>
         OpeningNodes(tree.GetRoot(), FileNames.Of(tree.GetRoot()), helpers)
@@ -293,10 +304,42 @@ public class ChildScopeGuardTests
         };
     }
 
+    /// <summary>
+    /// Whether <paramref name="text"/> can declare a helper: <see cref="ReturnsScope"/> reads the
+    /// declared type as written, so it names <see cref="ScopeType"/>. The scan parses only the files
+    /// these filters admit, since the migrations are most of <c>src</c>.
+    /// </summary>
+    private static bool MayDeclareHelper(string text) => text.Contains(ScopeType, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether <paramref name="text"/> can hold an opening node: an identifier naming a raw scope
+    /// method, <c>Open</c> or one of <paramref name="helpers"/>. Identifiers are matched by value, so
+    /// the text is read with its <c>\u</c> escapes decoded.
+    /// </summary>
+    private static bool MayOpen(string text, IEnumerable<string> helpers)
+    {
+        if (text.Contains(@"\u", StringComparison.OrdinalIgnoreCase))
+            text = UnicodeEscape().Replace(text, Decode);
+
+        static string Decode(System.Text.RegularExpressions.Match escape) =>
+            Convert.ToInt32(escape.Groups[1].Success ? escape.Groups[1].Value : escape.Groups[2].Value, 16) switch
+            {
+                <= 0xFFFF and var unit => ((char)unit).ToString(),
+                <= 0x10FFFF and var point => char.ConvertFromUtf32(point),
+                _ => escape.Value,
+            };
+
+        var names = RawScopeMethods.Append(nameof(TenantJobScope.Open)).Concat(helpers).Select(Regex.Escape);
+        return Regex.IsMatch(text, $@"\b(?:{string.Join('|', names)})\b", RegexOptions.CultureInvariant);
+    }
+
+    [GeneratedRegex(@"\\(?:u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8}))")]
+    private static partial Regex UnicodeEscape();
+
     private static List<string> Scan()
     {
         var root = RepositoryRoot();
-        var sources = new List<(string File, SyntaxTree Tree)>();
+        var sources = new List<(string File, string Text)>();
 
         foreach (var tree in ScannedTrees)
         {
@@ -306,15 +349,24 @@ public class ChildScopeGuardTests
                     || path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
                     continue;
 
-                var file = Path.GetRelativePath(root, path).Replace('\\', '/');
-                sources.Add((file, CSharpSyntaxTree.ParseText(File.ReadAllText(path))));
+                sources.Add((Path.GetRelativePath(root, path).Replace('\\', '/'), File.ReadAllText(path)));
             }
         }
 
-        var helpers = ScopeHelpers(sources.Where(s => s.File != Seam).Select(s => s.Tree).ToList());
+        var trees = new Dictionary<string, SyntaxTree>(StringComparer.Ordinal);
+        SyntaxTree Parse((string File, string Text) source) =>
+            trees.TryGetValue(source.File, out var tree)
+                ? tree
+                : trees[source.File] = CSharpSyntaxTree.ParseText(source.Text);
+
+        var helpers = ScopeHelpers(sources
+            .Where(s => s.File != Seam && MayDeclareHelper(s.Text))
+            .Select(Parse)
+            .ToList());
 
         return sources
-            .SelectMany(s => OpeningMembers(s.Tree, helpers).Select(member => $"{s.File}: {member}"))
+            .Where(s => MayOpen(s.Text, helpers.Keys))
+            .SelectMany(s => OpeningMembers(Parse(s), helpers).Select(member => $"{s.File}: {member}"))
             .ToList();
     }
 

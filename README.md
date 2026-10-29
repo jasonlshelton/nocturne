@@ -74,31 +74,41 @@ Aspire will automatically:
 - Launch any configured data connectors
 - Set up service discovery, health checks, and a YARP gateway
 
-Once running, access the app at `https://nocturne.localhost:1612`. `aspire describe` lists the services and `aspire logs <resource>` tails one. The Aspire dashboard is off by default; start with `Aspire__OptionalServices__AspireDashboard__Enabled=true aspire start` (or set `Aspire:OptionalServices:AspireDashboard:Enabled` in the AppHost appsettings) to get it.
+Once running, access the app at `https://nocturne.localhost:1612`. On an instance with no tenants (a fresh clone, and every worktree, whose Postgres is ephemeral), the AppHost seeds a `dev` tenant with 30 days of sample data before the web app starts, at `https://dev.nocturne.localhost:1612`, and dev auto-login signs you in as its owner, so the first page is a populated dashboard. `aspire logs nocturne-dev-seed` shows what the seed did and how long it took. An instance that already holds a tenant is never seeded, so an existing database keeps its own tenants and has no `dev`. A first start stopped during the seed leaves a partial `dev` tenant that is not seeded again: delete it (the "Delete Tenants" command on `nocturne-postgres-server`) and restart. `aspire describe` lists the services and `aspire logs <resource>` tails one. The Aspire dashboard is off by default; start with `Aspire__OptionalServices__AspireDashboard__Enabled=true aspire start` (or set `Aspire:OptionalServices:AspireDashboard:Enabled` in the AppHost appsettings) to get it.
 
 If .NET is installed outside the default location (e.g. Homebrew), set `DOTNET_ROOT` to the directory holding the real `dotnet` binary before `aspire start` (Homebrew: `export DOTNET_ROOT="$(brew --prefix dotnet)/libexec"`).
 
 In run mode the AppHost pins two host ports (main checkout; worktrees stay dynamic):
 
-- **`https://nocturne.localhost:1612`** — the YARP gateway (the app; tenants at `https://<slug>.nocturne.localhost:1612`)
+- **`https://nocturne.localhost:1612`** — the YARP gateway (the app; tenants at `https://<slug>.nocturne.localhost:1612`, the seeded one at `https://dev.nocturne.localhost:1612`)
 - **`http://localhost:1610`** — nocturne-api directly (stable target for scripts and the dev-only admin API)
 
 The API always runs with `ASPNETCORE_ENVIRONMENT=Development` under `aspire start`, so the dev-only surface (`/api/v4/dev-only/*`) exists locally and never in published images.
 
+The dev shortcuts live under `Dev` in the AppHost appsettings (see `appsettings.example.json`). To test the first-run wizard and the passkey UI, turn both off:
+
+```bash
+Dev__AutoSeed__Enabled=false Dev__AutoLogin=false aspire start
+```
+
+`Dev__AutoSeed__SampleDataDays` sets how much history the `dev` tenant gets (default 30).
+
 ## Multitenancy and Passkeys (Local Domains)
 
-The default local base domain is **`nocturne.localhost`**. Browsers resolve every `*.localhost` name to loopback themselves, so tenant subdomains (`sleepy.nocturne.localhost`) need no DNS or hosts-file setup, and WebAuthn accepts `nocturne.localhost` as the passkey Relying Party ID — unlike bare `localhost`, which browsers reject on subdomain origins as a public suffix.
+The default local base domain is **`nocturne.localhost`**. Browsers resolve every `*.localhost` name to loopback themselves, so tenant subdomains (`dev.nocturne.localhost`) need no DNS or hosts-file setup, and WebAuthn accepts `nocturne.localhost` as the passkey Relying Party ID — unlike bare `localhost`, which browsers reject on subdomain origins as a public suffix.
 
 TLS: if [mkcert](https://github.com/FiloSottile/mkcert) is installed (`winget install FiloSottile.mkcert` / `brew install mkcert`), the AppHost generates a trusted wildcard certificate for `*.nocturne.localhost` automatically — note this runs `mkcert -install`, which adds the mkcert root CA to your system trust store. Without mkcert, the gateway falls back to the ASP.NET dev certificate and tenant subdomains show a browser certificate warning (functional, just noisy).
 
 Migrating from an older checkout: the local base domain used to be bare `localhost`, and passkeys are scoped to the WebAuthn RP ID derived from it — credentials registered under the old domain won't assert under `nocturne.localhost`. Register a fresh passkey once (then export it as a fixture, below).
 
-### Seed a loginable tenant with data in one call
+### Seed another loginable tenant with data in one call
+
+The `dev` tenant already exists (see above), so another tenant needs another slug:
 
 ```bash
 curl -X POST http://localhost:1610/api/v4/dev-only/admin/seed-tenant \
   -H "Content-Type: application/json" \
-  -d '{ "slug": "sleepy", "displayName": "Sleepy", "ownerUsername": "dev", "sampleData": true }'
+  -d '{ "slug": "test", "displayName": "Test", "ownerUsername": "dev", "sampleData": true }'
 ```
 
 The response includes `url` and `loginLink` — open the `loginLink` in a browser and you're signed in as the owner, looking at realistic CGM data. `GET /api/v4/dev-only/auth/login?tenant=<slug>&format=json` (or POST) returns a token pair for headless clients instead. `scripts/dev-smoke.cs` runs the whole path end to end: `dotnet run scripts/dev-smoke.cs`.
@@ -124,7 +134,7 @@ cd src/Aspire/Nocturne.Aspire.Host
 dotnet user-secrets set "LocalDev:Domain" "nocturne.test"
 ```
 
-This requires mkcert and one hosts-file line per tenant slug (`127.0.0.1 sleepy.nocturne.test` — hosts files don't support wildcards). The app is then at `https://nocturne.test` with no port.
+This requires mkcert and one hosts-file line per tenant slug (`127.0.0.1 dev.nocturne.test` — hosts files don't support wildcards). The app is then at `https://nocturne.test` with no port.
 
 ## Production Deployment (Docker Compose)
 
@@ -157,7 +167,7 @@ The production compose includes [Watchtower](https://github.com/nicholas-fedor/w
 
 ### First-run setup
 
-A fresh install has no tenants, so the API answers every request with `503 {"error":"setup_required"}` until the first owner secures the instance. This is expected — it's the signal for the web UI to show the setup wizard.
+A fresh install has no tenants, so the API answers every request with `503 {"error":"setup_required"}` until the first owner secures the instance. This is expected — it's the signal for the web UI to show the setup wizard. A local `aspire start` skips this step: it seeds a `dev` tenant (see [Quick Start with Aspire](#quick-start-with-aspire-development)).
 
 **In a browser (normal path).** Open your Nocturne site (the apex `https://<BASE_DOMAIN>/`). The setup wizard walks you through creating the first tenant and registering a passkey (or linking an OIDC provider). When it completes you're shown a set of recovery codes — save them. That's the whole setup.
 

@@ -31,6 +31,7 @@ public class CompressionLowService : ICompressionLowService
     private readonly IUISettingsService _uiSettingsService;
     private readonly ITenantOwnerResolver _tenantOwnerResolver;
     private readonly ITenantAccessor _tenantAccessor;
+    private readonly TimeProvider _time;
     private readonly ILogger<CompressionLowService> _logger;
 
     public CompressionLowService(
@@ -43,6 +44,7 @@ public class CompressionLowService : ICompressionLowService
         IUISettingsService uiSettingsService,
         ITenantOwnerResolver tenantOwnerResolver,
         ITenantAccessor tenantAccessor,
+        TimeProvider timeProvider,
         ILogger<CompressionLowService> logger)
     {
         _repository = repository;
@@ -54,6 +56,7 @@ public class CompressionLowService : ICompressionLowService
         _uiSettingsService = uiSettingsService;
         _tenantOwnerResolver = tenantOwnerResolver;
         _tenantAccessor = tenantAccessor;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -138,7 +141,7 @@ public class CompressionLowService : ICompressionLowService
 
         // Update suggestion
         suggestion.Status = CompressionLowStatus.Accepted;
-        suggestion.ReviewedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        suggestion.ReviewedAt = _time.GetUtcNow().ToUnixTimeMilliseconds();
         suggestion.StateSpanId = Guid.TryParse(createdSpan.Id, out var spanId) ? spanId : null;
 
         await _repository.UpdateAsync(suggestion, cancellationToken);
@@ -165,7 +168,7 @@ public class CompressionLowService : ICompressionLowService
             throw new InvalidOperationException($"Suggestion {id} is not pending");
 
         suggestion.Status = CompressionLowStatus.Dismissed;
-        suggestion.ReviewedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        suggestion.ReviewedAt = _time.GetUtcNow().ToUnixTimeMilliseconds();
 
         await _repository.UpdateAsync(suggestion, cancellationToken);
 

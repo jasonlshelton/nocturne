@@ -26,7 +26,8 @@ internal sealed class AlertReplayService(
     ISensorContextEnricher enricher,
     ITenantAccessor tenantAccessor,
     IOptions<AlertEvaluationOptions> evaluationOptions,
-    IAlertReplayEngine replayEngine)
+    IAlertReplayEngine replayEngine,
+    TimeProvider timeProvider)
     : IAlertReplayService
 {
     /// <summary>
@@ -73,7 +74,8 @@ internal sealed class AlertReplayService(
         var tenantId = tenantAccessor.TenantId;
         if (tenantId == Guid.Empty)
         {
-            return new AlertReplayResult(DateTime.UtcNow, DateTime.UtcNow, []);
+            var now = timeProvider.GetUtcNow().UtcDateTime;
+            return new AlertReplayResult(now, now, []);
         }
 
         var stored = await alertRepository.GetEnabledRulesAsync(tenantId, ct);
@@ -449,7 +451,7 @@ internal sealed class AlertReplayService(
     /// midnight-to-midnight, converted to UTC. On DST-transition days the resulting UTC
     /// window is 23 or 25 hours wide rather than exactly 24.
     /// </summary>
-    private static (DateTime Start, DateTime End) ResolveWindow(
+    private (DateTime Start, DateTime End) ResolveWindow(
         DateOnly? localDate, string? timezone, DateTime? fromUtc, DateTime? toUtc)
     {
         // Absolute UTC range wins when both endpoints are provided. The caller is
@@ -465,7 +467,7 @@ internal sealed class AlertReplayService(
 
         if (localDate is null)
         {
-            var now = DateTime.UtcNow;
+            var now = timeProvider.GetUtcNow().UtcDateTime;
             return (now.AddHours(-24), now);
         }
 

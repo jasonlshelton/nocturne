@@ -19,7 +19,7 @@ namespace Nocturne.API.Services.Identity;
 /// alone is not an authorization decision.
 /// </remarks>
 /// <seealso cref="ITenantRoleService"/>
-public partial class TenantRoleService(INocturneDbContextFactory contexts) : ITenantRoleService
+public partial class TenantRoleService(INocturneDbContextFactory contexts, TimeProvider time) : ITenantRoleService
 {
     public async Task<List<TenantRoleDto>> GetRolesAsync(
         Guid tenantId, IReadOnlyCollection<string> granterScopes, CancellationToken ct = default)
@@ -101,7 +101,7 @@ public partial class TenantRoleService(INocturneDbContextFactory contexts) : ITe
         entity.Slug = GenerateSlug(name);
         entity.Description = description;
         entity.Permissions = permissions;
-        entity.SysUpdatedAt = DateTime.UtcNow;
+        entity.SysUpdatedAt = time.GetUtcNow().UtcDateTime;
 
         await db.SaveChangesAsync(ct);
 

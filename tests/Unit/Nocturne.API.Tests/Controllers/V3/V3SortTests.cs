@@ -96,6 +96,7 @@ public class V3SortTests
                 Mock.Of<IUploaderSnapshotRepository>(),
                 Mock.Of<IStateSpanRepository>(),
                 Mock.Of<IDeviceStatusExtrasRepository>(),
+                TimeProvider.System,
                 NullLogger<DeviceStatusProjectionService>.Instance),
             Mock.Of<IDeviceStatusDecomposer>(),
             Mock.Of<IWriteSideEffects>(),

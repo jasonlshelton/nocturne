@@ -20,6 +20,7 @@
         <PackageReference Include="Moq"/>
         <PackageReference Include="FluentAssertions"/>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+        <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing"/>
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="../../../src/Connectors/Nocturne.Connectors.Eversense/Nocturne.Connectors.Eversense.csproj"/>

@@ -307,7 +307,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
         try
         {
             // See GlookoSyncContext: this run's entire working state lives here, never on the service.
-            var context = new GlookoSyncContext(config, ConnectorSource, _glookoLogger)
+            var context = new GlookoSyncContext(config, ConnectorSource, _glookoLogger, Clock)
             {
                 CancellationToken = cancellationToken
             };
@@ -328,7 +328,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
             // The request window is real-UTC; Glooko queries expect fake-UTC (local wall-clock). Pad by
             // a day each side so a non-zero offset between the two never clips edge data (dedup absorbs
             // the overlap). A range naming no lower bound reaches back the full history floor.
-            var now = DateTime.UtcNow;
+            var now = Clock.GetUtcNow().UtcDateTime;
             var from = context.TimeMapper.ToGlookoTime(
                 request.From ?? now.AddMonths(-GlookoConstants.FullWalkMonths)).AddDays(-1);
             var to = context.TimeMapper.ToGlookoTime(request.To ?? now).AddDays(1);
@@ -438,7 +438,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
             return await base.SyncDataAsync(config, cancellationToken, resumeFrom, progressReporter);
         }
 
-        var now = DateTime.UtcNow;
+        var now = Clock.GetUtcNow().UtcDateTime;
         var fullWalk = await IsFullWalkDueAsync(now, cancellationToken);
         var from = fullWalk
             ? now.AddMonths(-GlookoConstants.FullWalkMonths)
@@ -1241,7 +1241,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
         // state spans from MapAndPublishV2BatchAsync; degrades to none on failure.
         if (activeTypes.Contains(SyncDataType.StateSpans))
         {
-            var modeTo = context.TimeMapper.ToGlookoTime(DateTime.UtcNow).AddDays(1);
+            var modeTo = context.TimeMapper.ToGlookoTime(Clock.GetUtcNow().UtcDateTime).AddDays(1);
             var modeFrom = incremental ? modeTo.AddDays(-3) : from;
             var modeData = await FetchV3PumpModeGraphAsync(context, modeFrom, modeTo);
             if (modeData != null)
@@ -1778,7 +1778,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
             if (GlookoDeviceClockMapper.MapProfileObservation(users?.Users, ClockConnectorId) is { } profile)
                 observations.Add(profile);
 
-            var since = DateTime.UtcNow - ClockProbeLookback;
+            var since = Clock.GetUtcNow().UtcDateTime - ClockProbeLookback;
             var egvs = await FetchClockPageAsync<GlookoEgvPage>(context, GlookoConstants.Ssv2EgvsPath, since);
             var boluses = await FetchClockPageAsync<GlookoNormalBolusPage>(
                 context, GlookoConstants.NormalBolusesPath, since);
@@ -1837,7 +1837,7 @@ public class GlookoConnectorService : BaseConnectorService<GlookoConnectorConfig
         GlookoSyncContext context, CancellationToken cancellationToken)
     {
         var records = new List<GlookoBolus>();
-        var cursor = FormatSsv2Cursor(DateTime.UtcNow - TimeSpan.FromDays(IDeviceClockService.RetentionDays));
+        var cursor = FormatSsv2Cursor(Clock.GetUtcNow().UtcDateTime - TimeSpan.FromDays(IDeviceClockService.RetentionDays));
         var guid = GlookoConstants.Ssv2InitialLastGuid;
 
         for (var page = 0; page < HistoricalScanMaxPages; page++)

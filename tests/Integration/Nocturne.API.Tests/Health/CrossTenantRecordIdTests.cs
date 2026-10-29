@@ -210,15 +210,15 @@ public sealed class CrossTenantRecordIdTests(CrossTenantRecordIdFixture fixture)
 
     private BodyWeightService BodyWeights(Guid tenant) => new(
         Tenant(tenant).AsFactory(), Processing<BodyWeight>(), Mock.Of<ISignalRBroadcastService>(),
-        NullLogger<BodyWeightService>.Instance);
+        TimeProvider.System, NullLogger<BodyWeightService>.Instance);
 
     private HeartRateService HeartRates(Guid tenant) => new(
         Tenant(tenant).AsFactory(), Processing<HeartRate>(), Mock.Of<ISignalRBroadcastService>(),
-        NullLogger<HeartRateService>.Instance);
+        TimeProvider.System, NullLogger<HeartRateService>.Instance);
 
     private StepCountService StepCounts(Guid tenant) => new(
         Tenant(tenant).AsFactory(), Processing<StepCount>(), Mock.Of<ISignalRBroadcastService>(),
-        NullLogger<StepCountService>.Instance);
+        TimeProvider.System, NullLogger<StepCountService>.Instance);
 
     private NocturneDbContext Tenant(Guid tenant) => new(new DbContextOptionsBuilder<NocturneDbContext>()
         .UseNpgsql(fixture.Database.AppConnectionString)

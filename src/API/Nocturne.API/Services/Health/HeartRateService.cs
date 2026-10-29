@@ -19,15 +19,17 @@ namespace Nocturne.API.Services.Health;
 /// <seealso cref="TimeSeriesEntityService{TModel,TEntity}"/>
 /// <param name="documentProcessingService">Service that applies field processing before save.</param>
 /// <param name="signalRBroadcastService">Service used to broadcast entity changes over SignalR.</param>
+/// <param name="timeProvider">Clock that stamps soft deletes.</param>
 /// <param name="logger">Logger instance for this service.</param>
 public class HeartRateService(
     INocturneDbContextFactory contexts,
     IDocumentProcessingService documentProcessingService,
     ISignalRBroadcastService signalRBroadcastService,
+    TimeProvider timeProvider,
     ILogger<HeartRateService> logger
 )
     : TimeSeriesEntityService<HeartRate, HeartRateEntity>(
-        contexts, documentProcessingService, signalRBroadcastService, logger),
+        contexts, documentProcessingService, signalRBroadcastService, timeProvider, logger),
         IHeartRateService
 {
     protected override DbSet<HeartRateEntity> EntitySet(NocturneDbContext db) => db.HeartRates;

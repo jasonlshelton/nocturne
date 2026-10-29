@@ -68,7 +68,8 @@ public class AuthorizationServiceTokenExchangeTests : IDisposable
             new Mock<IDirectGrantService>().Object,
             _mockJwtService.Object,
             _dbContext.AsFactory(),
-            _categoryReadContext
+            _categoryReadContext,
+            TimeProvider.System
         );
     }
 
@@ -385,7 +386,8 @@ public class AuthorizationServiceTokenExchangeTests : IDisposable
             new Mock<IDirectGrantService>().Object,
             _mockJwtService.Object,
             context.AsFactory(),
-            _categoryReadContext
+            _categoryReadContext,
+            TimeProvider.System
         );
     }
 

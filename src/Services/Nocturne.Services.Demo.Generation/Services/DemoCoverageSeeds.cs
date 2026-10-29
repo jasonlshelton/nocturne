@@ -13,8 +13,8 @@ public static class DemoCoverageSeeds
         night.DayOfWeek is DayOfWeek.Sunday or DayOfWeek.Tuesday or DayOfWeek.Thursday;
 
     /// <summary>The planted nadir after <paramref name="night"/>, at the demo's local wall clock.</summary>
-    public static long CompressionNadirMills(DateOnly night) =>
-        new DateTimeOffset(CompressionNadirLocal(night)).ToUnixTimeMilliseconds();
+    public static long CompressionNadirMills(DateOnly night, DemoClock clock) =>
+        clock.ToUtc(CompressionNadirLocal(night)).ToMills();
 
     private static DateTime CompressionNadirLocal(DateOnly night) =>
         night.AddDays(1).ToDateTime(new TimeOnly(4, 10));

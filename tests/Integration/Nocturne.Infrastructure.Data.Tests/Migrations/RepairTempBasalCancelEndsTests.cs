@@ -67,10 +67,9 @@ public class RepairTempBasalCancelEndsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("repair_temp_basal_cancel_ends");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "repair_temp_basal_cancel_ends");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(null);

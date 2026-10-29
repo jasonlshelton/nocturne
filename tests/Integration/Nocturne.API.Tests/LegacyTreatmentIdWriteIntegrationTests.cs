@@ -21,6 +21,7 @@ namespace Nocturne.API.Tests.Integration;
 /// read-back document, and edits and deletes of a meal whose bolus and carb halves do not share a
 /// legacy id.
 /// </summary>
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 [Parity]
 public class LegacyTreatmentIdWriteIntegrationTests : ApiIntegrationTestBase

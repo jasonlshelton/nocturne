@@ -22,6 +22,7 @@ namespace Nocturne.API.Tests.Integration.Auth;
 /// cannot read or write against another tenant, and that a tenant member without
 /// the platform_admin role cannot reach the platform-admin API.
 /// </summary>
+[Collection(ApiIntegrationShards.Three)]
 [Trait("Category", "Integration")]
 public class MultitenantIsolationIntegrationTests : ApiIntegrationTestBase
 {

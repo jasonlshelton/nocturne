@@ -11,6 +11,7 @@ namespace Nocturne.API.Tests.Integration;
 /// <summary>
 /// v1 PUT /profile, DELETE /profile/{id} and DELETE /profile?keep=N on real PostgreSQL.
 /// </summary>
+[Collection(ApiIntegrationShards.Three)]
 [Trait("Category", "Integration")]
 public class ProfileV1WriteIntegrationTests : ApiIntegrationTestBase
 {

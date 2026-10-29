@@ -244,8 +244,6 @@ public class ConnectorConfigurationLoaderTests
         public LoaderTestConfig() => ConnectSource = ConnectSource.Dexcom;
 
         public string Username { get; set; } = string.Empty;
-
-        protected override void ValidateSourceSpecificConfiguration() { }
     }
 
     private sealed class RequiredSecretTestConfig : BaseConnectorConfiguration
@@ -254,7 +252,5 @@ public class ConnectorConfigurationLoaderTests
 
         [ConnectorProperty(ConnectorPropertyKey.ApiSecret, Required = true, Secret = true)]
         public string ApiSecret { get; set; } = string.Empty;
-
-        protected override void ValidateSourceSpecificConfiguration() { }
     }
 }

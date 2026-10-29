@@ -103,7 +103,8 @@ public class AlertDeliveryWebhookSigningTests
             Mock.Of<ISignalRBroadcastService>(),
             Mock.Of<IEngineAlarmRelay>(),
             services.BuildServiceProvider(),
-            NullLogger<AlertDeliveryService>.Instance);
+            NullLogger<AlertDeliveryService>.Instance,
+            TimeProvider.System);
 
         return (service, channels);
     }

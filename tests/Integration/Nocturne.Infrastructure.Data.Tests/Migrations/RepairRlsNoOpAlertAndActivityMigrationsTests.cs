@@ -33,10 +33,9 @@ public class RepairRlsNoOpAlertAndActivityMigrationsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("rls_noop_repair");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "rls_noop_repair");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
         foreach (var tenant in new[] { TenantA, TenantB })

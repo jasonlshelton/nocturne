@@ -26,6 +26,7 @@ public class MemberInviteService : IMemberInviteService
     private readonly ITenantService _tenantService;
     private readonly ITenantRoleService _tenantRoleService;
     private readonly BaseDomainOptions _baseDomain;
+    private readonly TimeProvider _time;
     private readonly ILogger<MemberInviteService> _logger;
 
     public MemberInviteService(
@@ -34,6 +35,7 @@ public class MemberInviteService : IMemberInviteService
         ITenantService tenantService,
         ITenantRoleService tenantRoleService,
         IOptions<BaseDomainOptions> baseDomainOptions,
+        TimeProvider timeProvider,
         ILogger<MemberInviteService> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
@@ -41,6 +43,7 @@ public class MemberInviteService : IMemberInviteService
         _tenantService = tenantService;
         _tenantRoleService = tenantRoleService;
         _baseDomain = baseDomainOptions.Value;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -90,10 +93,10 @@ public class MemberInviteService : IMemberInviteService
             DirectPermissions = directPermissions,
             Label = label,
             LimitTo24Hours = limitTo24Hours,
-            ExpiresAt = DateTime.UtcNow.AddDays(expiresInDays),
+            ExpiresAt = _time.GetUtcNow().UtcDateTime.AddDays(expiresInDays),
             MaxUses = maxUses,
             UseCount = 0,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = _time.GetUtcNow().UtcDateTime,
         };
 
         db.MemberInvites.Add(entity);
@@ -141,7 +144,7 @@ public class MemberInviteService : IMemberInviteService
         if (entity == null)
             return null;
 
-        return MapToInfo(entity, await LoadRolesAsync(db, tenantId, entity.RoleIds));
+        return MapToInfo(entity, _time.GetUtcNow().UtcDateTime, await LoadRolesAsync(db, tenantId, entity.RoleIds));
     }
 
     /// <inheritdoc />
@@ -165,7 +168,7 @@ public class MemberInviteService : IMemberInviteService
         if (entity == null)
             return new AcceptMemberInviteResult(false, "invalid_token", "Invite not found or has been revoked.");
 
-        if (entity.IsExpired)
+        if (entity.IsExpiredAt(_time.GetUtcNow().UtcDateTime))
             return new AcceptMemberInviteResult(false, "expired", "This invite has expired.");
 
         if (entity.IsRevoked)
@@ -253,7 +256,8 @@ public class MemberInviteService : IMemberInviteService
             .ToListAsync();
 
         var roles = await LoadRolesAsync(db, tenantId, entities.SelectMany(i => i.RoleIds).Distinct().ToList());
-        return entities.Select(e => MapToInfo(e, roles)).ToList();
+        var now = _time.GetUtcNow().UtcDateTime;
+        return entities.Select(e => MapToInfo(e, now, roles)).ToList();
     }
 
     /// <inheritdoc />
@@ -270,7 +274,7 @@ public class MemberInviteService : IMemberInviteService
         if (entity.RevokedAt.HasValue)
             return true; // Already revoked
 
-        entity.RevokedAt = DateTime.UtcNow;
+        entity.RevokedAt = _time.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync();
 
         _logger.LogInformation(
@@ -291,7 +295,7 @@ public class MemberInviteService : IMemberInviteService
     }
 
     private static MemberInviteInfo MapToInfo(
-        MemberInviteEntity entity, IReadOnlyDictionary<Guid, TenantRoleEntity> roles)
+        MemberInviteEntity entity, DateTime now, IReadOnlyDictionary<Guid, TenantRoleEntity> roles)
     {
         // A deleted role grants nothing on acceptance, so it is not described either.
         var grantedRoles = entity.RoleIds
@@ -316,8 +320,8 @@ public class MemberInviteService : IMemberInviteService
             entity.ExpiresAt,
             entity.MaxUses,
             entity.UseCount,
-            entity.IsValid,
-            entity.IsExpired,
+            entity.IsValidAt(now),
+            entity.IsExpiredAt(now),
             entity.IsRevoked,
             entity.CreatedAt,
             entity.CreatedMembers

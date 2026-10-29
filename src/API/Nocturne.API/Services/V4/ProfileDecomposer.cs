@@ -31,6 +31,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
     private readonly ITargetRangeScheduleRepository _targetRangeScheduleRepo;
     private readonly ITempBasalRateReresolver _tempBasalRates;
     private readonly ILoopClosedLoopStamper _closedLoop;
+    private readonly TimeProvider _time;
 
     /// <param name="therapySettingsRepo">Repository for <see cref="V4Models.TherapySettings"/> records.</param>
     /// <param name="basalScheduleRepo">Repository for <see cref="V4Models.BasalSchedule"/> records.</param>
@@ -39,6 +40,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
     /// <param name="targetRangeScheduleRepo">Repository for <see cref="V4Models.TargetRangeSchedule"/> records.</param>
     /// <param name="tempBasalRates">Re-resolves the percent temp basals a written basal schedule covers.</param>
     /// <param name="closedLoop">Restamps the Loop snapshots written Loop settings govern.</param>
+    /// <param name="timeProvider">Clock that marks when a batch began writing.</param>
     /// <param name="logger">Logger instance for this decomposer.</param>
     public ProfileDecomposer(
         ITherapySettingsRepository therapySettingsRepo,
@@ -48,6 +50,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
         ITargetRangeScheduleRepository targetRangeScheduleRepo,
         ITempBasalRateReresolver tempBasalRates,
         ILoopClosedLoopStamper closedLoop,
+        TimeProvider timeProvider,
         ILogger<ProfileDecomposer> logger)
         : base(logger)
     {
@@ -58,6 +61,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
         _targetRangeScheduleRepo = targetRangeScheduleRepo;
         _tempBasalRates = tempBasalRates;
         _closedLoop = closedLoop;
+        _time = timeProvider;
     }
 
     /// <inheritdoc />
@@ -146,7 +150,7 @@ public class ProfileDecomposer : DecomposerBase, IProfileDecomposer, IDecomposer
             : (await _therapySettingsRepo.GetDefaultsAsync(ct))
                 .Select(d => d.LegacyId).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
-        var writtenSince = DateTime.UtcNow;
+        var writtenSince = _time.GetUtcNow().UtcDateTime;
         var anchors = await _therapySettingsRepo.BulkUpsertByLegacyIdAsync(
             entries.Select(e => MapToTherapySettings(
                 e.Profile, e.Data, e.StoreName, e.LegacyId,

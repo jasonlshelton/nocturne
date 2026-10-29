@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Analytics;
@@ -55,7 +56,29 @@ public class SummaryServiceTests
         _mockPropertiesService
             .Setup(x => x.GetAllPropertiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<string, object>());
-        _service = new SummaryService(
+        _service = ServiceAt(TimeProvider.System);
+    }
+
+    [Fact]
+    public void ProcessSgvs_KeepsReadingsFromTheLastNHoursOfTheClock()
+    {
+        var now = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero);
+        var service = ServiceAt(new FakeTimeProvider(now));
+        var hoursAgo = (double hours) => now.AddHours(-hours).ToUnixTimeMilliseconds();
+        var sgvs = new List<Entry>
+        {
+            new() { Mgdl = 100, Mills = hoursAgo(6.01) },
+            new() { Mgdl = 110, Mills = hoursAgo(6) },
+            new() { Mgdl = 120, Mills = hoursAgo(1) },
+        };
+
+        var kept = service.ProcessSgvs(sgvs, 6);
+
+        kept.Select(k => k.Sgv).Should().Equal(110, 120);
+    }
+
+    private SummaryService ServiceAt(TimeProvider time) =>
+        new SummaryService(
             _mockDDataService.Object,
             _mockPropertiesService.Object,
             _mockIobCobReader.Object,
@@ -68,9 +91,8 @@ public class SummaryServiceTests
                 _mockSensitivity.Object,
                 _mockTargetRange.Object
             ),
-            _mockLogger.Object
+            time, _mockLogger.Object
         );
-    }
 
     [Fact]
     public async Task GetSummaryAsync_WithValidData_ReturnsProcessedSummary()

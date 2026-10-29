@@ -38,6 +38,7 @@ public class DevAdminController : ControllerBase
     private readonly ISecretEncryptionService _encryption;
     private readonly ITenantService _tenantService;
     private readonly IMemoryCache _cache;
+    private readonly TimeProvider _time;
     private readonly ILogger<DevAdminController> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -51,12 +52,14 @@ public class DevAdminController : ControllerBase
     /// <param name="encryption">Service for secret encryption/decryption in snapshots.</param>
     /// <param name="tenantService">Service for tenant lifecycle management.</param>
     /// <param name="cache">Tenant-resolution cache, which a restored snapshot invalidates.</param>
+    /// <param name="timeProvider">Clock that stamps seeded fixture credentials.</param>
     /// <param name="logger">Logger instance.</param>
     public DevAdminController(
         INocturneDbContextFactory contexts,
         ISecretEncryptionService encryption,
         ITenantService tenantService,
         IMemoryCache cache,
+        TimeProvider timeProvider,
         ILogger<DevAdminController> logger
     )
     {
@@ -64,6 +67,7 @@ public class DevAdminController : ControllerBase
         _encryption = encryption;
         _tenantService = tenantService;
         _cache = cache;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -720,7 +724,7 @@ public class DevAdminController : ControllerBase
 
         var validation = await _tenantService.ValidateSlugAsync(request.Slug, ct);
         if (!validation.IsValid)
-            return await SlugRejectionAsync(request.Slug, validation.Message, ct);
+            return await SlugRejectionAsync(request.Slug, validation.Message, allowReserved: false, ct);
 
         var result = await _tenantService.CreateWithoutOwnerAsync(
             request.Slug, request.DisplayName, ct: ct);
@@ -1018,9 +1022,10 @@ public class DevAdminController : ControllerBase
             .Replace("\n", string.Empty);
         _logger.LogInformation("Dev seed-tenant: slug={Slug}", sanitizedSlugForLog);
 
-        var validation = await _tenantService.ValidateSlugAsync(slug, ct);
+        // `dev` (the AppHost's auto-seeded tenant) and `test` are reserved for production subdomains.
+        var validation = await _tenantService.ValidateSlugAsync(slug, allowReserved: true, ct);
         if (!validation.IsValid)
-            return await SlugRejectionAsync(slug, validation.Message, ct);
+            return await SlugRejectionAsync(slug, validation.Message, allowReserved: true, ct);
 
         // 1. Tenant (seeds roles, public subject)
         var tenant = await _tenantService.CreateWithoutOwnerAsync(
@@ -1064,7 +1069,7 @@ public class DevAdminController : ControllerBase
         // passkeys (re-seeded from docs/seed/dev-identities.json) can then sign
         // in to this tenant with the developer's actual authenticator.
         var fixtureSubjectIds = await DevIdentityFixtureSeeder.SeedAsync(
-            db, configuration, _logger, ct);
+            db, configuration, _time, _logger, ct);
         foreach (var fixtureSubjectId in fixtureSubjectIds)
         {
             if (fixtureSubjectId == subjectResult.Subject.Id)
@@ -1271,11 +1276,11 @@ public class DevAdminController : ControllerBase
     /// (and their scripts) don't have to guess around the reserved-slug list.
     /// </summary>
     private async Task<ActionResult> SlugRejectionAsync(
-        string? slug, string? message, CancellationToken ct)
+        string? slug, string? message, bool allowReserved, CancellationToken ct)
     {
         var normalized = (slug ?? string.Empty).Trim().ToLowerInvariant();
         var candidates = string.IsNullOrEmpty(normalized)
-            ? ["sleepy", "dev-tenant", "sandbox"]
+            ? ["test", "sandbox", "demo2"]
             : new[]
             {
                 $"{normalized}-tenant", $"{normalized}-local", $"my-{normalized}",
@@ -1287,7 +1292,7 @@ public class DevAdminController : ControllerBase
         {
             if (suggestions.Count >= 3)
                 break;
-            if ((await _tenantService.ValidateSlugAsync(candidate, ct)).IsValid)
+            if ((await _tenantService.ValidateSlugAsync(candidate, allowReserved, ct)).IsValid)
                 suggestions.Add(candidate);
         }
 

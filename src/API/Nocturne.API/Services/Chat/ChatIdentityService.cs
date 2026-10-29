@@ -29,6 +29,7 @@ public sealed class ChatIdentityService(
     ChatIdentityDirectoryService directory,
     ChatIdentityPendingLinkService pendingLinks,
     INocturneDbContextFactory contextFactory,
+    TimeProvider time,
     ILogger<ChatIdentityService> logger)
 {
     /// <summary>Returns all active chat identity links for the specified tenant.</summary>
@@ -107,7 +108,7 @@ public sealed class ChatIdentityService(
         await using var db = await contextFactory.CreatePlatformAsync(ct);
         var row = await db.ChatIdentityPendingLinks.AsNoTracking()
             .FirstOrDefaultAsync(p => p.Token == token, ct);
-        if (row is null || row.ExpiresAt < DateTime.UtcNow) return null;
+        if (row is null || row.ExpiresAt < time.GetUtcNow().UtcDateTime) return null;
         return new ChatIdentityPendingLinkView
         {
             Platform = row.Platform,

@@ -901,7 +901,7 @@ public partial class StatisticsControllerTests
             .Setup(s => s.GetSegmentsAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .Returns(AsAsync([]));
 
-        await CreateController(statisticsService: new StatisticsService())
+        await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetInsulinDeliveryStatistics(start, start.AddDays(1), cancellationToken: cts.Token);
 
         _basalSegmentsMock.Verify(
@@ -982,7 +982,7 @@ public partial class StatisticsControllerTests
             .Setup(s => s.GetSegmentsAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .Returns(AsAsync([new BasalSegment(Mills(start.AddDays(-1)), Mills(start.AddDays(2)), 1.0, 1.0, "Default")]));
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetBasalAnalysis(start, start.AddDays(1));
 
         var ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
@@ -1186,7 +1186,7 @@ public partial class StatisticsControllerTests
         SetupBoluses(BolusKind.Manual, new List<Bolus> { new() { Timestamp = start, Insulin = 2 } });
         SetupBoluses(BolusKind.Algorithm, new List<Bolus>());
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetInsulinDeliveryStatistics(start, start.AddDays(1));
 
         result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1211,7 +1211,7 @@ public partial class StatisticsControllerTests
             });
         var now = new FakeTimeProvider(new DateTimeOffset(start.AddHours(10).AddMinutes(30), TimeSpan.Zero));
 
-        var result = await CreateController(statisticsService: new StatisticsService(), timeProvider: now)
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System), timeProvider: now)
             .GetInsulinDeliveryStatistics(start, start.AddDays(1));
 
         result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1353,7 +1353,7 @@ public partial class StatisticsControllerTests
         SetupHistoryPastTheOldLimits();
         using var cts = new CancellationTokenSource();
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetDailyBasalBolusRatios(DenseDay, DenseDay.AddDays(4), cts.Token);
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1376,7 +1376,7 @@ public partial class StatisticsControllerTests
         var canonicalGlucose = TestDoubles.CanonicalGlucosePassThrough.Create();
         using var cts = new CancellationTokenSource();
 
-        var result = await CreateController(canonicalGlucose, statisticsService: new StatisticsService())
+        var result = await CreateController(canonicalGlucose, statisticsService: new StatisticsService(TimeProvider.System))
             .GetPunchCardData(DateOnly.FromDateTime(DenseDay), DateOnly.FromDateTime(LateRecordAt), cts.Token);
 
         var lateDay = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1401,7 +1401,7 @@ public partial class StatisticsControllerTests
         SetupHistoryPastTheOldLimits();
         using var cts = new CancellationTokenSource();
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetInsulinDeliveryStatistics(DenseDay, DenseDay.AddDays(4), cancellationToken: cts.Token);
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1441,7 +1441,7 @@ public partial class StatisticsControllerTests
                 },
             });
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetBasalAnalysis(start, start.AddDays(1));
 
         readFrom.Should().Be(start.AddHours(-24));
@@ -1456,7 +1456,7 @@ public partial class StatisticsControllerTests
         SetupHistoryPastTheOldLimits();
         using var cts = new CancellationTokenSource();
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetBasalAnalysis(DenseDay, DenseDay.AddDays(4), cts.Token);
 
         result.Result.Should().BeOfType<OkObjectResult>();
@@ -1471,7 +1471,7 @@ public partial class StatisticsControllerTests
         SetupEmptyTreatments();
         SetupScheduledFallbackFor(cts.Token);
 
-        await CreateController(statisticsService: new StatisticsService())
+        await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetBasalAnalysis(DenseDay, DenseDay.AddDays(1), cts.Token);
 
         VerifyScheduledFallbackRanUnder(cts.Token);
@@ -1484,7 +1484,7 @@ public partial class StatisticsControllerTests
         SetupHistoryPastTheOldLimits();
         using var cts = new CancellationTokenSource();
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetHourlyInsulinDelivery(DenseDay, DenseDay.AddDays(4), cts.Token);
 
         result.Result.Should().BeOfType<OkObjectResult>();
@@ -1499,7 +1499,7 @@ public partial class StatisticsControllerTests
         SetupEmptyTreatments();
         SetupScheduledFallbackFor(cts.Token);
 
-        await CreateController(statisticsService: new StatisticsService())
+        await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetHourlyInsulinDelivery(DenseDay, DenseDay.AddDays(1), cts.Token);
 
         VerifyScheduledFallbackRanUnder(cts.Token);
@@ -1750,7 +1750,7 @@ public partial class StatisticsControllerTests
             Origin = TempBasalOrigin.Manual,
         });
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetDailyBasalBolusRatios(start, start.AddDays(1));
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1787,7 +1787,7 @@ public partial class StatisticsControllerTests
             .Setup(x => x.GetSegmentsAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .Returns(AsAsync([]));
 
-        await CreateController(statisticsService: new StatisticsService())
+        await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetBasalAnalysis(start, start.AddDays(1), cts.Token);
 
         _basalSegmentsMock.Verify(
@@ -1819,7 +1819,7 @@ public partial class StatisticsControllerTests
     {
         SetupMultiPeriodWithProfile([]);
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetMultiPeriodStatistics();
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1913,7 +1913,7 @@ public partial class StatisticsControllerTests
 
     private async Task<InsulinDeliveryStatistics> DeliveryStatsAsync(DateTime start, params string[] grantedScopes)
     {
-        var controller = CreateController(statisticsService: new StatisticsService());
+        var controller = CreateController(statisticsService: new StatisticsService(TimeProvider.System));
         controller.HttpContext.Items[AuthContextKeys.GrantedScopes] =
             (IReadOnlySet<string>)new HashSet<string>(grantedScopes);
 
@@ -1925,7 +1925,7 @@ public partial class StatisticsControllerTests
 
     private async Task<InsulinDeliveryStatistics> MultiPeriodLastDayDelivery()
     {
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetMultiPeriodStatistics();
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -1994,7 +1994,7 @@ public partial class StatisticsControllerTests
             .ReturnsAsync(new[] { reading });
         SetupEmptyTreatments();
 
-        var controller = CreateController(statisticsService: new StatisticsService());
+        var controller = CreateController(statisticsService: new StatisticsService(TimeProvider.System));
 
         var result = await controller.GetPunchCardData(
             new DateOnly(2026, 6, 1),
@@ -2038,7 +2038,7 @@ public partial class StatisticsControllerTests
             .ReturnsAsync(Array.Empty<SensorGlucose>());
         SetupEmptyTreatments();
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetPunchCardData(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30));
 
         var ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
@@ -2072,7 +2072,7 @@ public partial class StatisticsControllerTests
             .ReturnsAsync(readings);
         SetupEmptyTreatments();
 
-        var result = await CreateController(statisticsService: new StatisticsService()).GetPunchCardData(
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System)).GetPunchCardData(
             DateOnly.FromDateTime(dayStart),
             DateOnly.FromDateTime(dayStart.AddDays(1)));
 
@@ -2102,7 +2102,7 @@ public partial class StatisticsControllerTests
         SetupPunchCardGlucose(readings);
         SetupEmptyTreatments();
 
-        var result = await CreateController(statisticsService: new StatisticsService()).GetPunchCardData(
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System)).GetPunchCardData(
             DateOnly.FromDateTime(dayStart), DateOnly.FromDateTime(dayStart));
 
         var month = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -2142,7 +2142,7 @@ public partial class StatisticsControllerTests
             .ReturnsAsync(readings);
         SetupEmptyTreatments();
 
-        var result = await CreateController(statisticsService: new StatisticsService()).GetPunchCardData(
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System)).GetPunchCardData(
             DateOnly.FromDateTime(dayStart),
             DateOnly.FromDateTime(dayStart.AddDays(1)));
 
@@ -2211,7 +2211,7 @@ public partial class StatisticsControllerTests
 
     private async Task<PunchCardMonthSummary> JuneSummary(DateOnly from, DateOnly to, TimeProvider? timeProvider = null)
     {
-        var result = await CreateController(statisticsService: new StatisticsService(), timeProvider: timeProvider)
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System), timeProvider: timeProvider)
             .GetPunchCardData(from, to);
 
         return result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -2239,7 +2239,7 @@ public partial class StatisticsControllerTests
     public async Task GetPunchCardData_ServesInsulinAndCarbAggregatesOnlyToReportsOrTreatmentsRead(string[] granted, bool served)
     {
         SetupDailyTreatmentsForJune(1, 30, JuneReadings(1, 30));
-        var controller = CreateController(statisticsService: new StatisticsService());
+        var controller = CreateController(statisticsService: new StatisticsService(TimeProvider.System));
         controller.HttpContext.Items[AuthContextKeys.GrantedScopes] =
             (IReadOnlySet<string>)new HashSet<string>(granted);
 
@@ -2336,7 +2336,7 @@ public partial class StatisticsControllerTests
             .ReturnsAsync(readings);
         SetupEmptyTreatments();
 
-        var result = await CreateController(statisticsService: new StatisticsService()).GetPunchCardData(
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System)).GetPunchCardData(
             DateOnly.FromDateTime(dayStart),
             DateOnly.FromDateTime(dayStart));
 
@@ -2971,7 +2971,7 @@ public partial class StatisticsControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(ages.Select(a => new BasalInjection { Timestamp = now - a, Units = 10 }).ToList());
 
-        var result = await CreateController(statisticsService: new StatisticsService()).GetMultiPeriodStatistics();
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System)).GetMultiPeriodStatistics();
 
         var payload = result.Result.Should().BeOfType<OkObjectResult>().Subject
             .Value.Should().BeOfType<MultiPeriodStatistics>().Subject;
@@ -3073,7 +3073,7 @@ public partial class StatisticsControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(injections);
 
-        var stats = new StatisticsService();
+        var stats = new StatisticsService(TimeProvider.System);
         var result = await CreateController(statisticsService: stats).GetPunchCardData(start, end);
 
         var days = result.Result.Should().BeOfType<OkObjectResult>().Subject
@@ -3103,7 +3103,7 @@ public partial class StatisticsControllerTests
             .Setup(r => r.GetTimezoneAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("Australia/Sydney");
 
-        var result = await CreateController(statisticsService: new StatisticsService())
+        var result = await CreateController(statisticsService: new StatisticsService(TimeProvider.System))
             .GetPunchCardData(new DateOnly(2026, 10, 4), new DateOnly(2026, 10, 5));
 
         var days = result.Result.Should().BeOfType<OkObjectResult>().Subject

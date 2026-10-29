@@ -210,6 +210,7 @@ public class CompressionLowNightWindowResolverTests
             settings.Object,
             Mock.Of<ITenantOwnerResolver>(),
             tenantAccessor.Object,
+            TimeProvider.System,
             NullLogger<CompressionLowService>.Instance);
         await detail.GetSuggestionWithEntriesAsync(suggestion.Id);
 

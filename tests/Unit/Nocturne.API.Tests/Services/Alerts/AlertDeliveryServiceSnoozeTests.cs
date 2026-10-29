@@ -68,6 +68,7 @@ public class AlertDeliveryServiceSnoozeTests : IDisposable
         services.AddSingleton<IMemoryCache>(_ => new MemoryCache(new MemoryCacheOptions()));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddSingleton<InAppProvider>();
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<DeviceActionProvider>();
         services.AddSingleton<ChatBotProvider>();
         services.AddSingleton<HomeAssistantProvider>();
@@ -82,7 +83,8 @@ public class AlertDeliveryServiceSnoozeTests : IDisposable
             _broadcast.Object,
             _alarmRelay.Object,
             provider,
-            NullLogger<AlertDeliveryService>.Instance);
+            NullLogger<AlertDeliveryService>.Instance,
+            TimeProvider.System);
     }
 
     private async Task<Guid> SeedInstanceAsync(DateTime? snoozedUntil)

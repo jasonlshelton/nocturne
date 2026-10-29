@@ -70,6 +70,7 @@ public class DataHubHistoryClampTests
             Mock.Of<IUploaderSnapshotRepository>(),
             Mock.Of<IStateSpanRepository>(),
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance));
         var requestServices = services.BuildServiceProvider().CreateScope().ServiceProvider;
 

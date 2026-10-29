@@ -57,10 +57,7 @@ public class BaseConnectorServiceTests
         public DateTime? CallInitialSyncFloor() => InitialSyncFloor;
     }
 
-    public class TestConfig : BaseConnectorConfiguration
-    {
-        protected override void ValidateSourceSpecificConfiguration() { }
-    }
+    public class TestConfig : BaseConnectorConfiguration;
 
     [Fact]
     public void DefaultInitialSyncFloor_IsSixMonthsBeforeTheInjectedClock()

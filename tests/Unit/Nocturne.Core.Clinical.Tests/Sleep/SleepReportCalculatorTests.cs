@@ -371,7 +371,7 @@ public class SleepReportCalculatorTests
         var glucose = mgdl.Select((value, i) => MakeGlucose(t0.AddMinutes(i * 5), value)).ToArray();
 
         var hypos = Clinical.Sleep.SleepReportCalculator.ComputeHypoEvents(session, glucose, [], _thresholds);
-        var episodes = new StatisticsService().CalculateTimeInRange(glucose, _thresholds).Episodes;
+        var episodes = new StatisticsService(TimeProvider.System).CalculateTimeInRange(glucose, _thresholds).Episodes;
 
         hypos.Should().HaveCount(episodes.BelowRange).And.HaveCount(2);
         hypos.Count(h => h.Severity == SleepHypoSeverity.VeryLow).Should().Be(episodes.VeryLow).And.Be(1);

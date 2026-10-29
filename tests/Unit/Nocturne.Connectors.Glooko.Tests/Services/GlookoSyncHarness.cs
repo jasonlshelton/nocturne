@@ -38,9 +38,10 @@ internal static class GlookoSyncHarness
         PublishKind? rejected = null,
         IConnectorPublisher? publisher = null,
         StaticGlookoTokenProvider? tokenProvider = null,
-        IConnectorSyncCursorStore? cursorStore = null) =>
-        new(new HttpClient(handler), tokenProvider ?? new StaticGlookoTokenProvider(), rejected, publisher,
-            cursorStore);
+        IConnectorSyncCursorStore? cursorStore = null,
+        TimeProvider? clock = null) =>
+        new(new HttpClient(handler), tokenProvider ?? new StaticGlookoTokenProvider(clock), rejected, publisher,
+            cursorStore, clock);
 }
 
 /// <summary>
@@ -98,7 +99,8 @@ internal sealed class RecordingGlookoConnectorService : GlookoConnectorService
 
     public RecordingGlookoConnectorService(
         HttpClient httpClient, GlookoAuthTokenProvider tokenProvider, PublishKind? rejected,
-        IConnectorPublisher? publisher = null, IConnectorSyncCursorStore? cursorStore = null)
+        IConnectorPublisher? publisher = null, IConnectorSyncCursorStore? cursorStore = null,
+        TimeProvider? clock = null)
         : base(
             httpClient,
             new ConnectorServerResolver<GlookoConnectorConfiguration>(null, null, null),
@@ -107,7 +109,8 @@ internal sealed class RecordingGlookoConnectorService : GlookoConnectorService
             Mock.Of<IRateLimitingStrategy>(),
             tokenProvider,
             publisher,
-            cursorStore: cursorStore)
+            cursorStore: cursorStore,
+            timeProvider: clock)
     {
         _rejected = rejected;
     }
@@ -153,15 +156,19 @@ internal sealed class StaticGlookoTokenProvider : GlookoAuthTokenProvider
     /// <summary>How many logins the sync has driven; a second one is a re-authentication.</summary>
     public int AcquireCount { get; private set; }
 
-    public StaticGlookoTokenProvider()
+    private readonly TimeProvider _clock;
+
+    public StaticGlookoTokenProvider(TimeProvider? clock = null)
         : base(
             new HttpClient(),
-            new ConnectorTokenCache(),
+            new ConnectorTokenCache(clock),
             new ConnectorServerResolver<GlookoConnectorConfiguration>(null, null, null),
             new FakeTenantAccessor(),
             NullLogger<GlookoAuthTokenProvider>.Instance,
-            Mock.Of<IRetryDelayStrategy>())
+            Mock.Of<IRetryDelayStrategy>(),
+            clock)
     {
+        _clock = clock ?? TimeProvider.System;
     }
 
     protected override Task<(string? Token, DateTime ExpiresAt, IReadOnlyDictionary<string, string>? Metadata)> AcquireTokenAsync(
@@ -174,7 +181,7 @@ internal sealed class StaticGlookoTokenProvider : GlookoAuthTokenProvider
             new GlookoUserData { User = new GlookoUserLogin { GlookoCode = GlookoSyncHarness.PatientCode } });
 
         return Task.FromResult<(string?, DateTime, IReadOnlyDictionary<string, string>?)>(
-            (cookie, DateTime.UtcNow.AddHours(1), new Dictionary<string, string>
+            (cookie, _clock.GetUtcNow().UtcDateTime.AddHours(1), new Dictionary<string, string>
             {
                 ["SessionCookie"] = cookie,
                 ["UserData"] = userData,

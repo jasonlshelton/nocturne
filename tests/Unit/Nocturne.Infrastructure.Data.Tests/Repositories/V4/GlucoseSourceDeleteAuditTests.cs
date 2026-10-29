@@ -207,8 +207,8 @@ public abstract class GlucoseSourceDeleteAuditTests<TEntity> : AuditedSoftDelete
     private void SeedMany(int count, string dataSource)
     {
         var start = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        for (var i = 0; i < count; i++)
-            Seed(start.AddMinutes(i), dataSource);
+        AddRange(Enumerable.Range(0, count)
+            .Select(i => NewRow(Guid.CreateVersion7(), start.AddMinutes(i), dataSource, device: null)));
     }
 }
 

@@ -128,7 +128,7 @@ public class ApsSnapshotCurvesBackfillServiceTests
 
         var provider = new ServiceCollection().AddSingleton(factory.Object).BuildServiceProvider();
         logger = new ListLogger<ApsSnapshotCurvesBackfillService>();
-        return new ApsSnapshotCurvesBackfillService(provider, logger, rewrite);
+        return new ApsSnapshotCurvesBackfillService(provider, logger, TimeProvider.System, rewrite);
     }
 
     private static async Task RunAsync(ApsSnapshotCurvesBackfillService service)

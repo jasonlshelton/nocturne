@@ -74,7 +74,7 @@ public class MyFitnessPalConnectorService : BaseConnectorService<MyFitnessPalCon
         base.SyncDataAsync(
             config,
             cancellationToken,
-            since ?? DateTime.UtcNow.AddDays(-config.LookbackDays),
+            since ?? Clock.GetUtcNow().UtcDateTime.AddDays(-config.LookbackDays),
             progressReporter);
 
     /// <inheritdoc />
@@ -99,7 +99,7 @@ public class MyFitnessPalConnectorService : BaseConnectorService<MyFitnessPalCon
             return AuthenticationFailedResult();
 
         // The request carries UTC instants; pin the kind so the window is not reinterpreted as local.
-        var from = AsUtc(request.From ?? DateTime.UtcNow.AddDays(-config.LookbackDays));
+        var from = AsUtc(request.From ?? Clock.GetUtcNow().UtcDateTime.AddDays(-config.LookbackDays));
 
         // A background sync leaves the end open on purpose: clamping to "now" would discard
         // entries pre-logged for later today, whose resolved time is still in the future. The
@@ -107,7 +107,7 @@ public class MyFitnessPalConnectorService : BaseConnectorService<MyFitnessPalCon
         // than importing next week's plan as if it had been eaten.
         var to = request.To.HasValue
             ? AsUtc(request.To.Value)
-            : AsUtc(DateTime.UtcNow.AddDays(1));
+            : AsUtc(Clock.GetUtcNow().UtcDateTime.AddDays(1));
 
         var walkToEnd = IsFullWalkDue(config);
         var read = await FetchDiaryAsync(config, from, walkToEnd, cancellationToken);
@@ -136,7 +136,7 @@ public class MyFitnessPalConnectorService : BaseConnectorService<MyFitnessPalCon
             // reconciling is retried rather than counting against the schedule.
             if (read.WalkedEntireDiary)
             {
-                config.LastFullWalkAt = FullWalkSchedule.Stamp(DateTimeOffset.UtcNow);
+                config.LastFullWalkAt = FullWalkSchedule.Stamp(Clock.GetUtcNow());
                 await PersistSecretsIfChangedAsync(config, cancellationToken);
             }
         }
@@ -184,9 +184,9 @@ public class MyFitnessPalConnectorService : BaseConnectorService<MyFitnessPalCon
     /// provides it. An unset or unparseable timestamp walks — a connector that has never completed
     /// one has never reconciled.
     /// </remarks>
-    public static bool IsFullWalkDue(MyFitnessPalConnectorConfiguration config) =>
+    public bool IsFullWalkDue(MyFitnessPalConnectorConfiguration config) =>
         FullWalkSchedule.IsDue(
-            config.LastFullWalkAt, MyFitnessPalConstants.FullWalkInterval, DateTimeOffset.UtcNow);
+            config.LastFullWalkAt, MyFitnessPalConstants.FullWalkInterval, Clock.GetUtcNow());
 
     /// <summary>
     /// Obtains an access token and the MyFitnessPal user id required by the GraphQL API.

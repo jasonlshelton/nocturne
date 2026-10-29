@@ -14,6 +14,7 @@ namespace Nocturne.API.Tests.Integration.Analytics;
 /// an algorithm temp at the 1.0 U/h schedule, glucose resting at 110, a 40 g breakfast bolused 4 U
 /// at 08:00 and a 2 U correction at 14:00 from 200 down to 120 by 18:00, each day.
 /// </summary>
+[Collection(ApiIntegrationShards.Two)]
 [Trait("Category", "Integration")]
 public class LoopAnalysisSettingsEvidenceIntegrationTests(ApiIntegrationTestFixture fixture, ITestOutputHelper output)
     : LoopAnalysisIntegrationTestBase(fixture, output)

@@ -20,6 +20,7 @@ namespace Nocturne.API.Tests.Integration.Migration;
 /// must not reach any client as a delete. These lay the cutover's leftovers beside a live switch, run the
 /// migration's statements on the API's database, and read the switch back on v1, v3 and v3 history.
 /// </summary>
+[Collection(ApiIntegrationShards.Two)]
 [Trait("Category", "Integration")]
 public class RemoveLegacyProfileSpansAndSwitchSnapshotsServingTests : ApiIntegrationTestBase
 {

@@ -72,6 +72,7 @@ public class MyFitnessPalMatchingSettingsServiceTests
     {
         return new MyFitnessPalMatchingSettingsService(
             context.AsFactory(),
+            TimeProvider.System,
             NullLogger<MyFitnessPalMatchingSettingsService>.Instance
         );
     }

@@ -30,7 +30,7 @@ public class NocturneRemoteRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance);
+            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -51,7 +51,7 @@ public class NocturneRemoteRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance);
+            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw
         await InvokeStopRealtimeListenersAsync(sut);
@@ -71,7 +71,7 @@ public class NocturneRemoteRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance);
+            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw on repeated calls
         await InvokeStopRealtimeListenersAsync(sut);
@@ -100,7 +100,7 @@ public class NocturneRemoteRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance);
+            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should skip the tenant without throwing
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -128,7 +128,7 @@ public class NocturneRemoteRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance);
+            NullLogger<NocturneRemoteConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should skip the tenant without throwing
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -154,7 +154,7 @@ public class NocturneRemoteRealtimeListenerTests
         var logger = new ListLogger<NocturneRemoteConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
         var sut = new NocturneRemoteConnectorBackgroundService(
-            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
 
@@ -182,7 +182,7 @@ public class NocturneRemoteRealtimeListenerTests
         var logger = new ListLogger<NocturneRemoteConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
         var sut = new NocturneRemoteConnectorBackgroundService(
-            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
 

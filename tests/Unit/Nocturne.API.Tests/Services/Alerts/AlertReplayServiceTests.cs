@@ -97,7 +97,8 @@ public class AlertReplayServiceTests
             _tenantAccessor.Object,
             Options.Create(new AlertEvaluationOptions()),
             new RustAlertReplayEngine(new AlertEngineErrors(
-                new Nocturne.API.Tests.Services.BackgroundServices.TestMeterFactory(), TimeProvider.System)));
+                new Nocturne.API.Tests.Services.BackgroundServices.TestMeterFactory(), TimeProvider.System)),
+            TimeProvider.System);
     }
 
     private static AlertRuleSnapshot ThresholdRule(Guid id, string direction, decimal value,

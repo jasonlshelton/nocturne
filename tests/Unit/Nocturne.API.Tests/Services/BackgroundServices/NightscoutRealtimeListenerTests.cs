@@ -36,7 +36,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -57,7 +57,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw
         await InvokeStopRealtimeListenersAsync(sut);
@@ -77,7 +77,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should not throw on repeated calls
         await InvokeStopRealtimeListenersAsync(sut);
@@ -105,7 +105,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should skip the tenant without throwing
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -132,7 +132,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         // Act & Assert — should skip the tenant without throwing
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -174,7 +174,7 @@ public class NightscoutRealtimeListenerTests
 
         var logger = new ListLogger<NightscoutConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
-        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         // Act
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -203,7 +203,7 @@ public class NightscoutRealtimeListenerTests
 
         var logger = new ListLogger<NightscoutConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
-        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         // Act
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
@@ -232,7 +232,7 @@ public class NightscoutRealtimeListenerTests
 
         var logger = new ListLogger<NightscoutConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
-        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+        var sut = new NightscoutConnectorBackgroundService(serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
 
@@ -265,7 +265,7 @@ public class NightscoutRealtimeListenerTests
             serviceProvider,
             new ConnectorSyncBudget(),
             serviceProvider.GetRequiredService<ActiveTenantSnapshot>(),
-            NullLogger<NightscoutConnectorBackgroundService>.Instance);
+            NullLogger<NightscoutConnectorBackgroundService>.Instance, TimeProvider.System);
 
         var dead = new SocketIO(new Uri("http://127.0.0.1:9"));
         SocketClients(sut)[tenantId] = dead;
@@ -295,7 +295,7 @@ public class NightscoutRealtimeListenerTests
         var logger = new ListLogger<NightscoutConnectorBackgroundService>();
         var serviceProvider = BuildServiceProvider(db, config);
         var sut = new NightscoutConnectorBackgroundService(
-            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger);
+            serviceProvider, new ConnectorSyncBudget(), serviceProvider.GetRequiredService<ActiveTenantSnapshot>(), logger, TimeProvider.System);
 
         await InvokeStartRealtimeListenersAsync(sut, CancellationToken.None);
 

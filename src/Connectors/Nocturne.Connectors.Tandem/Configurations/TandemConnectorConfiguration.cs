@@ -75,11 +75,4 @@ public class TandemConnectorConfiguration : BaseConnectorConfiguration
     /// </summary>
     [ConnectorProperty(ConnectorPropertyKey.IgnoreZeroUnitBasal, DefaultValue = "false")]
     public bool IgnoreZeroUnitBasal { get; set; }
-
-    protected override void ValidateSourceSpecificConfiguration()
-    {
-        if (!string.Equals(Region, "US", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(Region, "EU", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException($"Tandem: Region must be 'US' or 'EU' (was '{Region}')");
-    }
 }

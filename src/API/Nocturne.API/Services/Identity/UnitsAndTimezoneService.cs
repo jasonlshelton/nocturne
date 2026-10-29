@@ -62,6 +62,7 @@ public class UnitsAndTimezoneService(
     IConnectorConfigurationService connectorConfigurations,
     IMigrationJobService migrations,
     ICacheService cache,
+    TimeProvider time,
     ILogger<UnitsAndTimezoneService> logger) : IUnitsAndTimezoneService
 {
     /// <summary>The connector onboarding saves a Nightscout instance under.</summary>
@@ -98,7 +99,7 @@ public class UnitsAndTimezoneService(
             var preferences = UserDisplayPreferences.Deserialize(subject.Preferences);
             preferences.GlucoseUnits = glucoseUnits;
             subject.Preferences = preferences.Serialize();
-            subject.UpdatedAt = DateTime.UtcNow;
+            subject.UpdatedAt = time.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(ct);
         }
 

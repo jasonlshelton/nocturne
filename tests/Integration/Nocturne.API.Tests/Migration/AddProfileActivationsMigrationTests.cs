@@ -75,10 +75,9 @@ public sealed class AddProfileActivationsMigrationFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("add_profile_activations");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "add_profile_activations");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(MigrationUnderTest);
         await ReadAsync(AfterUp);

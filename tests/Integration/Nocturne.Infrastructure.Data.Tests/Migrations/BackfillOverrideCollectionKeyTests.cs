@@ -60,11 +60,10 @@ public class BackfillOverrideCollectionKeyFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("backfill_override_collection");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "backfill_override_collection");
         _migratorConnectionString = database.MigratorConnectionString;
         _superuserConnectionString = database.SuperuserConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await ReadAsync(Seeded);
         await MigrateToAsync(targetMigration: null);

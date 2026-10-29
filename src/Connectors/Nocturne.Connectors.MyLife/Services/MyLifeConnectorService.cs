@@ -130,7 +130,8 @@ public class MyLifeConnectorService(
                 request, await CalculateTreatmentSinceTimestampAsync(config) ?? floor, floor);
 
             var overallSince = glucoseSince < treatmentSince ? glucoseSince : treatmentSince;
-            var until = request.To ?? DateTime.UtcNow;
+            var now = Clock.GetUtcNow().UtcDateTime;
+            var until = request.To ?? now;
 
             // Overlap window for cross-month consolidation context
             var overlapMs = Math.Max(
@@ -159,7 +160,7 @@ public class MyLifeConnectorService(
                 if (needGlucose)
                 {
                     var sgList = eventProcessor
-                        .MapSensorGlucose(batch.Events.Where(e => e.EventDateTime >= glucoseSinceTicks))
+                        .MapSensorGlucose(batch.Events.Where(e => e.EventDateTime >= glucoseSinceTicks), now)
                         .ToList();
 
                     await PublishRecordTypeAsync(result, SyncDataType.Glucose, activeTypes,
@@ -177,7 +178,8 @@ public class MyLifeConnectorService(
                         contextEvents,
                         config.EnableMealCarbConsolidation,
                         config.EnableTempBasalConsolidation,
-                        config.TempBasalConsolidationWindowMinutes);
+                        config.TempBasalConsolidationWindowMinutes,
+                        now);
 
                     // Treatment records
                     if (needRecords)

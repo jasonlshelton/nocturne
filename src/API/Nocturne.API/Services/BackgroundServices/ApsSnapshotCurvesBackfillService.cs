@@ -20,6 +20,7 @@ namespace Nocturne.API.Services.BackgroundServices;
 internal sealed class ApsSnapshotCurvesBackfillService(
     IServiceProvider serviceProvider,
     ILogger<ApsSnapshotCurvesBackfillService> logger,
+    TimeProvider timeProvider,
     Func<NocturneDbContext, Guid, CancellationToken, Task<int>>? rewrite = null) : BackgroundService
 {
     internal const string BackfillName = "aps-snapshot-curves";
@@ -32,13 +33,14 @@ internal sealed class ApsSnapshotCurvesBackfillService(
     /// Records the tenant as complete. A second instance that finishes the same tenant first has
     /// already written the row, so a unique violation is the row existing, not a failure.
     /// </summary>
-    internal static async Task RecordCompletionAsync(NocturneDbContext db, Guid tenantId, CancellationToken ct)
+    internal static async Task RecordCompletionAsync(
+        NocturneDbContext db, Guid tenantId, TimeProvider timeProvider, CancellationToken ct)
     {
         db.BackfillCompletions.Add(new BackfillCompletionEntity
         {
             Backfill = BackfillName,
             TenantId = tenantId,
-            CompletedAt = DateTime.UtcNow,
+            CompletedAt = timeProvider.GetUtcNow().UtcDateTime,
         });
         try
         {
@@ -94,7 +96,7 @@ internal sealed class ApsSnapshotCurvesBackfillService(
 
                     await using (var platform = await factory.CreatePlatformAsync(stoppingToken))
                     {
-                        await RecordCompletionAsync(platform, tenantId, stoppingToken);
+                        await RecordCompletionAsync(platform, tenantId, timeProvider, stoppingToken);
                     }
 
                     if (changed > 0)

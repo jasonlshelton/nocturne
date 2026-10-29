@@ -38,6 +38,7 @@ public sealed class TenantServiceProvisionOwnerTests : IDisposable
         Mock.Of<IHttpClientFactory>(),
         Mock.Of<ITenantRoleService>(),
         new GrantRevocationService(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
+        TimeProvider.System,
         NullLogger<TenantService>.Instance);
 
     private async Task<Guid> SeedSubjectAsync(string email)

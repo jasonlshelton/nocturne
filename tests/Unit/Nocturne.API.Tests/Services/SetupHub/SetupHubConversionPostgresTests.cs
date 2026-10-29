@@ -105,6 +105,7 @@ public class SetupHubConversionPostgresTests(SetupHubConversionPostgresTests.Dat
                 Mock.Of<ITrackerAlertRuleSyncService>(),
                 Mock.Of<ITherapySettingsResolver>(),
                 Writer(),
+                TimeProvider.System,
                 NullLogger<DeviceSetupService>.Instance);
             var conversion = new LegacyFallbackService(
                 new TrackerRepository(Context(tenant).AsFactory()),

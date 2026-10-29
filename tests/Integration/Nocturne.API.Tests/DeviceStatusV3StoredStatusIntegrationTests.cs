@@ -20,6 +20,7 @@ namespace Nocturne.API.Tests.Integration;
 /// carries in place under the status's identifier and removes each one it omits, and a DELETE
 /// removes them all.
 /// </summary>
+[Collection(ApiIntegrationShards.Two)]
 [Trait("Category", "Integration")]
 public class DeviceStatusV3StoredStatusIntegrationTests : ApiIntegrationTestBase
 {

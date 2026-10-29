@@ -66,6 +66,7 @@ public class ConnectorCursorResetJobServiceTests
             SeedTenant(provider);
 
         var service = new ConnectorCursorResetJobService(
+            TimeProvider.System,
             NullLogger<ConnectorCursorResetJobService>.Instance, provider);
         return (service, provider);
     }

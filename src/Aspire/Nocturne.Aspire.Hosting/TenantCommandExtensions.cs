@@ -417,14 +417,14 @@ public static class TenantCommandExtensions
                 Name = "Slug",
                 InputType = InputType.Text,
                 Required = true,
-                Value = "sleepy",
+                Value = "test",
             },
             new()
             {
                 Name = "Display Name",
                 InputType = InputType.Text,
                 Required = true,
-                Value = "Sleepy",
+                Value = "Test",
             },
             new()
             {
@@ -477,25 +477,23 @@ public static class TenantCommandExtensions
             if (!endpoint.IsAllocated)
                 return CommandResults.Failure("API endpoint is not yet allocated.");
 
-            using var http = new HttpClient { BaseAddress = new Uri(endpoint.Url) };
+            using var http = new HttpClient
+            {
+                BaseAddress = new Uri(endpoint.Url),
+                Timeout = TenantSeedClient.Timeout,
+            };
 
             logger.LogInformation(
                 "Seeding tenant '{Slug}' (owner={Owner}, sampleData={SampleData})...",
                 slug, ownerUsername, sampleData);
 
-            var response = await http.PostAsJsonAsync(
-                "api/v4/dev-only/admin/seed-tenant",
-                new { slug, displayName, ownerUsername, sampleData, sampleDataDays },
+            var (seeded, error) = await TenantSeedClient.SeedAsync(
+                http,
+                new SeedTenantRequest(slug, displayName, ownerUsername, sampleData, sampleDataDays),
                 context.CancellationToken);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await response.Content.ReadAsStringAsync(context.CancellationToken);
-                return CommandResults.Failure($"{response.StatusCode}: {error}");
-            }
-
-            var seeded = await response.Content.ReadFromJsonAsync<SeedTenantResult>(
-                JsonOptions, context.CancellationToken);
+            if (error is not null)
+                return CommandResults.Failure(error);
 
             logger.LogInformation("Tenant '{Slug}' seeded successfully", slug);
 
@@ -658,8 +656,4 @@ public static class TenantCommandExtensions
 
     private sealed record ConnectorSummary(
         string Name, bool IsHealthy, DateTime? LastSuccessfulSync, string? LastError);
-
-    private sealed record SeedTenantResult(
-        Guid TenantId, string? Url, string? LoginLink,
-        int EntriesSeeded, int TreatmentsSeeded, int SleepSessionsSeeded);
 }

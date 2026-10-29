@@ -65,7 +65,8 @@ public class SoftDeleteHistoryStampTests : IDisposable
         rows.Take(group).Should().OnlyContain(a => a.SysUpdatedAt == deletedAt);
         rows.Skip(group).Take(group).Should().OnlyContain(a => a.SysUpdatedAt == deletedAt.AddMilliseconds(1));
         rows[^1].SysUpdatedAt.Should().Be(deletedAt.AddMilliseconds(2));
-        rows.Select(a => a.Id).Should().BeEquivalentTo(ids);
+        // Not BeEquivalentTo: it matches every element against every other, seconds for 2,001 ids.
+        rows.Select(a => a.Id).Order().Should().Equal(ids.Order());
     }
 
     [Fact]
@@ -296,7 +297,7 @@ public class SoftDeleteHistoryStampTests : IDisposable
         _statements.Count("SELECT", s => s.Contains("FROM \"linked_records\"", StringComparison.Ordinal)).Should().Be(1 + 3, "one lookup of the groups, then one read per chunk");
         await using var verify = _db.CreateContext();
         (await verify.LinkedRecords.Where(l => l.IsPrimary).Select(l => l.RecordId).ToListAsync())
-            .Should().BeEquivalentTo(copies);
+            .Order().Should().Equal(copies.Order());
     }
 
     [Theory]

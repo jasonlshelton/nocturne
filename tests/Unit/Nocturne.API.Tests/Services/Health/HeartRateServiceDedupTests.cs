@@ -36,7 +36,7 @@ public class HeartRateServiceDedupTests
             context.AsFactory(),
             processing.Object,
             Mock.Of<ISignalRBroadcastService>(),
-            NullLogger<HeartRateService>.Instance);
+            TimeProvider.System, NullLogger<HeartRateService>.Instance);
 
         return (service, context);
     }

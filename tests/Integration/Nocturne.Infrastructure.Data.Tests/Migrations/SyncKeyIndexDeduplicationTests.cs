@@ -27,10 +27,9 @@ public class SyncKeyIndexDeduplicationFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("sync_key_dedup");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "sync_key_dedup");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

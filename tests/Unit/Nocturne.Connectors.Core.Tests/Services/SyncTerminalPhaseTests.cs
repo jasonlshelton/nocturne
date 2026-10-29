@@ -18,10 +18,7 @@ namespace Nocturne.Connectors.Core.Tests.Services;
 /// </summary>
 public class SyncTerminalPhaseTests
 {
-    private sealed class TestConfig : BaseConnectorConfiguration
-    {
-        protected override void ValidateSourceSpecificConfiguration() { }
-    }
+    private sealed class TestConfig : BaseConnectorConfiguration;
 
     private sealed class TestConnectorService : BaseConnectorService<TestConfig>
     {

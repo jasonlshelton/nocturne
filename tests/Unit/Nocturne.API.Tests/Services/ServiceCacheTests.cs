@@ -212,6 +212,7 @@ public class ServiceCacheTests
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
+            TimeProvider.System,
             _mockStatusLogger.Object
         );
 
@@ -305,6 +306,7 @@ public class ServiceCacheTests
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
+            TimeProvider.System,
             _mockStatusLogger.Object
         );
 

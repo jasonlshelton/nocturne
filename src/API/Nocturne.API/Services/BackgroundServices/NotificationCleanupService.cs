@@ -12,7 +12,8 @@ namespace Nocturne.API.Services.BackgroundServices;
 /// </remarks>
 public class NotificationCleanupService(
     IServiceProvider serviceProvider,
-    ILogger<NotificationCleanupService> logger) : BackgroundService
+    ILogger<NotificationCleanupService> logger,
+    TimeProvider timeProvider) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(24);
     private static readonly TimeSpan RetentionPeriod = TimeSpan.FromDays(30);
@@ -27,7 +28,7 @@ public class NotificationCleanupService(
                 var repository = scope.ServiceProvider
                     .GetRequiredService<IInAppNotificationRepository>();
 
-                var cutoff = DateTime.UtcNow - RetentionPeriod;
+                var cutoff = timeProvider.GetUtcNow().UtcDateTime - RetentionPeriod;
                 var deleted = await repository.DeleteArchivedBeforeAsync(cutoff, stoppingToken);
 
                 if (deleted > 0)

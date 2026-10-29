@@ -87,6 +87,7 @@ public class RetrospectiveControllerTests
             new Mock<IUploaderSnapshotRepository>().Object,
             new Mock<IStateSpanRepository>().Object,
             new Mock<IDeviceStatusExtrasRepository>().Object,
+            TimeProvider.System,
             new Mock<ILogger<DeviceStatusProjectionService>>().Object);
     }
 

@@ -136,7 +136,7 @@ public class TwiistConnectorService : BaseConnectorService<TwiistConnectorConfig
         }
 
         var sensorGlucose = _glucoseMapper.MapGlucoseRecords(
-            glucoseRecords, status.Summary?.LastGlucoseTrend).ToList();
+            glucoseRecords, Clock.GetUtcNow().UtcDateTime, status.Summary?.LastGlucoseTrend).ToList();
 
         // Apply trend to the most recent reading if available
         if (sensorGlucose.Count > 0 && status.Summary?.LastGlucoseTrend != null)
@@ -154,7 +154,7 @@ public class TwiistConnectorService : BaseConnectorService<TwiistConnectorConfig
         TwiistConnectorConfiguration config, CancellationToken cancellationToken)
     {
         await PublishRecordTypeAsync(result, SyncDataType.Boluses, activeTypes,
-            _insulinMapper.MapBoluses(status.InsulinHistory).ToList(), PublishBolusDataAsync,
+            _insulinMapper.MapBoluses(status.InsulinHistory, Clock.GetUtcNow().UtcDateTime).ToList(), PublishBolusDataAsync,
             config, cancellationToken);
     }
 
@@ -163,7 +163,7 @@ public class TwiistConnectorService : BaseConnectorService<TwiistConnectorConfig
         TwiistConnectorConfiguration config, CancellationToken cancellationToken)
     {
         await PublishRecordTypeAsync(result, SyncDataType.CarbIntake, activeTypes,
-            _mealMapper.MapMeals(status.MealHistory).ToList(), PublishCarbIntakeDataAsync,
+            _mealMapper.MapMeals(status.MealHistory, Clock.GetUtcNow().UtcDateTime).ToList(), PublishCarbIntakeDataAsync,
             config, cancellationToken);
     }
 
@@ -172,8 +172,9 @@ public class TwiistConnectorService : BaseConnectorService<TwiistConnectorConfig
         TwiistConnectorConfiguration config, CancellationToken cancellationToken)
     {
         var scheduledRate = _tempBasalMapper.ParseScheduledRate(status.Details?.BasalRateUnitsPerHour);
-        var tempBasals = _tempBasalMapper.MapTempBasals(status.InsulinDelivery?.Data, scheduledRate)
-            .Concat(_tempBasalMapper.MapSuspensions(status.InsulinHistory))
+        var now = Clock.GetUtcNow().UtcDateTime;
+        var tempBasals = _tempBasalMapper.MapTempBasals(status.InsulinDelivery?.Data, scheduledRate, now)
+            .Concat(_tempBasalMapper.MapSuspensions(status.InsulinHistory, now))
             .ToList();
 
         await PublishRecordTypeAsync(result, SyncDataType.TempBasals, activeTypes,

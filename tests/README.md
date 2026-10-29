@@ -138,7 +138,12 @@ tmpfs. It migrates a template database once (with the share-RLS and storage-para
 reconcilers the API runs at startup) and hands each fixture a `CREATE DATABASE … TEMPLATE` clone,
 reachable as `nocturne_migrator`, `nocturne_app` or the bootstrap superuser.
 `CreateEmptyDatabaseAsync` clones the bootstrapped, unmigrated database for tests that walk the
-migration chain themselves.
+migration chain themselves. A migration test that seeds part-way along the chain asks
+`CreateDatabaseAtMigrationAsync(migration, prefix)` for a database migrated up to that migration:
+it clones the nearest checkpoint at or below it and migrates the rest (at most 24 migrations). The
+checkpoints are template databases every 25 migrations, each built once per process on first use by
+cloning the one before it and migrating forward; the fully migrated template is built apart from
+them. A migration name not in the chain throws.
 
 **`ApiIntegrationTestFixture`** runs the API with `WebApplicationFactory` on a real Kestrel port
 (so HttpClient and SignalR connect over sockets) as Development, against its own `SharedPostgres`
@@ -151,6 +156,29 @@ the seeded tenant (active, owner with a passkey) and re-seeds the `api-secret` g
 fixture seeds its own tenant the same way, with Nightscout's `API_SECRET` as a legacy-secret grant. Use `ApiFactory` for any `WebApplicationFactory`
 over the API: the API's entry point also carries NSwag's static `CreateHostBuilder`, which
 `WebApplicationFactory` otherwise prefers, and that host has no endpoints.
+
+**API integration shards.** The classes deriving `ApiIntegrationTestBase` are split across four
+xUnit collections, `ApiIntegrationShards.One` to `Four` (`Infrastructure/IntegrationTestCollection.cs`).
+Each has its own `ApiIntegrationTestFixture`, so its own API host on its own port and its own
+database. The shards run in parallel; the tests inside one run one after another. A class names its
+shard on itself, `[Collection(ApiIntegrationShards.Two)]`; the remarks on `ApiIntegrationShards`
+give the rules and `ApiIntegrationShardTests` holds them. The shards are balanced by measured
+duration, so put a new class in the shortest. To find it or to rebalance, run the suite with
+`--logger "trx;LogFileName=api.trx"`. Within a shard the classes run one after another, so order a
+shard's results by start time and charge each class from the previous class's last test end to its
+own last test end. That charge includes the cleanup before each test and the class's own fixtures,
+such as the MongoDB container of the migration classes. Total the classes of each shard.
+
+**Parity shards.** The parity classes are split the same way across `ParityShards.One` and `Two`
+(`Infrastructure/ParityTestFixture.cs`), each with its own `ParityTestFixture`: a Nightscout 15.0.3
+container, its MongoDB, and an API host on its own database. The same rules apply, held by
+`ParityShardTests`, and they are balanced and measured the same way. Nightscout serves summary,
+properties and `ddata` reads from memory that it reloads from Mongo 5 seconds after the last write
+(a constant in its source, with no setting), and that wait is most of a parity shard's time. A test
+that reads that memory waits once, after its last write, for a reload that started after the wait
+began to have finished (`ParityTestBase.WaitForNightscoutBodyAsync`, whose remarks say how it tells);
+a test that compares Nightscout's in-memory data without writing calls `WaitForNightscoutEmptyAsync`
+first.
 
 **SQLite unit databases.** `TestDbContextFactory.CreateSqlite*` copies a schema built once per
 process into each test's in-memory database with SQLite's backup API instead of running
@@ -217,7 +245,8 @@ node .github/scripts/coverage-report.mjs --base origin/main \
 - .NET: `dotnet test` over a solution builds and runs the test assemblies in parallel (MSBuild
   nodes); xUnit runs collections in parallel on one thread per core, which measured faster than a
   lower cap for the same memory. Integration fixtures each get their own cloned database, so their
-  collections run in parallel too.
+  collections run in parallel too, the four API integration shards and the two parity shards among
+  them.
 - vitest: the app unit suite uses half the cores, between two and four; the browser suite two pages,
   always headless; the other packages run their default pool.
 - e2e: vitest and Playwright use half the cores, at least two (`E2E_API_WORKERS`,

@@ -29,13 +29,12 @@ public static class CareLinkTreatmentMapper
     // marker to bound its end. The pump delivers an auto-basal roughly every 5 minutes.
     private const int DefaultAutoBasalIntervalMinutes = 5;
 
-    public static List<Bolus> MapBoluses(CareLinkData data, double pumpOffsetMs)
+    public static List<Bolus> MapBoluses(CareLinkData data, double pumpOffsetMs, DateTime now)
     {
         if (data.Markers is not { Count: > 0 })
             return [];
 
         var deviceName = DeviceName(data);
-        var now = DateTime.UtcNow;
         var results = new List<Bolus>();
 
         foreach (var marker in data.Markers.Where(m => IsType(m, InsulinMarker)))
@@ -80,13 +79,12 @@ public static class CareLinkTreatmentMapper
         return results;
     }
 
-    public static List<CarbIntake> MapCarbIntakes(CareLinkData data, double pumpOffsetMs)
+    public static List<CarbIntake> MapCarbIntakes(CareLinkData data, double pumpOffsetMs, DateTime now)
     {
         if (data.Markers is not { Count: > 0 })
             return [];
 
         var deviceName = DeviceName(data);
-        var now = DateTime.UtcNow;
         var results = new List<CarbIntake>();
 
         foreach (var marker in data.Markers.Where(m => IsType(m, MealMarker)))
@@ -118,13 +116,12 @@ public static class CareLinkTreatmentMapper
         return results;
     }
 
-    public static List<TempBasal> MapTempBasals(CareLinkData data, double pumpOffsetMs)
+    public static List<TempBasal> MapTempBasals(CareLinkData data, double pumpOffsetMs, DateTime now)
     {
         if (data.Markers is not { Count: > 0 })
             return [];
 
         var deviceName = DeviceName(data);
-        var now = DateTime.UtcNow;
 
         // Resolve each marker's timestamp up front and order chronologically so each micro-bolus
         // can be bounded by the next one's start.

@@ -16,12 +16,17 @@ namespace Nocturne.API.Services.ClientDevices;
 public class ClientDeviceService : IClientDeviceService
 {
     private readonly INocturneDbContextFactory _contexts;
+    private readonly TimeProvider _time;
     private readonly ILogger<ClientDeviceService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="ClientDeviceService"/> class.</summary>
-    public ClientDeviceService(INocturneDbContextFactory contexts, ILogger<ClientDeviceService> logger)
+    public ClientDeviceService(
+        INocturneDbContextFactory contexts,
+        TimeProvider timeProvider,
+        ILogger<ClientDeviceService> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -179,7 +184,7 @@ public class ClientDeviceService : IClientDeviceService
         }
 
         device.Label = label;
-        device.UpdatedAt = DateTime.UtcNow;
+        device.UpdatedAt = _time.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(cancellationToken);
         return ToDto(device);
     }
@@ -225,7 +230,7 @@ public class ClientDeviceService : IClientDeviceService
         // EndedAt > now admits test fires: AlertDeliveryService.TestFireAsync gives a
         // device_action test excursion a short future end so it appears here for the window
         // and then self-withdraws. Real excursions always end in the past.
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         var excursions = await db.AlertExcursions
             .AsNoTracking()
             .Include(e => e.AlertRule)
@@ -278,14 +283,14 @@ public class ClientDeviceService : IClientDeviceService
         return intents;
     }
 
-    private static void Apply(
+    private void Apply(
         ClientDeviceEntity entity,
         Guid subjectId,
         RegisterDeviceRequest request,
         string[] capabilities,
         Guid? grantId)
     {
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         entity.SubjectId = subjectId;
         entity.Kind = request.Kind;
         entity.Label = request.Label;

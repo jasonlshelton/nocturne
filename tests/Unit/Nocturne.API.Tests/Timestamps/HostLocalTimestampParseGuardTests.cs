@@ -73,7 +73,16 @@ public class HostLocalTimestampParseGuardTests
         Detect(CSharpSyntaxTree.ParseText(source), "C.cs")
             .Select(site => site.Reason)
             .Should().BeEquivalentTo(expectedReason is null ? [] : new[] { expectedReason });
+        MayHold(source).Should().BeTrue("the scan does not parse a file this filter turns away");
     }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> can hold a site: <see cref="HostLocalReason"/> reads the
+    /// receiver and the method name as written, so a site names both words. The scan parses only the
+    /// files this admits.
+    /// </summary>
+    private static bool MayHold(string text) =>
+        text.Contains("DateTime", StringComparison.Ordinal) && text.Contains("Parse", StringComparison.Ordinal);
 
     private static IEnumerable<ParseSite> Detect(SyntaxTree syntax, string path) =>
         syntax.GetRoot()
@@ -103,8 +112,14 @@ public class HostLocalTimestampParseGuardTests
                     continue;
                 }
 
+                var text = File.ReadAllText(path);
+                if (!MayHold(text))
+                {
+                    continue;
+                }
+
                 var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-                var syntax = CSharpSyntaxTree.ParseText(File.ReadAllText(path));
+                var syntax = CSharpSyntaxTree.ParseText(text);
 
                 sites.AddRange(Detect(syntax, relative));
             }

@@ -19,15 +19,17 @@ namespace Nocturne.API.Services.Health;
 /// <seealso cref="TimeSeriesEntityService{TModel,TEntity}"/>
 /// <param name="documentProcessingService">Service that applies field processing before save.</param>
 /// <param name="signalRBroadcastService">Service used to broadcast entity changes over SignalR.</param>
+/// <param name="timeProvider">Clock that stamps soft deletes.</param>
 /// <param name="logger">Logger instance for this service.</param>
 public class StepCountService(
     INocturneDbContextFactory contexts,
     IDocumentProcessingService documentProcessingService,
     ISignalRBroadcastService signalRBroadcastService,
+    TimeProvider timeProvider,
     ILogger<StepCountService> logger
 )
     : TimeSeriesEntityService<StepCount, StepCountEntity>(
-        contexts, documentProcessingService, signalRBroadcastService, logger),
+        contexts, documentProcessingService, signalRBroadcastService, timeProvider, logger),
         IStepCountService
 {
     protected override DbSet<StepCountEntity> EntitySet(NocturneDbContext db) => db.StepCounts;

@@ -17,11 +17,14 @@ namespace Nocturne.API.Services.Connectors;
 public class ConnectorSyncCursorStore : IConnectorSyncCursorStore
 {
     private readonly INocturneDbContextFactory _contexts;
+    private readonly TimeProvider _time;
     private readonly ILogger<ConnectorSyncCursorStore> _logger;
 
-    public ConnectorSyncCursorStore(INocturneDbContextFactory contexts, ILogger<ConnectorSyncCursorStore> logger)
+    public ConnectorSyncCursorStore(
+        INocturneDbContextFactory contexts, TimeProvider timeProvider, ILogger<ConnectorSyncCursorStore> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -66,7 +69,7 @@ public class ConnectorSyncCursorStore : IConnectorSyncCursorStore
                 UPDATE connector_configurations
                 SET sync_cursors = jsonb_set(CASE WHEN jsonb_typeof(sync_cursors) = 'object'
                     THEN sync_cursors ELSE jsonb_build_object() END, ARRAY[{resource}], {json}::jsonb),
-                    sys_updated_at = {DateTime.UtcNow}
+                    sys_updated_at = {_time.GetUtcNow().UtcDateTime}
                 WHERE tenant_id = {db.TenantId} AND connector_name = {canonicalName}
                 """, cancellationToken);
             return;
@@ -87,7 +90,7 @@ public class ConnectorSyncCursorStore : IConnectorSyncCursorStore
                 UPDATE connector_configurations
                 SET sync_cursors = (CASE WHEN jsonb_typeof(sync_cursors) = 'object'
                     THEN sync_cursors ELSE jsonb_build_object() END) - {resource},
-                    sys_updated_at = {DateTime.UtcNow}
+                    sys_updated_at = {_time.GetUtcNow().UtcDateTime}
                 WHERE tenant_id = {db.TenantId} AND connector_name = {canonicalName}
                 """, cancellationToken);
             return;
@@ -113,7 +116,7 @@ public class ConnectorSyncCursorStore : IConnectorSyncCursorStore
         var cursors = ReadObject(config.SyncCursorsJson);
         update(cursors);
         config.SyncCursorsJson = cursors.ToJsonString();
-        config.SysUpdatedAt = DateTime.UtcNow;
+        config.SysUpdatedAt = _time.GetUtcNow().UtcDateTime;
 
         await db.SaveChangesAsync(cancellationToken);
     }

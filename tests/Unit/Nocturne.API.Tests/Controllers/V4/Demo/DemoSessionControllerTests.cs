@@ -220,6 +220,7 @@ public class DemoSessionControllerTests : IDisposable
             new Mock<ITenantService>().Object,
             TestPublicAccessCache.Create(),
             Mock.Of<ITenantCache>(),
+            TimeProvider.System,
             new Mock<ILogger<DemoTenantService>>().Object);
 
         var controller = new DemoSessionController(

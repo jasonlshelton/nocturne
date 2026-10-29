@@ -39,6 +39,7 @@ public sealed class TenantServicePatientRelationshipTests : IDisposable
         Mock.Of<IHttpClientFactory>(),
         Mock.Of<ITenantRoleService>(),
         new GrantRevocationService(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
+        TimeProvider.System,
         Mock.Of<ILogger<TenantService>>());
 
     [Fact]

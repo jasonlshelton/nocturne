@@ -29,6 +29,7 @@ public class TenantOverviewService : ITenantOverviewService
     private readonly IServiceProvider _scope;
     private readonly IGlucoseStatusClassifier _classifier;
     private readonly IAlertRepository _alertRepository;
+    private readonly TimeProvider _time;
     private readonly ILogger<TenantOverviewService> _logger;
 
     public TenantOverviewService(
@@ -36,12 +37,14 @@ public class TenantOverviewService : ITenantOverviewService
         IServiceProvider scope,
         IGlucoseStatusClassifier classifier,
         IAlertRepository alertRepository,
+        TimeProvider timeProvider,
         ILogger<TenantOverviewService> logger)
     {
         _factory = factory;
         _scope = scope;
         _classifier = classifier;
         _alertRepository = alertRepository;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -156,7 +159,7 @@ public class TenantOverviewService : ITenantOverviewService
         var lastReadingAt = historyClamped ? null : tenant.LastReadingAt;
 
         var status = _classifier.Classify(
-            latest?.Mgdl, latest?.Timestamp, lastReadingAt, thresholds, DateTime.UtcNow);
+            latest?.Mgdl, latest?.Timestamp, lastReadingAt, thresholds, _time.GetUtcNow().UtcDateTime);
 
         return new TenantOverviewItem(
             tenant.Id, tenant.Slug, tenant.DisplayName,

@@ -93,7 +93,8 @@ public class OutboundSinkGuardTests
             NullLogger<MigrationJobService>.Instance,
             provider,
             EmptyConfiguration(),
-            new Nocturne.API.Services.TenantRunGuard());
+            new Nocturne.API.Services.TenantRunGuard(),
+            TimeProvider.System);
 
         await migration.TestConnectionAsync(new TestMigrationConnectionRequest
         {

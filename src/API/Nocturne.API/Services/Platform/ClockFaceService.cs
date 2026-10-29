@@ -19,6 +19,7 @@ namespace Nocturne.API.Services.Platform;
 public class ClockFaceService : IClockFaceService
 {
     private readonly INocturneDbContextFactory _contexts;
+    private readonly TimeProvider _time;
     private readonly ILogger<ClockFaceService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -29,9 +30,11 @@ public class ClockFaceService : IClockFaceService
 
     public ClockFaceService(
         INocturneDbContextFactory contexts,
+        TimeProvider timeProvider,
         ILogger<ClockFaceService> logger)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -164,7 +167,7 @@ public class ClockFaceService : IClockFaceService
                 entity.ConfigJson = Serialize(request.Config);
             }
 
-            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedAt = _time.GetUtcNow().UtcDateTime;
 
             await db.SaveChangesAsync(cancellationToken);
 

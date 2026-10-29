@@ -24,10 +24,9 @@ public class MarkDeviceApprovedGrantsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("mark_device_approved_grants");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "mark_device_approved_grants");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(MigrationUnderTest);
     }

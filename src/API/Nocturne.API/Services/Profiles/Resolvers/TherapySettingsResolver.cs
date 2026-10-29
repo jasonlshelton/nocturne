@@ -18,6 +18,7 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
     private readonly IPatientRecordRepository _patientRecordRepo;
     private readonly IActiveProfileResolver _activeProfileResolver;
     private readonly ProfileVersionCache _versions;
+    private readonly TimeProvider _time;
     private readonly ILogger<TherapySettingsResolver> _logger;
 
     private bool? _hasData;
@@ -31,6 +32,7 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
         IPatientRecordRepository patientRecordRepo,
         IActiveProfileResolver activeProfileResolver,
         ProfileVersionCache versions,
+        TimeProvider timeProvider,
         ILogger<TherapySettingsResolver> logger)
     {
         _repo = repo;
@@ -38,6 +40,7 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
         _patientRecordRepo = patientRecordRepo;
         _activeProfileResolver = activeProfileResolver;
         _versions = versions;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -107,7 +110,7 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
     }
 
     public Task<string?> GetTimezoneAsync(string? specProfile = null, CancellationToken ct = default) =>
-        GetTimezoneAtAsync(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), specProfile, ct);
+        GetTimezoneAtAsync(_time.GetUtcNow().ToUnixTimeMilliseconds(), specProfile, ct);
 
     /// <remarks>The order is <see cref="ScheduleTimeHelper.TimezoneOf"/>'s.</remarks>
     public async Task<string?> GetTimezoneAtAsync(long timeMills, string? specProfile = null, CancellationToken ct = default)
@@ -126,8 +129,8 @@ internal sealed class TherapySettingsResolver : ITherapySettingsResolver
     public async Task<string?> GetUnitsAsync(string? specProfile = null, CancellationToken ct = default)
     {
         var profileName = specProfile
-            ?? await _activeProfileResolver.GetDefaultProfileNameAsync(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ct);
-        var settings = await GetCachedSettingsAsync(profileName, DateTime.UtcNow, ct);
+            ?? await _activeProfileResolver.GetDefaultProfileNameAsync(_time.GetUtcNow().ToUnixTimeMilliseconds(), ct);
+        var settings = await GetCachedSettingsAsync(profileName, _time.GetUtcNow().UtcDateTime, ct);
         return settings?.Units;
     }
 

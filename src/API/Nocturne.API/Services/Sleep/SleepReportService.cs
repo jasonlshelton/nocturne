@@ -35,6 +35,7 @@ public class SleepReportService : ISleepReportService
     private readonly IPatientRecordRepository _patientRecord;
     private readonly INocturneDbContextFactory _contexts;
     private readonly IAuditContext _caller;
+    private readonly TimeProvider _time;
     private readonly ILogger<SleepReportService> _logger;
 
     public SleepReportService(
@@ -44,6 +45,7 @@ public class SleepReportService : ISleepReportService
         IPatientRecordRepository patientRecord,
         INocturneDbContextFactory contexts,
         IAuditContext caller,
+        TimeProvider timeProvider,
         ILogger<SleepReportService> logger)
     {
         _sessions = sessions;
@@ -52,6 +54,7 @@ public class SleepReportService : ISleepReportService
         _patientRecord = patientRecord;
         _contexts = contexts;
         _caller = caller;
+        _time = timeProvider;
         _logger   = logger;
     }
 
@@ -88,9 +91,9 @@ public class SleepReportService : ISleepReportService
     }
 
     /// <summary>Completed years between <paramref name="dob"/> and today (UTC).</summary>
-    private static int AgeInYears(DateOnly dob)
+    private int AgeInYears(DateOnly dob)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
         var age = today.Year - dob.Year;
         if (dob > today.AddYears(-age)) age--;
         return age;

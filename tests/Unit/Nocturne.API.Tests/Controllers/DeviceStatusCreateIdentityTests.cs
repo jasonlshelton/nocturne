@@ -46,6 +46,7 @@ public class DeviceStatusCreateIdentityTests
         _uploaderRepo.Object,
         Mock.Of<IStateSpanRepository>(),
         Mock.Of<IDeviceStatusExtrasRepository>(),
+        TimeProvider.System,
         NullLogger<DeviceStatusProjectionService>.Instance);
 
     private V1DeviceStatusController V1() => WithContext(new V1DeviceStatusController(

@@ -54,6 +54,7 @@ public class StatusService : IStatusService
     private readonly IGlucoseStatusClassifier _thresholdClassifier;
     private readonly IAlertRepository _alertRepository;
     private readonly ICategoryReadContext _categoryReadContext;
+    private readonly TimeProvider _time;
     private readonly ILogger<StatusService> _logger;
 
     /// <summary>The cache key of a tenant's system status, before its demo-mode and rules suffixes.</summary>
@@ -84,6 +85,7 @@ public class StatusService : IStatusService
         IGlucoseStatusClassifier thresholdClassifier,
         IAlertRepository alertRepository,
         ICategoryReadContext categoryReadContext,
+        TimeProvider timeProvider,
         ILogger<StatusService> logger
     )
     {
@@ -100,6 +102,7 @@ public class StatusService : IStatusService
         _thresholdClassifier = thresholdClassifier;
         _alertRepository = alertRepository;
         _categoryReadContext = categoryReadContext;
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -115,7 +118,7 @@ public class StatusService : IStatusService
                 Status = "setup_required",
                 Name = "Nocturne",
                 Version = AppVersion.Current,
-                ServerTime = DateTime.UtcNow,
+                ServerTime = _time.GetUtcNow().UtcDateTime,
                 ApiEnabled = false,
             };
         }
@@ -141,7 +144,7 @@ public class StatusService : IStatusService
         _logger.LogDebug("Generating system status response");
 
         var version = AppVersion.Current;
-        var serverTime = DateTime.UtcNow;
+        var serverTime = _time.GetUtcNow().UtcDateTime;
         var (settings, thresholdsDegraded) = await GetPublicSettingsAsync();
 
         // Add demo mode settings if enabled
@@ -553,7 +556,7 @@ public class StatusService : IStatusService
         var basicStatus = await GetSystemStatusAsync();
 
         var storageVersion = await GetPostgresVersionAsync();
-        var serverTime = DateTime.UtcNow;
+        var serverTime = _time.GetUtcNow().UtcDateTime;
 
         var response = new V3StatusResponse
         {
@@ -577,7 +580,7 @@ public class StatusService : IStatusService
             {
                 Authorization = GetAuthorizationInfo(),
                 Permissions = GetApiPermissions(),
-                UptimeMs = (long)(DateTime.UtcNow - ProcessStartUtc).TotalMilliseconds,
+                UptimeMs = (long)(_time.GetUtcNow().UtcDateTime - ProcessStartUtc).TotalMilliseconds,
                 Collections = GetAvailableCollections(),
                 ApiVersions = GetSupportedApiVersions(),
             },
@@ -605,7 +608,7 @@ public class StatusService : IStatusService
     {
         _logger.LogDebug("Generating last modified timestamps response");
 
-        var serverTime = DateTime.UtcNow;
+        var serverTime = _time.GetUtcNow().UtcDateTime;
         var grantedScopes = _httpContextAccessor.HttpContext?.GetGrantedScopes() ?? new HashSet<string>();
 
         Task<DateTime?> ReadableLastModifiedAsync(string collection, Func<NocturneDbContext, Task<DateTime?>> query) =>

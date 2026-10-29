@@ -67,7 +67,8 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
             _broadcast.Object,
             Mock.Of<IEngineAlarmRelay>(),
             provider,
-            NullLogger<AlertDeliveryService>.Instance);
+            NullLogger<AlertDeliveryService>.Instance,
+            TimeProvider.System);
     }
 
     private async Task<Guid> SeedInstanceAsync()

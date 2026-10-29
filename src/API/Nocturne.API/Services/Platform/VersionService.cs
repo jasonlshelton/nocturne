@@ -10,10 +10,12 @@ namespace Nocturne.API.Services.Platform;
 /// <seealso cref="IVersionService"/>
 public class VersionService : IVersionService
 {
+    private readonly TimeProvider _time;
     private readonly ILogger<VersionService> _logger;
 
-    public VersionService(ILogger<VersionService> logger)
+    public VersionService(TimeProvider timeProvider, ILogger<VersionService> logger)
     {
+        _time = timeProvider;
         _logger = logger;
     }
 
@@ -49,9 +51,9 @@ public class VersionService : IVersionService
         {
             Version = AppVersion.Current,
             Name = assemblyName,
-            ServerTime = DateTime.UtcNow,
+            ServerTime = _time.GetUtcNow().UtcDateTime,
             Head = Environment.GetEnvironmentVariable("GIT_COMMIT") ?? "unknown",
-            Build = Environment.GetEnvironmentVariable("BUILD_DATE") ?? DateTime.UtcNow.ToString("yyyy.MM.dd"),
+            Build = Environment.GetEnvironmentVariable("BUILD_DATE") ?? _time.GetUtcNow().UtcDateTime.ToString("yyyy.MM.dd"),
             ApiCompatibility = "Nightscout v15.0",
         };
 

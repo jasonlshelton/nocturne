@@ -8,6 +8,7 @@ namespace Nocturne.API.Tests.Integration.Parity.V1;
 /// Parity tests for /api/v1/status endpoints.
 /// Verifies that Nocturne status responses match Nightscout 15.0.3 structure.
 /// </summary>
+[Collection(ParityShards.Two)]
 public class StatusParityTests : ParityTestBase
 {
     public StatusParityTests(ParityTestFixture fixture, ITestOutputHelper output)

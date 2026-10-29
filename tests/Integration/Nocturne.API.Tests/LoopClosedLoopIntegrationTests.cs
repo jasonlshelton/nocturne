@@ -18,6 +18,7 @@ namespace Nocturne.API.Tests.Integration;
 /// the <c>loopSettings.dosingEnabled</c> of the Loop profile in force, whichever of the two uploads
 /// arrives first.
 /// </summary>
+[Collection(ApiIntegrationShards.Four)]
 [Trait("Category", "Integration")]
 public class LoopClosedLoopIntegrationTests : ApiIntegrationTestBase
 {

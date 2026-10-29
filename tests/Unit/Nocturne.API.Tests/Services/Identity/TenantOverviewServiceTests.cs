@@ -480,6 +480,7 @@ public class TenantOverviewServiceTests
             new GlucoseStatusClassifier(
                 new ConfigurationBuilder().Build(), NullLogger<GlucoseStatusClassifier>.Instance),
             new AlertRepository(new InMemoryContextFactory(options)),
+            TimeProvider.System,
             NullLogger<TenantOverviewService>.Instance);
         return (service, clampSeen, contextClampSeen);
     }
@@ -609,6 +610,7 @@ public class TenantOverviewServiceTests
             new GlucoseStatusClassifier(
                 new ConfigurationBuilder().Build(), NullLogger<GlucoseStatusClassifier>.Instance),
             new AlertRepository(new InMemoryContextFactory(options)),
+            TimeProvider.System,
             NullLogger<TenantOverviewService>.Instance);
     }
 

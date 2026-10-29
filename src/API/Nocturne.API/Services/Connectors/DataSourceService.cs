@@ -47,6 +47,7 @@ public class DataSourceService : IDataSourceService
     private readonly ProfileActivationWriter _profileActivationWriter;
     private readonly IEnumerable<IConnectorPurgeGuard> _purgeGuards;
     private readonly IEnumerable<IConnectorDataPurge> _dataPurges;
+    private readonly TimeProvider _time;
     private readonly ILogger<DataSourceService> _logger;
 
     public DataSourceService(
@@ -59,6 +60,7 @@ public class DataSourceService : IDataSourceService
         ProfileActivationWriter profileActivationWriter,
         IEnumerable<IConnectorPurgeGuard> purgeGuards,
         IEnumerable<IConnectorDataPurge> dataPurges,
+        TimeProvider time,
         ILogger<DataSourceService> logger
     )
     {
@@ -71,6 +73,7 @@ public class DataSourceService : IDataSourceService
         _connectorConfiguration = connectorConfiguration;
         _purgeGuards = purgeGuards;
         _dataPurges = dataPurges;
+        _time = time;
         _logger = logger;
     }
 
@@ -405,7 +408,7 @@ public class DataSourceService : IDataSourceService
         await using var db = await _contexts.CreateAsync(cancellationToken);
         _logger.LogDebug("Getting active data sources");
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var last24Hours = now.AddHours(-24);
         var windowStart = now.AddDays(-DiscoveryWindowDays).UtcDateTime;
         var last24HoursDate = last24Hours.UtcDateTime;
@@ -1002,7 +1005,7 @@ public class DataSourceService : IDataSourceService
         }
 
         foreach (var purge in PurgesOf(metadata))
-        foreach (var stats in await purge.DescribeAsync(null, DateTime.UtcNow.AddHours(-24), cancellationToken))
+        foreach (var stats in await purge.DescribeAsync(null, _time.GetUtcNow().UtcDateTime.AddHours(-24), cancellationToken))
             counts[stats.DataType] = counts.GetValueOrDefault(stats.DataType) + stats.Count;
 
         return new ConnectorDataSummary
@@ -1298,7 +1301,7 @@ public class DataSourceService : IDataSourceService
 
         try
         {
-            var treatmentsDeleted = await DemoDataPurge.PurgeTreatmentsAsync(db, cancellationToken);
+            var treatmentsDeleted = await DemoDataPurge.PurgeTreatmentsAsync(db, _time, cancellationToken);
             var glucoseDeleted = await DemoDataPurge.PurgeEntriesAsync(db, cancellationToken);
             var deviceStatusDeleted = await DemoDataPurge.PurgeDeviceStatusAsync(db, cancellationToken);
 
@@ -1336,7 +1339,7 @@ public class DataSourceService : IDataSourceService
     )
     {
         await using var db = await _contexts.CreateAsync(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var oneDayAgoDate = now.AddHours(-24).UtcDateTime;
 
         // Query V4 sensor glucose stats

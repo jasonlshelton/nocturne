@@ -132,8 +132,9 @@ public class EversenseConnectorService : BaseConnectorService<EversenseConnector
                 return result;
             }
 
-            var history = await FetchHistoryAsync(config, patient, request, cancellationToken);
-            var records = MergeReadings(history, _mapper.Map(patient));
+            var now = Clock.GetUtcNow().UtcDateTime;
+            var history = await FetchHistoryAsync(config, patient, request, now, cancellationToken);
+            var records = MergeReadings(history, _mapper.Map(patient, now));
             if (records.Count == 0)
             {
                 _logger.LogDebug(
@@ -175,7 +176,7 @@ public class EversenseConnectorService : BaseConnectorService<EversenseConnector
     ///     A first background sync reaches back one day; a longer import is a manual historical sync,
     ///     bounded by <see cref="EversenseConnectorConfiguration.MaxHistoryDays"/>.
     /// </summary>
-    protected override DateTime? InitialSyncFloor => DateTime.UtcNow.AddDays(-1);
+    protected override DateTime? InitialSyncFloor => Clock.GetUtcNow().UtcDateTime.AddDays(-1);
 
     /// <summary>
     ///     The request windows for a sync from <paramref name="from"/> to <paramref name="to"/>, oldest
@@ -223,6 +224,7 @@ public class EversenseConnectorService : BaseConnectorService<EversenseConnector
         EversenseConnectorConfiguration config,
         EversensePatientDatum patient,
         SyncRequest request,
+        DateTime now,
         CancellationToken cancellationToken)
     {
         if (patient.UserId <= 0)
@@ -239,7 +241,7 @@ public class EversenseConnectorService : BaseConnectorService<EversenseConnector
 
         var dataBaseUrl = EversenseConstants.DataBaseUrl(config.Server);
         var records = new List<SensorGlucose>();
-        foreach (var (start, end) in HistoryWindows(request.From, request.To, DateTime.UtcNow))
+        foreach (var (start, end) in HistoryWindows(request.From, request.To, now))
         {
             var url = $"{dataBaseUrl}{EversenseConstants.Endpoints.GetFollowingUserSensorGlucose}" +
                       $"?UserID={patient.UserId}" +
@@ -282,7 +284,7 @@ public class EversenseConnectorService : BaseConnectorService<EversenseConnector
                 break;
             }
 
-            records.AddRange(_mapper.MapHistory(events));
+            records.AddRange(_mapper.MapHistory(events, now));
         }
 
         return records;

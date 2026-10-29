@@ -45,6 +45,7 @@ public class SetupDevicesControllerTests
                 Mock.Of<IDeviceEventRepository>(), Mock.Of<ITrackerAlertRuleSyncService>(),
                 Mock.Of<IDeviceEventReactor>(), Mock.Of<ISignalRBroadcastService>(), TimeProvider.System,
                 NullLogger<ConsumableTrackerWriter>.Instance),
+            TimeProvider.System,
             NullLogger<DeviceSetupService>.Instance);
 
         var httpContext = new DefaultHttpContext();

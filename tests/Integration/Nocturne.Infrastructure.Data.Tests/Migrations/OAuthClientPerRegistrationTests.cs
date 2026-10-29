@@ -23,10 +23,9 @@ public class OAuthClientPerRegistrationFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("oauth_client_per_registration");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "oauth_client_per_registration");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

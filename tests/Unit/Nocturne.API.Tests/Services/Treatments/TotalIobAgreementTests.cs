@@ -357,7 +357,7 @@ public class TotalIobAgreementTests
             _aps.Object, trackers.Object, Mock.Of<INotificationV1Service>(),
             Mock.Of<IGlucoseStatusClassifier>(), Mock.Of<IAlertRepository>(),
             MockTenantAccessor.Create().Object, Mock.Of<ICategoryReadContext>(),
-            NullLogger<WidgetSummaryService>.Instance);
+            TimeProvider.System, NullLogger<WidgetSummaryService>.Instance);
 
         var summary = await service.GetSummaryAsync();
 
@@ -432,7 +432,7 @@ public class TotalIobAgreementTests
         var service = new SummaryService(
             Mock.Of<IDDataService>(), properties.Object, Reader(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
             Mock.Of<IActiveProfileResolver>(), Mock.Of<ITherapySettingsRepository>(),
-            Mock.Of<IProfileProjectionService>(), NullLogger<SummaryService>.Instance);
+            Mock.Of<IProfileProjectionService>(), TimeProvider.System, NullLogger<SummaryService>.Instance);
 
         return (await service.ConstructStateAsync()).Iob;
     }
@@ -572,6 +572,7 @@ public class TotalIobAgreementTests
             Mock.Of<IUploaderSnapshotRepository>(),
             MockStateSpans.Empty().Object,
             Mock.Of<IDeviceStatusExtrasRepository>(),
+            TimeProvider.System,
             NullLogger<DeviceStatusProjectionService>.Instance);
         var controller = new RetrospectiveController(
             _calculator, _cob.Object, entries.Object, Boluses(ReadingMills), _carbs.Object, TempBasals(ReadingMills),

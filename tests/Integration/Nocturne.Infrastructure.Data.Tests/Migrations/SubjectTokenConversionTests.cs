@@ -33,11 +33,9 @@ public class SubjectTokenConversionFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Unmigrated: the fixture walks the chain up to the migration under test itself.
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("token_conversion");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "token_conversion");
         _migratorConnectionString = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(targetMigration: null);
     }

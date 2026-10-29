@@ -17,10 +17,7 @@ public class PublishRecordTypePathTests
 {
     private sealed class PublishedRecord;
 
-    private sealed class TestConfig : BaseConnectorConfiguration
-    {
-        protected override void ValidateSourceSpecificConfiguration() { }
-    }
+    private sealed class TestConfig : BaseConnectorConfiguration;
 
     /// <summary>Captures the messages the shared publish path logs, which no fixture otherwise sees.</summary>
     private sealed class RecordingLogger : ILogger<TestConnectorService>

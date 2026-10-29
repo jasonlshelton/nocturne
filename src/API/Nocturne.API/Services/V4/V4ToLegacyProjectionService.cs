@@ -8,7 +8,6 @@ using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
-using Nocturne.Infrastructure.Data.Entities.V4;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Services;
 
@@ -48,6 +47,7 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
         IDeviceEventRepository deviceEventRepository,
         ITempBasalRepository tempBasalRepository,
         IBolusCalculationRepository bolusCalculationRepository,
+        IProfileActivationRepository profileActivationRepository,
         ITreatmentFoodService treatmentFoodService,
         INocturneDbContextFactory contexts,
         ILogger<V4ToLegacyProjectionService> logger
@@ -60,7 +60,8 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             noteRepository,
             deviceEventRepository,
             tempBasalRepository,
-            bolusCalculationRepository
+            bolusCalculationRepository,
+            profileActivationRepository
         );
         _treatmentFoodService = treatmentFoodService;
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
@@ -270,42 +271,16 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     }
 
     /// <inheritdoc />
-    public async Task<long> CountProjectedStateSpanTreatmentsAsync(
+    public async Task<long> CountProjectedTreatmentsAsync(
         long? fromMills, long? toMills, CancellationToken ct = default)
     {
         await using var db = await _contexts.CreateAsync(ct);
         var (from, to) = (MillsToDateTime(fromMills), MillsToDateTime(toMills));
         long count = 0;
-        foreach (var table in LegacyTreatmentTables.StateSpanTables)
-        {
-            count += await FetchSafe(
-                table, _ => table.InWindow(db, from, to).LongCountAsync(ct), 0L);
-        }
-
-        var activations = LegacyTreatmentTables.ProfileActivationTable;
-        count += await FetchSafe(
-            activations, _ => LegacyProfileActivationTable.InWindow(db, from, to).LongCountAsync(ct), 0L);
+        foreach (var table in LegacyTreatmentTables.All)
+            count += await table.CountAsync(_repositories, db, from, to, _logger, ct);
 
         return count;
-    }
-
-    /// <inheritdoc />
-    public async Task<long> CountNotesServedApartAsync(
-        long? fromMills, long? toMills, CancellationToken ct = default)
-    {
-        await using var db = await _contexts.CreateAsync(ct);
-        IQueryable<NoteEntity> InWindow(IQueryable<NoteEntity> notes)
-        {
-            notes = notes.AsNoTracking().ExcludeNonPrimary(db, RecordType.Note);
-            if (MillsToDateTime(fromMills) is { } lower)
-                notes = notes.Where(n => n.Timestamp >= lower);
-            if (MillsToDateTime(toMills) is { } upper)
-                notes = notes.Where(n => n.Timestamp <= upper);
-            return notes;
-        }
-
-        return await InWindow(db.Notes).LongCountAsync(ct)
-            - await InWindow(LegacyTreatmentTables.NotesServedWithAnotherRecord(db)).LongCountAsync(ct);
     }
 
     private static IQueryable<StateSpanEntity> MatchingId(IQueryable<StateSpanEntity> rows, string id)
@@ -542,33 +517,9 @@ public class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             : new CarbFoodIndex(await _treatmentFoodService.GetByCarbIntakeIdsAsync(carbIntakeIds, ct));
     }
 
+    /// <inheritdoc cref="LegacyTreatmentTables.GuardedAsync"/>
     private Task<IReadOnlyList<FetchedRecord>> FetchSafe(
         ILegacyTreatmentTable table,
         Func<ILegacyTreatmentTable, Task<IReadOnlyList<FetchedRecord>>> fetch
-    ) => FetchSafe(table, fetch, []);
-
-    /// <summary>
-    /// A read of one type the database provider cannot translate logs and yields
-    /// <paramref name="fallback"/>, so the other types still serve. Any other failure, a cancellation
-    /// included, propagates.
-    /// </summary>
-    private async Task<T> FetchSafe<T>(
-        ILegacyTreatmentTable table,
-        Func<ILegacyTreatmentTable, Task<T>> fetch,
-        T fallback
-    )
-    {
-        try
-        {
-            return await fetch(table);
-        }
-        catch (InvalidOperationException ex) when (ex is not ObjectDisposedException)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to fetch V4 records of type {Type} for legacy projection",
-                table.RecordType);
-            return fallback;
-        }
-    }
+    ) => LegacyTreatmentTables.GuardedAsync(table, _logger, () => fetch(table), []);
 }

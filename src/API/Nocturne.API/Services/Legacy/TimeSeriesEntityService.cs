@@ -19,8 +19,9 @@ public abstract class TimeSeriesEntityService<TDomain, TEntity>(
     INocturneDbContextFactory contexts,
     IDocumentProcessingService documentProcessingService,
     ISignalRBroadcastService signalRBroadcastService,
+    TimeProvider timeProvider,
     ILogger logger
-) : SimpleEntityService<TDomain, TEntity>(contexts, documentProcessingService, signalRBroadcastService, logger)
+) : SimpleEntityService<TDomain, TEntity>(contexts, documentProcessingService, signalRBroadcastService, timeProvider, logger)
     where TDomain : class, IProcessableDocument
     where TEntity : class, IOriginalIdentified, ITenantScoped, ISoftDeletable, IObservationTimestamped, ISyncDedupable
 {

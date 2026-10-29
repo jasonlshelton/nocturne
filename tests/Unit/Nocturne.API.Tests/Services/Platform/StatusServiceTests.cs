@@ -8,6 +8,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Core.Contracts.Alerts;
@@ -225,6 +226,7 @@ public class StatusServiceTests
             new GlucoseStatusClassifier(_configuration, NullLogger<GlucoseStatusClassifier>.Instance),
             new AlertRepository(mockFactory.Object),
             Mock.Of<ICategoryReadContext>(),
+            TimeProvider.System,
             _mockLogger.Object);
 
         await service.GetSystemStatusAsync();
@@ -533,6 +535,19 @@ public class StatusServiceTests
     #region GetLastModifiedAsync Tests
 
     [Fact]
+    public async Task GetLastModifiedAsync_StampsServerTimeFromTheClock()
+    {
+        var instant = new DateTimeOffset(2026, 10, 29, 12, 0, 0, TimeSpan.Zero);
+        var dbName = $"nocturne_lastmod_{Guid.NewGuid()}";
+        await using var context = TestDbContextFactory.CreateInMemoryContext(dbName);
+        var service = CreateStatusService(_configuration, context, dbName, time: new FakeTimeProvider(instant));
+
+        var result = await service.GetLastModifiedAsync();
+
+        result.ServerTime.Should().Be(instant.UtcDateTime);
+    }
+
+    [Fact]
     public async Task GetLastModifiedAsync_ShouldReturnTimestampsForAllCollections()
     {
         // Arrange
@@ -777,7 +792,7 @@ public class StatusServiceTests
     public async Task GetSystemStatusAsync_IgnoresTheLegacyFeaturesUnitsUntilTheOwnerChooses()
     {
         _dbContext.TenantId = MockTenantAccessor.DefaultTenantId;
-        await new UISettingsService(new TestNocturneDbContextFactory(_dbContext), Mock.Of<ILogger<UISettingsService>>()).SaveSectionAsync(
+        await new UISettingsService(new TestNocturneDbContextFactory(_dbContext), TimeProvider.System, Mock.Of<ILogger<UISettingsService>>()).SaveSectionAsync(
             "features", new FeatureSettings { Display = new DisplaySettings { Units = "mmol" } });
         var configuration = new ConfigurationBuilder().Build();
 
@@ -1059,7 +1074,7 @@ public class StatusServiceTests
                 r.GetTenantAppearanceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())
                     == Task.FromResult(new UserDisplayPreferences())),
             new GlucoseStatusClassifier(_configuration, NullLogger<GlucoseStatusClassifier>.Instance),
-            alerts.Object, Mock.Of<ICategoryReadContext>(), _mockLogger.Object);
+            alerts.Object, Mock.Of<ICategoryReadContext>(), TimeProvider.System, _mockLogger.Object);
 
         await Service().GetSystemStatusAsync();
         await Service().GetSystemStatusAsync();
@@ -1452,7 +1467,8 @@ public class StatusServiceTests
         ICategoryReadContext? categoryReadContext = null,
         IAlertRepository? alertRepository = null,
         CacheFlights? flights = null,
-        ITenantAppearanceReader? appearanceReader = null
+        ITenantAppearanceReader? appearanceReader = null,
+        TimeProvider? time = null
     )
     {
         var dbName = databaseName ?? $"nocturne_status_tests_{Guid.NewGuid()}";
@@ -1492,6 +1508,7 @@ public class StatusServiceTests
             new GlucoseStatusClassifier(configuration, NullLogger<GlucoseStatusClassifier>.Instance),
             alertRepository,
             categoryReadContext ?? Mock.Of<ICategoryReadContext>(),
+            time ?? TimeProvider.System,
             _mockLogger.Object
         );
     }

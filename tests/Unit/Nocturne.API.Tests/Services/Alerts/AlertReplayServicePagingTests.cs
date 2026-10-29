@@ -111,7 +111,8 @@ public class AlertReplayServicePagingTests
             enricher,
             _tenantAccessor.Object,
             Options.Create(options),
-            new RustAlertReplayEngine(new AlertEngineErrors(new Nocturne.API.Tests.Services.BackgroundServices.TestMeterFactory(), TimeProvider.System)));
+            new RustAlertReplayEngine(new AlertEngineErrors(new Nocturne.API.Tests.Services.BackgroundServices.TestMeterFactory(), TimeProvider.System)),
+            TimeProvider.System);
     }
 
     /// <summary>

@@ -51,7 +51,7 @@ public class HealthRecordIdResolutionTests
                 context.AsFactory(),
                 PassThrough<HeartRate>(),
                 Mock.Of<ISignalRBroadcastService>(),
-                NullLogger<HeartRateService>.Instance),
+                TimeProvider.System, NullLogger<HeartRateService>.Instance),
             context);
     }
 
@@ -63,7 +63,7 @@ public class HealthRecordIdResolutionTests
                 context.AsFactory(),
                 PassThrough<StepCount>(),
                 Mock.Of<ISignalRBroadcastService>(),
-                NullLogger<StepCountService>.Instance),
+                TimeProvider.System, NullLogger<StepCountService>.Instance),
             context);
     }
 
@@ -75,7 +75,7 @@ public class HealthRecordIdResolutionTests
                 context.AsFactory(),
                 PassThrough<BodyWeight>(),
                 Mock.Of<ISignalRBroadcastService>(),
-                NullLogger<BodyWeightService>.Instance),
+                TimeProvider.System, NullLogger<BodyWeightService>.Instance),
             context);
     }
 

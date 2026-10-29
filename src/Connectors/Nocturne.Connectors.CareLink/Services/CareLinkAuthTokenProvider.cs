@@ -20,9 +20,13 @@ public class CareLinkAuthTokenProvider(
     IConnectorServerResolver<CareLinkConnectorConfiguration> serverResolver,
     ITenantAccessor tenantAccessor,
     ILogger<CareLinkAuthTokenProvider> logger,
-    IRetryDelayStrategy retryDelayStrategy)
+    IRetryDelayStrategy retryDelayStrategy,
+    TimeProvider timeProvider)
     : AuthTokenProviderBase<CareLinkConnectorConfiguration>(httpClient, tokenCache, serverResolver, tenantAccessor, logger)
 {
+    private readonly TimeProvider _timeProvider =
+        timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+
     private readonly IRetryDelayStrategy _retryDelayStrategy =
         retryDelayStrategy ?? throw new ArgumentNullException(nameof(retryDelayStrategy));
 
@@ -277,12 +281,12 @@ public class CareLinkAuthTokenProvider(
         }
     }
 
-    private static DateTime GetTokenExpiry(string jwt)
+    private DateTime GetTokenExpiry(string jwt)
     {
         try
         {
             var parts = jwt.Split('.');
-            if (parts.Length != 3) return DateTime.UtcNow.AddHours(1);
+            if (parts.Length != 3) return _timeProvider.GetUtcNow().UtcDateTime.AddHours(1);
 
             var payload = parts[1].Replace('-', '+').Replace('_', '/');
             switch (payload.Length % 4)
@@ -301,6 +305,6 @@ public class CareLinkAuthTokenProvider(
         catch (InvalidOperationException) { /* fall through */ }
         catch (ArgumentException) { /* fall through */ }
 
-        return DateTime.UtcNow.AddHours(1);
+        return _timeProvider.GetUtcNow().UtcDateTime.AddHours(1);
     }
 }

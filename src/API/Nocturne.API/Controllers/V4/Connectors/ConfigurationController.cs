@@ -139,6 +139,7 @@ public class ConfigurationController : ControllerBase
     /// Saves or updates runtime configuration for a connector.
     /// Only properties marked with [RuntimeConfigurable] are accepted.
     /// Validates the configuration against the connector's schema before saving.
+    /// Refused for Google Health, whose options are saved by the Google Health endpoint.
     /// </summary>
     /// <param name="connectorName">The connector name</param>
     /// <param name="configuration">Configuration values as JSON</param>
@@ -158,9 +159,9 @@ public class ConfigurationController : ControllerBase
         _logger.LogInformation("Saving configuration for connector {ConnectorName} by {ModifiedBy}",
             connectorName, modifiedBy);
 
-        if (IsGrantDrivenConnector(connectorName) && SetsEnabled(configuration))
+        if (IsGrantDrivenConnector(connectorName))
         {
-            return RefuseGrantDrivenEnabled();
+            return SetsEnabled(configuration) ? RefuseGrantDrivenEnabled() : RefuseGrantDrivenConfiguration();
         }
 
         // Validate the configuration against the schema
@@ -187,6 +188,18 @@ public class ConfigurationController : ControllerBase
     private ObjectResult RefuseGrantDrivenEnabled() =>
         Problem(
             detail: "Google Health is enabled while it holds a Google sign-in. Disconnect it to stop syncing.",
+            statusCode: 400,
+            title: "Bad Request");
+
+    private ObjectResult RefuseGrantDrivenConfiguration() =>
+        Problem(
+            detail: "Google Health options are saved at PUT /api/v4/google-health/options, which validates them.",
+            statusCode: 400,
+            title: "Bad Request");
+
+    private ObjectResult RefuseGrantDrivenGrant() =>
+        Problem(
+            detail: "Google Health holds a Google sign-in. Connect and disconnect it at /api/v4/google-health.",
             statusCode: 400,
             title: "Bad Request");
 
@@ -384,6 +397,11 @@ public class ConfigurationController : ControllerBase
         [FromBody] Dictionary<string, string> secrets,
         CancellationToken ct)
     {
+        if (IsGrantDrivenConnector(connectorName))
+        {
+            return RefuseGrantDrivenGrant();
+        }
+
         // Saving a Nightscout API secret adopts it as a working credential (see
         // RequireInteractiveSessionAttribute); other connector credentials hand out nothing.
         if (ConnectorConfigurationService.AdoptedSecret(connectorName, secrets) is not null
@@ -524,11 +542,17 @@ public class ConfigurationController : ControllerBase
     [RemoteCommand(Invalidates = ["GetConfiguration", "GetAllConnectorStatus"])]
     [RequireScope(Scope.TenantSettings)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteConfiguration(
         string connectorName,
         CancellationToken ct)
     {
+        if (IsGrantDrivenConnector(connectorName))
+        {
+            return RefuseGrantDrivenGrant();
+        }
+
         _logger.LogInformation("Deleting configuration for connector {ConnectorName}", connectorName);
 
         var deleted = await _configService.DeleteConfigurationAsync(connectorName, ct);

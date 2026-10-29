@@ -241,7 +241,6 @@ public sealed class AlertRuleChannelWriter(ISecretEncryptionService encryption)
         Metadata = SerializeMetadata(req.Metadata),
         Secret = ResolveSecret(req, retainedSecrets),
         SortOrder = sortOrder,
-        CreatedAt = DateTime.UtcNow,
     };
 
     /// <summary>

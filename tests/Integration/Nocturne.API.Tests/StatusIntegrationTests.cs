@@ -13,6 +13,7 @@ namespace Nocturne.API.Tests.Integration;
 /// Tests the complete request/response cycle for various status formats against
 /// the full distributed application stack.
 /// </summary>
+[Collection(ApiIntegrationShards.Three)]
 [Trait("Category", "Integration")]
 public class StatusIntegrationTests : ApiIntegrationTestBase
 {

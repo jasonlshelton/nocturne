@@ -35,10 +35,9 @@ public sealed class RepairDoubleConvertedMmolProfilesFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var database = await SharedPostgres.CreateEmptyDatabaseAsync("repair_mmol_profiles");
+        var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "repair_mmol_profiles");
         _migrator = database.MigratorConnectionString;
 
-        await MigrateToAsync(PriorMigration);
         await SeedAsync();
         await MigrateToAsync(null);
         await ReadAsync(AfterUp);
