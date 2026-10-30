@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -6,6 +7,7 @@ using Nocturne.API.Attributes;
 using Nocturne.API.Authorization;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Extensions;
+using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
@@ -346,24 +348,70 @@ public class MemberInviteController : ControllerBase
         if (await WouldExemptAClampedMemberAsync(member, rolesAfter.Concat(member.DirectPermissions ?? []), ct))
             return Problem(detail: HttpContextExtensions.HistoryCeilingDetail, statusCode: 403);
 
-        db.TenantMemberRoles.RemoveRange(member.MemberRoles.Where(mr => removed.Contains(mr.TenantRoleId)));
-
-        var now = DateTime.UtcNow;
-        foreach (var roleId in added)
-        {
-            db.TenantMemberRoles.Add(new TenantMemberRoleEntity
-            {
-                Id = Guid.CreateVersion7(),
-                TenantMemberId = member.Id,
-                TenantRoleId = roleId,
-            });
-        }
-
-        member.SysUpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+        await ReplaceRolesAsync(db, member, removed, added, ct);
 
         if (member.Subject?.IsSystemSubject == true && member.Subject.Name == "Public")
             publicAccessCache.Evict(tenantId);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Replaces the caller's own roles with <see cref="RoleSeeds.Caretaker"/>, for a helper handing
+    /// the tenant over. Direct permissions and the history clamp stay as they are.
+    /// </summary>
+    /// <remarks>
+    /// The one self-edit allowed past <see cref="IsCallersOwnMembership"/> and
+    /// <see cref="SelfEditDetail"/>. It can only narrow: it is refused unless the caller could grant
+    /// caretaker, which means they already hold everything it confers.
+    /// </remarks>
+    [HttpPost("members/self/step-down")]
+    [RequireInteractiveSession]
+    [DenyDemoSubject]
+    [RemoteCommand]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> StepDown([FromServices] IAuthAuditService audit, CancellationToken ct)
+    {
+        if (HttpContext.GetSubjectId() is not { } subjectId)
+            return Unauthorized();
+
+        await using var db = await _contexts.CreateAsync(ct);
+        var tenantId = _tenantAccessor.TenantId;
+        var member = await db.TenantMembers
+            .Include(m => m.MemberRoles).ThenInclude(mr => mr.TenantRole)
+            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.SubjectId == subjectId, ct);
+        var caretaker = await db.TenantRoles
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Slug == RoleSeeds.Caretaker, ct);
+        if (member == null || caretaker == null)
+            return NotFound();
+
+        if (!(await _tenantRoleService.ValidateRoleGrantAsync(
+                tenantId, [caretaker.Id], HttpContext.GetGrantedScopes(), ct)).Ok)
+            return Problem(detail: "Cannot step down to a role with more access than you have.", statusCode: 403);
+
+        if (await db.TenantMembers.IsLastOwnerAsync(tenantId, member.Id, ct))
+            return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
+
+        var removed = member.MemberRoles.Where(mr => mr.TenantRoleId != caretaker.Id).ToList();
+        var assigned = member.MemberRoles.All(mr => mr.TenantRoleId != caretaker.Id);
+        await ReplaceRolesAsync(
+            db, member, removed.Select(mr => mr.TenantRoleId).ToList(), assigned ? [caretaker.Id] : [], ct);
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers.UserAgent.ToString();
+        foreach (var role in removed)
+        {
+            await audit.LogAsync(AuthAuditEventType.RoleRemoved, subjectId, success: true, ipAddress: ip,
+                userAgent: userAgent, detailsJson: JsonSerializer.Serialize(new { role = role.TenantRole?.Slug, kind = "tenant" }));
+        }
+        if (assigned)
+        {
+            await audit.LogAsync(AuthAuditEventType.RoleAssigned, subjectId, success: true, ipAddress: ip,
+                userAgent: userAgent, detailsJson: JsonSerializer.Serialize(new { role = caretaker.Slug, kind = "tenant" }));
+        }
 
         return NoContent();
     }
@@ -536,6 +584,29 @@ public class MemberInviteController : ControllerBase
         "Cannot remove your own membership; ask another member with members.manage.";
 
     private const string UngrantableRoleRemovalDetail = "Cannot remove a role you cannot grant.";
+
+    private static async Task ReplaceRolesAsync(
+        NocturneDbContext db,
+        TenantMemberEntity member,
+        IReadOnlyCollection<Guid> removedIds,
+        IReadOnlyCollection<Guid> addedIds,
+        CancellationToken ct)
+    {
+        db.TenantMemberRoles.RemoveRange(member.MemberRoles.Where(mr => removedIds.Contains(mr.TenantRoleId)));
+
+        foreach (var roleId in addedIds)
+        {
+            db.TenantMemberRoles.Add(new TenantMemberRoleEntity
+            {
+                Id = Guid.CreateVersion7(),
+                TenantMemberId = member.Id,
+                TenantRoleId = roleId,
+            });
+        }
+
+        member.SysUpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
 
     /// <summary>
     /// True when a history-clamped caller's edit would leave a clamped member holding permissions

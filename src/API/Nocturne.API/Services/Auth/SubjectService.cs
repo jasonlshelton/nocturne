@@ -311,7 +311,7 @@ public class SubjectService : ISubjectService
                 .SetProperty(a => a.UserAgent, (string?)null));
 
         await db.AuthAuditLog
-            .Where(a => a.SubjectId == subjectId || a.ActorSubjectId == subjectId)
+            .Where(a => a.TargetSubjectId == subjectId || a.ActorSubjectId == subjectId)
             .ExecuteUpdateAsync(s => s.SetProperty(a => a.DetailsJson, (string?)null));
     }
 

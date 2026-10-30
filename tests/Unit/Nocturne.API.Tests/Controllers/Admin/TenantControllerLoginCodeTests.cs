@@ -150,7 +150,7 @@ public class TenantControllerLoginCodeTests : IDisposable
         var row = await _auditContext.AuthAuditLog.AsNoTracking()
             .SingleAsync(a => a.EventType == AuthAuditEventType.LoginCodeIssued);
         row.Success.Should().BeTrue();
-        row.SubjectId.Should().Be(_memberSubjectId);
+        row.TargetSubjectId.Should().Be(_memberSubjectId);
         row.ActorSubjectId.Should().BeNull();
         row.ActorCredential.Should().Be($"{AuthType.InstanceKey}:0123456789abcdef");
         row.TenantId.Should().Be(_tenantId);

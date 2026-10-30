@@ -7,13 +7,13 @@ using Nocturne.API.Extensions;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Glucose;
 using Nocturne.Core.Constants;
-using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Queries;
+using Nocturne.Core.Contracts.Entries;
 
 namespace Nocturne.API.Controllers.V1;
 

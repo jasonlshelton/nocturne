@@ -34,9 +34,10 @@ public class BolusCalculationRepository : V4RepositoryBase<BolusCalculation, Bol
         IDeduplicationService deduplicationService,
         IAuditContext auditContext,
         ILogger<BolusCalculationRepository> logger,
-        IV4RecordBroadcaster<BolusCalculation>? broadcaster = null
+        IV4RecordBroadcaster<BolusCalculation>? broadcaster = null,
+        ILegacyReadCacheInvalidation? legacyReads = null
     )
-        : base(contextFactory, auditContext, logger, broadcaster)
+        : base(contextFactory, auditContext, logger, broadcaster, legacyReads: legacyReads)
     {
         _deduplicationService = deduplicationService;
     }

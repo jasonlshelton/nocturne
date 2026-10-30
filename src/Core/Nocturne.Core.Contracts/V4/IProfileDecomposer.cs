@@ -10,8 +10,6 @@ namespace Nocturne.Core.Contracts.V4;
 /// Handles idempotent create-or-update based on composite LegacyId matching.
 /// </summary>
 /// <seealso cref="IDecompositionPipeline"/>
-/// <seealso cref="IEntryDecomposer"/>
-/// <seealso cref="ITreatmentDecomposer"/>
 public interface IProfileDecomposer
 {
     /// <summary>

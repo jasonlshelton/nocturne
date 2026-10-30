@@ -190,14 +190,14 @@ public class TherapySetupServiceTests : IDisposable
     {
         await Decomposer().DecomposeAsync(UploadedProfile("5f0000000000000000000001"), WriteOrigin.Live);
 
-        (await Hub().GetAsync(CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Open,
+        (await Hub().GetAsync(null, CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Open,
             "a profile arriving is not the owner having checked it");
 
         var confirmed = await Service().ConfirmAsync(CancellationToken.None);
 
         confirmed.Confirmed.Should().BeTrue();
         (await Service().GetReviewAsync(CancellationToken.None)).Confirmed.Should().BeTrue();
-        (await Hub().GetAsync(CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done);
+        (await Hub().GetAsync(null, CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done);
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public class TherapySetupServiceTests : IDisposable
         var review = await Service().GetReviewAsync(CancellationToken.None);
         review.SourceName.Should().Be("Trio");
         review.Confirmed.Should().BeFalse("the owner confirmed Loop's profile, not this one");
-        (await Hub().GetAsync(CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done,
+        (await Hub().GetAsync(null, CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done,
             "done never reverts");
     }
 
@@ -253,7 +253,7 @@ public class TherapySetupServiceTests : IDisposable
         review.TargetRange!.Entries.Single().Low.Should().Be(99);
         review.TargetRange.Entries.Single().High.Should().Be(126);
 
-        (await Hub().GetAsync(CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done);
+        (await Hub().GetAsync(null, CancellationToken.None)).Items.Single().State.Should().Be(SetupHubItemState.Done);
     }
 
     [Fact]
@@ -305,9 +305,9 @@ public class TherapySetupServiceTests : IDisposable
     [Fact]
     public async Task NotForMe_ResolvesTheItemWithoutAProfile()
     {
-        await Hub().GetAsync(CancellationToken.None);
+        await Hub().GetAsync(null, CancellationToken.None);
 
-        var hub = await Hub().SetStateAsync(SetupHubItemKey.Therapy, SetupHubItemState.NotForMe, CancellationToken.None);
+        var hub = await Hub().SetStateAsync(null, SetupHubItemKey.Therapy, SetupHubItemState.NotForMe, CancellationToken.None);
 
         hub.Items.Single().State.Should().Be(SetupHubItemState.NotForMe);
         hub.ResolvedCount.Should().Be(1);

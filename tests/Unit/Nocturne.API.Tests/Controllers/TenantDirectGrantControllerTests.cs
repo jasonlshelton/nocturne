@@ -351,9 +351,9 @@ public class TenantDirectGrantControllerTests : IDisposable
 
         var row = await SingleAuditRowAsync();
         Assert.Equal(AuthAuditEventType.PlatformAdminGrantIssued, row.EventType);
-        Assert.Equal(_memberSubjectId, row.SubjectId);
+        Assert.Equal(_memberSubjectId, row.TargetSubjectId);
         Assert.Equal(_adminSubjectId, row.ActorSubjectId);
-        Assert.NotEqual(row.SubjectId, row.ActorSubjectId);
+        Assert.NotEqual(row.TargetSubjectId, row.ActorSubjectId);
         Assert.Equal(_tenantId, row.TenantId);
     }
 
@@ -373,9 +373,9 @@ public class TenantDirectGrantControllerTests : IDisposable
 
         var row = await _auditDbContext.AuthAuditLog.AsNoTracking()
             .SingleAsync(a => a.EventType == AuthAuditEventType.PlatformAdminGrantRevoked);
-        Assert.Equal(_memberSubjectId, row.SubjectId);
+        Assert.Equal(_memberSubjectId, row.TargetSubjectId);
         Assert.Equal(_adminSubjectId, row.ActorSubjectId);
-        Assert.NotEqual(row.SubjectId, row.ActorSubjectId);
+        Assert.NotEqual(row.TargetSubjectId, row.ActorSubjectId);
         Assert.Equal(_tenantId, row.TenantId);
     }
 
@@ -396,7 +396,7 @@ public class TenantDirectGrantControllerTests : IDisposable
 
         var row = await SingleAuditRowAsync();
         Assert.Equal(AuthAuditEventType.PlatformAdminGrantIssued, row.EventType);
-        Assert.Equal(_memberSubjectId, row.SubjectId);
+        Assert.Equal(_memberSubjectId, row.TargetSubjectId);
         Assert.Null(row.ActorSubjectId);
         Assert.Equal($"{AuthType.InstanceKey}:{fingerprint}", row.ActorCredential);
         Assert.Equal(_tenantId, row.TenantId);

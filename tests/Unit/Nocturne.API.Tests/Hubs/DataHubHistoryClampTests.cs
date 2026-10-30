@@ -9,19 +9,19 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Extensions;
 using Nocturne.API.Hubs;
-using Nocturne.API.Services.Devices;
+using Nocturne.Core.Contracts;
+using Nocturne.Core.Contracts.DeviceStatuses;
 using Nocturne.API.Services.Identity;
-using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
-using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Treatments;
-using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
+using Nocturne.Core.Models.Queries;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Services;
 using Xunit;
+using Nocturne.Core.Contracts.Entries;
 
 namespace Nocturne.API.Tests.Hubs;
 
@@ -63,15 +63,13 @@ public class DataHubHistoryClampTests
         services.AddDataServices();
         services.AddSingleton(entryService.Object);
         services.AddSingleton(treatmentService.Object);
-        services.AddSingleton(new DeviceStatusProjectionService(
-            Mock.Of<IDeviceStatusGroupRepository>(),
-            Mock.Of<IApsSnapshotRepository>(),
-            Mock.Of<IPumpSnapshotRepository>(),
-            Mock.Of<IUploaderSnapshotRepository>(),
-            Mock.Of<IStateSpanRepository>(),
-            Mock.Of<IDeviceStatusExtrasRepository>(),
-            TimeProvider.System,
-            NullLogger<DeviceStatusProjectionService>.Instance));
+        var deviceStatusService = new Mock<IDeviceStatusService>();
+        deviceStatusService
+            .Setup(s => s.GetDeviceStatusesAsync(
+                It.IsAny<FindQuery>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>(),
+                It.IsAny<bool>(), It.IsAny<ReadSortField>()))
+            .ReturnsAsync([]);
+        services.AddSingleton(deviceStatusService.Object);
         var requestServices = services.BuildServiceProvider().CreateScope().ServiceProvider;
 
         // A context the handshake request created before any credential was known.

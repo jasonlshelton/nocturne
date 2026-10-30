@@ -26,14 +26,14 @@ public class SetupHubService : ISetupHubService
         _items = items.OrderBy(i => i.Key).ToList();
     }
 
-    public async Task<SetupHubStatus> GetAsync(CancellationToken ct)
+    public async Task<SetupHubStatus> GetAsync(Guid? callerId, CancellationToken ct)
     {
         await using var db = await _contexts.CreateAsync(ct);
-        return await DescribeAsync(db, await SettleAsync(db, ct), ct);
+        return await DescribeAsync(db, await SettleAsync(db, ct), callerId, ct);
     }
 
     public async Task<SetupHubStatus> SetStateAsync(
-        SetupHubItemKey key, SetupHubItemState state, CancellationToken ct)
+        Guid? callerId, SetupHubItemKey key, SetupHubItemState state, CancellationToken ct)
     {
         if (state == SetupHubItemState.Done)
             throw new ArgumentException("Done is reached by the item working, never set.", nameof(state));
@@ -51,10 +51,10 @@ public class SetupHubService : ISetupHubService
             await db.SaveChangesAsync(ct);
         }
 
-        return await DescribeAsync(db, rows, ct);
+        return await DescribeAsync(db, rows, callerId, ct);
     }
 
-    public async Task<SetupHubStatus> ConfirmAboutAsync(CancellationToken ct)
+    public async Task<SetupHubStatus> ConfirmAboutAsync(Guid? callerId, CancellationToken ct)
     {
         await using (var db = await _contexts.CreateAsync(ct))
         {
@@ -71,10 +71,10 @@ public class SetupHubService : ISetupHubService
             }
         }
 
-        return await GetAsync(ct);
+        return await GetAsync(callerId, ct);
     }
 
-    public async Task<SetupHubStatus> DismissStripAsync(string revision, CancellationToken ct)
+    public async Task<SetupHubStatus> DismissStripAsync(Guid? callerId, string revision, CancellationToken ct)
     {
         await using (var db = await _contexts.CreateAsync(ct))
         {
@@ -83,7 +83,7 @@ public class SetupHubService : ISetupHubService
             await db.SaveChangesAsync(ct);
         }
 
-        return await GetAsync(ct);
+        return await GetAsync(callerId, ct);
     }
 
     private async Task<List<SetupHubItemEntity>> SettleAsync(
@@ -126,7 +126,7 @@ public class SetupHubService : ISetupHubService
     }
 
     private static async Task<SetupHubStatus> DescribeAsync(
-        NocturneDbContext db, List<SetupHubItemEntity> rows, CancellationToken ct)
+        NocturneDbContext db, List<SetupHubItemEntity> rows, Guid? callerId, CancellationToken ct)
     {
         var items = rows.Select(r => new SetupHubItem(r.ItemKey, r.State)).ToList();
         var resolved = items.Count(i => i.State != SetupHubItemState.Open);
@@ -134,14 +134,23 @@ public class SetupHubService : ISetupHubService
 
         var tenant = await db.Tenants.AsNoTracking()
             .Where(t => t.Id == db.TenantId)
-            .Select(t => new { t.SetupHubEnrolledAt, t.SetupStripDismissedRevision })
+            .Select(t => new
+            {
+                t.SetupHubEnrolledAt,
+                t.SetupStripDismissedRevision,
+                t.PatientRelationship,
+                t.HandedOverAt,
+            })
             .FirstAsync(ct);
 
         var showStrip = tenant.SetupHubEnrolledAt != null
             && resolved < items.Count
             && tenant.SetupStripDismissedRevision != revision;
 
-        return new SetupHubStatus(items, resolved, items.Count - resolved, items.Count, revision, showStrip);
+        return new SetupHubStatus(
+            items, resolved, items.Count - resolved, items.Count, revision, showStrip,
+            await Handover.DescribeAsync(
+                db, db.TenantId, tenant.PatientRelationship, tenant.HandedOverAt, callerId, ct));
     }
 
     private static string RevisionOf(IEnumerable<SetupHubItem> items)

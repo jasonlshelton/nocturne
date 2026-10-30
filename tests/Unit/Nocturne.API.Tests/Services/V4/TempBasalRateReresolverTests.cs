@@ -93,7 +93,6 @@ public class TempBasalRateReresolverTests
         _tempBasals.Verify(r => r.SetScheduleDerivedRateAsync(unknown.Id, -50, null, 0.5, 1.0, It.IsAny<CancellationToken>()), Times.Once);
         _tempBasals.Verify(r => r.SetScheduleDerivedRateAsync(current.Id, It.IsAny<double>(), It.IsAny<double?>(),
             It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
-        _cache.Verify(c => c.RemoveFamilyAsync(TenantCacheFamily.Treatments, It.IsAny<CancellationToken>()), Times.Once);
         _cache.Verify(c => c.RemoveFamilyAsync(TenantCacheFamily.Statistics, It.IsAny<CancellationToken>()), Times.Once);
     }
 

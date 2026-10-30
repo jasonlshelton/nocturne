@@ -31,6 +31,7 @@ using Nocturne.API.Services.ConnectorPublishing;
 using Nocturne.API.Services.Connectors;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Services.Devices;
+using Nocturne.API.Services.DeviceStatuses;
 using Nocturne.API.Services.Docs;
 using Nocturne.API.Services.Effects;
 using Nocturne.API.Services.Entries;
@@ -64,6 +65,7 @@ using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Devices;
+using Nocturne.Core.Contracts.DeviceStatuses;
 using Nocturne.Core.Contracts.Entries;
 using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.Glucose;
@@ -710,6 +712,7 @@ public static class ServiceRegistrationExtensions
 
         services.AddSingleton<CacheFlights>();
         services.AddScoped<ITenantCache, TenantCache>();
+        services.AddScoped<ILegacyReadCacheInvalidation, LegacyReadCacheInvalidation>();
 
         services.AddScoped<IV4ToLegacyProjectionService, V4ToLegacyProjectionService>();
 
@@ -720,10 +723,10 @@ public static class ServiceRegistrationExtensions
 
         // Core domain services
         services.AddScoped<ITreatmentService, TreatmentService>();
-        services.AddScoped<ITreatmentStore, Nocturne.API.Services.Treatments.TreatmentReadService>();
+        services.AddScoped<ITreatmentStore, TreatmentReadService>();
         services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadStore, Nocturne.Infrastructure.Data.Repositories.RejectedUploadRepository>();
         services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadRecorder, Nocturne.API.Services.Uploads.RejectedUploadRecorder>();
-        services.AddScoped<ITreatmentCache, Nocturne.API.Services.Treatments.TreatmentCacheAdapter>();
+        services.AddScoped<ITreatmentCache, TreatmentCacheAdapter>();
         services.AddScoped<SignalRTreatmentEventSink>();
         services.AddScoped<IDataEventSink<Treatment>>(sp =>
         {
@@ -740,8 +743,8 @@ public static class ServiceRegistrationExtensions
         });
         services.AddScoped<IWriteSideEffects, WriteSideEffectsService>();
         services.AddScoped<IEntryService, EntryService>();
-        services.AddScoped<IEntryStore, Nocturne.API.Services.Entries.EntryReadService>();
-        services.AddScoped<IEntryCache, Nocturne.API.Services.Entries.EntryCacheAdapter>();
+        services.AddScoped<IEntryStore, EntryReadService>();
+        services.AddScoped<IEntryCache, EntryCacheAdapter>();
         services.AddScoped<SignalREntryEventSink>();
         services.AddScoped<IDataEventSink<Entry>>(sp =>
         {
@@ -759,7 +762,8 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IStateSpanService, StateSpanService>();
         services.AddScoped<ISleepService, SleepService>();
         services.AddScoped<ISleepReportService, SleepReportService>();
-        services.AddScoped<DeviceStatusProjectionService>();
+        services.AddScoped<IDeviceStatusService, DeviceStatusService>();
+        services.AddScoped<IDeviceStatusStore, DeviceStatusProjectionService>();
         services.AddScoped<IDataEventSink<DeviceStatus>>(sp =>
         {
             var sinks = new List<IDataEventSink<DeviceStatus>>();
@@ -981,15 +985,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IProfileDecomposer, ProfileDecomposer>();
 
         // Unified generic decomposer registrations
-        services.AddScoped<IDecomposer<Entry>>(sp =>
-            (IDecomposer<Entry>)sp.GetRequiredService<IEntryDecomposer>()
-        );
-        services.AddScoped<IDecomposer<Treatment>>(sp =>
-            (IDecomposer<Treatment>)sp.GetRequiredService<ITreatmentDecomposer>()
-        );
-        services.AddScoped<IDecomposer<DeviceStatus>>(sp =>
-            (IDecomposer<DeviceStatus>)sp.GetRequiredService<IDeviceStatusDecomposer>()
-        );
         services.AddScoped<IDecomposer<Activity>>(sp =>
             (IDecomposer<Activity>)sp.GetRequiredService<IActivityDecomposer>()
         );

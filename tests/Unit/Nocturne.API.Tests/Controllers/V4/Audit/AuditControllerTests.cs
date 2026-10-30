@@ -416,6 +416,88 @@ public class AuditControllerTests : IDisposable
         response.Pagination.Total.Should().Be(3);
     }
 
+    [Fact]
+    public async Task GetMutations_FiltersByActorSubjectIdAndReturnsTheActor()
+    {
+        var actor = Guid.CreateVersion7();
+        var now = DateTime.UtcNow;
+        await using (var db = _db.CreateContext())
+        {
+            db.MutationAuditLog.Add(new MutationAuditLogEntity
+            {
+                Id = Guid.CreateVersion7(),
+                TenantId = TenantId,
+                EntityType = "Entry",
+                Action = "create",
+                ActorSubjectId = actor,
+                ActorName = "Alex",
+                CreatedAt = now.AddMinutes(-1),
+            });
+            db.MutationAuditLog.Add(new MutationAuditLogEntity
+            {
+                Id = Guid.CreateVersion7(),
+                TenantId = TenantId,
+                EntityType = "Entry",
+                Action = "create",
+                ActorSubjectId = Guid.CreateVersion7(),
+                CreatedAt = now.AddMinutes(-2),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var controller = CreateController(Scopes(Scope.AuditRead));
+
+        var result = await controller.GetMutationAuditLog(
+            now.AddHours(-1), now, actorSubjectId: actor);
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var row = ok.Value.Should().BeOfType<PaginatedResponse<MutationAuditDto>>().Subject
+            .Data.Should().ContainSingle().Subject;
+        row.ActorSubjectId.Should().Be(actor);
+        row.ActorName.Should().Be("Alex");
+    }
+
+    [Fact]
+    public async Task GetReads_FiltersByActorSubjectIdAndReturnsTheActor()
+    {
+        var actor = Guid.CreateVersion7();
+        var now = DateTime.UtcNow;
+        await using (var db = _db.CreateContext())
+        {
+            db.ReadAccessLog.Add(new ReadAccessLogEntity
+            {
+                Id = Guid.CreateVersion7(),
+                TenantId = TenantId,
+                Endpoint = "GET /api/v4/sensor-glucoses",
+                StatusCode = 200,
+                ActorSubjectId = actor,
+                ActorName = "Alex",
+                CreatedAt = now.AddMinutes(-1),
+            });
+            db.ReadAccessLog.Add(new ReadAccessLogEntity
+            {
+                Id = Guid.CreateVersion7(),
+                TenantId = TenantId,
+                Endpoint = "GET /api/v4/sensor-glucoses",
+                StatusCode = 200,
+                ActorSubjectId = Guid.CreateVersion7(),
+                CreatedAt = now.AddMinutes(-2),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var controller = CreateController(Scopes(Scope.AuditRead));
+
+        var result = await controller.GetReadAccessAuditLog(
+            now.AddHours(-1), now, actorSubjectId: actor);
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var row = ok.Value.Should().BeOfType<PaginatedResponse<ReadAccessAuditDto>>().Subject
+            .Data.Should().ContainSingle().Subject;
+        row.ActorSubjectId.Should().Be(actor);
+        row.ActorName.Should().Be("Alex");
+    }
+
     // ── Config tests ────────────────────────────────────────────────
 
     [Fact]

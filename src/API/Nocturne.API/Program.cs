@@ -493,15 +493,15 @@ app.MapScalarApiReference((options, httpContext) =>
 // API surface. A public info page would need the latest_entry payload stripped first.
 app.MapGet(
     "/",
-    async (IEntryStore entryStore) =>
+    async (IEntryService entries) =>
     {
-        // Check database connection by fetching the latest entry
+        // The latest entry may be a cache hit; database_status says whether one was served, not that the database was reached.
         string databaseStatus = "unknown";
         object? latestEntry = null;
 
         try
         {
-            var entry = await entryStore.GetCurrentAsync();
+            var entry = await entries.GetCurrentEntryAsync();
 
             if (entry != null)
             {

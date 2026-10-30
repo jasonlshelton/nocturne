@@ -39,8 +39,13 @@ public interface ITenantService
 
     Task<PatientRelationship?> GetPatientRelationshipAsync(Guid id, CancellationToken ct = default);
 
-    /// <summary>Records the onboarder's relationship to the patient, replacing any earlier answer.</summary>
-    Task SetPatientRelationshipAsync(Guid id, PatientRelationship relationship, CancellationToken ct = default);
+    /// <summary>
+    /// Records who the tenant is for, replacing any earlier answer. A caller other than the helper
+    /// replacing <see cref="PatientRelationship.Helper"/> is the recipient answering, which marks
+    /// the tenant handed over.
+    /// </summary>
+    Task SetPatientRelationshipAsync(
+        Guid id, PatientRelationship relationship, Guid? callerId, CancellationToken ct = default);
 
     /// <summary>The glucose units the owner chose for the tenant, or null when none was chosen.</summary>
     Task<string?> GetDefaultGlucoseUnitsAsync(Guid id, CancellationToken ct = default);

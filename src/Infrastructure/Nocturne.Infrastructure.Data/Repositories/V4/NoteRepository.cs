@@ -32,8 +32,9 @@ public class NoteRepository : SyncUpsertRepositoryBase<Note, NoteEntity>, INoteR
         IDeduplicationService deduplicationService,
         IAuditContext auditContext,
         ILogger<NoteRepository> logger,
-        IV4RecordBroadcaster<Note>? broadcaster = null)
-        : base(contextFactory, auditContext, logger, broadcaster)
+        IV4RecordBroadcaster<Note>? broadcaster = null,
+        ILegacyReadCacheInvalidation? legacyReads = null)
+        : base(contextFactory, auditContext, logger, broadcaster, legacyReads: legacyReads)
     {
         _deduplicationService = deduplicationService;
     }

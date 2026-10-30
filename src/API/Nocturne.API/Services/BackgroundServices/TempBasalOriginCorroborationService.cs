@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Services.Caching;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Services.BackgroundServices;
@@ -101,9 +103,10 @@ internal sealed class TempBasalOriginCorroborationService(
                         serviceProvider,
                         new TenantContext(tenant.Id, tenant.Slug, tenant.DisplayName, tenant.IsActive, IsDemo: false),
                         AuditEndpoint);
-                    var cache = job.ServiceProvider.GetRequiredService<ITenantCache>();
-                    await cache.RemoveFamilyAsync(TenantCacheFamily.Treatments, ct);
-                    await cache.RemoveFamilyAsync(TenantCacheFamily.Statistics, ct);
+                    await job.ServiceProvider.GetRequiredService<ILegacyReadCacheInvalidation>()
+                        .WrittenAsync([typeof(TempBasal)]);
+                    await job.ServiceProvider.GetRequiredService<ITenantCache>()
+                        .RemoveFamilyAsync(TenantCacheFamily.Statistics, ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

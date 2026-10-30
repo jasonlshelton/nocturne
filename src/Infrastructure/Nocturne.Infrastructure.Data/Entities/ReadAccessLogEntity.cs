@@ -19,14 +19,14 @@ public class ReadAccessLogEntity : ITenantScoped
     [Column("tenant_id")]
     public Guid TenantId { get; set; }
 
-    /// <summary>Authenticated user who performed the read, if known.</summary>
-    [Column("subject_id")]
-    public Guid? SubjectId { get; set; }
+    /// <summary>The caller who performed the read, if known. See <see cref="Nocturne.Core.Contracts.Auth.IAuthAuditService"/>.</summary>
+    [Column("actor_subject_id")]
+    public Guid? ActorSubjectId { get; set; }
 
-    /// <summary>Display name of the authenticated user, denormalized for historical retention.</summary>
-    [Column("subject_name")]
+    /// <summary>Display name of the caller, denormalized for historical retention.</summary>
+    [Column("actor_name")]
     [MaxLength(128)]
-    public string? SubjectName { get; set; }
+    public string? ActorName { get; set; }
 
     /// <summary>Authentication mechanism used (e.g. "Bearer", "ApiSecret").</summary>
     [Column("auth_type")]

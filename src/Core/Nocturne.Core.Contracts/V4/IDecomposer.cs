@@ -4,13 +4,13 @@ namespace Nocturne.Core.Contracts.V4;
 
 /// <summary>
 /// Unified generic interface for decomposing legacy records into v4 granular models.
-/// Implemented by each typed decomposer alongside its specific interface.
 /// </summary>
-/// <typeparam name="T">The legacy domain model type (Entry, Treatment, DeviceStatus, Activity, Profile).</typeparam>
+/// <remarks>
+/// Only the activity and profile decomposers implement it. A legacy entry or treatment is written
+/// through its module's service, which no generic dispatch may route around.
+/// </remarks>
+/// <typeparam name="T">The legacy domain model type (Activity, Profile).</typeparam>
 /// <seealso cref="IDecompositionPipeline"/>
-/// <seealso cref="IEntryDecomposer"/>
-/// <seealso cref="ITreatmentDecomposer"/>
-/// <seealso cref="IDeviceStatusDecomposer"/>
 /// <seealso cref="IActivityDecomposer"/>
 /// <seealso cref="IProfileDecomposer"/>
 public interface IDecomposer<in T> where T : class

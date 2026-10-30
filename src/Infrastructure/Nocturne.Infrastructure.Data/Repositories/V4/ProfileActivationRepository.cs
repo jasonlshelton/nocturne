@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Events;
+using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data.Entities.V4;
@@ -22,8 +23,9 @@ public class ProfileActivationRepository
         INocturneDbContextFactory contextFactory,
         IAuditContext auditContext,
         ILogger<ProfileActivationRepository> logger,
-        IV4RecordBroadcaster<ProfileActivation>? broadcaster = null)
-        : base(contextFactory, auditContext, logger, broadcaster)
+        IV4RecordBroadcaster<ProfileActivation>? broadcaster = null,
+        ILegacyReadCacheInvalidation? legacyReads = null)
+        : base(contextFactory, auditContext, logger, broadcaster, legacyReads: legacyReads)
     {
     }
 
@@ -158,12 +160,15 @@ public class ProfileActivationRepository
     }
 
     /// <summary>Saves only the rows whose values moved, so an unchanged end writes no row version.</summary>
-    private static async Task<int> SaveChangedAsync(
+    private async Task<int> SaveChangedAsync(
         NocturneDbContext ctx, List<ProfileActivationEntity> entities, CancellationToken ct)
     {
         var changed = entities.Count(e => ctx.Entry(e).State == EntityState.Modified);
         if (changed > 0)
+        {
             await ctx.SaveChangesAsync(ct);
+            await ReportWrittenAsync();
+        }
         return changed;
     }
 }

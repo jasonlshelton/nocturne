@@ -1,7 +1,8 @@
 // scripts/publish-release.cs
 //
-// Generates the production Docker Compose bundle and commits the results to
-// deploy/ and docs/diagrams/ before tagging a release.
+// Generates the production Docker Compose bundle into deploy/ and docs/diagrams/. The
+// compose-bundle-drift job in .github/workflows/tests.yml regenerates it and fails a pull
+// request whose committed copy differs.
 //
 // Usage:
 //   dotnet run scripts/publish-release.cs
@@ -126,7 +127,7 @@ try
     Console.WriteLine("[publish-release] Updated docs/diagrams/");
 
     Console.WriteLine();
-    Console.WriteLine("[publish-release] Done! Commit deploy/ and docs/diagrams/ before tagging.");
+    Console.WriteLine("[publish-release] Done! Commit deploy/ and docs/diagrams/. The compose-bundle-drift job checks them.");
 
     return 0;
 }

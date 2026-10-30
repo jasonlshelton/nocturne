@@ -76,6 +76,14 @@ public class TenantEntity : ISystemTimestamped
     public PatientRelationship? PatientRelationship { get; set; }
 
     /// <summary>
+    /// When the person a helper set the tenant up for answered who it is for, replacing the
+    /// helper's <see cref="Nocturne.Core.Models.V4.PatientRelationship.Helper"/>. It is all that is left
+    /// of the handover once the answer is overwritten, and the helper may still need to step down.
+    /// </summary>
+    [Column("handed_over_at")]
+    public DateTime? HandedOverAt { get; set; }
+
+    /// <summary>
     /// Glucose units ("mg/dl" or "mmol") the owner chose for the tenant, which members who have
     /// not chosen their own and Nightscout clients reading status see. Null until chosen; only an
     /// explicit choice is ever written here.

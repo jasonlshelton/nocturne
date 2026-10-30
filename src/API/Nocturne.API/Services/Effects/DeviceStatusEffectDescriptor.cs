@@ -3,7 +3,7 @@ namespace Nocturne.API.Services.Effects;
 
 /// <summary>
 /// <see cref="ICollectionEffectDescriptor"/> for the <c>devicestatus</c> collection.
-/// Decomposition is handled directly by the controller write path, not as a side effect.
+/// <see cref="DeviceStatuses.DeviceStatusService"/> decomposes on its write path, not as a side effect.
 /// </summary>
 /// <seealso cref="ICollectionEffectDescriptor"/>
 public class DeviceStatusEffectDescriptor : ICollectionEffectDescriptor

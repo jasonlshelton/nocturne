@@ -3,7 +3,6 @@ using System.Data.Common;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Audit;
@@ -154,7 +153,7 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
     }
 
     [Fact]
-    public async Task A_rolled_back_legacy_id_delete_reaches_the_pipeline_caller_as_an_error_not_as_nothing_deleted()
+    public async Task A_rolled_back_legacy_id_delete_reaches_the_caller_as_an_error_not_as_nothing_deleted()
     {
         _context.Boluses.Add(new BolusEntity
         {
@@ -166,11 +165,9 @@ public class TreatmentDecomposerSourceDeleteRollbackTests : IDisposable
         });
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
-        var services = new ServiceCollection().AddSingleton<IDecomposer<Treatment>>(_decomposer).BuildServiceProvider();
-        var pipeline = new DecompositionPipeline(services, NullLogger<DecompositionPipeline>.Instance);
 
         _failure.FailOn = "UPDATE \"carb_intakes\"";
-        var act = () => pipeline.DeleteByLegacyIdAsync<Treatment>("t-3", WriteOrigin.Live);
+        var act = () => _decomposer.DeleteByLegacyIdAsync("t-3", WriteOrigin.Live);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected write failure");
     }

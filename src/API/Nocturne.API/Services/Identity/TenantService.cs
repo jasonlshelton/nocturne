@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Docs;
+using Nocturne.API.Services.SetupHub;
 using Nocturne.Connectors.Core.Utilities;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
@@ -294,11 +295,18 @@ public partial class TenantService : ITenantService
     }
 
     public async Task SetPatientRelationshipAsync(
-        Guid id, PatientRelationship relationship, CancellationToken ct = default)
+        Guid id, PatientRelationship relationship, Guid? callerId, CancellationToken ct = default)
     {
-        await using var context = await _factory.CreatePlatformAsync(ct);
+        await using var context = await _factory.CreateForTenantAsync(id, ct);
         var tenant = await context.Tenants.FindAsync([id], ct)
             ?? throw new KeyNotFoundException($"Tenant {id} not found");
+
+        if (tenant.PatientRelationship == PatientRelationship.Helper
+            && relationship != PatientRelationship.Helper
+            && callerId is { } caller
+            && await Handover.HelperAsync(context, id, ct) is { } helper
+            && helper.SubjectId != caller)
+            tenant.HandedOverAt ??= _time.GetUtcNow().UtcDateTime;
 
         tenant.PatientRelationship = relationship;
         await context.SaveChangesAsync(ct);

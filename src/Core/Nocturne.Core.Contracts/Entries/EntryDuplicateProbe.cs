@@ -2,7 +2,7 @@ namespace Nocturne.Core.Contracts.Entries;
 
 /// <summary>
 /// One entry's identity for the upload duplicate check: the fields
-/// <see cref="IEntryStore.CheckDuplicatesAsync"/> matches against stored readings.
+/// <see cref="IEntryService.CheckForDuplicateEntriesAsync"/> matches against stored readings.
 /// </summary>
 /// <param name="Device">Device identifier, or <c>null</c> to match any device.</param>
 /// <param name="Type">Entry type ("sgv", "mbg", "cal"); other types are never duplicates.</param>

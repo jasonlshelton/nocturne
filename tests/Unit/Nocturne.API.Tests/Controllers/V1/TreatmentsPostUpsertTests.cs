@@ -2,17 +2,15 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Controllers.V1;
 using Nocturne.API.Services.Legacy;
-using Nocturne.API.Services.Treatments;
 using Nocturne.API.Services.V4;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.API.Tests.Services.Treatments;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Devices;
-using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Profiles.Resolvers;
 using Nocturne.Core.Contracts.Treatments;
@@ -43,7 +41,7 @@ public class TreatmentsPostUpsertTests : IDisposable
 
     private readonly SqliteTestDatabase _db;
     private readonly NocturneDbContext _context;
-    private readonly TreatmentService _service;
+    private readonly ITreatmentService _service;
     private readonly TreatmentsController _controller;
 
     public TreatmentsPostUpsertTests()
@@ -96,28 +94,9 @@ public class TreatmentsPostUpsertTests : IDisposable
             audit,
             NullLogger<TreatmentDecomposer>.Instance);
 
-        var projection = new V4ToLegacyProjectionService(
-            bolusRepo, carbRepo, bgCheckRepo, noteRepo, deviceEventRepo,
-            tempBasalRepo.Object, bolusCalcRepo,
-            Mock.Of<IProfileActivationRepository>(),
-            foods.Object,
-            _context.AsFactory(),
-            NullLogger<V4ToLegacyProjectionService>.Instance);
-
-        var pipeline = new DecompositionPipeline(
-            new ServiceCollection().AddSingleton<IDecomposer<Treatment>>(decomposer).BuildServiceProvider(),
-            NullLogger<DecompositionPipeline>.Instance);
-
-        var store = new TreatmentReadService(
-            projection, decomposer, pipeline,
-            tempBasalRepo.Object, bolusRepo, carbRepo, bgCheckRepo, noteRepo, deviceEventRepo, bolusCalcRepo,
-            Mock.Of<IProfileActivationRepository>(),
-            Mock.Of<IStateSpanService>(),
-            NullLogger<TreatmentReadService>.Instance);
-
-        _service = new TreatmentService(
-            store, decomposer, Mock.Of<ITreatmentCache>(), Mock.Of<IDataEventSink<Treatment>>(),
-            Mock.Of<IPatientInsulinRepository>(), NullLogger<TreatmentService>.Instance);
+        _service = WritingTreatmentService.Over(
+            decomposer, tempBasalRepo.Object, bolusRepo, carbRepo, bgCheckRepo, noteRepo, deviceEventRepo, bolusCalcRepo,
+            _context.AsFactory(), foods.Object);
 
         _controller = new TreatmentsController(
             _service,

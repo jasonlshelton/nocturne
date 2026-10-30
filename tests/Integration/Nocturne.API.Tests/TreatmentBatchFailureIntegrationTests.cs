@@ -4,14 +4,16 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Moq;
+using Castle.DynamicProxy;
 using Nocturne.API.Helpers;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.API.Services.Treatments;
+using Nocturne.API.Services.V4;
 using Nocturne.API.Tests.Integration.Infrastructure;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data.Entities.V4;
@@ -98,25 +100,35 @@ public class TreatmentBatchFailureIntegrationTests(ApiIntegrationTestFixture fix
     {
         await using var scope = TenantJobScope.Open(
             Fixture.Services, new TenantContext(Fixture.TenantId, "", "", true, false), "test:treatment-batch");
-        var real = scope.ServiceProvider.GetRequiredService<ITreatmentDecomposer>();
-        var failingSecond = new Mock<ITreatmentDecomposer>();
-        failingSecond
-            .Setup(d => d.DecomposeAsync(It.IsAny<Treatment>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
-            .Returns((Treatment t, WriteOrigin origin, CancellationToken ct) =>
-                t.Notes == "second" ? throw new TimeoutException() : real.DecomposeAsync(t, origin, ct));
-        var store = ActivatorUtilities.CreateInstance<TreatmentReadService>(scope.ServiceProvider, failingSecond.Object);
+        var notes = new ProxyGenerator().CreateInterfaceProxyWithTarget(
+            scope.ServiceProvider.GetRequiredService<INoteRepository>(), new TimesOutWriting("second"));
+        var decomposer = ActivatorUtilities.CreateInstance<TreatmentDecomposer>(scope.ServiceProvider, notes);
+        var store = ActivatorUtilities.CreateInstance<TreatmentReadService>(scope.ServiceProvider, decomposer);
 
         var act = () => store.CreateAsync(
         [
             new Treatment { EventType = "Note", Notes = "first", Mills = 1_790_000_000_000 },
             new Treatment { EventType = "Note", Notes = "second", Mills = 1_790_000_300_000 },
             new Treatment { EventType = "Note", Notes = "third", Mills = 1_790_000_600_000 },
-        ]);
+        ], WriteOrigin.Live);
 
         var failed = (await act.Should().ThrowAsync<TreatmentBatchFailedException>()).Which;
         failed.Written.Select(t => t.Notes).Should().Equal("first");
 
         await using var db = Fixture.CreateDbContext(Fixture.TenantId);
         (await db.Set<NoteEntity>().Select(n => n.Text).ToListAsync()).Should().Equal("first");
+    }
+
+    /// <summary>Times out the note write whose text is <paramref name="text"/>.</summary>
+    private sealed class TimesOutWriting(string text) : IInterceptor
+    {
+        public void Intercept(IInvocation invocation)
+        {
+            if (invocation.Method.Name == nameof(INoteRepository.CreateAsync)
+                && invocation.Arguments[0] is Note { Text: var written } && written == text)
+                throw new TimeoutException();
+
+            invocation.Proceed();
+        }
     }
 }

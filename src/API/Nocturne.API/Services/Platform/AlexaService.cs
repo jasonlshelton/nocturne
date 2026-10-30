@@ -25,7 +25,7 @@ public class AlexaService : IAlexaService
     private static readonly long RecentPumpWindowMills =
         new PumpPreferences().UrgentClock * 2 * 60 * 1000L;
 
-    private readonly IEntryStore _store;
+    private readonly IEntryService _entries;
     private readonly IPropertiesService _properties;
     private readonly IDDataService _ddata;
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -106,7 +106,7 @@ public class AlexaService : IAlexaService
     };
 
     public AlexaService(
-        IEntryStore store,
+        IEntryService entries,
         IPropertiesService properties,
         IDDataService ddata,
         IHttpContextAccessor httpContextAccessor,
@@ -116,7 +116,7 @@ public class AlexaService : IAlexaService
         ILogger<AlexaService> logger
     )
     {
-        _store = store;
+        _entries = entries;
         _properties = properties;
         _ddata = ddata;
         _httpContextAccessor = httpContextAccessor;
@@ -487,7 +487,7 @@ public class AlexaService : IAlexaService
 
     private async Task<string?> SpeakBgAsync(SpeechRequest request)
     {
-        var entries = await _store.QueryAsync(
+        var entries = await _entries.QueryEntriesAsync(
             new EntryQuery { Type = "sgv", Count = 1 },
             request.CancellationToken
         );

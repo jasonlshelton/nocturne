@@ -745,15 +745,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("refresh_token_id");
 
-                    b.Property<Guid?>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
                     b.Property<bool>("Success")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
                         .HasColumnName("success");
+
+                    b.Property<Guid?>("TargetSubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_subject_id");
 
                     b.Property<Guid?>("TenantId")
                         .HasColumnType("uuid")
@@ -782,8 +782,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("RefreshTokenId");
 
-                    b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_auth_audit_log_subject_id");
+                    b.HasIndex("TargetSubjectId")
+                        .HasDatabaseName("ix_auth_audit_log_target_subject_id");
 
                     b.HasIndex("ActorCredential", "CreatedAt")
                         .IsDescending(false, true)
@@ -793,9 +793,9 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsDescending(false, true)
                         .HasDatabaseName("ix_auth_audit_log_actor_subject_created");
 
-                    b.HasIndex("SubjectId", "CreatedAt")
+                    b.HasIndex("TargetSubjectId", "CreatedAt")
                         .IsDescending(false, true)
-                        .HasDatabaseName("ix_auth_audit_log_subject_created");
+                        .HasDatabaseName("ix_auth_audit_log_target_subject_created");
 
                     b.HasIndex("TenantId", "CreatedAt")
                         .IsDescending(false, true)
@@ -2797,6 +2797,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("mode");
 
+                    b.Property<string>("SourceAlarmSettings")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("source_alarm_settings");
+
                     b.Property<string>("SourceDescription")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)")
@@ -2931,6 +2935,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("action");
 
+                    b.Property<string>("ActorName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<Guid?>("ActorSubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_subject_id");
+
                     b.Property<string>("AuthType")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -2966,15 +2979,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(45)")
                         .HasColumnName("ip_address");
 
-                    b.Property<Guid?>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<string>("SubjectName")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("subject_name");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -2993,11 +2997,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId", "CreatedAt")
                         .HasDatabaseName("ix_mutation_audit_log_created");
 
+                    b.HasIndex("TenantId", "ActorSubjectId", "CreatedAt")
+                        .HasDatabaseName("ix_mutation_audit_log_actor_subject");
+
                     b.HasIndex("TenantId", "EntityType", "EntityId")
                         .HasDatabaseName("ix_mutation_audit_log_entity");
-
-                    b.HasIndex("TenantId", "SubjectId", "CreatedAt")
-                        .HasDatabaseName("ix_mutation_audit_log_subject");
 
                     b.ToTable("mutation_audit_log");
                 });
@@ -3757,6 +3761,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("ActorName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<Guid?>("ActorSubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_subject_id");
+
                     b.Property<string>("AuthType")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -3801,15 +3814,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("status_code");
 
-                    b.Property<Guid?>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<string>("SubjectName")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("subject_name");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -3832,11 +3836,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId", "CreatedAt")
                         .HasDatabaseName("ix_read_access_log_created");
 
+                    b.HasIndex("TenantId", "ActorSubjectId", "CreatedAt")
+                        .HasDatabaseName("ix_read_access_log_actor_subject");
+
                     b.HasIndex("TenantId", "EntityType", "CreatedAt")
                         .HasDatabaseName("ix_read_access_log_entity_type");
-
-                    b.HasIndex("TenantId", "SubjectId", "CreatedAt")
-                        .HasDatabaseName("ix_read_access_log_subject");
 
                     b.ToTable("read_access_log");
                 });
@@ -5276,6 +5280,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)")
                         .HasColumnName("display_name");
+
+                    b.Property<DateTime?>("HandedOverAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("handed_over_at");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")

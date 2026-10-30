@@ -104,7 +104,7 @@ public class DirectGrantControllerTests : IDisposable
 
         var row = await _dbContext.AuthAuditLog.AsNoTracking().SingleAsync();
         Assert.Equal(AuthAuditEventType.TokenIssued, row.EventType);
-        Assert.Equal(_subjectId, row.SubjectId);
+        Assert.Equal(_subjectId, row.TargetSubjectId);
         Assert.Equal(_subjectId, row.ActorSubjectId);
         Assert.Null(row.ActorCredential);
         Assert.Equal(_testTenantId, row.TenantId);

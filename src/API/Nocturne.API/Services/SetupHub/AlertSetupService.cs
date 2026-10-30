@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Controllers.V4.Monitoring;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Conditions;
+using Nocturne.API.Services.Migration;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Models;
@@ -65,14 +66,19 @@ public class AlertSetupService(
         var units = await UnitsAsync(db, callerId, ct);
         var starters = await StartersAsync(db, tracking: false, ct);
 
+        var startingPoints = StartingPoints(starters.Count == 0 ? await MigratedAlarmSettingsAsync(db, ct) : null);
         var rules = Enum.GetValues<StarterAlertKind>().Select(kind =>
         {
             var rule = starters.GetValueOrDefault(kind);
-            var mgdl = rule is null ? Starters[kind].DefaultMgdl : ThresholdOf(rule);
+            var start = startingPoints[kind];
+            var mgdl = rule is null ? start.Mgdl : ThresholdOf(rule);
             return new StarterAlertRule(
-                kind, rule?.Id, rule?.IsEnabled ?? true,
+                kind, rule?.Id, rule?.IsEnabled ?? start.IsEnabled,
                 Starters[kind].Direction is null ? null : Display(mgdl, units));
         }).ToList();
+        var thresholdsFrom = startingPoints.Values.Any(p => p.FromNightscout)
+            ? AlertThresholdSource.Nightscout
+            : AlertThresholdSource.Defaults;
 
         var primary = starters.Values.FirstOrDefault() is { } first
             ? PrimaryChannels(first, callerId).ToList()
@@ -86,7 +92,7 @@ public class AlertSetupService(
             : [];
 
         return new AlertSetupStatus(
-            routing, units, starters.Count > 0, rules, toThisDevice,
+            routing, units, starters.Count > 0, rules, thresholdsFrom, toThisDevice,
             toThisDevice ? [] : primary.Select(ToResponse).ToList(),
             ChannelTypesOffered,
             primary.Any(c => AlertDeliveryCheck.DeliversWhileClosed(c.ChannelType)),
@@ -380,6 +386,51 @@ public class AlertSetupService(
             .GroupBy(r => r.StarterKind!.Value)
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.CreatedAt).First());
+    }
+
+    /// <summary>
+    /// The alarm settings of the tenant's newest completed migration that read any. Only the run
+    /// reads the source, so a setup page never waits on the site it came from.
+    /// </summary>
+    private static async Task<NightscoutAlarmSettings?> MigratedAlarmSettingsAsync(NocturneDbContext db, CancellationToken ct)
+    {
+        var json = await db.MigrationRuns.AsNoTracking()
+            .Where(r => r.TenantId == db.TenantId
+                        && r.State == nameof(MigrationJobState.Completed)
+                        && r.SourceAlarmSettings != null)
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.Id)
+            .Select(r => r.SourceAlarmSettings)
+            .FirstOrDefaultAsync(ct);
+        return json is null ? null : NightscoutAlarmSettings.FromJson(json);
+    }
+
+    /// <param name="Mgdl">The threshold; 0 for a kind with none.</param>
+    /// <param name="FromNightscout">Whether the threshold or the switch was read from the settings.</param>
+    internal record StartingPoint(decimal Mgdl, bool IsEnabled, bool FromNightscout);
+
+    /// <summary>
+    /// What each starter rule shows before it is saved: the settings' threshold and switch when it
+    /// states them, else the rule's default. A threshold outside what a rule accepts is not used.
+    /// </summary>
+    internal static IReadOnlyDictionary<StarterAlertKind, StartingPoint> StartingPoints(NightscoutAlarmSettings? settings)
+    {
+        StartingPoint Of(StarterAlertKind kind, decimal? threshold, bool? enabled)
+        {
+            var inRange = threshold is >= MinThresholdMgdl and <= MaxThresholdMgdl;
+            return new StartingPoint(
+                inRange ? threshold!.Value : Starters[kind].DefaultMgdl,
+                enabled ?? true,
+                inRange || enabled is not null);
+        }
+
+        return new Dictionary<StarterAlertKind, StartingPoint>
+        {
+            [StarterAlertKind.UrgentLow] = Of(StarterAlertKind.UrgentLow, settings?.BgLow, settings?.AlarmUrgentLow),
+            [StarterAlertKind.Low] = Of(StarterAlertKind.Low, settings?.BgTargetBottom, settings?.AlarmLow),
+            [StarterAlertKind.High] = Of(StarterAlertKind.High, settings?.BgTargetTop, settings?.AlarmHigh),
+            [StarterAlertKind.NoReadings] = Of(StarterAlertKind.NoReadings, null, settings?.AlarmTimeagoWarn),
+        };
     }
 
     private static async Task<AlertRouting> RoutingAsync(NocturneDbContext db, CancellationToken ct) =>

@@ -36,14 +36,13 @@ vi.mock("#lib/server/patient-timezone.js", () => ({
 
 vi.mock("./glucose-pagination", () => ({ fetchAllGlucose: async () => [] }));
 
-const { getReportsData, getReportsAnalysis } = await import("./reports.remote");
+const { getReportsAnalysis } = await import("./reports.remote");
 const { getIdpData } = await import("./idp.remote");
 
 const range = { from: "2026-03-01", to: "2026-03-14" };
 
 describe("range analytics time zone reason", () => {
   it.each([
-    ["getReportsData", () => getReportsData(range)],
     ["getReportsAnalysis", () => getReportsAnalysis(range)],
     ["getIdpData", () => getIdpData(range)],
   ])("%s forwards the reason the API carries", async (_name, call) => {

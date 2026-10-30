@@ -10,15 +10,14 @@ using Nocturne.API.Services.Alerts;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.API.Extensions;
 using Nocturne.API.Helpers;
-using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Legacy;
 using Nocturne.API.Services.V4;
-using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Extensions;
 using Nocturne.Core.Contracts.Entries;
+using Nocturne.API.Services.Entries;
 
 namespace Nocturne.API.Controllers.V1;
 

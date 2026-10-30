@@ -15,6 +15,7 @@ using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Configuration;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
+using Nocturne.Core.Contracts.Entries;
 
 namespace Nocturne.API.Services.BackgroundServices;
 

@@ -11,8 +11,8 @@ namespace Nocturne.Core.Contracts.Treatments;
 /// </summary>
 /// <remarks>
 /// A treatment is written as several records, each in its own operation, so one that fails part way
-/// may have left some of them stored. Those are not in <see cref="Written"/>; reads see them once
-/// the cache is invalidated, and a resend upserts onto them.
+/// may have left some of them stored. Those are not in <see cref="Written"/>; reads see them, and a
+/// resend upserts onto them.
 /// </remarks>
 public sealed class TreatmentBatchFailedException : Exception
 {

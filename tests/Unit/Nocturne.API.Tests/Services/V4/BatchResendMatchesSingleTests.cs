@@ -210,7 +210,7 @@ public class BatchResendMatchesSingleTests : IDisposable
         _context.DeviceStatusExtras.IgnoreQueryFilters().Where(e => e.DeletedAt == null)
             .Select(e => (Guid?)e.CorrelationId).Should().Equal(storedCorrelationId);
 
-        await decomposer.DeleteByLegacyIdAsync(legacyId, WriteOrigin.Live);
+        await decomposer.DeleteStoredAsync(legacyId, WriteOrigin.Live);
 
         _context.DeviceStatusExtras.IgnoreQueryFilters().Where(e => e.DeletedAt == null)
             .Should().BeEmpty("deleting the device status must reach its extras row");
@@ -241,7 +241,7 @@ public class BatchResendMatchesSingleTests : IDisposable
         };
 
         await decomposer.DecomposeAsync(Status(), source: null, WriteOrigin.Live);
-        await decomposer.DeleteByLegacyIdAsync(legacyId, WriteOrigin.Live);
+        await decomposer.DeleteStoredAsync(legacyId, WriteOrigin.Live);
 
         var result = await decomposer.DecomposeAsync(Status(), source: null, WriteOrigin.Live);
 

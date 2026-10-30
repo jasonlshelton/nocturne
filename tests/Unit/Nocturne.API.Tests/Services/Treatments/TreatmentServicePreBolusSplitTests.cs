@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Audit;
@@ -105,12 +104,9 @@ public class TreatmentServicePreBolusSplitTests : IDisposable
             _context.AsFactory(),
             NullLogger<V4ToLegacyProjectionService>.Instance);
 
-        var pipeline = new DecompositionPipeline(
-            new ServiceCollection().AddSingleton<IDecomposer<Treatment>>(decomposer).BuildServiceProvider(),
-            NullLogger<DecompositionPipeline>.Instance);
 
         var store = new TreatmentReadService(
-            projection, decomposer, pipeline,
+            projection, decomposer,
             tempBasalRepo, bolusRepo, carbRepo, bgCheckRepo, noteRepo, deviceEventRepo, bolusCalcRepo,
             Mock.Of<IProfileActivationRepository>(),
             Mock.Of<IStateSpanService>(),

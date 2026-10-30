@@ -4,7 +4,6 @@ using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Treatments;
-using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
@@ -15,6 +14,7 @@ using Nocturne.Infrastructure.Data.Services;
 
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Treatments;
+using Nocturne.Core.Contracts.Entries;
 
 namespace Nocturne.API.Services.Analytics;
 

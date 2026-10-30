@@ -1,4 +1,5 @@
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.API.Tests.TestDoubles;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,6 +46,7 @@ public class TreatmentDecomposerReclassificationTests : IDisposable
     };
     private readonly IDeduplicationService _dedup = Mock.Of<IDeduplicationService>();
     private readonly Mock<IStateSpanService> _stateSpans = new();
+    private readonly RecordingLegacyReads _legacyReads = new();
 
     public TreatmentDecomposerReclassificationTests()
     {
@@ -122,7 +124,8 @@ public class TreatmentDecomposerReclassificationTests : IDisposable
             Mock.Of<IPatientInsulinRepository>(),
             TempBasalTestDeps.Unscheduled(),
             _audit,
-            NullLogger<TreatmentDecomposer>.Instance);
+            NullLogger<TreatmentDecomposer>.Instance,
+            legacyReads: _legacyReads);
     }
 
     private Task DecomposeAsync(Treatment treatment, bool batch) => batch
@@ -182,6 +185,30 @@ public class TreatmentDecomposerReclassificationTests : IDisposable
         var activation = await _context.ProfileActivations.AsNoTracking().SingleAsync(a => a.LegacyId == "aaps-1");
         activation.Phase.Should().Be(nameof(Nocturne.Core.Models.V4.ProfileActivationPhase.Effective));
         activation.DeletedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_drop_that_committed_is_reported_when_a_later_span_drop_fails()
+    {
+        await DecomposeAsync(PlainNote(), batch: false);
+        StoreSpan(new StateSpan
+        {
+            OriginalId = "aaps-1",
+            Category = StateSpanCategory.Override,
+            State = "Custom",
+            StartTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(At).UtcDateTime,
+        });
+        _stateSpans
+            .Setup(s => s.DeleteStateSpanAsync("aaps-1", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("span store down"));
+        _legacyReads.Models.Clear();
+
+        var reupload = () => DecomposeAsync(
+            new Treatment { Id = "aaps-1", EventType = "Correction Bolus", Mills = At, Insulin = 1 }, batch: false);
+
+        await reupload.Should().ThrowAsync<InvalidOperationException>();
+        (await _context.Notes.CountAsync()).Should().Be(0, "the note's drop committed before the span drop failed");
+        _legacyReads.Models.Should().Contain(typeof(Nocturne.Core.Models.V4.Note));
     }
 
     [Fact]

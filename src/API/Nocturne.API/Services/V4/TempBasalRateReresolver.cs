@@ -118,11 +118,7 @@ internal sealed class TempBasalRateReresolver(
                 changed += await ReresolveAsync(window, rates, tempBasals, ct);
 
             if (changed > 0)
-            {
-                var cache = services.GetRequiredService<ITenantCache>();
-                await cache.RemoveFamilyAsync(TenantCacheFamily.Treatments, ct);
-                await cache.RemoveFamilyAsync(TenantCacheFamily.Statistics, ct);
-            }
+                await services.GetRequiredService<ITenantCache>().RemoveFamilyAsync(TenantCacheFamily.Statistics, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Nocturne.API.Extensions;
-using Nocturne.API.Services.Devices;
+using Nocturne.Core.Contracts.DeviceStatuses;
 using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Realtime;
-using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Queries;
+using Nocturne.Core.Contracts.Entries;
 
 namespace Nocturne.API.Hubs;
 
@@ -178,9 +178,9 @@ public class DataHub : TenantAwareHub
             var serviceProvider = Context.GetHttpContext()?.RequestServices;
             var entryService = serviceProvider?.GetService<IEntryService>();
             var treatmentService = serviceProvider?.GetService<ITreatmentService>();
-            var projectionService = serviceProvider?.GetService<DeviceStatusProjectionService>();
+            var deviceStatusService = serviceProvider?.GetService<IDeviceStatusService>();
 
-            if (entryService == null || treatmentService == null || projectionService == null)
+            if (entryService == null || treatmentService == null || deviceStatusService == null)
             {
                 _logger.LogWarning("Required services not available for retro data loading");
                 await Clients.Caller.SendAsync(
@@ -219,11 +219,11 @@ public class DataHub : TenantAwareHub
             IEnumerable<Core.Models.DeviceStatus> deviceStatuses = [];
             if (authorization.Satisfies(Scope.DevicesRead))
             {
-                deviceStatuses = await projectionService.GetMatchingAsync(
+                deviceStatuses = await deviceStatusService.GetDeviceStatusesAsync(
                     FindQuery.Empty,
                     count: 1000,
                     skip: 0,
-                    ct: default
+                    cancellationToken: default
                 );
             }
 

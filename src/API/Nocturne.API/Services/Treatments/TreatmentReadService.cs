@@ -2,7 +2,6 @@ using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Helpers;
 using Nocturne.API.Services.Platform;
-using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Treatments;
@@ -20,7 +19,7 @@ namespace Nocturne.API.Services.Treatments;
 /// V4-only <see cref="ITreatmentStore"/> that reads all treatments from V4 repositories
 /// via the projection service and routes writes through the decomposer.
 /// </summary>
-public class TreatmentReadService : ITreatmentStore
+internal class TreatmentReadService : ITreatmentStore
 {
     private readonly IV4ToLegacyProjectionService _projection;
     private readonly ITreatmentDecomposer _decomposer;
@@ -30,7 +29,6 @@ public class TreatmentReadService : ITreatmentStore
     public TreatmentReadService(
         IV4ToLegacyProjectionService projection,
         ITreatmentDecomposer decomposer,
-        IDecompositionPipeline pipeline,
         ITempBasalRepository tempBasalRepo,
         IBolusRepository bolusRepo,
         ICarbIntakeRepository carbIntakeRepo,
@@ -50,7 +48,6 @@ public class TreatmentReadService : ITreatmentStore
                 activationRepo),
             projection,
             decomposer,
-            pipeline,
             stateSpans);
         _logger = logger;
     }
@@ -191,7 +188,10 @@ public class TreatmentReadService : ITreatmentStore
 
     /// <inheritdoc />
     public async Task<BulkWrite<Treatment>> CreateAsync(
-        IReadOnlyList<Treatment> treatments, CancellationToken ct = default, ICollection<Treatment>? stored = null)
+        IReadOnlyList<Treatment> treatments,
+        WriteOrigin origin,
+        CancellationToken ct = default,
+        ICollection<Treatment>? stored = null)
     {
         var results = new List<Treatment>();
         var rejected = new List<BulkWriteRejection<Treatment>>();
@@ -204,11 +204,12 @@ public class TreatmentReadService : ITreatmentStore
             try
             {
                 await _store.KeyToServedAsync(treatment, ct);
-                result = await _decomposer.DecomposeAsync(treatment, WriteOrigin.Live, ct);
+                result = await _decomposer.DecomposeAsync(treatment, origin, ct);
                 skippedDeleted += result.SkippedDeleted;
                 var created = await _store.ToCreatedAsync(treatment, result, ct);
                 results.Add(created);
-                stored?.Add(created);
+                if (Wrote(result))
+                    stored?.Add(created);
             }
             catch (DbUpdateException ex) when (result is null && StoreRefusal.ReasonFor(ex) is { } reason)
             {
@@ -229,7 +230,7 @@ public class TreatmentReadService : ITreatmentStore
                 _logger.LogError(ex, "Failed to store treatment {Id}; ending the batch", treatment.Id);
                 _logger.LogSkippedDeleted(nameof(Treatment), skippedDeleted);
                 var written = result is null ? results : [.. results, treatment];
-                if (result is not null)
+                if (result is not null && Wrote(result))
                     stored?.Add(treatment);
                 return new TreatmentBatchFailedException(
                     new BulkWrite<Treatment>(written, skippedDeleted) { Rejected = rejected },
@@ -240,6 +241,9 @@ public class TreatmentReadService : ITreatmentStore
         _logger.LogSkippedDeleted(nameof(Treatment), skippedDeleted);
         return new BulkWrite<Treatment>(results, skippedDeleted) { Rejected = rejected };
     }
+
+    private static bool Wrote(DecompositionResult result) =>
+        result.CreatedRecords.Count > 0 || result.UpdatedRecords.Count > 0;
 
     /// <summary>
     /// A treatment whose write fails the same way on every attempt is answered as refused and the

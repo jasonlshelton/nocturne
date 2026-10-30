@@ -6,11 +6,12 @@ using Nocturne.Core.Contracts.Entries;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Contracts.Profiles;
-using Nocturne.API.Services.Devices;
+using Nocturne.Core.Contracts.DeviceStatuses;
 using Nocturne.API.Services.Platform;
 using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Queries;
 
 namespace Nocturne.API.Services.Legacy;
 
@@ -28,10 +29,10 @@ public class DDataService : IDDataService
     private const long FrameTreatmentsWindowMills = 5 * DayMills / 2;
     private const long LiveFrameWindowMills = 5L * 60 * 1000;
 
-    private readonly IEntryStore _store;
+    private readonly IEntryService _entries;
     private readonly ITreatmentService _treatments;
     private readonly IProfileProjectionService _profiles;
-    private readonly DeviceStatusProjectionService _projectionService;
+    private readonly IDeviceStatusService _deviceStatuses;
     private readonly IFoodRepository _food;
     private readonly IActivityService _activities;
     private readonly IStoreSizeReader _storeSize;
@@ -60,10 +61,10 @@ public class DDataService : IDDataService
     };
 
     public DDataService(
-        IEntryStore store,
+        IEntryService entries,
         ITreatmentService treatments,
         IProfileProjectionService profiles,
-        DeviceStatusProjectionService projectionService,
+        IDeviceStatusService deviceStatuses,
         IFoodRepository food,
         IActivityService activities,
         IStoreSizeReader storeSize,
@@ -71,10 +72,10 @@ public class DDataService : IDDataService
         ILogger<DDataService> logger)
     {
         _time = timeProvider;
-        _store = store;
+        _entries = entries;
         _treatments = treatments;
         _profiles = profiles;
-        _projectionService = projectionService;
+        _deviceStatuses = deviceStatuses;
         _food = food;
         _activities = activities;
         _storeSize = storeSize;
@@ -648,7 +649,7 @@ public class DDataService : IDDataService
         try
         {
             // Load SGV entries with type filter - reduced count to prevent memory issues
-            var sgvs = await _store.QueryAsync(
+            var sgvs = await _entries.QueryEntriesAsync(
                 FrameEntryQuery(ddata, "sgv", timestamp),
                 cancellationToken);
             ddata.Sgvs = sgvs.ToList();
@@ -727,7 +728,7 @@ public class DDataService : IDDataService
         try
         {
             // Load MBG entries with type filter - reduced count to prevent memory issues
-            var mbgs = await _store.QueryAsync(
+            var mbgs = await _entries.QueryEntriesAsync(
                 FrameEntryQuery(ddata, "mbg", timestamp),
                 cancellationToken);
             ddata.Mbgs = mbgs.ToList();
@@ -748,7 +749,7 @@ public class DDataService : IDDataService
         try
         {
             // Load calibration entries with type filter - reduced count to prevent memory issues
-            var cals = await _store.QueryAsync(
+            var cals = await _entries.QueryEntriesAsync(
                 FrameEntryQuery(ddata, "cal", timestamp),
                 cancellationToken);
             ddata.Cals = cals.ToList();
@@ -794,11 +795,11 @@ public class DDataService : IDDataService
                     ["$lte"] = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).UtcDateTime.ToString("o"),
                 },
             };
-            var deviceStatuses = await _projectionService.GetMatchingAsync(
-                DeviceStatusProjectionService.ParseFind(JsonSerializer.Serialize(window)),
+            var deviceStatuses = await _deviceStatuses.GetDeviceStatusesAsync(
+                FindQuery.ParseDeviceStatus(JsonSerializer.Serialize(window)),
                 count: 1000,
                 skip: 0,
-                ct: cancellationToken
+                cancellationToken: cancellationToken
             );
             ddata.DeviceStatus = deviceStatuses.ToList();
         }

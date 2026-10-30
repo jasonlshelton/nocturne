@@ -16,9 +16,7 @@ namespace Nocturne.API.Services.V4;
 /// with per-record success/failure counts so callers can track partial failures.
 /// </remarks>
 /// <seealso cref="IDecompositionPipeline"/>
-/// <seealso cref="EntryDecomposer"/>
-/// <seealso cref="TreatmentDecomposer"/>
-/// <seealso cref="DeviceStatusDecomposer"/>
+/// <seealso cref="ActivityDecomposer"/>
 /// <seealso cref="ProfileDecomposer"/>
 public class DecompositionPipeline : IDecompositionPipeline
 {

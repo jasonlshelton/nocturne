@@ -93,41 +93,38 @@ export const getBolusesAndCarbs = query(
 );
 
 /**
- * Reports data for the overview, executive summary and AGP pages: how many sensor readings the
- * range holds, plus server-computed extended analytics and averaged stats.
+ * How many sensor readings a date range holds. The pages show the count, not the readings: one
+ * row and the total rather than every reading of the window.
  */
-export const getReportsData = query(
+export const getReadingCount = query(
   DateRangeSchema.optional(),
   async (input) => {
-    const { locals } = getRequestEvent();
-    const { apiClient } = locals;
+    const { apiClient } = getRequestEvent().locals;
     const { startDate, endDate } = await resolveReportRange(input);
-
-    // The pages show how many readings the window holds, not the readings: one row and the
-    // total rather than every reading of the window.
-    const [readings, { analysis, averagedStats, personalRange, timeZoneUnavailableReason }] = await Promise.all([
-      apiClient.sensorGlucose.getAll(startDate, endDate, 1, 0, undefined, undefined, undefined, true),
-      apiClient.statistics.getRangeAnalytics(startDate, endDate),
-    ]);
+    const readings = await apiClient.sensorGlucose.getAll(
+      startDate,
+      endDate,
+      1,
+      0,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
 
     return {
       readingCount: readings.pagination?.total ?? 0,
-      analysis,
-      averagedStats,
-      personalRange,
-      timeZoneUnavailableReason,
       dateRange: {
         from: startDate,
         to: endDate,
-        lastUpdated: new Date().toISOString(),
       },
     };
   }
 );
 
 /**
- * Server-side extended analytics and averaged stats for a date range. Used by report
- * pages that render only computed metrics (comparison, glucose distribution).
+ * Server-side extended analytics and averaged stats for a date range: the overview, executive
+ * summary, AGP, comparison and glucose distribution reports render these computed metrics.
  */
 export const getReportsAnalysis = query(
   DateRangeSchema.optional(),
@@ -155,6 +152,7 @@ export const getReportsAnalysis = query(
       dateRange: {
         from: startDate,
         to: endDate,
+        lastUpdated: new Date().toISOString(),
       },
     };
   }

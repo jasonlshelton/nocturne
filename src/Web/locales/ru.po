@@ -857,6 +857,7 @@ msgstr ""
 #: src/routes/(authenticated)/food/Composer.svelte
 #: src/routes/(authenticated)/trackers/+page.svelte
 #: src/routes/(unauthenticated)/setup/hub/HubBasics.svelte
+#: src/routes/(unauthenticated)/setup/hub/HubRecipientQuestion.svelte
 msgid "Save"
 msgstr ""
 
@@ -1376,10 +1377,8 @@ msgstr ""
 msgid "Time"
 msgstr ""
 
-#: src/lib/components/audit/AuditMutationsTable.svelte
-#: src/lib/components/audit/AuditReadsTable.svelte
-msgid "Subject"
-msgstr ""
+#~ msgid "Subject"
+#~ msgstr ""
 
 #: src/lib/components/audit/AuditMutationsTable.svelte
 msgid "Entity ID"
@@ -7769,7 +7768,6 @@ msgstr ""
 #: src/routes/(authenticated)/+layout.svelte
 #: src/routes/(authenticated)/calendar/+page.svelte
 #: src/routes/(authenticated)/compatibility/test/+page.svelte
-#: src/routes/(authenticated)/reports/+page.svelte
 #: src/routes/(authenticated)/settings/profile/+page.svelte
 msgid "An error occurred"
 msgstr ""
@@ -9196,10 +9194,12 @@ msgstr ""
 #. 0: basic.count
 #. 0: formatNumber(totalReadings)
 #. 0: formatNumber(readingCount)
+#. 0: formatNumber(readingCount)
 #. 0: readings.length
 #. 0: formatNumber(readingCount)
 #: src/lib/components/dashboard/widgets/DailySummaryWidget.svelte
 #: src/lib/components/dashboard/widgets/TirChartWidget.svelte
+#: src/routes/(authenticated)/reports/+page.svelte
 #: src/routes/(authenticated)/reports/agp/+page.svelte
 #: src/routes/(authenticated)/reports/battery/+page.svelte
 #: src/routes/(authenticated)/reports/idp/+page.svelte
@@ -22404,10 +22404,8 @@ msgstr ""
 #~ msgid "{0} meals · {1}g/day · {2}g avg/meal"
 #~ msgstr ""
 
-#. 0: formatNumber(readingCount)
-#: src/routes/(authenticated)/reports/+page.svelte
-msgid "· {0} readings"
-msgstr ""
+#~ msgid "· {0} readings"
+#~ msgstr ""
 
 #: src/routes/(authenticated)/reports/+page.svelte
 msgid "Consensus target: at least 70% of time in range."
@@ -28853,9 +28851,8 @@ msgstr ""
 msgid "Could not load the complete report. Try again before printing."
 msgstr ""
 
-#: src/routes/(authenticated)/reports/+page.svelte
-msgid "Could not load reports"
-msgstr ""
+#~ msgid "Could not load reports"
+#~ msgstr ""
 
 #: src/routes/(authenticated)/reports/+page.svelte
 msgid "There are not enough glucose readings between these dates to summarize. Choose a longer date range."
@@ -30783,6 +30780,7 @@ msgid "Connect Nightscout"
 msgstr ""
 
 #: src/routes/(unauthenticated)/setup/SetupWizard.svelte
+#: src/routes/(unauthenticated)/setup/hub/HubRecipientQuestion.svelte
 msgid "We could not save your answer."
 msgstr ""
 
@@ -31064,6 +31062,7 @@ msgstr ""
 msgid "Someone you are setting it up for"
 msgstr ""
 
+#: src/routes/(unauthenticated)/setup/hub/HubBasics.svelte
 #: src/routes/(unauthenticated)/setup/hub/HubBasics.svelte
 msgid "Not answered yet"
 msgstr ""
@@ -32566,9 +32565,8 @@ msgstr ""
 msgid "Meal attribution"
 msgstr ""
 
-#: src/routes/(authenticated)/reports/+page.svelte
-msgid "Error loading reports"
-msgstr ""
+#~ msgid "Error loading reports"
+#~ msgstr ""
 
 #: src/routes/(authenticated)/reports/+page.svelte
 msgid "<0/> Executive summary"
@@ -38348,4 +38346,99 @@ msgstr ""
 
 #: src/routes/(authenticated)/StickyBarProbe.test.svelte
 msgid "bar"
+msgstr ""
+
+#: src/lib/components/audit/AuditMutationsTable.svelte
+msgid "Changed by"
+msgstr ""
+
+#: src/lib/components/audit/AuditReadsTable.svelte
+msgid "Read by"
+msgstr ""
+
+#. 0: voice.name
+#: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
+msgid "These are the thresholds from {0}'s Nightscout site. Check that they are still right."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
+msgid "These are the thresholds from the Nightscout site. Check that they are still right."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
+msgid "These are the thresholds from your Nightscout site. Check that they are still right."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "Loading the range analysis"
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "Could not load the reading count."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "Loading the reading count"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "We could not change your role."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "Step down to a supporter role"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "They own Nocturne now. You can stay as a member who helps, with this access:"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "Caretaker"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "Step down"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "Step down?"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/HubStepDown.svelte
+msgid "You will not own Nocturne after this. Only an owner can give you more access again."
+msgstr ""
+
+#. 0: handover?.helperName
+#: src/routes/(unauthenticated)/setup/hub/SetupHub.svelte
+msgid "{0} set up <0>Nocturne</0> for you."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/hub/SetupHub.svelte
+msgid "A few things only you can decide."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/+page.svelte
+msgid "Hand it over"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/+page.svelte
+msgid "Make a link for the person who will own Nocturne. When they accept the link, Nocturne is theirs. Then they can choose who it is for and where alerts go."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/+page.svelte
+msgid "They can do everything you can do, including remove you."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/+page.svelte
+msgid "Waiting for them to accept."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
+msgid "Owner"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
+msgid "They own Nocturne, the same as you."
 msgstr ""

@@ -12,7 +12,7 @@ namespace Nocturne.Infrastructure.Data.Entities;
 /// tenant is resolved must still be recordable, and a tenant query filter plus RLS policy would
 /// make those rows unwritable and unreadable exactly when they matter. <see cref="TenantId"/> is a
 /// plain nullable column with no foreign key for the same reason — the trail outlives the tenant.
-/// <see cref="SubjectId"/> and <see cref="ActorSubjectId"/> carry no foreign key either: the trail
+/// <see cref="TargetSubjectId"/> and <see cref="ActorSubjectId"/> carry no foreign key either: the trail
 /// also outlives the subject, so the rows an insider incident needs survive the account's deletion
 /// as a pseudonymous record once the subject's personal data is cleared from them.
 /// </remarks>
@@ -35,15 +35,14 @@ public class AuthAuditLogEntity : IEntityCreated
     public string EventType { get; set; } = string.Empty;
 
     /// <summary>
-    /// The subject involved in this event (if applicable)
+    /// The subject the event happened to, if any. See <see cref="Nocturne.Core.Contracts.Auth.IAuthAuditService"/>.
     /// </summary>
-    [Column("subject_id")]
-    public Guid? SubjectId { get; set; }
+    [Column("target_subject_id")]
+    public Guid? TargetSubjectId { get; set; }
 
     /// <summary>
-    /// The subject who performed this event, which on an administrative action is not
-    /// <see cref="SubjectId"/>. Mirrors <see cref="SubjectId"/> when a subject acted for
-    /// themselves, so "everything this subject did" is one indexed predicate.
+    /// The caller who performed the event. Mirrors <see cref="TargetSubjectId"/> when a subject
+    /// acted for themselves, so "everything this subject did" is one indexed predicate.
     /// </summary>
     [Column("actor_subject_id")]
     public Guid? ActorSubjectId { get; set; }

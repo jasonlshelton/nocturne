@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nocturne.API.Services.ProfileActivations;
+using Nocturne.API.Services.Treatments;
 using Nocturne.Connectors.Core.Constants;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Devices;
@@ -45,9 +46,8 @@ namespace Nocturne.API.Services.V4;
 /// Supports idempotent create-or-update via <c>LegacyId</c> matching.
 /// </summary>
 /// <seealso cref="ITreatmentDecomposer"/>
-/// <seealso cref="IDecomposer{T}"/>
 /// <seealso cref="IStateSpanService"/>
-public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomposer<Treatment>
+internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
 {
     private readonly INocturneDbContextFactory _contexts;
     private readonly IBolusRepository _bolusRepository;
@@ -68,6 +68,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     private readonly IPatientInsulinRepository _insulinRepo;
     private readonly RelativeTempBasalRates _relativeTempBasalRates;
     private readonly IAuditContext _auditContext;
+    private readonly ILegacyReadCacheInvalidation? _legacyReads;
 
     /// <summary>
     /// Event types that indicate a temp basal treatment (case-insensitive comparison)
@@ -99,9 +100,11 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         RelativeTempBasalRates relativeTempBasalRates,
         IAuditContext auditContext,
         ILogger<TreatmentDecomposer> logger,
-        IDeviceEventReactor? deviceEventReactor = null)
+        IDeviceEventReactor? deviceEventReactor = null,
+        ILegacyReadCacheInvalidation? legacyReads = null)
         : base(logger)
     {
+        _legacyReads = legacyReads;
         _deviceEventReactor = deviceEventReactor;
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _bolusRepository = bolusRepository;
@@ -1449,26 +1452,36 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
 
         List<Guid> deviceEventIds = [];
         List<Guid> activationIds = [];
-        using (SystemAttributedBatchWrites(_auditContext))
+        // Each table's drop commits on its own, so what committed is reported even when a later drop fails.
+        List<Type> committed = [];
+        try
         {
-            foreach (var table in DecomposedTables)
+            using (SystemAttributedBatchWrites(_auditContext))
             {
-                if (!tableDrops.TryGetValue(table.Kind, out var dropIds))
-                    continue;
+                foreach (var table in DecomposedTables)
+                {
+                    if (!tableDrops.TryGetValue(table.Kind, out var dropIds))
+                        continue;
 
-                var dropped = await table.SoftDeleteAsync(
-                    db, [.. dropIds], source: null, "treatment_reclassified", DuplicateDelete.EveryCopy, ct);
-                if (table.Kind == DecomposedKind.DeviceEvent)
-                    deviceEventIds = dropped.Entities;
-                if (table.Kind == DecomposedKind.ProfileActivation)
-                    activationIds = dropped.Entities;
-                Logger.LogDebug(
-                    "Removed {Count} {RecordType} rows a reclassified treatment no longer writes",
-                    dropped.Count, table.Kind);
+                    var dropped = await table.SoftDeleteAsync(
+                        db, [.. dropIds], source: null, "treatment_reclassified", DuplicateDelete.EveryCopy, ct);
+                    committed.Add(table.Model);
+                    if (table.Kind == DecomposedKind.DeviceEvent)
+                        deviceEventIds = dropped.Entities;
+                    if (table.Kind == DecomposedKind.ProfileActivation)
+                        activationIds = dropped.Entities;
+                    Logger.LogDebug(
+                        "Removed {Count} {RecordType} rows a reclassified treatment no longer writes",
+                        dropped.Count, table.Kind);
+                }
+
+                foreach (var id in spanDrops)
+                    await _stateSpanService.DeleteStateSpanAsync(id, ct);
             }
-
-            foreach (var id in spanDrops)
-                await _stateSpanService.DeleteStateSpanAsync(id, ct);
+        }
+        finally
+        {
+            await ReportWrittenAsync(committed);
         }
 
         if (tableDrops.ContainsKey(DecomposedKind.ProfileActivation))
@@ -1972,6 +1985,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         if (deleted > 0)
         {
             Logger.LogDebug("Soft-deleted {Count} v4 records for legacy treatment {LegacyId}", deleted, legacyId);
+            await ReportWrittenAsync(DecomposedTables.Select(t => t.Model));
             await _profileActivationWriter.ResettleAfterRemovalAsync(activationIds, ct);
         }
 
@@ -2021,6 +2035,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             return (count, deviceEvents, activations);
         });
 
+        await ReportWrittenAsync([.. DecomposedTables.Select(t => t.Model), typeof(StateSpan)]);
         await _profileActivationWriter.ResettleAfterRemovalAsync(activationIds, ct);
         await ReactToDeletedDeviceEventsAsync(db, deviceEventIds, ct);
         return deleted;
@@ -2166,6 +2181,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             return moved;
         });
 
+        await ReportWrittenAsync([.. DecomposedTables.Select(t => t.Model), typeof(StateSpan)]);
         await _profileActivationWriter.InvalidateAsync(ct);
         return rekeyed;
     }
@@ -2393,6 +2409,7 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
             return deleted;
         }, ct: ct);
 
+        await ReportWrittenAsync([.. DecomposedTables.Select(t => t.Model), typeof(StateSpan)]);
         await _profileActivationWriter.ResettleAfterRemovalAsync(activationIds, ct);
         Logger.LogInformation("BulkDelete: removed {Total} v4 treatment records from={From} to={To}", total, from, to);
         return total;
@@ -2406,15 +2423,22 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     /// </summary>
     private IDecomposedTable[] DecomposedTables => _decomposedTables ??=
     [
-        Table(DecomposedKind.Bolus, db => db.Boluses, ByTimeRange, StoredAt),
-        Table(DecomposedKind.TempBasal, db => db.TempBasals, ByTimeRange, StoredAt),
-        Table(DecomposedKind.CarbIntake, db => db.CarbIntakes, ByTimeRange, StoredAt),
-        Table(DecomposedKind.BGCheck, db => db.BGChecks, ByTimeRange, StoredAt),
-        Table(DecomposedKind.Note, db => db.Notes, ByTimeRange, StoredAt),
-        Table(DecomposedKind.DeviceEvent, db => db.DeviceEvents, ByTimeRange, StoredAt),
-        Table(DecomposedKind.BolusCalculation, db => db.BolusCalculations, ByTimeRange, StoredAt),
-        Table(DecomposedKind.ProfileActivation, db => db.ProfileActivations, ServedInRange, StoredAt),
+        Table<V4Models.Bolus, BolusEntity>(DecomposedKind.Bolus, db => db.Boluses, ByTimeRange, StoredAt),
+        Table<V4Models.TempBasal, TempBasalEntity>(DecomposedKind.TempBasal, db => db.TempBasals, ByTimeRange, StoredAt),
+        Table<V4Models.CarbIntake, CarbIntakeEntity>(DecomposedKind.CarbIntake, db => db.CarbIntakes, ByTimeRange, StoredAt),
+        Table<V4Models.BGCheck, BGCheckEntity>(DecomposedKind.BGCheck, db => db.BGChecks, ByTimeRange, StoredAt),
+        Table<V4Models.Note, NoteEntity>(DecomposedKind.Note, db => db.Notes, ByTimeRange, StoredAt),
+        Table<V4Models.DeviceEvent, DeviceEventEntity>(DecomposedKind.DeviceEvent, db => db.DeviceEvents, ByTimeRange, StoredAt),
+        Table<V4Models.BolusCalculation, BolusCalculationEntity>(DecomposedKind.BolusCalculation, db => db.BolusCalculations, ByTimeRange, StoredAt),
+        Table<V4Models.ProfileActivation, ProfileActivationEntity>(DecomposedKind.ProfileActivation, db => db.ProfileActivations, ServedInRange, StoredAt),
     ];
+
+    /// <summary>
+    /// Tells <see cref="ILegacyReadCacheInvalidation"/> what a write here made around the
+    /// repositories, which report their own writes.
+    /// </summary>
+    private Task ReportWrittenAsync(IEnumerable<Type> models) =>
+        _legacyReads?.WrittenAsync([.. models]) ?? Task.CompletedTask;
 
     private IDecomposedTable[]? _decomposedTables;
 
@@ -2431,13 +2455,14 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
         ProfileActivation,
     }
 
-    private DecomposedTable<T> Table<T>(
+    private DecomposedTable<T> Table<TModel, T>(
         DecomposedKind kind,
         Func<NocturneDbContext, DbSet<T>> rows,
         Func<IQueryable<T>, DateTime?, DateTime?, IQueryable<T>> inRange,
         Func<IQueryable<T>, IQueryable<StoredRow>> storedAt)
+        where TModel : V4Models.IV4Record
         where T : class, IV4Entity, ISourcedEntity, IAuditable, IUpstreamFingerprinted
-        => new(_auditContext, kind, rows, inRange, storedAt);
+        => new(_auditContext, kind, typeof(TModel), rows, inRange, storedAt);
 
     private static IQueryable<StoredRow> StoredAt<T>(IQueryable<T> rows) where T : IV4TimeSeriesEntity
         => rows.Select(e => new StoredRow(e.LegacyId!, e.Timestamp));
@@ -2447,6 +2472,8 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     private interface IDecomposedTable
     {
         DecomposedKind Kind { get; }
+
+        Type Model { get; }
 
         /// <param name="source">Only this data source's rows, or every source's when null.</param>
         /// <remarks>
@@ -2487,12 +2514,15 @@ public class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer, IDecomp
     private sealed class DecomposedTable<T>(
         IAuditContext auditContext,
         DecomposedKind kind,
+        Type model,
         Func<NocturneDbContext, DbSet<T>> rowsOf,
         Func<IQueryable<T>, DateTime?, DateTime?, IQueryable<T>> inRange,
         Func<IQueryable<T>, IQueryable<StoredRow>> storedAt) : IDecomposedTable
         where T : class, IV4Entity, ISourcedEntity, IAuditable, IUpstreamFingerprinted
     {
         public DecomposedKind Kind => kind;
+
+        public Type Model => model;
 
         public Task<AuditedSoftDeleteResult<Guid>> SoftDeleteAsync(
             NocturneDbContext db, string[] legacyIds, string? source, string scope, DuplicateDelete duplicates, CancellationToken ct)

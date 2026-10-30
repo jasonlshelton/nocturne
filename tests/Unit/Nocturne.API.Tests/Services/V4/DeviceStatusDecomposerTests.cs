@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Devices;
+using Nocturne.API.Services.DeviceStatuses;
 using Nocturne.API.Services.V4;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Core.Clinical.LoopAnalysis;
@@ -532,9 +533,6 @@ public class DeviceStatusDecomposerTests : IDisposable
     }
 
     #endregion
-
-    // Note: DeleteByLegacyIdAsync tests require PostgreSQL (ExecuteDeleteAsync is not
-    // supported by the EF Core in-memory provider) and belong in integration tests.
 
     #region OpenAPS - Suggested Only (No Enacted)
 

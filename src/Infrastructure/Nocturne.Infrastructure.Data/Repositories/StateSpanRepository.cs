@@ -23,6 +23,7 @@ public class StateSpanRepository : IStateSpanRepository
     private readonly IDeduplicationService _deduplicationService;
     private readonly IAuditContext _auditContext;
     private readonly ILogger<StateSpanRepository> _logger;
+    private readonly ILegacyReadCacheInvalidation? _legacyReads;
 
     /// <summary>
     /// Categories where only one span can be active at a time.
@@ -70,18 +71,25 @@ public class StateSpanRepository : IStateSpanRepository
     /// <param name="deduplicationService">Service for deduplicating records</param>
     /// <param name="auditContext">The audit context for tracking mutations</param>
     /// <param name="logger">Logger instance</param>
+    /// <param name="legacyReads">Optional; null clears no legacy read cache.</param>
     public StateSpanRepository(
         INocturneDbContextFactory contexts,
         IDeduplicationService deduplicationService,
         IAuditContext auditContext,
-        ILogger<StateSpanRepository> logger
+        ILogger<StateSpanRepository> logger,
+        ILegacyReadCacheInvalidation? legacyReads = null
     )
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _deduplicationService = deduplicationService;
         _auditContext = auditContext;
         _logger = logger;
+        _legacyReads = legacyReads;
     }
+
+    /// <summary>Tells <see cref="ILegacyReadCacheInvalidation"/> state spans were written, after every committed write.</summary>
+    private Task ReportWrittenAsync() =>
+        _legacyReads?.WrittenAsync([typeof(StateSpan)]) ?? Task.CompletedTask;
 
     /// <summary>
     /// Get state spans with optional filtering
@@ -373,6 +381,7 @@ public class StateSpanRepository : IStateSpanRepository
             }
         }
 
+        await ReportWrittenAsync();
         return written.Select(StateSpanMapper.ToDomainModel).ToList();
     }
 
@@ -591,6 +600,7 @@ public class StateSpanRepository : IStateSpanRepository
 
         StateSpanMapper.UpdateEntity(entity, stateSpan);
         await db.SaveChangesAsync(cancellationToken);
+        await ReportWrittenAsync();
         return StateSpanMapper.ToDomainModel(entity);
     }
 
@@ -622,10 +632,10 @@ public class StateSpanRepository : IStateSpanRepository
         return entity == null ? [] : await SoftDeleteWithCopiesAsync(db, entity, cancellationToken);
     }
 
-    private static async Task<IReadOnlyList<StateSpan>> SoftDeleteWithCopiesAsync(
+    private async Task<IReadOnlyList<StateSpan>> SoftDeleteWithCopiesAsync(
         NocturneDbContext db, StateSpanEntity entity, CancellationToken cancellationToken)
     {
-        return await db.ExecuteInTransactionAsync<IReadOnlyList<StateSpan>>(async token =>
+        var deleted = await db.ExecuteInTransactionAsync<IReadOnlyList<StateSpan>>(async token =>
         {
             var (saved, copies) = await DuplicateGroupPrimaries.SoftDeleteAsync(
                 db, entity, RecordType.StateSpan, token);
@@ -635,6 +645,9 @@ public class StateSpanRepository : IStateSpanRepository
             await db.ClearSupersededByAsync([entity.Id, .. copies.Select(c => c.Id)], token);
             return [StateSpanMapper.ToDomainModel(entity), .. copies.Select(StateSpanMapper.ToDomainModel)];
         }, ct: cancellationToken);
+        if (deleted.Count > 0)
+            await ReportWrittenAsync();
+        return deleted;
     }
 
     /// <inheritdoc />
@@ -669,8 +682,9 @@ public class StateSpanRepository : IStateSpanRepository
         Guid id, WriteOrigin origin, CancellationToken cancellationToken = default)
     {
         await using var db = await _contexts.CreateAsync(cancellationToken);
-        return StateSpanMapper.ToDomainModel(
-            await db.RestoreDeletedAsync<StateSpanEntity>(id, nameof(StateSpan), cancellationToken));
+        var restored = await db.RestoreDeletedAsync<StateSpanEntity>(id, nameof(StateSpan), cancellationToken);
+        await ReportWrittenAsync();
+        return StateSpanMapper.ToDomainModel(restored);
     }
 
     /// <inheritdoc />
@@ -678,8 +692,9 @@ public class StateSpanRepository : IStateSpanRepository
         IEnumerable<Guid> ids, WriteOrigin origin, CancellationToken cancellationToken = default)
     {
         await using var db = await _contexts.CreateAsync(cancellationToken);
-        return (await db.RestoreDeletedAsync<StateSpanEntity>(ids, nameof(StateSpan), cancellationToken))
-            .Map(StateSpanMapper.ToDomainModel);
+        var restored = await db.RestoreDeletedAsync<StateSpanEntity>(ids, nameof(StateSpan), cancellationToken);
+        await ReportWrittenAsync();
+        return restored.Map(StateSpanMapper.ToDomainModel);
     }
 
     /// <summary>
@@ -697,6 +712,8 @@ public class StateSpanRepository : IStateSpanRepository
         var deletedCount = await db.AuditedSoftDeleteAsync(
             db.StateSpans.Where(s => s.Source == source), _auditContext,
             $"data_source={source}", cancellationToken);
+        if (deletedCount > 0)
+            await ReportWrittenAsync();
         return deletedCount;
     }
 
@@ -1000,6 +1017,7 @@ public class StateSpanRepository : IStateSpanRepository
 
         StateSpanMapper.UpdateEntity(entity, stateSpan);
         await db.SaveChangesAsync(cancellationToken);
+        await ReportWrittenAsync();
         return StateSpanMapper.ToDomainModel(entity);
     }
 

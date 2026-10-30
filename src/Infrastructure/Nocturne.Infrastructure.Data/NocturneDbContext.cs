@@ -573,7 +573,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     /// <summary>
     /// Tables a v3 history endpoint pages through <see cref="HistoryPage"/> on <c>sys_updated_at</c>:
-    /// the V4 record tables of the treatment projection's <c>LegacyTreatmentTables.All</c> (its state
+    /// the V4 record tables the legacy treatment projection reads (its state
     /// spans page on <c>ix_state_spans_tenant_category_updated_at</c>), the four tables a device
     /// status is decomposed into, the three glucose types the entry projection reads and the five
     /// profile-decomposition tables.
@@ -1244,8 +1244,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<AuthAuditLogEntity>()
-            .HasIndex(a => a.SubjectId)
-            .HasDatabaseName("ix_auth_audit_log_subject_id");
+            .HasIndex(a => a.TargetSubjectId)
+            .HasDatabaseName("ix_auth_audit_log_target_subject_id");
 
         modelBuilder
             .Entity<AuthAuditLogEntity>()
@@ -1265,8 +1265,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder
             .Entity<AuthAuditLogEntity>()
-            .HasIndex(a => new { a.SubjectId, a.CreatedAt })
-            .HasDatabaseName("ix_auth_audit_log_subject_created")
+            .HasIndex(a => new { a.TargetSubjectId, a.CreatedAt })
+            .HasDatabaseName("ix_auth_audit_log_target_subject_created")
             .IsDescending(false, true);
 
         modelBuilder
@@ -2431,8 +2431,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             entity.HasIndex(e => new { e.TenantId, e.EntityType, e.EntityId })
                 .HasDatabaseName("ix_mutation_audit_log_entity");
 
-            entity.HasIndex(e => new { e.TenantId, e.SubjectId, e.CreatedAt })
-                .HasDatabaseName("ix_mutation_audit_log_subject");
+            entity.HasIndex(e => new { e.TenantId, e.ActorSubjectId, e.CreatedAt })
+                .HasDatabaseName("ix_mutation_audit_log_actor_subject");
 
             entity.HasIndex(e => new { e.TenantId, e.CreatedAt })
                 .HasDatabaseName("ix_mutation_audit_log_created");
@@ -2440,8 +2440,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
         modelBuilder.Entity<ReadAccessLogEntity>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.SubjectId, e.CreatedAt })
-                .HasDatabaseName("ix_read_access_log_subject");
+            entity.HasIndex(e => new { e.TenantId, e.ActorSubjectId, e.CreatedAt })
+                .HasDatabaseName("ix_read_access_log_actor_subject");
 
             entity.HasIndex(e => new { e.TenantId, e.EntityType, e.CreatedAt })
                 .HasDatabaseName("ix_read_access_log_entity_type");

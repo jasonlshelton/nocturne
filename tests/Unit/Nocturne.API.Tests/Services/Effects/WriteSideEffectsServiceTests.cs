@@ -108,10 +108,10 @@ public class WriteSideEffectsServiceTests
     {
         var options = new WriteEffectOptions { DecomposeToV4 = true };
 
-        await _service.BeforeDeleteAsync<Entry>("entry-123", options);
+        await _service.BeforeDeleteAsync<Activity>("activity-123", options);
 
         _mockPipeline.Verify(
-            p => p.DeleteByLegacyIdAsync<Entry>("entry-123", It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()),
+            p => p.DeleteByLegacyIdAsync<Activity>("activity-123", It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()),
             Times.Once
         );
     }

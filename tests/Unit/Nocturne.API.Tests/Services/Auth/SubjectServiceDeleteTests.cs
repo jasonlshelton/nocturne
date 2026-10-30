@@ -49,10 +49,10 @@ public class SubjectServiceDeleteTests : IDisposable
         await DeleteAsLeaverAsync();
 
         var rows = await ReadRowsAsync();
-        rows[_selfLoginRow].SubjectId.Should().Be(_deletedId);
+        rows[_selfLoginRow].TargetSubjectId.Should().Be(_deletedId);
         rows[_selfLoginRow].ActorSubjectId.Should().Be(_deletedId);
         rows[_actedOnOtherRow].ActorSubjectId.Should().Be(_deletedId);
-        rows[_actedOnByAdminRow].SubjectId.Should().Be(_deletedId);
+        rows[_actedOnByAdminRow].TargetSubjectId.Should().Be(_deletedId);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class SubjectServiceDeleteTests : IDisposable
 
         await using var reader = _db.CreateContext();
         var deleted = await reader.AuthAuditLog.SingleAsync(a => a.EventType == AuthAuditEventType.SubjectDeleted);
-        deleted.SubjectId.Should().Be(_deletedId);
+        deleted.TargetSubjectId.Should().Be(_deletedId);
         deleted.ActorSubjectId.Should().Be(_adminId);
         (await reader.Subjects.AnyAsync(s => s.Id == _deletedId)).Should().BeFalse();
     }
@@ -144,7 +144,7 @@ public class SubjectServiceDeleteTests : IDisposable
     {
         Id = id,
         EventType = eventType,
-        SubjectId = subject,
+        TargetSubjectId = subject,
         ActorSubjectId = actor,
         IpAddress = ip,
         UserAgent = $"agent-{ip}",

@@ -12,7 +12,10 @@ using Nocturne.Core.Constants;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using DecompositionResult = Nocturne.Core.Models.V4.DecompositionResult;
+using Nocturne.Core.Contracts.DeviceStatuses;
+using Nocturne.Core.Contracts.Entries;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.Treatments;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Services;
@@ -719,6 +722,7 @@ internal class MigrationJob
             run.CollectionOutcomes = _collectionProgress.IsEmpty
                 ? null
                 : System.Text.Json.JsonSerializer.Serialize(_collectionProgress.Values.ToList(), s_outcomeJson);
+            run.SourceAlarmSettings = _sourceAlarmSettings;
 
             if (state == MigrationJobState.Completed)
             {
@@ -899,6 +903,27 @@ internal class MigrationJob
     private long _totalDocumentsAllCollections;
     private long _migratedDocumentsAllCollections; // computed by UpdateOverallProgress
 
+    /// <summary>
+    /// The source's alarm settings as <see cref="NightscoutAlarmSettings.ToJson"/>, for
+    /// <see cref="MigrationRunEntity.SourceAlarmSettings"/>. Null until read, and when the source
+    /// would not give them: the settings pre-fill a form, so the run does not fail for them.
+    /// </summary>
+    private string? _sourceAlarmSettings;
+
+    private async Task<string?> ReadAlarmSettingsAsync(HttpClient httpClient, CancellationToken ct)
+    {
+        try
+        {
+            var status = await ReadFromSourceAsync(httpClient, "api/v1/status.json", "status", ct, NightscoutRead.ImportProbe);
+            return NightscoutAlarmSettings.Parse(status).ToJson();
+        }
+        catch (Exception ex) when (ex is MigrationSourceException or System.Text.Json.JsonException)
+        {
+            _logger.LogInformation(ex, "Migration job {JobId} read no alarm settings from the source", _id);
+            return null;
+        }
+    }
+
     private async Task ExecuteApiMigrationAsync(CancellationToken ct)
     {
         _currentOperation = "Connecting to Nightscout";
@@ -915,6 +940,8 @@ internal class MigrationJob
         {
             httpClient.DefaultRequestHeaders.Add("api-secret", HashApiSecret(_request.NightscoutApiSecret));
         }
+
+        _sourceAlarmSettings = await ReadAlarmSettingsAsync(httpClient, ct);
 
         await using var dbContext = await scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>().CreateAsync(ct);
 
@@ -1362,24 +1389,24 @@ internal class MigrationJob
         "entries", "entries", s_dateCursor, OneRecordPerDocument: true,
         sp =>
         {
-            var decomposer = sp.GetRequiredService<IEntryDecomposer>();
-            return (page, ct) => decomposer.DecomposeBatchAsync(page, WriteOrigin.Backfill, ct);
+            var entries = sp.GetRequiredService<IEntryService>();
+            return (page, ct) => entries.ImportEntriesAsync(page, ct);
         });
 
     private static readonly PagedCollection<Treatment> s_treatmentsCollection = new(
         "treatments", "treatments", s_createdAtCursor, OneRecordPerDocument: false,
         sp =>
         {
-            var decomposer = sp.GetRequiredService<ITreatmentDecomposer>();
-            return (page, ct) => decomposer.DecomposeBatchAsync(page, WriteOrigin.Backfill, ct);
+            var treatments = sp.GetRequiredService<ITreatmentService>();
+            return (page, ct) => treatments.ImportTreatmentsAsync(page, ct);
         });
 
     private static readonly PagedCollection<DeviceStatus> s_deviceStatusCollection = new(
         "devicestatus", "device statuses", s_createdAtCursor, OneRecordPerDocument: false,
         sp =>
         {
-            var decomposer = sp.GetRequiredService<IDeviceStatusDecomposer>();
-            return (page, ct) => decomposer.DecomposeBatchAsync(page, source: null, WriteOrigin.Backfill, ct);
+            var deviceStatuses = sp.GetRequiredService<IDeviceStatusService>();
+            return (page, ct) => deviceStatuses.ImportDeviceStatusesAsync(page, source: null, ct);
         });
 
     private static readonly PagedCollection<Activity> s_activityCollection = new(
@@ -1969,8 +1996,8 @@ internal class MigrationJob
             status.Id = doc["_id"].AsObjectId.ToString();
 
         using var scope = CreateTenantScope();
-        var decomposer = scope.ServiceProvider.GetRequiredService<Core.Contracts.V4.IDeviceStatusDecomposer>();
-        await decomposer.DecomposeAsync(status, source: null, WriteOrigin.Backfill, ct);
+        await scope.ServiceProvider.GetRequiredService<IDeviceStatusService>()
+            .CreateDeviceStatusesAsync([status], source: null, WriteOrigin.Backfill, ct);
     }
 
     private async Task TransformProfileAsync(

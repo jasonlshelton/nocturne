@@ -55,7 +55,7 @@ public class AuthAuditService : IAuthAuditService
             {
                 Id = Guid.CreateVersion7(),
                 EventType = eventType,
-                SubjectId = subjectId,
+                TargetSubjectId = subjectId,
                 // No actor to distinguish means the subject acted for themselves.
                 ActorSubjectId = actor is null ? subjectId : actor.SubjectId,
                 ActorCredential = actor?.Credential,

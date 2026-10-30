@@ -202,7 +202,7 @@ public class AlexaControllerTests
     public async Task OpenSessionResponse_KeepsShouldEndSessionFalseOnTheNightscoutWire(string kind)
     {
         var service = new AlexaService(
-            Mock.Of<IEntryStore>(),
+            Mock.Of<IEntryService>(),
             Mock.Of<IPropertiesService>(),
             Mock.Of<IDDataService>(),
             new HttpContextAccessor(),

@@ -267,6 +267,41 @@ public class ReadAccessAuditFilterTests
         written!.CredentialFingerprint.Should().Be("0123456789abcdef");
     }
 
+    [Fact]
+    public async Task OnResultExecutionAsync_RecordsTheCallerInActorSubjectIdAndActorName()
+    {
+        var caller = Guid.NewGuid();
+        _configCache
+            .Setup(c => c.GetConfigAsync(TestTenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantAuditConfig(ReadAuditEnabled: true, null, null));
+        _auditContext.Setup(a => a.SubjectId).Returns(caller);
+        _auditContext.Setup(a => a.SubjectName).Returns("Alex");
+
+        var saveCompleted = new SemaphoreSlim(0, 1);
+        var mockDbContext = CreateMockDbContext();
+        ReadAccessLogEntity? written = null;
+        mockDbContext
+            .Setup(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                written = mockDbContext.Object.ChangeTracker
+                    .Entries<ReadAccessLogEntity>().Single().Entity;
+                saveCompleted.Release();
+            })
+            .ReturnsAsync(1);
+        _contextFactory
+            .Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockDbContext.Object);
+
+        var (ctx, next) = CreateContexts("/api/v4/entries", "GET", tenantContext: TestTenantContext);
+
+        await CreateFilter().OnResultExecutionAsync(ctx, next);
+
+        (await saveCompleted.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue();
+        written!.ActorSubjectId.Should().Be(caller);
+        written.ActorName.Should().Be("Alex");
+    }
+
     /// <summary>
     /// The audit trail is durable and readable through the audit API, so a credential carried as a
     /// path segment must not reach it.
