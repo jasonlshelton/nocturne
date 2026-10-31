@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.DeviceStatuses;
+using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Effects;
 using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.Repositories;
@@ -14,8 +15,8 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.DeviceStatuses;
 
 /// <summary>
-/// A device status upload is announced as reads serve it, and only a status that wrote a record; a
-/// backfill or a connector's statuses are written without an announcement.
+/// A live create, an upload or a connector's, is announced as reads serve it, and only a status that wrote
+/// a record; a backfill is written without an announcement.
 /// </summary>
 [Trait("Category", "Unit")]
 public class DeviceStatusServiceCreateTests
@@ -65,6 +66,7 @@ public class DeviceStatusServiceCreateTests
 
         var served = created.Should().ContainSingle().Subject;
         served.Uploader!.Battery.Should().Be(64);
+        served.DataSource.Should().BeNull();
         VerifyAnnounced(served);
         _decomposer.Verify(d => d.DecomposeAsync(It.IsAny<DeviceStatus>(), null, WriteOrigin.Live, It.IsAny<CancellationToken>()));
     }
@@ -119,23 +121,37 @@ public class DeviceStatusServiceCreateTests
         VerifyNothingAnnounced();
     }
 
-    /// <summary>
-    /// A device status carries no data source, so the upstream write-back cannot skip a connector's own
-    /// statuses; announcing them would post a Nightscout connector's statuses back to their source.
-    /// </summary>
     [Fact]
-    public async Task AConnectorsLiveStatusesAreWrittenWithoutAnAnnouncement()
+    public async Task AConnectorsLiveStatusesAreAnnouncedWithTheirSource()
+    {
+        var created = await _service.CreateDeviceStatusesAsync([Posted(Id)], DataSources.NightscoutConnector);
+
+        var served = created.Should().ContainSingle().Subject;
+        served.DataSource.Should().Be(DataSources.NightscoutConnector);
+        VerifyAnnounced(served);
+        _decomposer.Verify(d => d.DecomposeAsync(
+            It.IsAny<DeviceStatus>(), DataSources.NightscoutConnector, WriteOrigin.Live, It.IsAny<CancellationToken>()));
+    }
+
+    [Fact]
+    public async Task AConnectorsStatusThatWroteNothingIsNotAnnounced()
     {
         _decomposer
             .Setup(d => d.DecomposeAsync(It.IsAny<DeviceStatus>(), It.IsAny<string?>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DecompositionResult { SkippedDeleted = 1 });
 
-        var created = await _service.CreateDeviceStatusesAsync([Posted(Id), Posted(OtherId)], "nightscout-connector");
+        var created = await _service.CreateDeviceStatusesAsync([Posted(Id), Posted(OtherId)], DataSources.NightscoutConnector);
 
         created.SkippedDeleted.Should().Be(2);
-        _decomposer.Verify(
-            d => d.DecomposeAsync(It.IsAny<DeviceStatus>(), "nightscout-connector", WriteOrigin.Live, It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+        _sideEffects.VerifyNoOtherCalls();
+        _events.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AConnectorsBackfillIsWrittenWithoutAnAnnouncement()
+    {
+        await _service.CreateDeviceStatusesAsync([Posted(Id)], DataSources.NightscoutConnector, WriteOrigin.Backfill);
+
         VerifyNothingAnnounced();
     }
 

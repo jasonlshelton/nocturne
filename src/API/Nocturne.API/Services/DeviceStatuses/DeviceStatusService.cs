@@ -54,7 +54,7 @@ internal sealed class DeviceStatusService(
         IReadOnlyList<DeviceStatus> statuses, string? source = null, WriteOrigin origin = WriteOrigin.Live,
         CancellationToken cancellationToken = default)
     {
-        var announce = origin == WriteOrigin.Live && source is null;
+        var announce = origin == WriteOrigin.Live;
         var decomposed = new List<(DeviceStatus Status, bool Wrote)>(statuses.Count);
         IReadOnlyList<DeviceStatus> served = [];
         var skippedDeleted = 0;
@@ -70,7 +70,7 @@ internal sealed class DeviceStatusService(
         finally
         {
             if (announce)
-                served = await AnnounceCreatedAsync(decomposed);
+                served = await AnnounceCreatedAsync(decomposed, source);
         }
 
         return new BulkWrite<DeviceStatus>(announce ? served : [.. decomposed.Select(d => d.Status)], skippedDeleted);
@@ -136,16 +136,20 @@ internal sealed class DeviceStatusService(
         return deletedCount;
     }
 
-    /// <summary>Reads each status back as reads serve it, and announces those that wrote a record.</summary>
+    /// <summary>
+    /// Reads each status back as reads serve it, and announces those that wrote a record. A read carries
+    /// no data source, so each is stamped with <paramref name="source"/> for the write-back to skip on.
+    /// </summary>
     /// <returns>Every status, as read back or else as given.</returns>
     private async Task<IReadOnlyList<DeviceStatus>> AnnounceCreatedAsync(
-        IReadOnlyList<(DeviceStatus Status, bool Wrote)> decomposed)
+        IReadOnlyList<(DeviceStatus Status, bool Wrote)> decomposed, string? source)
     {
         var served = new List<DeviceStatus>(decomposed.Count);
         var announced = new List<DeviceStatus>(decomposed.Count);
         foreach (var (status, wrote) in decomposed)
         {
             var read = await ReadBackAsync(status);
+            read.DataSource = source;
             served.Add(read);
             if (wrote)
                 announced.Add(read);
