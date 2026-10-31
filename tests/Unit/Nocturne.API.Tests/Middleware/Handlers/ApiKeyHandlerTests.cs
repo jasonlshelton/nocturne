@@ -8,6 +8,7 @@ using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Authorization;
 using Nocturne.API.Multitenancy;
+using Nocturne.API.Middleware;
 using Nocturne.API.Middleware.Handlers;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Connectors.Core.Utilities;
@@ -64,7 +65,7 @@ public class ApiKeyHandlerTests : IDisposable
             .ReturnsAsync(() => _db.CreateContext(_testTenantId));
 
         var logger = new Mock<ILogger<ApiKeyHandler>>();
-        _handler = new ApiKeyHandler(new OAuthGrantRepository(_dbContextFactory.Object.AsNocturneFactory()), _clock, logger.Object);
+        _handler = new ApiKeyHandler(new OAuthGrantRepository(_dbContextFactory.Object.AsNocturneFactory()), _clock, new LastUsedClaims(_clock), logger.Object);
     }
 
     public void Dispose()

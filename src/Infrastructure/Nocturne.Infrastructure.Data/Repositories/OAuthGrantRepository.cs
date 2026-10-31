@@ -382,12 +382,16 @@ public class OAuthGrantRepository : IOAuthGrantRepository
         };
 
     /// <summary>
-    /// Stamps the use in one statement; the address and agent only when a presentation is given,
-    /// so a caller that has none keeps the stored ones.
+    /// Stamps the use in one statement, and only when the stored stamp is due
+    /// (<see cref="LastUsedStamp.StaleBefore"/>), so writes that race stamp once. The address and
+    /// agent are written only when a presentation is given, so a caller that has none keeps the
+    /// stored ones.
     /// </summary>
     private static Task<int> StampUseAsync(
-        IQueryable<OAuthGrantEntity> grant, DateTime now, GrantPresentation? presentation, CancellationToken ct) =>
-        grant.ExecuteUpdateAsync(s =>
+        IQueryable<OAuthGrantEntity> grant, DateTime now, GrantPresentation? presentation, CancellationToken ct)
+    {
+        var staleBefore = LastUsedStamp.StaleBefore(now);
+        return grant.Where(g => g.LastUsedAt == null || g.LastUsedAt < staleBefore).ExecuteUpdateAsync(s =>
         {
             s.SetProperty(g => g.LastUsedAt, now);
             if (presentation is not null)
@@ -396,6 +400,7 @@ public class OAuthGrantRepository : IOAuthGrantRepository
                 s.SetProperty(g => g.LastUsedUserAgent, presentation.UserAgent);
             }
         }, ct);
+    }
 
     /// <summary>
     /// Pairs each grant with its subject's membership of <paramref name="tenantId"/> as a left join,

@@ -376,7 +376,7 @@ public class MemberScopeFilterPipelineTests
             .Membership.StoreOn(httpContext);
 
         var middleware = new MemberScopeMiddleware(
-            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), NullLogger<MemberScopeMiddleware>.Instance);
+            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
         await middleware.InvokeAsync(httpContext);
 
         return httpContext;

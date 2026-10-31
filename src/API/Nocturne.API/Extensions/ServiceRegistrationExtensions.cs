@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Nocturne.API.Authorization;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services;
+using Nocturne.API.Middleware;
 using Nocturne.API.Middleware.Handlers;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.RateLimiting;
@@ -669,6 +670,8 @@ public static class ServiceRegistrationExtensions
         // Shared by InstanceKeyHandler (authentication) and TenantSetupMiddleware
         // (setup-gate bypass) so instance-key validation rules live in one place.
         services.AddSingleton<IInstanceKeyValidator, InstanceKeyValidator>();
+
+        services.AddSingleton<LastUsedClaims>();
 
         // Auth handlers (executed in priority order, lowest first)
         services.AddSingleton<IAuthHandler, PlatformAccessCookieHandler>(); // Priority 40

@@ -118,13 +118,44 @@ public class OAuthGrantRepositoryTests : IDisposable
 
         await Grants(_otherTenant).RecordUseAsync(
             _tenant, grant, Now, new GrantPresentation("203.0.113.7", "xDrip"), CancellationToken.None);
-        await Grants().RecordUseAsync(grant, Now.AddMinutes(1), presentation: null, CancellationToken.None);
+        var later = Now + LastUsedStamp.Interval + TimeSpan.FromMinutes(1);
+        await Grants().RecordUseAsync(grant, later, presentation: null, CancellationToken.None);
 
         var stored = await GetAsync(grant);
-        stored.LastUsedAt.Should().Be(Now.AddMinutes(1));
+        stored.LastUsedAt.Should().Be(later);
         stored.LastUsedIp.Should().Be("203.0.113.7");
         stored.LastUsedUserAgent.Should().Be("xDrip");
         stored.TenantId.Should().Be(_tenant, "the tenant is stamped on save and read back");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AUseStampWithinTheIntervalOfTheStoredOneChangesNothing(bool pinnedToTheTenant)
+    {
+        var grant = await CreateAsync(Direct(_member, "h1"));
+        var first = new GrantPresentation("203.0.113.7", "xDrip");
+        var second = new GrantPresentation("198.51.100.9", "Loop");
+
+        Task Record(DateTime at, GrantPresentation presentation) => pinnedToTheTenant
+            ? Grants().RecordUseAsync(_tenant, grant, at, presentation, CancellationToken.None)
+            : Grants().RecordUseAsync(grant, at, presentation, CancellationToken.None);
+
+        await Record(Now, first);
+        await Record(Now + LastUsedStamp.Interval, second);
+
+        var held = await GetAsync(grant);
+        held.LastUsedAt.Should().Be(Now);
+        held.LastUsedIp.Should().Be("203.0.113.7");
+        held.LastUsedUserAgent.Should().Be("xDrip");
+
+        var due = Now + LastUsedStamp.Interval + TimeSpan.FromSeconds(1);
+        await Record(due, second);
+
+        var stamped = await GetAsync(grant);
+        stamped.LastUsedAt.Should().Be(due);
+        stamped.LastUsedIp.Should().Be("198.51.100.9");
+        stamped.LastUsedUserAgent.Should().Be("Loop");
     }
 
     [Fact]

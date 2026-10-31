@@ -127,6 +127,7 @@ public interface ITenantMembershipRepository
     /// <summary>
     /// Stamps the membership as used at <paramref name="at"/> from <paramref name="ipAddress"/> and
     /// <paramref name="userAgent"/>, in one statement, so the write that outlives a request tracks nothing.
+    /// It writes only when the stored stamp is due (<see cref="Nocturne.Core.Models.Authorization.LastUsedStamp"/>).
     /// </summary>
     Task RecordUseAsync(Guid tenantId, Guid memberId, DateTime at, string? ipAddress, string? userAgent, CancellationToken ct);
 
