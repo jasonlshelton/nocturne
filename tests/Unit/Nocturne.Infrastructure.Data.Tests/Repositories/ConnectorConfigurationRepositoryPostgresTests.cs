@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Nocturne.Core.Models.Connectors;
 using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -14,8 +15,8 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 /// <summary>
 /// <see cref="ConnectorConfigurationRepository"/> and <see cref="ConnectorResetJobRepository"/> on
 /// PostgreSQL under the runtime role and Row Level Security: the jsonb-path statements that write
-/// one cursor or one low-water mark beside the others, and the tenant pin, which reads the tenant it
-/// names and not the scope's.
+/// one cursor, one low-water mark or the enabled flag beside the others, and the tenant pin, which
+/// reads the tenant it names and not the scope's.
 /// </summary>
 [Trait("Category", "Integration")]
 public class ConnectorConfigurationRepositoryPostgresTests(ConnectorConfigurationRepositoryPostgresTests.Database database)
@@ -160,6 +161,96 @@ public class ConnectorConfigurationRepositoryPostgresTests(ConnectorConfiguratio
         (await configurations.FindAsync("nightscout", CancellationToken.None))!.BackfillLowWaterMarks.Should().BeNull();
         (await configurations.SetBackfillLowWaterMarkAsync("dexcom-connector", "Glucose", glucose, CancellationToken.None))
             .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TheToggleWritesOnlyTheEnabledKeyStampsTheRowAndStaysInTheScopesTenant()
+    {
+        var a = await SeedTenantAsync();
+        var b = await SeedTenantAsync();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 8, 0, 0, TimeSpan.Zero));
+        var configurations = new ConnectorConfigurationRepository(new Factory(Context, a), time);
+        await configurations.SaveConfigurationAsync(
+            "glooko", """{"Enabled":true,"region":"eu","retries":3}""", "owner", CancellationToken.None);
+        await configurations.SaveSecretsAsync("glooko", """{"password":"x"}""", "owner", CancellationToken.None);
+        await Configurations(b).SaveConfigurationAsync("glooko", """{"enabled":true}""", "owner", CancellationToken.None);
+
+        var toggled = await configurations.SetActiveAsync("Glooko", false, "rhys", CancellationToken.None);
+
+        toggled.Should().Match<ConnectorConfigurationRecord>(c =>
+            c.TenantId == a && c.ConnectorName == "glooko" && c.ModifiedBy == "rhys" && c.LastModified == time.GetUtcNow());
+        var config = JsonNode.Parse(toggled.ConfigurationJson)!.AsObject();
+        config.ToDictionary(p => p.Key, p => p.Value!.ToJsonString()).Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"eu\"", ["retries"] = "3" });
+        JsonNode.Parse(toggled.SecretsJson)!["password"]!.GetValue<string>().Should().Be("x");
+        JsonNode.Parse((await Configurations(b).FindAsync("glooko", CancellationToken.None))!.ConfigurationJson)!["enabled"]!
+            .GetValue<bool>().Should().BeTrue();
+
+        var unattributed = await configurations.SetActiveAsync("glooko", true, null, CancellationToken.None);
+
+        unattributed.ModifiedBy.Should().BeNull();
+        JsonNode.Parse(unattributed.ConfigurationJson)!["enabled"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TheToggleCreatesTheRowWhenTheConnectorHasNone()
+    {
+        var a = await SeedTenantAsync();
+
+        var created = await Configurations(a).SetActiveAsync("libre", true, "rhys", CancellationToken.None);
+
+        created.Should().Match<ConnectorConfigurationRecord>(c =>
+            c.TenantId == a && c.ConnectorName == "libre" && c.ModifiedBy == "rhys");
+        JsonNode.Parse(created.ConfigurationJson)!.ToJsonString().Should().Be("""{"enabled":true}""");
+        (await Configurations(a).FindAsync("libre", CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task AToggleBlockedByAConfigurationSaveKeepsTheSavedConfigurationAndSetsTheFlag()
+    {
+        var a = await SeedTenantAsync();
+        await Configurations(a).SaveConfigurationAsync("glooko", """{"enabled":true,"region":"eu"}""", "owner", CancellationToken.None);
+
+        await using var saver = new NpgsqlConnection(database.MigratorConnectionString);
+        await saver.OpenAsync();
+        await using var save = await saver.BeginTransactionAsync();
+        await using (var cmd = saver.CreateCommand())
+        {
+            cmd.Transaction = save;
+            cmd.CommandText = """
+                SELECT set_config('app.current_tenant_id', @tenant, true);
+                UPDATE connector_configurations SET configuration = '{"enabled":true,"region":"us"}'::jsonb
+                WHERE tenant_id = @tenant::uuid AND connector_name = 'glooko'
+                """;
+            cmd.Parameters.Add(new NpgsqlParameter("@tenant", a.ToString()));
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var toggle = Task.Run(() => Configurations(a).SetActiveAsync("glooko", false, "rhys", CancellationToken.None));
+        await WaitForAWriterBlockedByAsync(saver);
+        await save.CommitAsync();
+        var toggled = await toggle;
+
+        var config = JsonNode.Parse(toggled.ConfigurationJson)!.AsObject();
+        config["region"]!.GetValue<string>().Should().Be("us");
+        config["enabled"]!.GetValue<bool>().Should().BeFalse();
+    }
+
+    private async Task WaitForAWriterBlockedByAsync(NpgsqlConnection blocker)
+    {
+        await using var conn = new NpgsqlConnection(database.MigratorConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM pg_stat_activity WHERE @blocker = ANY(pg_blocking_pids(pid))";
+        cmd.Parameters.Add(new NpgsqlParameter("@blocker", blocker.ProcessID));
+
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while ((long)(await cmd.ExecuteScalarAsync())! == 0)
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("The toggle never waited on the saving transaction's row lock.");
+            await Task.Delay(25);
+        }
     }
 
     [Fact]
