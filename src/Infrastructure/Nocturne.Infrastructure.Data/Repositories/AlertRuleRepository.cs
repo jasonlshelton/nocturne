@@ -227,6 +227,27 @@ public class AlertRuleRepository : IAlertRuleRepository
     }
 
     /// <inheritdoc/>
+    public virtual async Task<bool> ChannelExistsAsync(Guid channelId, CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+
+        return await lease.Context.AlertRuleChannels.AnyAsync(c => c.Id == channelId, ct);
+    }
+
+    /// <inheritdoc/>
+    public virtual async Task<IReadOnlyList<AlertChannelSecret>> GetChannelSecretsAsync(CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+
+        return await lease.Context.AlertRuleChannels
+            .AsNoTracking()
+            .Where(c => c.Secret != null)
+            .OrderBy(c => c.AlertRule!.Name).ThenBy(c => c.SortOrder)
+            .Select(c => new AlertChannelSecret(c.AlertRuleId, c.AlertRule!.Name, c.Destination, c.DestinationLabel, c.Secret!))
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public virtual async Task<IReadOnlySet<string>> GetInAppDestinationsAsync(CancellationToken ct)
     {
         await using var lease = await OpenAsync(ct);

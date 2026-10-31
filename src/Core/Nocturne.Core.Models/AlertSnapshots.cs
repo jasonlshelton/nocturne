@@ -31,6 +31,17 @@ public record AlertRuleChannelSnapshot(
     string? Secret = null);
 
 /// <summary>
+/// A channel that carries a signing secret, with the name of the rule it belongs to.
+/// </summary>
+/// <param name="Secret">The stored ciphertext.</param>
+public sealed record AlertChannelSecret(
+    Guid AlertRuleId,
+    string RuleName,
+    string Destination,
+    string? DestinationLabel,
+    string Secret);
+
+/// <summary>
 /// A stored <see cref="AlertRule"/>, enabled or not, with what the rule editor reads beside its
 /// evaluated fields.
 /// </summary>
