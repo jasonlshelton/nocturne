@@ -14,11 +14,12 @@ namespace Nocturne.Infrastructure.Data.Repositories;
 /// </summary>
 /// <remarks>
 /// Registered transient, like the factory it holds. Writes are tracked reads and saves, which update
-/// only the columns they change, so a health report cannot undo a configuration save. The cursor and
-/// low-water-mark writes are the exception on PostgreSQL: each is one jsonb-path statement, so two
-/// writers of different keys on the same row cannot drop each other's key, as a read-modify-write of
-/// the whole object could. A dropped low-water mark is stranded history the failure marks exist to
-/// prevent. Same-key writes stay last-writer-wins.
+/// only the columns they change, so a health report cannot undo a configuration save. The cursor,
+/// low-water-mark and enabled-flag writes are the exception on PostgreSQL: each is one jsonb-path
+/// statement, so two writers of different keys on the same row cannot drop each other's key, as a
+/// read-modify-write of the whole object could. A dropped low-water mark is stranded history the
+/// failure marks exist to prevent, and a toggle that re-wrote the configuration it read would undo a
+/// configuration saved in between. Same-key writes stay last-writer-wins.
 /// </remarks>
 public class ConnectorConfigurationRepository : IConnectorConfigurationRepository
 {
@@ -83,10 +84,17 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
         UpsertAsync(connectorName, modifiedBy, entity => entity.SecretsJson = secretsJson, ct);
 
     /// <inheritdoc/>
-    public virtual Task<ConnectorConfigurationRecord> SetActiveAsync(
-        string connectorName, bool isActive, string? modifiedBy, CancellationToken ct) =>
-        UpsertAsync(connectorName, modifiedBy,
+    public virtual async Task<ConnectorConfigurationRecord> SetActiveAsync(
+        string connectorName, bool isActive, string? modifiedBy, CancellationToken ct)
+    {
+        await using var db = await _contexts.CreateAsync(ct);
+        if (db.Database.IsNpgsql()
+            && await SetEnabledInPlaceAsync(db, connectorName, isActive, modifiedBy, ct) is { } record)
+            return record;
+
+        return await UpsertAsync(db, connectorName, modifiedBy,
             entity => entity.ConfigurationJson = WithEnabled(entity.ConfigurationJson, isActive), ct);
+    }
 
     /// <inheritdoc/>
     public virtual async Task<ConnectorConfigurationRecord?> DeleteAsync(string connectorName, CancellationToken ct)
@@ -252,6 +260,40 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
         return true;
     }
 
+    /// <summary>
+    /// Writes the <c>enabled</c> key alone on PostgreSQL, dropping any spelling of it that differs in
+    /// case; null when the connector has no row. A row deleted after the update matched it is not
+    /// "no row": the caller must not create it again, so that case throws, as a tracked save of a
+    /// vanished row does.
+    /// </summary>
+    private async Task<ConnectorConfigurationRecord?> SetEnabledInPlaceAsync(
+        NocturneDbContext db, string connectorName, bool isActive, string? modifiedBy, CancellationToken ct)
+    {
+        var name = ConnectorNames.Canonical(connectorName);
+        var now = _time.GetUtcNow();
+        var updated = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE connector_configurations
+            SET configuration = jsonb_set(
+                    coalesce((SELECT jsonb_object_agg(e.key, e.value)
+                              FROM jsonb_each(CASE WHEN jsonb_typeof(configuration) = 'object'
+                                  THEN configuration ELSE jsonb_build_object() END) AS e
+                              WHERE lower(e.key) <> 'enabled'), jsonb_build_object()),
+                    ARRAY['enabled'], to_jsonb({isActive})),
+                last_modified = {now},
+                modified_by = {modifiedBy},
+                sys_updated_at = {now.UtcDateTime}
+            WHERE tenant_id = {db.TenantId} AND connector_name = {name}
+            """, ct);
+        if (updated == 0)
+            return null;
+
+        var entity = await db.ConnectorConfigurations.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConnectorName == name, ct);
+        return entity is null
+            ? throw new DbUpdateConcurrencyException("The connector configuration was deleted while its enabled flag was written.")
+            : ToRecord(entity);
+    }
+
     private async Task<ConnectorConfigurationRecord> UpsertAsync(
         string connectorName,
         string? modifiedBy,
@@ -259,6 +301,16 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
         CancellationToken ct)
     {
         await using var db = await _contexts.CreateAsync(ct);
+        return await UpsertAsync(db, connectorName, modifiedBy, change, ct);
+    }
+
+    private async Task<ConnectorConfigurationRecord> UpsertAsync(
+        NocturneDbContext db,
+        string connectorName,
+        string? modifiedBy,
+        Action<ConnectorConfigurationEntity> change,
+        CancellationToken ct)
+    {
         var entity = await FindTrackedAsync(db, connectorName, ct);
         if (entity is null)
         {
