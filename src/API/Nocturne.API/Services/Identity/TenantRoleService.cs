@@ -1,7 +1,9 @@
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
+using Nocturne.Infrastructure.Data.Extensions;
 
 namespace Nocturne.API.Services.Identity;
 
@@ -39,7 +41,7 @@ public partial class TenantRoleService(ITenantMembershipRepository members, Time
         return role is null ? null : ToDto(role, granterScopes);
     }
 
-    public async Task<TenantRoleDto> CreateRoleAsync(
+    public async Task<SaveRoleResult> CreateRoleAsync(
         Guid tenantId,
         string name,
         string? description,
@@ -47,12 +49,23 @@ public partial class TenantRoleService(ITenantMembershipRepository members, Time
         IReadOnlyCollection<string> granterScopes,
         CancellationToken ct = default)
     {
-        var created = await members.CreateRoleAsync(
-            new NewTenantRole(tenantId, name, GenerateSlug(name), description, permissions, IsSystem: false), ct);
-        return ToDto(created, granterScopes);
+        var slug = GenerateSlug(name);
+        if (await RefuseSlugAsync(tenantId, slug, roleId: null, ct) is { } refusal)
+            return refusal;
+
+        try
+        {
+            var created = await members.CreateRoleAsync(
+                new NewTenantRole(tenantId, name, slug, description, permissions, IsSystem: false), ct);
+            return SaveRoleResult.Saved(ToDto(created, granterScopes));
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        {
+            return SaveRoleResult.Taken;
+        }
     }
 
-    public async Task<TenantRoleDto?> UpdateRoleAsync(
+    public async Task<SaveRoleResult?> UpdateRoleAsync(
         Guid tenantId,
         Guid roleId,
         string name,
@@ -68,10 +81,35 @@ public partial class TenantRoleService(ITenantMembershipRepository members, Time
         if (existing.Slug == RoleSeeds.Owner)
             throw new InvalidOperationException("Cannot modify the owner role.");
 
-        var updated = await members.UpdateRoleAsync(
-            tenantId, roleId, new TenantRoleEdit(name, GenerateSlug(name), description, permissions),
-            time.GetUtcNow().UtcDateTime, ct);
-        return updated is null ? null : ToDto(updated, granterScopes);
+        var slug = existing.IsSystem ? existing.Slug : GenerateSlug(name);
+        if (slug != existing.Slug && await RefuseSlugAsync(tenantId, slug, roleId, ct) is { } refusal)
+            return refusal;
+
+        try
+        {
+            var updated = await members.UpdateRoleAsync(
+                tenantId, roleId, new TenantRoleEdit(name, slug, description, permissions),
+                time.GetUtcNow().UtcDateTime, ct);
+            return updated is null ? null : SaveRoleResult.Saved(ToDto(updated, granterScopes));
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        {
+            return SaveRoleResult.Taken;
+        }
+    }
+
+    /// <summary>
+    /// A seed slug is refused outright, so a tenant that deleted a seed role cannot name a custom
+    /// one after it; any other slug is refused only while a role other than <paramref name="roleId"/> holds it.
+    /// </summary>
+    private async Task<SaveRoleResult?> RefuseSlugAsync(
+        Guid tenantId, string slug, Guid? roleId, CancellationToken ct)
+    {
+        if (RoleSeeds.Permissions.ContainsKey(slug))
+            return SaveRoleResult.Reserved;
+
+        var holder = await members.FindRoleIdBySlugAsync(tenantId, slug, ct);
+        return holder is not null && holder != roleId ? SaveRoleResult.Taken : null;
     }
 
     public async Task<DeleteRoleResult> DeleteRoleAsync(Guid tenantId, Guid roleId, CancellationToken ct = default)
