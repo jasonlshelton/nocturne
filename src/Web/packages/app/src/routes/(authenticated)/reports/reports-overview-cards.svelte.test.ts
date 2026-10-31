@@ -144,7 +144,9 @@ describe("reports overview cards", () => {
       .toBeVisible();
     expect(page.getByRole("heading", { level: 1 }).elements()).toHaveLength(1);
 
-    await page.getByRole("button", { name: "Try again" }).click();
+    await page
+      .getByRole("button", { name: "Try again to load the analysis" })
+      .click();
     expect(queries.analysis.refresh).toHaveBeenCalledOnce();
     expect(queries.count.refresh).not.toHaveBeenCalled();
   });
@@ -162,9 +164,41 @@ describe("reports overview cards", () => {
       .toBeVisible();
     expect(page.getByRole("heading", { level: 1 }).elements()).toHaveLength(1);
 
-    await page.getByRole("button", { name: "Try again" }).click();
+    await page
+      .getByRole("button", { name: "Try again to load the reading count" })
+      .click();
     expect(queries.count.refresh).toHaveBeenCalledOnce();
     expect(queries.analysis.refresh).not.toHaveBeenCalled();
+  });
+
+  it("names what each retry button retries when the count and the analysis both fail", async () => {
+    queries.count = failed("The count service is down");
+    queries.analysis = failed("The analytics service is down");
+    render(ReportsOverviewPage);
+
+    await expect
+      .element(page.getByText("The analytics service is down"))
+      .toBeVisible();
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Try again to load the reading count",
+          exact: true,
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Try again to load the analysis",
+          exact: true,
+        })
+      )
+      .toBeVisible();
+    expect(
+      page.getByRole("button", { name: "Try again" }).elements()
+    ).toHaveLength(2);
   });
 
   it("keeps the analysis on screen with a status line while a new range loads", async () => {

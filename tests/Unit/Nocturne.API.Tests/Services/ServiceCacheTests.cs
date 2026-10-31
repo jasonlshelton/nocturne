@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.API.Services.Auth;
+using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Caching;
 using Nocturne.API.Services.Platform;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,6 +22,7 @@ using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
 using Nocturne.Tests.Shared.Mocks;
 using Xunit;
+using Nocturne.Infrastructure.Data.Repositories;
 
 namespace Nocturne.API.Tests.Services;
 
@@ -97,11 +99,11 @@ public class ServiceCacheTests
             new CacheFlights(),
             _mockDemoModeService.Object,
             tenantDbContextFactory.Object,
+            new TenantRepository(tenantDbContextFactory.Object), new SubjectRepository(tenantDbContextFactory.Object), new RoleRepository(tenantDbContextFactory.Object), new OidcProviderRepository(tenantDbContextFactory.Object),
             httpContextAccessor,
             _mockTenantAccessor.Object,
             TestPublicAccessCache.Create(),
-            _tenants.Object,
-            appearanceReader.Object,
+            new TenantGlucoseUnits(_mockTenantAccessor.Object, appearanceReader.Object, _tenants.Object),
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
@@ -191,11 +193,11 @@ public class ServiceCacheTests
             new CacheFlights(),
             _mockDemoModeService.Object,
             tenantDbContextFactory.Object,
+            new TenantRepository(tenantDbContextFactory.Object), new SubjectRepository(tenantDbContextFactory.Object), new RoleRepository(tenantDbContextFactory.Object), new OidcProviderRepository(tenantDbContextFactory.Object),
             httpContextAccessor,
             _mockTenantAccessor.Object,
             TestPublicAccessCache.Create(),
-            _tenants.Object,
-            appearanceReader.Object,
+            new TenantGlucoseUnits(_mockTenantAccessor.Object, appearanceReader.Object, _tenants.Object),
             new GlucoseStatusClassifier(mockConfiguration, NullLogger<GlucoseStatusClassifier>.Instance),
             NoAlertRules(),
             Mock.Of<ICategoryReadContext>(),
@@ -226,7 +228,7 @@ public class ServiceCacheTests
     private static IAlertRepository NoAlertRules()
     {
         var alerts = new Mock<IAlertRepository>();
-        alerts.Setup(a => a.GetEnabledRulesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        alerts.Setup(a => a.GetEnabledRulesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
         return alerts.Object;
     }

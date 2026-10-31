@@ -9,8 +9,9 @@ namespace Nocturne.API.Services.Caching;
 /// Clears the legacy read families a written model type projects into: <see cref="TenantCacheFamily.Entries"/>
 /// for the glucose tables, <see cref="TenantCacheFamily.Treatments"/> for every table of
 /// <see cref="LegacyTreatmentTables.All"/> and for the <see cref="TreatmentFood"/> breakdown a carb
-/// intake is served with (<see cref="CarbFoodIndex"/>). Every state span category clears treatments,
-/// though only the categories of <see cref="LegacyTreatmentTables.StateSpanTables"/> are served as one.
+/// intake is served with (<see cref="CarbFoodIndex"/>) and for the <see cref="Food"/> whose name that
+/// breakdown reads. Every state span category clears treatments, though only the categories of
+/// <see cref="LegacyTreatmentTables.StateSpanTables"/> are served as one.
 /// </summary>
 internal sealed class LegacyReadCacheInvalidation(
     ITenantCache cache, ILogger<LegacyReadCacheInvalidation> logger) : ILegacyReadCacheInvalidation
@@ -18,6 +19,7 @@ internal sealed class LegacyReadCacheInvalidation(
     internal static readonly IReadOnlyDictionary<Type, string[]> FamiliesByModel =
         LegacyTreatmentTables.All.Select(table => table.Model)
             .Append(typeof(TreatmentFood))
+            .Append(typeof(Food))
             .Select(model => (Model: model, Family: TenantCacheFamily.Treatments))
             .Concat(new[] { typeof(SensorGlucose), typeof(MeterGlucose), typeof(Calibration) }
                 .Select(model => (Model: model, Family: TenantCacheFamily.Entries)))

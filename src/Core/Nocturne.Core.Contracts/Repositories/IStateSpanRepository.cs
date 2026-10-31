@@ -169,6 +169,16 @@ public interface IStateSpanRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Hard-deletes every span written by <paramref name="source"/> and writes <paramref name="stateSpans"/>
+    /// in their place in one transaction, as given: no supersede, end-at-successor or deduplication. For the
+    /// sample-data seeder's idempotent re-seed only.
+    /// </summary>
+    Task ReplaceBySourceAsync(
+        string source,
+        IReadOnlyCollection<StateSpan> stateSpans,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the current pump operational mode, derived from the most recently started
     /// open-ended <see cref="StateSpanCategory.PumpMode"/> span.
     /// </summary>

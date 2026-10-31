@@ -80,11 +80,7 @@ internal class EntryDecomposer : DecomposerBase, IEntryDecomposer
                 await DecomposeCalAsync(entry, result, origin, ct);
                 break;
             default:
-                var sanitizedType = entry.Type?
-                    .Replace("\r", string.Empty)
-                    .Replace("\n", string.Empty);
-
-                Logger.LogWarning("Skipped an entry whose type Nocturne does not store: {Type}", sanitizedType);
+                Logger.LogWarning("Skipped an entry whose type Nocturne does not store: {Type}", LogText.Sanitize(entry.Type));
                 result.SkippedUnsupported++;
                 break;
         }
@@ -142,15 +138,6 @@ internal class EntryDecomposer : DecomposerBase, IEntryDecomposer
         => await UpsertByLegacyIdAsync(
             _calibrationRepository, entry.Id, MapToCalibration(entry, result.CorrelationId), result, origin, ct);
 
-    private static string SanitizeForLog(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return "(none)";
-
-        var sanitized = value.Replace("\r", " ").Replace("\n", " ");
-        return new string(sanitized.Where(c => !char.IsControl(c)).ToArray());
-    }
-
     /// <inheritdoc />
     public async Task<DecompositionResult> DecomposeBatchAsync(
         IReadOnlyList<Entry> entries, WriteOrigin origin, CancellationToken ct = default)
@@ -188,7 +175,7 @@ internal class EntryDecomposer : DecomposerBase, IEntryDecomposer
                     break;
                 default:
                     result.SkippedUnsupported++;
-                    unsupportedTypes.Add(SanitizeForLog(entry.Type));
+                    unsupportedTypes.Add(LogText.Sanitize(entry.Type));
                     continue;
             }
 

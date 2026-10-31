@@ -387,12 +387,14 @@ public class AlertSweepServiceWallClockTests
                 .ReturnsAsync((CreateAlertInstanceRequest r, CancellationToken _) =>
                 {
                     InstancesCreated++;
-                    return new AlertInstanceSnapshot(Guid.NewGuid(), r.TenantId, r.ExcursionId, r.Status, r.TriggeredAt, null, 0);
+                    return new AlertInstanceSnapshot(Guid.NewGuid(), Tenant, r.ExcursionId, r.Status, r.TriggeredAt, null, 0);
                 });
-            repository
-                .Setup(x => x.GetChannelsForRuleAsync(Tenant, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync([]);
             services.AddSingleton(repository.Object);
+            var rules = new Mock<IAlertRuleRepository>();
+            rules
+                .Setup(x => x.GetChannelsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<Guid, IReadOnlyList<AlertRuleChannelSnapshot>>());
+            services.AddSingleton(rules.Object);
 
             var canonical = Canonical;
             canonical
@@ -424,9 +426,8 @@ public class AlertSweepServiceWallClockTests
             var enricher = new Mock<ISensorContextEnricher>();
             enricher
                 .Setup(x => x.EnrichAsync(
-                    It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(),
-                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((SensorContext c, IEnumerable<AlertRuleSnapshot> _, Guid _, CancellationToken _) =>
+                    It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SensorContext c, IEnumerable<AlertRuleSnapshot> _, CancellationToken _) =>
                     c with { ActiveAlerts = ActiveAlerts });
             services.AddSingleton(enricher.Object);
 

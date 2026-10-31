@@ -10961,8 +10961,8 @@ msgstr ""
 #~ msgid "Meal Boluses"
 #~ msgstr ""
 
-#. 0: (insulinStats.manualBolusCount ?? 0) > 0 ? ( ((insulinStats.mealBoluses ?? 0) / (insulinStats.manualBolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
-#. 0: (insulinStats.manualBolusCount ?? 0) > 0 ? ( ((insulinStats.correctionBoluses ?? 0) / (insulinStats.manualBolusCount ?? 1)) * 100 ).toFixed(0) \\: 0
+#. 0: (insulinStats.mealBolusPercent ?? 0).toFixed(0)
+#. 0: (insulinStats.correctionBolusPercent ?? 0).toFixed(0)
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 msgid "{0}% of boluses"
@@ -11057,8 +11057,8 @@ msgstr ""
 #~ msgid "Avg Total Daily Dose"
 #~ msgstr ""
 
-#. 0: avgBasal?.toFixed(1) ?? "--"
-#. 0: avgScheduled?.toFixed(1) ?? "--"
+#. 0: insulinStats?.totalBasalPerDay?.toFixed(1) ?? "--"
+#. 0: insulinStats?.scheduledBasalPerDay?.toFixed(1) ?? "--"
 #: src/routes/(authenticated)/reports/idp/+page.svelte
 #: src/routes/(authenticated)/reports/idp/+page.svelte
 msgid "{0} U/day"
@@ -16580,10 +16580,8 @@ msgstr ""
 #~ msgid "Error Loading Comparison"
 #~ msgstr ""
 
-#. 0: signed(d)
-#. 0: signed(d, 2)
+#. 0: signed(v, d)
 #. 0: signedNumber(priorWeek.tirDelta)
-#: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
 #: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
 #: src/routes/(authenticated)/reports/sleep/+page.svelte
 msgid "{0} pp"
@@ -16621,7 +16619,7 @@ msgstr ""
 #~ msgid "<0/> zero or suspend temp basals were recorded. This often indicates low glucose prevention or manual suspensions."
 #~ msgstr ""
 
-#. 0.0: (basalStats.totalDelivered / dateInfo.dayCount).toFixed(1); 0: dateInfo.dayCount
+#. 0.0: basalStats.totalDeliveredPerDay.toFixed(1); 0: analysisQuery.current?.windowDays ?? dateInfo.dayCount
 #: src/routes/(authenticated)/reports/basal-analysis/BasalAnalysisContent.svelte
 msgid "Average of <0>{0} units</0> of basal insulin delivered per day over this {0}-day period."
 msgstr ""
@@ -22087,12 +22085,12 @@ msgstr ""
 msgid "Heart rate"
 msgstr ""
 
-#. 0: avgBasal?.toFixed(1) ?? "--"; 1: basalPct.toFixed(0)
+#. 0: insulinStats?.totalBasalPerDay?.toFixed(1) ?? "--"; 1: basalPct.toFixed(0)
 #: src/routes/(authenticated)/reports/idp/+page.svelte
 msgid "<0/> Basal: {0} U/day ({1}%)"
 msgstr ""
 
-#. 0: avgBolus?.toFixed(1) ?? "--"; 1: bolusPct.toFixed(0)
+#. 0: insulinStats?.totalBolusPerDay?.toFixed(1) ?? "--"; 1: bolusPct.toFixed(0)
 #: src/routes/(authenticated)/reports/idp/+page.svelte
 msgid "<0/> Bolus: {0} U/day ({1}%)"
 msgstr ""
@@ -34561,9 +34559,6 @@ msgstr ""
 
 #: src/routes/(authenticated)/reports/comparison/+page.svelte
 #: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
-#: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
-#: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
-#: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
 msgid "Error loading comparison"
 msgstr ""
 
@@ -36683,9 +36678,8 @@ msgstr ""
 msgid "The average daily risk range (ADRR) is not shown for either period, and days with data are counted on UTC days."
 msgstr ""
 
-#: src/routes/(authenticated)/reports/idp/+page.svelte
-msgid "The hourly figures place each reading at the local time its device reported. Days of data are counted on UTC days."
-msgstr ""
+#~ msgid "The hourly figures place each reading at the local time its device reported. Days of data are counted on UTC days."
+#~ msgstr ""
 
 #~ msgid "Days in range, the weekly breakdown and the composition chart use UTC days."
 #~ msgstr ""
@@ -38441,4 +38435,24 @@ msgstr ""
 
 #: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
 msgid "They own Nocturne, the same as you."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/idp/+page.svelte
+msgid "The hourly glucose figures place each reading at the local time its device reported. Days of data are counted on UTC days."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/idp/+page.svelte
+msgid "This chart cannot show boluses by hour of day."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "Try again to load the reading count"
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "Try again to load the analysis"
+msgstr ""
+
+#: src/routes/(authenticated)/reports/readings/+page.svelte
+msgid "Error Loading Readings"
 msgstr ""

@@ -17,6 +17,7 @@ using Nocturne.API.Services.Alerts.Webhooks;
 using Nocturne.API.Services.Analytics;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.BackgroundServices;
+using Nocturne.API.Services.BolusWizard;
 using Nocturne.API.Services.CoachMarks;
 using Nocturne.API.Services.SetupHub;
 using Nocturne.API.Services.SetupHub.Items;
@@ -601,6 +602,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IShareTokenGenerator, ShareTokenGenerator>();
         services.AddScoped<IShareLinkService, ShareLinkService>();
         services.AddScoped<ITenantAppearanceReader>(sp => sp.GetRequiredService<IShareLinkService>());
+        services.AddScoped<ITenantGlucoseUnits, TenantGlucoseUnits>();
         // Singleton because its consumer runs at startup outside any request scope; it creates its
         // own scope per notification.
         services.AddSingleton<IShareLinkRotatedNotifier, ShareLinkRotatedNotifier>();
@@ -970,6 +972,8 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IAidDetectionStrategy, NoAidStrategy>();
         services.AddScoped<IAidMetricsService, AidMetricsService>();
         services.AddScoped<AidSystemMetricsReader>();
+        services.AddScoped<InsulinDeliveryReader>();
+        services.AddScoped<RangeAnalyticsReader>();
 
         // V4 Decomposers
         services.AddScoped<IEntryDecomposer, EntryDecomposer>();
@@ -1179,6 +1183,7 @@ public static class ServiceRegistrationExtensions
     )
     {
         services.AddScoped<IDataSourceService, DataSourceService>();
+        services.AddTransient<DemoDataPurger>();
         services.AddScoped<IDeduplicationService, DeduplicationService>();
         services.AddSingleton<ISecretEncryptionService, SecretEncryptionService>();
         services.AddScoped<IConnectorConfigurationService, ConnectorConfigurationService>();

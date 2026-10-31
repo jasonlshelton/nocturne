@@ -8,6 +8,7 @@ using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
+using Nocturne.Infrastructure.Data.Repositories;
 
 namespace Nocturne.API.Tests.Services.Auth;
 
@@ -36,7 +37,7 @@ public class OAuthCodeCleanupServiceTests : IDisposable
     }
 
     private OAuthCodeCleanupService CreateService() =>
-        new(_seed.AsFactory(), NullLogger<OAuthCodeCleanupService>.Instance);
+        new(_seed.AsFactory(), new TenantRepository(_seed.AsFactory()), new OAuthTokenRepository(_seed.AsFactory()), new OAuthClientRepository(_seed.AsFactory()), NullLogger<OAuthCodeCleanupService>.Instance);
 
     private async Task<OAuthClientEntity> ClientAsync(
         Guid tenantId, string clientId, DateTime createdAt, string? softwareId = null)
@@ -197,8 +198,12 @@ public class OAuthCodeCleanupServiceTests : IDisposable
         await ClientAsync(_tenantA, "unused-a", LongAgo);
         await ClientAsync(_tenantB, "unused-b", LongAgo);
         var failing = tenantAFails ? _tenantA : _tenantB;
+        var contexts = new FailingForTenantFactory(_seed.AsFactory(), failing, retriesExhausted);
         var service = new OAuthCodeCleanupService(
-            new FailingForTenantFactory(_seed.AsFactory(), failing, retriesExhausted),
+            contexts,
+            new TenantRepository(contexts),
+            new OAuthTokenRepository(contexts),
+            new OAuthClientRepository(contexts),
             NullLogger<OAuthCodeCleanupService>.Instance);
 
         await service.CleanupAsync(CancellationToken.None);

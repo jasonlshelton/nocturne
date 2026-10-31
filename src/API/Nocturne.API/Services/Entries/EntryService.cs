@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Nocturne.API.Helpers;
+using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts.Entries;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
@@ -112,12 +114,111 @@ internal class EntryService : IEntryService
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<StoredEntryMatch?>> CheckForDuplicateEntriesAsync(
-        IReadOnlyList<EntryDuplicateProbe> probes,
+    public async Task<EntryUploadResult> UpsertUploadAsync(
+        IReadOnlyList<Entry> processed,
+        string? uploader,
         CancellationToken cancellationToken = default)
     {
-        return await _store.CheckDuplicatesAsync(probes, cancellationToken);
+        var probes = processed
+            .Select(entry => new EntryDuplicateProbe(entry.Device, entry.Type ?? "sgv", entry.Mills))
+            .ToArray();
+
+        var duplicates = await _store.CheckDuplicatesAsync(probes, cancellationToken);
+
+        if (duplicates.Count != processed.Count)
+        {
+            throw new InvalidOperationException(
+                $"Duplicate check returned {duplicates.Count} results for {processed.Count} entries");
+        }
+
+        var toWrite = new List<Entry>();
+        var response = new List<Entry>(processed.Count);
+        var glucoseMoved = new List<Entry>();
+        var stored = 0;
+
+        for (var i = 0; i < processed.Count; i++)
+        {
+            var entry = processed[i];
+            var match = duplicates[i];
+
+            if (match is null)
+            {
+                toWrite.Add(entry);
+                response.Add(entry);
+                glucoseMoved.Add(entry);
+                continue;
+            }
+
+            stored++;
+
+            if (match.LegacyId is null)
+            {
+                response.Add(match.Entry);
+                continue;
+            }
+
+            var storedMgdl = EntryDecomposer.WrittenMgdl(match.Entry);
+            var merged = MergeOntoStored(match.Entry, entry);
+            merged.Id = match.LegacyId;
+            toWrite.Add(merged);
+            response.Add(merged);
+            if (EntryDecomposer.WrittenMgdl(merged) != storedMgdl)
+                glucoseMoved.Add(merged);
+        }
+
+        LogReuploadLoop(processed.Count, stored, uploader);
+
+        var written = await CreateEntriesAsync(toWrite, cancellationToken: cancellationToken);
+
+        _logger.LogDebug("Wrote {Count} entries", written.Count);
+
+        return new EntryUploadResult(response, glucoseMoved);
     }
+
+    /// <summary>
+    /// Overlays the fields <paramref name="resent"/> carries onto <paramref name="stored"/> in place.
+    /// A nullable field left null, and an <c>mgdl</c> of 0, is one the re-send did not carry.
+    /// Computed and non-nullable members are always carried.
+    /// </summary>
+    private static Entry MergeOntoStored(Entry stored, Entry resent)
+    {
+        var carried = JsonSerializer.SerializeToNode(resent, CarriedFields)!.AsObject();
+        if (resent.Mgdl == 0)
+            carried.Remove("mgdl");
+
+        JsonMergePatch.ApplyInPlace(stored, JsonSerializer.SerializeToElement(carried), CarrySgvAndMgdl);
+        return stored;
+    }
+
+    private static readonly JsonSerializerOptions CarriedFields =
+        new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+    /// <summary>
+    /// Records one line when a large upload is almost entirely already stored, which is what a
+    /// client re-sending its backlog every cycle looks like from the server. Names the uploader
+    /// (User-Agent) and the counts only, no entry values.
+    /// </summary>
+    private void LogReuploadLoop(int submitted, int duplicates, string? uploader)
+    {
+        if (submitted < ReuploadLoopMinimumBatch)
+            return;
+        if (duplicates < submitted * ReuploadLoopDuplicateRatio)
+            return;
+
+        _logger.LogInformation(
+            "Entries upload of {Submitted} entries was already stored ({Duplicates} duplicates); "
+                + "client {UserAgent} is re-sending stored readings",
+            submitted,
+            duplicates,
+            LogText.Sanitize(uploader)
+        );
+    }
+
+    /// <summary>Smallest upload that can be reported as a re-upload loop.</summary>
+    private const int ReuploadLoopMinimumBatch = 100;
+
+    /// <summary>Share of an upload that must already be stored to report a re-upload loop.</summary>
+    private const double ReuploadLoopDuplicateRatio = 0.95;
 
     /// <inheritdoc />
     public async Task<Entry?> GetCurrentEntryAsync(CancellationToken cancellationToken = default)
@@ -232,7 +333,7 @@ internal class EntryService : IEntryService
         entry.Id = originalId;
     }
 
-    internal static void CarrySgvAndMgdl(Entry patched, JsonElement patchData)
+    private static void CarrySgvAndMgdl(Entry patched, JsonElement patchData)
     {
         // The existing entry's sgv and mgdl are one stored value, so a patch that moves only one of them carries the other.
         var patchesSgv = patchData.TryGetProperty("sgv", out _);

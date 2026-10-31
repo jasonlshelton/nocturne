@@ -916,13 +916,6 @@ internal static class LegacyTreatmentTables
         $$"""{"{{StateSpanMetadataExtensions.CollectionKey}}":"{{StateSpanMetadataExtensions.TreatmentsCollection}}"}""";
 
     /// <summary>
-    /// Metadata key for the <c>duration</c> an override or temporary target was uploaded with, served
-    /// verbatim as Nightscout does: an open-ended Loop override is uploaded with no duration and must
-    /// be served with none, since NightscoutKit reads any numeric duration as a finite override.
-    /// </summary>
-    internal const string UploadedDurationKey = "duration";
-
-    /// <summary>
     /// Metadata key for the <c>timestamp</c> a span's treatment was uploaded with, served verbatim:
     /// NightscoutKit drops a treatment without one. See <see cref="TreatmentUploadedTimestamp"/>.
     /// </summary>
@@ -965,7 +958,7 @@ internal static class LegacyTreatmentTables
 
     /// <remarks>Spans written before the key was kept fall back to their stored end.</remarks>
     private static double? UploadedDuration(IDictionary<string, object>? metadata) =>
-        (double?)metadata.TryReadDecimal(UploadedDurationKey);
+        (double?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UploadedDurationKey);
 
     private static double? DurationMinutes(StateSpanEntity span) =>
         span.EndTimestamp is { } end ? (end - span.StartTimestamp).TotalMinutes : null;

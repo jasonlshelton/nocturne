@@ -5,14 +5,17 @@ using Moq;
 using Nocturne.API.Controllers.V4.Admin;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 using Nocturne.API.Services.Caching;
+using Nocturne.Infrastructure.Data.Repositories;
 
 namespace Nocturne.API.Tests.Controllers.V4.Admin;
 
@@ -27,6 +30,7 @@ public class DemoAdminPurgeTests : IDisposable
     private static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-0000000000de");
 
     private readonly SqliteTestDatabase _db;
+    private readonly DemoAdminRequest _request = new();
 
     public DemoAdminPurgeTests()
     {
@@ -53,14 +57,21 @@ public class DemoAdminPurgeTests : IDisposable
 
         var tenantService = new Mock<ITenantService>();
         var demoTenantService = new DemoTenantService(
-            dbFactory.Object.AsNocturneFactory(),
+            dbFactory.Object.AsNocturneFactory(), new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()), new SubjectRepository(dbFactory.Object.AsNocturneFactory()),
+            new EfFirstPartyTokenRepository(dbFactory.Object.AsNocturneFactory()),
             tenantService.Object,
             TestPublicAccessCache.Create(),
             Mock.Of<ITenantCache>(),
             TimeProvider.System,
             new Mock<ILogger<DemoTenantService>>().Object);
 
-        return new DemoAdminController(tenantService.Object, demoTenantService, dbFactory.Object.AsNocturneFactory(), TimeProvider.System);
+        return new DemoAdminController(
+            tenantService.Object, demoTenantService,
+            new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()),
+            dbFactory.Object.AsNocturneFactory(), TimeProvider.System)
+        {
+            ControllerContext = _request.Context,
+        };
     }
 
     [Fact]
@@ -125,5 +136,86 @@ public class DemoAdminPurgeTests : IDisposable
         (await assert.Boluses.IgnoreQueryFilters().CountAsync()).Should().Be(0);
         (await assert.CarbIntakes.IgnoreQueryFilters().CountAsync()).Should().Be(0);
         (await assert.ApsSnapshots.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteEntries_ReportsTheGlucoseModelsAsTheDemoTenant()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.SensorGlucose.Add(new SensorGlucoseEntity
+            {
+                Id = Guid.CreateVersion7(), TenantId = TenantId, DataSource = DataSources.DemoService,
+                Timestamp = DateTime.UtcNow, Mgdl = 120,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await BuildController().DeleteEntries(CancellationToken.None);
+
+        var report = _request.Reports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().BeEquivalentTo([typeof(SensorGlucose), typeof(MeterGlucose), typeof(Calibration)]);
+    }
+
+    [Fact]
+    public async Task DeleteTreatments_ReportsTheTreatmentAndDeviceStatusModelsAsTheDemoTenant()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.Boluses.Add(new BolusEntity
+            {
+                Id = Guid.CreateVersion7(), TenantId = TenantId, DataSource = DataSources.DemoService,
+                Timestamp = DateTime.UtcNow, Insulin = 1,
+            });
+            seed.ApsSnapshots.Add(new ApsSnapshotEntity
+            {
+                Id = Guid.CreateVersion7(), TenantId = TenantId, Device = DataSources.DemoService,
+                Timestamp = DateTime.UtcNow, AidAlgorithm = "Loop",
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await BuildController().DeleteTreatments(CancellationToken.None);
+
+        var report = _request.Reports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().Contain([typeof(Bolus), typeof(CarbIntake), typeof(StateSpan), typeof(ApsSnapshot)])
+            .And.NotContain(typeof(SensorGlucose));
+    }
+
+    [Fact]
+    public async Task DeleteTreatments_ThatFailsPartWay_StillReportsTheGroupAndNoGroupThatNeverStarted()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.Boluses.Add(new BolusEntity
+            {
+                Id = Guid.CreateVersion7(), TenantId = TenantId, DataSource = DataSources.DemoService,
+                Timestamp = DateTime.UtcNow, Insulin = 1,
+            });
+            await seed.SaveChangesAsync();
+            await seed.Database.ExecuteSqlRawAsync("DROP TABLE lab_hba1c_results");
+        }
+
+        var purge = () => BuildController().DeleteTreatments(CancellationToken.None);
+
+        await purge.Should().ThrowAsync<Exception>();
+
+        var report = _request.Reports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().Contain([typeof(Bolus), typeof(CarbIntake)])
+            .And.NotContain([typeof(SensorGlucose), typeof(ApsSnapshot)]);
+    }
+
+    [Fact]
+    public async Task APurgeThatDeletesNothing_ReportsNothing()
+    {
+        var controller = BuildController();
+
+        await controller.DeleteEntries(CancellationToken.None);
+        await controller.DeleteTreatments(CancellationToken.None);
+
+        _request.Reports.Should().BeEmpty();
     }
 }

@@ -278,15 +278,11 @@ public class LegacyPostBodyTests
         var entries = new List<Entry>();
         var service = new Mock<IEntryService>();
         service
-            .Setup(s => s.CheckForDuplicateEntriesAsync(
-                It.IsAny<IReadOnlyList<EntryDuplicateProbe>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IReadOnlyList<EntryDuplicateProbe> probes, CancellationToken _) =>
-                probes.Select(_ => (StoredEntryMatch?)null).ToArray());
-        service
-            .Setup(s => s.CreateEntriesAsync(
-                It.IsAny<IEnumerable<Entry>>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
-            .Callback<IEnumerable<Entry>, WriteOrigin, CancellationToken>((e, _, _) => entries.AddRange(e))
-            .ReturnsAsync([]);
+            .Setup(s => s.UpsertUploadAsync(
+                It.IsAny<IReadOnlyList<Entry>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<Entry>, string?, CancellationToken>((processed, _, _) => entries.AddRange(processed))
+            .ReturnsAsync((IReadOnlyList<Entry> processed, string? _, CancellationToken _) =>
+                new EntryUploadResult(processed, processed));
         var controller = WithContext(new LegacyV1.EntriesController(
             service.Object,
             Passthrough(),

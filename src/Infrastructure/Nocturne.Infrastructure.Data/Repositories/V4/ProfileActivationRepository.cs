@@ -144,6 +144,21 @@ public class ProfileActivationRepository
         return entities.Count == 0 ? 0 : await SaveChangedAsync(ctx, entities, ct);
     }
 
+    public async Task ReplaceByDataSourceAsync(
+        string dataSource, IReadOnlyCollection<ProfileActivation> activations, CancellationToken ct = default)
+    {
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var purged = await ctx.ExecuteInTransactionAsync(async token =>
+        {
+            var count = await ctx.ProfileActivations.PurgeAsync(a => a.DataSource == dataSource, token);
+            ctx.ProfileActivations.AddRange(activations.Select(ProfileActivationMapper.ToEntity));
+            await ctx.SaveChangesAsync(token);
+            return count;
+        }, ct: ct);
+        if (purged > 0 || activations.Count > 0)
+            await ReportWrittenAsync();
+    }
+
     public async Task<IReadOnlyList<ProfileActivation>> GetUnattributedAsync(
         DateTime? from, DateTime? to, int limit, CancellationToken ct = default)
     {

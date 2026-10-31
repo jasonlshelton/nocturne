@@ -49,6 +49,14 @@ public interface IProfileActivationRepository
     /// <summary>Writes a set of activations' ends in one save; ids with no live row are skipped.</summary>
     Task<int> SetEndsAsync(IReadOnlyDictionary<Guid, DateTime?> ends, CancellationToken ct = default);
 
+    /// <summary>
+    /// Hard-deletes every activation written by <paramref name="dataSource"/> and writes
+    /// <paramref name="activations"/> in their place in one transaction. For the sample-data seeder's
+    /// idempotent re-seed only.
+    /// </summary>
+    Task ReplaceByDataSourceAsync(
+        string dataSource, IReadOnlyCollection<ProfileActivation> activations, CancellationToken ct = default);
+
     /// <summary>Links effective activations to the requested activation they confirm, or to none.</summary>
     Task<int> SetRequestedActivationAsync(
         IReadOnlyCollection<Guid> effectiveIds, Guid? requestedId, CancellationToken ct = default);

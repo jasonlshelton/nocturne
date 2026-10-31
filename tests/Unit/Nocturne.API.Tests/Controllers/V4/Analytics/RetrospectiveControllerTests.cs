@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Nocturne.API.Controllers.V4.Analytics;
-using Nocturne.API.Services.Treatments;
+using Nocturne.API.Services.Analytics;
 using Nocturne.Core.Contracts;
 using Nocturne.Core.Contracts.DeviceStatuses;
 using Nocturne.Core.Contracts.Entries;

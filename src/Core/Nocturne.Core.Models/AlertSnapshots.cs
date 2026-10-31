@@ -62,8 +62,7 @@ public record AlertInstanceSnapshot(Guid Id, Guid TenantId, Guid AlertExcursionI
 /// <summary>
 /// Request to create a new alert instance when an <see cref="AlertExcursion"/> is first detected.
 /// </summary>
-public record CreateAlertInstanceRequest(Guid TenantId, Guid ExcursionId,
-    string Status, DateTime TriggeredAt);
+public record CreateAlertInstanceRequest(Guid ExcursionId, string Status, DateTime TriggeredAt);
 
 /// <summary>
 /// Request to update an existing alert instance (snooze, status change).

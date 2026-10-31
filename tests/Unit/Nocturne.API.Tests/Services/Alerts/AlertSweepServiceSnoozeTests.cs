@@ -97,11 +97,10 @@ public class AlertSweepServiceSnoozeTests
         var enricher = new Mock<ISensorContextEnricher>();
         enricher
             .Setup(e => e.EnrichAsync(
-                It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(),
-                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Callback<SensorContext, IEnumerable<AlertRuleSnapshot>, Guid, CancellationToken>(
-                (ctx, _, _, _) => _enricherInputs.Add(ctx))
-            .ReturnsAsync((SensorContext ctx, IEnumerable<AlertRuleSnapshot> _, Guid _, CancellationToken _) => ctx);
+                It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
+            .Callback<SensorContext, IEnumerable<AlertRuleSnapshot>, CancellationToken>(
+                (ctx, _, _) => _enricherInputs.Add(ctx))
+            .ReturnsAsync((SensorContext ctx, IEnumerable<AlertRuleSnapshot> _, CancellationToken _) => ctx);
 
         var clock = new FakeTimeProvider(new DateTimeOffset(Now));
         var services = new ServiceCollection();

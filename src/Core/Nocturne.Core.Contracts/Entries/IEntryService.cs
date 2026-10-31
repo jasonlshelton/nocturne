@@ -68,18 +68,28 @@ public interface IEntryService
     );
 
     /// <summary>
-    /// Check a whole upload batch for duplicates in one pass
+    /// Writes a processed v1 upload batch and says what to echo and which entries moved glucose.
     /// </summary>
     /// <remarks>
-    /// Same per-entry classification as
-    /// <see cref="CheckForDuplicateEntryAsync(string?, string, long, CancellationToken)"/>,
-    /// but the stored readings covering an <c>sgv</c> batch are loaded in one query rather than a
-    /// query per entry. Other types are probed one at a time.
+    /// Uses one duplicate query per entry type for the whole batch instead of one per entry, with the
+    /// same per-entry classification as
+    /// <see cref="CheckForDuplicateEntryAsync(string?, string, long, CancellationToken)"/>.
+    /// A re-send of a stored reading updates it, as Nightscout's upsert on <c>{sysTime, type}</c>
+    /// does: xDrip+ re-sends the reading paired with a calibration at its original time, with no
+    /// <c>_id</c> and the recalculated value. Like that upsert's <c>$set</c>, it changes only the
+    /// fields the re-send carries. It is written under the stored row's legacy id, so the legacy-id
+    /// upsert updates that row and its material-change gate keeps an identical re-send silent. A
+    /// stored row with no legacy id is out of that upsert's reach, so a re-send of it is echoed as
+    /// stored and not written.
+    /// Every re-send is echoed: v1 uploaders (Loop's NightscoutKit) treat a response shorter than the
+    /// upload as a failed upload and retry the batch forever.
     /// </remarks>
-    /// <param name="probes">Entries to classify, in submission order</param>
-    /// <returns>One result per probe in the order given: the stored reading, or null</returns>
-    Task<IReadOnlyList<StoredEntryMatch?>> CheckForDuplicateEntriesAsync(
-        IReadOnlyList<EntryDuplicateProbe> probes,
+    /// <param name="processed">The batch after document processing, in submission order.</param>
+    /// <param name="uploader">The uploading client's User-Agent, named in the log line that reports a
+    /// client re-sending its stored backlog.</param>
+    Task<EntryUploadResult> UpsertUploadAsync(
+        IReadOnlyList<Entry> processed,
+        string? uploader,
         CancellationToken cancellationToken = default
     );
 

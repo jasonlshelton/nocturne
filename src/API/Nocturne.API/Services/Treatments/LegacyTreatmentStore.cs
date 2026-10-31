@@ -180,7 +180,7 @@ internal sealed class LegacyTreatmentStore(
             .Select(table => written.OfType<IV4Record>().FirstOrDefault(table.Model.IsInstanceOfType))
             .FirstOrDefault(record => record is not null);
         if (served is not null)
-            treatment.Id = served.Id.ToString();
+            treatment.Id = (await ServedAsAsync(served, ct)).Id.ToString();
 
         return treatment;
     }
@@ -226,21 +226,32 @@ internal sealed class LegacyTreatmentStore(
     /// carb intake of a Meal Bolus, bolus first, which need not share a legacy id (a meal entered in
     /// Nocturne has none, a connector's carries one per half); else the record alone.
     /// </summary>
-    private async Task<IReadOnlyList<StoredRecord>> ServedTogetherAsync(StoredRecord stored, CancellationToken ct)
-    {
-        if (!LegacyTreatmentTables.MealTables.Contains(stored.Table) || stored.Record.CorrelationId is not { } correlationId)
-            return [stored];
+    private async Task<IReadOnlyList<StoredRecord>> ServedTogetherAsync(StoredRecord stored, CancellationToken ct) =>
+        await MealHalvesAsync(stored.Table, stored.Record, ct) is { } halves
+            ? [.. halves.Select(half => stored with { Table = half.Table, Record = half.Record })]
+            : [stored];
 
-        var halves = new List<StoredRecord>();
-        foreach (var table in LegacyTreatmentTables.MealTables)
+    /// <summary>
+    /// The bolus and the carb intake served as one Meal Bolus with <paramref name="record"/>, bolus
+    /// first, or none when <paramref name="record"/> is not one of its halves: an extra carb of a
+    /// correlation is served as a Carb Correction under its own id.
+    /// </summary>
+    private async Task<IReadOnlyList<(ILegacyKeyedTreatmentTable Table, IV4Record Record)>?> MealHalvesAsync(
+        ILegacyKeyedTreatmentTable table, IV4Record record, CancellationToken ct)
+    {
+        if (!LegacyTreatmentTables.MealTables.Contains(table) || record.CorrelationId is not { } correlationId)
+            return null;
+
+        var halves = new List<(ILegacyKeyedTreatmentTable Table, IV4Record Record)>();
+        foreach (var mealTable in LegacyTreatmentTables.MealTables)
         {
-            if (await table.Records.MealHalfAsync(_repositories, correlationId, ct) is { } half)
-                halves.Add(stored with { Table = table, Record = half });
+            if (await mealTable.Records.MealHalfAsync(_repositories, correlationId, ct) is { } half)
+                halves.Add((mealTable, half));
         }
 
-        return halves.Count == LegacyTreatmentTables.MealTables.Count && halves.Any(h => h.Record.Id == stored.Record.Id)
+        return halves.Count == LegacyTreatmentTables.MealTables.Count && halves.Any(h => h.Record.Id == record.Id)
             ? halves
-            : [stored];
+            : null;
     }
 
     /// <summary>
@@ -270,13 +281,19 @@ internal sealed class LegacyTreatmentStore(
         if (record is TempBasal tempBasal)
             return TempBasalToTreatmentMapper.ToTreatment(tempBasal);
 
-        // A carb intake paired into a Meal Bolus is served under the bolus's id.
-        if (record is CarbIntake { CorrelationId: { } correlationId }
-            && await LegacyTreatmentTables.KeyedTableOf<Bolus>().Records.MealHalfAsync(_repositories, correlationId, ct) is { } pairedBolus)
-            return await FindProjectedAsync(pairedBolus.Mills, pairedBolus.Id.ToString(), ct);
-
-        return await FindProjectedAsync(record.Mills, record.Id.ToString(), ct);
+        var served = await ServedAsAsync(record, ct);
+        return await FindProjectedAsync(served.Mills, served.Id.ToString(), ct);
     }
+
+    /// <summary>
+    /// The record whose id names the treatment <paramref name="record"/> is served as: a carb intake
+    /// that is half of a Meal Bolus is served under the bolus's id, any other record under its own.
+    /// </summary>
+    private async Task<IV4Record> ServedAsAsync(IV4Record record, CancellationToken ct) =>
+        record is CarbIntake
+            && await MealHalvesAsync(LegacyTreatmentTables.KeyedTableOf<CarbIntake>(), record, ct) is { } halves
+                ? halves[0].Record
+                : record;
 
     private async Task<Treatment?> FindProjectedAsync(long mills, string treatmentId, CancellationToken ct) =>
         (await _projection.GetProjectedTreatmentsAsync(mills, mills, 100, ct: ct))

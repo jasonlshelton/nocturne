@@ -92,9 +92,7 @@ public partial class ChildScopeGuardTests
 
         // Job and connector bookkeeping: job runs, migration sources, sync cursors and locks, none of
         // them time-series.
-        "src/API/Nocturne.API/Services/Connectors/ConnectorCursorResetJobService.cs: ConnectorCursorResetJobService.FindRecordAsync",
         "src/API/Nocturne.API/Services/Connectors/ConnectorCursorResetJobService.cs: ConnectorCursorResetJobService.StartResetAsync",
-        "src/API/Nocturne.API/Services/Connectors/ConnectorCursorResetJobService.cs: ConnectorResetJob.PersistSnapshotAsync",
         "src/API/Nocturne.API/Services/Health/GoogleHealth/GoogleHealthCoordinator.cs: GoogleHealthCoordinator.PendingTenantsAsync",
         "src/API/Nocturne.API/Services/Health/GoogleHealth/GoogleHealthCoordinator.cs: GoogleHealthCoordinator.ReadAsync",
         "src/API/Nocturne.API/Services/Health/GoogleHealth/GoogleHealthCoordinator.cs: GoogleHealthCoordinator.WriteAsync",
@@ -112,6 +110,7 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Auth/ShareLinkRotatedNotifier.cs: ShareLinkRotatedNotifier.NotifyAsync",
         "src/API/Nocturne.API/Services/Connectors/ConnectorCursorResetJobService.cs: ConnectorResetJob.ExecuteAsync",
         "src/API/Nocturne.API/Services/Connectors/ConnectorSyncService.cs: ConnectorSyncService.TriggerSyncAsync",
+        "src/API/Nocturne.API/Services/Demo/DemoDataPurge.cs: DemoPurgeWrites.ReportInTenantAsync",
         "src/API/Nocturne.API/Services/Devices/SensorSessionInferenceRunner.cs: SensorSessionInferenceRunner.RunAsync",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.CreateTenantScope",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.ExecuteApiMigrationAsync",
@@ -338,50 +337,16 @@ public partial class ChildScopeGuardTests
 
     private static List<string> Scan()
     {
-        var root = RepositoryRoot();
-        var sources = new List<(string File, string Text)>();
-
-        foreach (var tree in ScannedTrees)
-        {
-            foreach (var path in Directory.EnumerateFiles(Path.Combine(root, tree), "*.cs", SearchOption.AllDirectories))
-            {
-                if (path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                    || path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-                    continue;
-
-                sources.Add((Path.GetRelativePath(root, path).Replace('\\', '/'), File.ReadAllText(path)));
-            }
-        }
-
-        var trees = new Dictionary<string, SyntaxTree>(StringComparer.Ordinal);
-        SyntaxTree Parse((string File, string Text) source) =>
-            trees.TryGetValue(source.File, out var tree)
-                ? tree
-                : trees[source.File] = CSharpSyntaxTree.ParseText(source.Text);
+        var sources = ScannedTrees.SelectMany(RepoSources.Under).ToList();
 
         var helpers = ScopeHelpers(sources
-            .Where(s => s.File != Seam && MayDeclareHelper(s.Text))
-            .Select(Parse)
+            .Where(s => s.Path != Seam && MayDeclareHelper(s.Text))
+            .Select(s => s.Tree)
             .ToList());
 
         return sources
             .Where(s => MayOpen(s.Text, helpers.Keys))
-            .SelectMany(s => OpeningMembers(Parse(s), helpers).Select(member => $"{s.File}: {member}"))
+            .SelectMany(s => OpeningMembers(s.Tree, helpers).Select(member => $"{s.Path}: {member}"))
             .ToList();
-    }
-
-    private static string RepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-
-        while (directory is not null)
-        {
-            if (Directory.Exists(Path.Combine(directory.FullName, "tests", "Unit")))
-                return directory.FullName;
-
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException($"No tests/Unit directory above {AppContext.BaseDirectory}.");
     }
 }

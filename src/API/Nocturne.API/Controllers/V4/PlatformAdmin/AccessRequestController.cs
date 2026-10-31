@@ -1,16 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Authorization;
+using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
-using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Core.Models.Authorization;
 using Nocturne.API.Multitenancy;
-using Nocturne.Infrastructure.Data;
 using Nocturne.API.Extensions;
-using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Controllers.V4.PlatformAdmin;
 
@@ -31,7 +29,8 @@ namespace Nocturne.API.Controllers.V4.PlatformAdmin;
 [Authorize(Roles = "platform_admin")]
 [AllowDuringSetup]
 public class AccessRequestController(
-    INocturneDbContextFactory contexts,
+    ITenantMembershipRepository members,
+    ISubjectRepository subjects,
     ISubjectService subjectService,
     ITenantService tenantService,
     ITenantRoleService tenantRoleService,
@@ -44,20 +43,15 @@ public class AccessRequestController(
     [ProducesResponseType(typeof(List<AccessRequestDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<AccessRequestDto>>> GetPendingRequests(CancellationToken ct)
     {
-        await using var db = await contexts.CreateAsync(ct);
-        var requests = await db.Subjects
-            .Where(s => s.ApprovalStatus == "Pending" && !s.IsSystemSubject)
-            .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new AccessRequestDto
-            {
-                SubjectId = s.Id,
-                Name = s.Name,
-                Message = s.AccessRequestMessage,
-                CreatedAt = s.CreatedAt,
-            })
-            .ToListAsync(ct);
+        var pending = await subjects.ListPendingAccessRequestsAsync(ct);
 
-        return Ok(requests);
+        return Ok(pending.Select(s => new AccessRequestDto
+        {
+            SubjectId = s.Id,
+            Name = s.Name,
+            Message = s.AccessRequestMessage,
+            CreatedAt = s.CreatedAt,
+        }).ToList());
     }
 
     /// <inheritdoc cref="ITenantService.AddMemberAsync"/>
@@ -70,20 +64,15 @@ public class AccessRequestController(
         [FromBody] ApproveAccessRequestRequest request,
         CancellationToken ct)
     {
-        await using var db = await contexts.CreateAsync(ct);
-        var subject = await db.Subjects
-            .FirstOrDefaultAsync(s => s.Id == subjectId && s.ApprovalStatus == "Pending", ct);
+        var subject = await subjects.GetAsync(subjectId, ct);
 
-        if (subject == null)
+        if (subject is not { ApprovalStatus: "Pending" })
             return NotFound();
 
         if (request.RoleIds.Count == 0 && (request.DirectPermissions == null || request.DirectPermissions.Count == 0))
             return Problem(detail: "At least one role or direct permission is required", statusCode: 400, title: "Bad Request");
 
-        subject.ApprovalStatus = "Approved";
-        subject.IsActive = true;
-        subject.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await subjects.UpdateAsync(subjectId, new SubjectEdit(IsActive: true, ApprovalStatus: "Approved"), ct);
 
         var tenantContext = tenantAccessor.Context;
         if (tenantContext != null)
@@ -104,10 +93,7 @@ public class AccessRequestController(
                 tenantId, subjectId, request.RoleIds, request.DirectPermissions,
                 limitTo24Hours: request.LimitTo24Hours, ct: ct);
 
-            var ownerIds = await db.TenantMembers
-                .OwnersOf(tenantId)
-                .Select(tm => tm.SubjectId)
-                .ToListAsync(ct);
+            var ownerIds = await members.GetOwnerSubjectIdsAsync(tenantId, ct);
 
             foreach (var ownerId in ownerIds)
             {
@@ -134,20 +120,15 @@ public class AccessRequestController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> Deny(Guid subjectId, CancellationToken ct)
     {
-        await using var db = await contexts.CreateAsync(ct);
-        var subject = await db.Subjects
-            .FirstOrDefaultAsync(s => s.Id == subjectId && s.ApprovalStatus == "Pending", ct);
+        var subject = await subjects.GetAsync(subjectId, ct);
 
-        if (subject == null)
+        if (subject is not { ApprovalStatus: "Pending" })
             return NotFound();
 
         var denyTenantContext = tenantAccessor.Context;
         if (denyTenantContext != null)
         {
-            var ownerIds = await db.TenantMembers
-                .OwnersOf(denyTenantContext.TenantId)
-                .Select(tm => tm.SubjectId)
-                .ToListAsync(ct);
+            var ownerIds = await members.GetOwnerSubjectIdsAsync(denyTenantContext.TenantId, ct);
 
             foreach (var ownerId in ownerIds)
             {

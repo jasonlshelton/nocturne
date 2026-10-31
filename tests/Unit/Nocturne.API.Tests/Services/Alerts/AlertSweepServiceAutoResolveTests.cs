@@ -63,9 +63,8 @@ public class AlertSweepServiceAutoResolveTests
         var enricher = new Mock<ISensorContextEnricher>();
         enricher
             .Setup(e => e.EnrichAsync(
-                It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(),
-                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SensorContext ctx, IEnumerable<AlertRuleSnapshot> _, Guid _, CancellationToken _) => ctx);
+                It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SensorContext ctx, IEnumerable<AlertRuleSnapshot> _, CancellationToken _) => ctx);
 
         var engine = new Mock<IAlertEvaluationEngine>();
         engine

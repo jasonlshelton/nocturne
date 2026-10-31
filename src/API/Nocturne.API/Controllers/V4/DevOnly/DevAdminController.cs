@@ -6,12 +6,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Nocturne.API.Authorization;
+using Nocturne.API.Helpers;
 using Nocturne.API.Models.DevOnly;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Connectors;
 using Nocturne.API.Services.DevOnly;
 using Nocturne.API.Services.Seeding;
 using Nocturne.Connectors.Core.Models;
+using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
@@ -35,6 +37,9 @@ namespace Nocturne.API.Controllers.V4.DevOnly;
 public class DevAdminController : ControllerBase
 {
     private readonly INocturneDbContextFactory _contexts;
+    private readonly ITenantMembershipRepository _members;
+    private readonly ISubjectRepository _subjects;
+    private readonly IPasskeyCredentialRepository _passkeys;
     private readonly ISecretEncryptionService _encryption;
     private readonly ITenantService _tenantService;
     private readonly IMemoryCache _cache;
@@ -56,6 +61,9 @@ public class DevAdminController : ControllerBase
     /// <param name="logger">Logger instance.</param>
     public DevAdminController(
         INocturneDbContextFactory contexts,
+        ITenantMembershipRepository members,
+        ISubjectRepository subjects,
+        IPasskeyCredentialRepository passkeys,
         ISecretEncryptionService encryption,
         ITenantService tenantService,
         IMemoryCache cache,
@@ -64,6 +72,9 @@ public class DevAdminController : ControllerBase
     )
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _members = members;
+        _subjects = subjects;
+        _passkeys = passkeys;
         _encryption = encryption;
         _tenantService = tenantService;
         _cache = cache;
@@ -288,7 +299,7 @@ public class DevAdminController : ControllerBase
     /// restore time, because <see cref="Infrastructure.Data.Entities.ISystemTimestamped"/>,
     /// <see cref="Infrastructure.Data.Entities.IEntityTimestamped"/> and
     /// <see cref="Infrastructure.Data.Entities.ConnectorConfigurationEntity.LastModified"/> are
-    /// server-assigned on insert. A tenant updated in place is stamped only if its columns changed.
+    /// server-assigned on insert. A tenant or subject updated in place is stamped only if its columns changed.
     /// </remarks>
     [HttpPost("snapshot")]
     public async Task<ActionResult> ImportSnapshot(
@@ -845,7 +856,6 @@ public class DevAdminController : ControllerBase
                     subject.Notes = s.Notes;
                     subject.IsActive = s.IsActive;
                     subject.IsSystemSubject = s.IsSystemSubject;
-                    subject.UpdatedAt = s.UpdatedAt;
                     subject.LastLoginAt = s.LastLoginAt;
                     subject.OriginalId = s.OriginalId;
                     subject.PreferredLanguage = s.PreferredLanguage;
@@ -1017,10 +1027,7 @@ public class DevAdminController : ControllerBase
     {
         await using var db = await _contexts.CreateAsync(ct);
         var slug = request.Slug ?? string.Empty;
-        var sanitizedSlugForLog = slug
-            .Replace("\r", string.Empty)
-            .Replace("\n", string.Empty);
-        _logger.LogInformation("Dev seed-tenant: slug={Slug}", sanitizedSlugForLog);
+        _logger.LogInformation("Dev seed-tenant: slug={Slug}", LogText.Sanitize(slug));
 
         // `dev` (the AppHost's auto-seeded tenant) and `test` are reserved for production subdomains.
         var validation = await _tenantService.ValidateSlugAsync(slug, allowReserved: true, ct);
@@ -1069,7 +1076,7 @@ public class DevAdminController : ControllerBase
         // passkeys (re-seeded from docs/seed/dev-identities.json) can then sign
         // in to this tenant with the developer's actual authenticator.
         var fixtureSubjectIds = await DevIdentityFixtureSeeder.SeedAsync(
-            db, configuration, _time, _logger, ct);
+            _subjects, _passkeys, configuration, _time, _logger, ct);
         foreach (var fixtureSubjectId in fixtureSubjectIds)
         {
             if (fixtureSubjectId == subjectResult.Subject.Id)
@@ -1148,16 +1155,10 @@ public class DevAdminController : ControllerBase
         if (tenant is null)
             return NotFound(new { error = $"Tenant {id} not found" });
 
-        await db.PinTenantAsync(tenant.Id, ct);
-        var members = await db.TenantMembers
-            .AsNoTracking()
-            .Include(m => m.Subject)
-            .Include(m => m.MemberRoles).ThenInclude(mr => mr.TenantRole)
-            .Where(m => m.TenantId == tenant.Id)
-            .ToListAsync(ct);
+        var members = await _members.ListMembersAsync(tenant.Id, ct);
         var candidates = DevTenantMemberSelection.Candidates(members);
         var owner = candidates.Count > 0
-            ? DevTenantMemberSelection.PickOwnerOrFirst(candidates, tenant.Id)
+            ? DevTenantMemberSelection.PickOwnerOrFirst(candidates)
             : null;
 
         var seeded = await SampleDataSeeder.SeedInTenantScopeAsync(
@@ -1195,11 +1196,7 @@ public class DevAdminController : ControllerBase
 
         await db.PinTenantAsync(tenant.Id, ct);
 
-        var members = await db.TenantMembers
-            .Include(m => m.Subject)
-            .Include(m => m.MemberRoles).ThenInclude(mr => mr.TenantRole)
-            .Where(m => m.TenantId == tenant.Id)
-            .ToListAsync(ct);
+        var members = await _members.ListMembersAsync(tenant.Id, ct);
 
         var candidates = DevTenantMemberSelection.Candidates(members);
         if (candidates.Count == 0)
@@ -1207,7 +1204,7 @@ public class DevAdminController : ControllerBase
 
         var target = request?.SubjectId is { } subjectId
             ? candidates.FirstOrDefault(m => m.SubjectId == subjectId)
-            : DevTenantMemberSelection.PickOwnerOrFirst(candidates, tenant.Id);
+            : DevTenantMemberSelection.PickOwnerOrFirst(candidates);
         if (target is null)
             return NotFound(new { error = $"Subject {request?.SubjectId} is not a member of '{tenant.Slug}'" });
 

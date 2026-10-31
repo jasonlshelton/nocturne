@@ -17,7 +17,7 @@ using Nocturne.Core.Models;
 using Nocturne.Core.Models.Battery;
 using Nocturne.Core.Models.V4;
 using Nocturne.API.Services.Glucose;
-using Nocturne.API.Services.Treatments;
+using Nocturne.API.Services.BolusWizard;
 
 namespace Nocturne.API.Services.Profiles;
 

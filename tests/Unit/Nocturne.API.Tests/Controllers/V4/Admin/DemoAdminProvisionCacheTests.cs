@@ -13,6 +13,7 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 using Nocturne.API.Services.Caching;
+using Nocturne.Infrastructure.Data.Repositories;
 
 namespace Nocturne.API.Tests.Controllers.V4.Admin;
 
@@ -143,14 +144,18 @@ public class DemoAdminProvisionCacheTests : IDisposable
             });
 
         var demoTenantService = new DemoTenantService(
-            dbFactory.Object.AsNocturneFactory(),
+            dbFactory.Object.AsNocturneFactory(), new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()), new SubjectRepository(dbFactory.Object.AsNocturneFactory()),
+            new EfFirstPartyTokenRepository(dbFactory.Object.AsNocturneFactory()),
             tenantService.Object,
             TestPublicAccessCache.Create(),
             Mock.Of<ITenantCache>(),
             TimeProvider.System,
             new Mock<ILogger<DemoTenantService>>().Object);
 
-        return new DemoAdminController(tenantService.Object, demoTenantService, dbFactory.Object.AsNocturneFactory(), TimeProvider.System);
+        return new DemoAdminController(
+            tenantService.Object, demoTenantService,
+            new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()),
+            dbFactory.Object.AsNocturneFactory(), TimeProvider.System);
     }
 
     public void Dispose()

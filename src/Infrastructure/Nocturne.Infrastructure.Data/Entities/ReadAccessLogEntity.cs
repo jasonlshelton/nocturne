@@ -5,7 +5,8 @@ namespace Nocturne.Infrastructure.Data.Entities;
 
 /// <summary>
 /// Audit log entry recording a read access to clinical data.
-/// Append-only — no updates or deletes.
+/// Written once. Retention deletes it, and the actor's deletion clears its client address and user agent
+/// (<see cref="Nocturne.Core.Contracts.Auth.ISubjectRepository.DeleteAsync"/>).
 /// </summary>
 [Table("read_access_log")]
 public class ReadAccessLogEntity : ITenantScoped

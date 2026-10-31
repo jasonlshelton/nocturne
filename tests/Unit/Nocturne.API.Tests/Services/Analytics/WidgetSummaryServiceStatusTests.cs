@@ -15,6 +15,7 @@ using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Tests.Shared.Infrastructure;
 using Nocturne.Tests.Shared.Mocks;
 using Nocturne.Infrastructure.Data.Abstractions;
 using Nocturne.Infrastructure.Data.Entities;
@@ -172,8 +173,7 @@ public class WidgetSummaryServiceStatusTests
             Mock.Of<INotificationV1Service>(),
             new GlucoseStatusClassifier(
                 new ConfigurationBuilder().Build(), NullLogger<GlucoseStatusClassifier>.Instance),
-            new AlertRepository(contextFactory.Object),
-            MockTenantAccessor.Create(tenantId: _tenantId).Object,
+            new AlertRepository(contextFactory.Object.AsNocturneFactory()),
             categoryReadContext.Object,
             TimeProvider.System, NullLogger<WidgetSummaryService>.Instance);
     }

@@ -46,13 +46,14 @@ public class LegacyReadCacheInvalidationTests : IDisposable
     private static readonly Type[] GlucoseModels = [typeof(SensorGlucose), typeof(MeterGlucose), typeof(Calibration)];
 
     private static IEnumerable<Type> TreatmentModels =>
-        LegacyTreatmentTables.All.Select(t => t.Model).Append(typeof(TreatmentFood)).Distinct();
+        LegacyTreatmentTables.All.Select(t => t.Model)
+            .Append(typeof(TreatmentFood)).Append(typeof(Nocturne.Core.Models.Food)).Distinct();
 
     public static TheoryData<Type> RepositoryModels()
     {
         var data = new TheoryData<Type>();
         foreach (var model in TreatmentModels.Concat(GlucoseModels)
-                     .Where(m => m != typeof(StateSpan) && m != typeof(TreatmentFood)))
+                     .Where(m => m != typeof(StateSpan) && m != typeof(TreatmentFood) && m != typeof(Nocturne.Core.Models.Food)))
             data.Add(model);
         return data;
     }
@@ -113,6 +114,18 @@ public class LegacyReadCacheInvalidationTests : IDisposable
         var invalidation = new LegacyReadCacheInvalidation(cache.Object, NullLogger<LegacyReadCacheInvalidation>.Instance);
 
         await invalidation.WrittenAsync([typeof(Bolus), typeof(CarbIntake), typeof(ApsSnapshot)]);
+
+        cache.Verify(c => c.RemoveFamilyAsync(TenantCacheFamily.Treatments, It.IsAny<CancellationToken>()), Times.Once);
+        cache.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task A_food_write_clears_the_treatments_family_a_treatment_is_served_through()
+    {
+        var cache = new Mock<ITenantCache>();
+        var invalidation = new LegacyReadCacheInvalidation(cache.Object, NullLogger<LegacyReadCacheInvalidation>.Instance);
+
+        await invalidation.WrittenAsync([typeof(Nocturne.Core.Models.Food)]);
 
         cache.Verify(c => c.RemoveFamilyAsync(TenantCacheFamily.Treatments, It.IsAny<CancellationToken>()), Times.Once);
         cache.VerifyNoOtherCalls();

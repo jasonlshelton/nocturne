@@ -10,6 +10,8 @@ using Nocturne.Connectors.Core.Services;
 using Nocturne.Connectors.Core.Utilities;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Models;
+using Nocturne.Core.Contracts.Auth;
+using AuthRole = Nocturne.Core.Models.Authorization.Role;
 using Nocturne.Core.Models.Authorization;
 using DecompositionResult = Nocturne.Core.Models.V4.DecompositionResult;
 using Nocturne.Core.Contracts.DeviceStatuses;
@@ -203,7 +205,7 @@ public class MigrationJobService : IMigrationJobService
             "Started migration job {JobId} in {Mode} mode from {Source}",
             jobId,
             request.Mode,
-            SanitizeForLog(sourceDesc)
+            LogText.Sanitize(sourceDesc)
         );
 
         return jobInfo;
@@ -480,13 +482,6 @@ public class MigrationJobService : IMigrationJobService
 
         return sources;
     }
-
-    /// <summary>
-    /// The source description carries the caller's Nightscout URL or Mongo database name;
-    /// stripping CR/LF keeps it from forging log lines.
-    /// </summary>
-    private static string? SanitizeForLog(string? value) =>
-        value?.Replace("\r", string.Empty).Replace("\n", string.Empty);
 }
 
 /// <summary>
@@ -948,7 +943,9 @@ internal class MigrationJob
         // Build the list of collections to migrate
         var allCollections = new (string name, Func<HttpClient, CancellationToken, Task> migrate)[]
         {
-            ("subjects", (client, token) => MigrateSubjectsViaApiAsync(client, dbContext, token)),
+            ("subjects", (client, token) => MigrateSubjectsViaApiAsync(
+                client, dbContext, scope.ServiceProvider.GetRequiredService<IOAuthGrantRepository>(),
+                scope.ServiceProvider.GetRequiredService<IRoleRepository>(), token)),
             ("entries", (client, token) => MigratePagedCollectionAsync(client, s_entriesCollection, token)),
             ("treatments", (client, token) => MigratePagedCollectionAsync(client, s_treatmentsCollection, token)),
             ("devicestatus", (client, token) => MigratePagedCollectionAsync(client, s_deviceStatusCollection, token)),
@@ -2118,6 +2115,8 @@ internal class MigrationJob
     private async Task MigrateSubjectsViaApiAsync(
         HttpClient httpClient,
         NocturneDbContext dbContext,
+        IOAuthGrantRepository grants,
+        IRoleRepository roleCatalogue,
         CancellationToken ct)
     {
         _currentOperation = "Migrating subjects";
@@ -2161,13 +2160,9 @@ internal class MigrationJob
         UpdateCollectionProgress(collectionName, subjects.Length, 0, 0, false);
         UpdateOverallProgress();
 
-        var existingHashes = await dbContext.OAuthGrants
-            .Where(g => g.TenantId == _tenantId && g.TokenHash != null)
-            .Select(g => g.TokenHash!)
-            .ToHashSetAsync(ct);
+        var existingHashes = (await grants.GetTokenHashesAsync(ct)).ToHashSet(StringComparer.Ordinal);
 
-        var nocturneRoles = await dbContext.Roles
-            .ToDictionaryAsync(r => r.Name, r => r, ct);
+        var nocturneRoles = (await roleCatalogue.ListAsync(ct)).ToDictionary(r => r.Name, r => r);
 
         // Nightscout derives each subject's token from digest = sha1(sha1(api_secret) + _id).
         // HashApiSecret yields exactly that inner sha1(api_secret), so with the mongo _id we
@@ -2207,7 +2202,7 @@ internal class MigrationJob
                     continue;
                 }
 
-                var roles = await ResolveRolesAsync(dbContext, nocturneRoles, rolePermissions, subject.Roles, ct);
+                var roles = await ResolveRolesAsync(roleCatalogue, nocturneRoles, rolePermissions, subject.Roles, ct);
                 var scopes = ScopeTranslator.FromPermissions(GrantedPermissions(roles, rolePermissions));
 
                 // A subject whose permissions all fall outside Nocturne's vocabulary would get a
@@ -2230,14 +2225,14 @@ internal class MigrationJob
 
                 // Both spellings the source instance would have accepted: the token verbatim, and
                 // any other digest prefix. Existing AAPS and xDrip setups keep uploading.
-                dbContext.OAuthGrants.Add(OAuthGrantEntity.AdoptedLegacyCredential(
-                    deviceSubjectId.Value,
-                    subject.Name ?? "Unnamed",
-                    scopes,
-                    tokenHash: tokenHash,
-                    legacyTokenDigest: legacyDigest));
-
-                await dbContext.SaveChangesAsync(ct);
+                await grants.AdoptLegacyCredentialAsync(
+                    new AdoptedLegacyCredential(
+                        deviceSubjectId.Value,
+                        subject.Name ?? "Unnamed",
+                        [.. scopes],
+                        TokenHash: tokenHash,
+                        LegacyTokenDigest: legacyDigest),
+                    ct);
 
                 existingHashes.Add(tokenHash);
                 totalMigrated++;
@@ -2267,16 +2262,16 @@ internal class MigrationJob
     /// </summary>
     /// <remarks>
     /// "denied" is dropped: it is Nightscout's way of spelling "no access", carried instead by
-    /// <see cref="SubjectEntity.IsActive"/>, and a role row for it would grant nothing anyway.
+    /// the subject's <c>is_active</c> flag, and a role row for it would grant nothing anyway.
     /// </remarks>
-    private static async Task<List<RoleEntity>> ResolveRolesAsync(
-        NocturneDbContext dbContext,
-        Dictionary<string, RoleEntity> knownRoles,
+    private static async Task<List<AuthRole>> ResolveRolesAsync(
+        IRoleRepository roleCatalogue,
+        Dictionary<string, AuthRole> knownRoles,
         Dictionary<string, List<string>> sourcePermissions,
         List<string>? roleNames,
         CancellationToken ct)
     {
-        var resolved = new List<RoleEntity>();
+        var resolved = new List<AuthRole>();
 
         foreach (var roleName in roleNames ?? [])
         {
@@ -2285,16 +2280,9 @@ internal class MigrationJob
 
             if (!knownRoles.TryGetValue(roleName, out var role))
             {
-                role = new RoleEntity
-                {
-                    Id = Guid.CreateVersion7(),
-                    Name = roleName,
-                    Description = "Migrated from Nightscout",
-                    Permissions = sourcePermissions.GetValueOrDefault(roleName, []),
-                    IsSystemRole = false,
-                };
-                dbContext.Roles.Add(role);
-                await dbContext.SaveChangesAsync(ct);
+                role = await roleCatalogue.CreateAsync(
+                    new NewRole(roleName, "Migrated from Nightscout", sourcePermissions.GetValueOrDefault(roleName, []), IsSystemRole: false),
+                    ct);
                 knownRoles[roleName] = role;
             }
 
@@ -2312,7 +2300,7 @@ internal class MigrationJob
     /// inaccessible.
     /// </summary>
     private static IEnumerable<string> GrantedPermissions(
-        List<RoleEntity> roles, Dictionary<string, List<string>> sourcePermissions) =>
+        List<AuthRole> roles, Dictionary<string, List<string>> sourcePermissions) =>
         roles.SelectMany(role => sourcePermissions.TryGetValue(role.Name, out var fromSource)
             ? fromSource
             : role.Permissions);

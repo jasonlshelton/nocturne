@@ -66,8 +66,8 @@ public interface IAuthAuditService
     /// <summary>
     /// Log an authentication or authorization event.
     /// </summary>
-    /// <param name="eventType">One of the <c>AuthAuditEventType</c> constants.</param>
-    /// <param name="subjectId">The subject the event happened to, if known.</param>
+    /// <param name="eventType">One of the <see cref="AuthAuditEventType"/> constants.</param>
+    /// <param name="targetSubjectId">The subject the event happened to, if known.</param>
     /// <param name="success">Whether the event succeeded.</param>
     /// <param name="ipAddress">Client IP address.</param>
     /// <param name="userAgent">Client user-agent string.</param>
@@ -75,7 +75,7 @@ public interface IAuthAuditService
     /// <param name="detailsJson">Additional details as a JSON string (stored as jsonb).</param>
     /// <param name="refreshTokenId">Related refresh token, if applicable.</param>
     /// <param name="actor">
-    /// Who performed the action, when that is someone other than <paramref name="subjectId"/>.
+    /// Who performed the action, when that is someone other than <paramref name="targetSubjectId"/>.
     /// Defaults to the caller on the current request per
     /// <see cref="AuthAuditActor.FromCallerOtherThan"/>; pass one explicitly only where the actor
     /// is not that caller.
@@ -84,7 +84,7 @@ public interface IAuthAuditService
     /// The tenant the action targeted. Defaults to the tenant the request is pinned to; pass one
     /// explicitly for an action against a tenant other than the caller's own.
     /// </param>
-    Task LogAsync(string eventType, Guid? subjectId, bool success,
+    Task LogAsync(string eventType, Guid? targetSubjectId, bool success,
         string? ipAddress = null, string? userAgent = null,
         string? errorMessage = null, string? detailsJson = null,
         Guid? refreshTokenId = null,

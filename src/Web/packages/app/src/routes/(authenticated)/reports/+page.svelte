@@ -146,7 +146,12 @@
           ·
           {#if countResource.error}
             <span class="text-destructive">Could not load the reading count.</span>
-            <Button variant="link" size="inline" onclick={() => countResource.refresh()}>
+            <Button
+              variant="link"
+              size="inline"
+              aria-label="Try again to load the reading count"
+              onclick={() => countResource.refresh()}
+            >
               Try again
             </Button>
           {:else if countResource.current}
@@ -186,6 +191,7 @@
       hasData={analysisResource.current !== undefined}
       refreshing={analysisResource.loading && analysisResource.current !== undefined}
       onRetry={() => analysisResource.refresh()}
+      retryLabel="Try again to load the analysis"
       loadingSnippet={analysisSkeleton}
       compact
     >

@@ -226,6 +226,25 @@ public class TempBasalRepository : SyncUpsertRepositoryBase<TempBasal, TempBasal
     }
 
     /// <inheritdoc />
+    public async Task<int> StampScheduledRatesAsync(
+        string source, Func<DateTime, double> scheduledRateAt, CancellationToken ct = default)
+    {
+        var scheduled = nameof(TempBasalOrigin.Scheduled);
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        var temps = await ctx.TempBasals
+            .Where(t => t.DataSource == source && t.ScheduledRate == null && t.Origin != scheduled)
+            .ToListAsync(ct);
+        if (temps.Count == 0)
+            return 0;
+
+        foreach (var temp in temps)
+            temp.ScheduledRate = scheduledRateAt(temp.Timestamp);
+        await ctx.SaveChangesAsync(ct);
+        await ReportWrittenAsync();
+        return temps.Count;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TempBasal>> GetByLegacyIdsAsync(
         IReadOnlyCollection<string> legacyIds, CancellationToken ct = default)
     {

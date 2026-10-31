@@ -1,5 +1,4 @@
 using Nocturne.API.Tests.Infrastructure;
-using Nocturne.API.Services.Treatments;
 using Nocturne.Core.Clinical.Treatments;
 using System.Reflection;
 using FluentAssertions;

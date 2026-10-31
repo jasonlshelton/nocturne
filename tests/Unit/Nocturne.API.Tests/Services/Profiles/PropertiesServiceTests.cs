@@ -8,7 +8,7 @@ using Moq;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Devices;
 using Nocturne.API.Services.Profiles;
-using Nocturne.API.Services.Treatments;
+using Nocturne.API.Services.BolusWizard;
 using Nocturne.Core.Contracts.Devices;
 using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Contracts.Profiles;

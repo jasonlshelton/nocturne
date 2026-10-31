@@ -474,7 +474,6 @@ public class StateSpanRepository : IStateSpanRepository
 
             open.EndTimestamp = entity.StartTimestamp;
             open.SupersededById = entity.Id;
-            open.UpdatedAt = DateTime.UtcNow;
             superseded++;
         }
 
@@ -553,7 +552,6 @@ public class StateSpanRepository : IStateSpanRepository
 
             earlier.EndTimestamp = entity.StartTimestamp;
             earlier.SupersededById = entity.Id;
-            earlier.UpdatedAt = DateTime.UtcNow;
         }
     }
 
@@ -715,6 +713,25 @@ public class StateSpanRepository : IStateSpanRepository
         if (deletedCount > 0)
             await ReportWrittenAsync();
         return deletedCount;
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceBySourceAsync(
+        string source,
+        IReadOnlyCollection<StateSpan> stateSpans,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await using var db = await _contexts.CreateAsync(cancellationToken);
+        var purged = await db.ExecuteInTransactionAsync(async ct =>
+        {
+            var count = await db.StateSpans.PurgeAsync(s => s.Source == source, ct);
+            db.StateSpans.AddRange(stateSpans.Select(StateSpanMapper.ToEntity));
+            await db.SaveChangesAsync(ct);
+            return count;
+        }, ct: cancellationToken);
+        if (purged > 0 || stateSpans.Count > 0)
+            await ReportWrittenAsync();
     }
 
     /// <inheritdoc />

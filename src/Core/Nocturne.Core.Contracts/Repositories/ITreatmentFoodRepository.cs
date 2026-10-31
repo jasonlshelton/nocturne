@@ -65,6 +65,16 @@ public interface ITreatmentFoodRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Hard-deletes the breakdowns of <paramref name="carbIntakeIds"/> and writes
+    /// <paramref name="entries"/> in their place in one transaction. For the sample-data seeder's idempotent
+    /// re-seed only.
+    /// </summary>
+    Task ReplaceForCarbIntakesAsync(
+        IReadOnlyCollection<Guid> carbIntakeIds,
+        IReadOnlyCollection<TreatmentFood> entries,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get recently used foods ordered by last usage.
     /// </summary>
     Task<IReadOnlyList<Food>> GetRecentFoodsAsync(

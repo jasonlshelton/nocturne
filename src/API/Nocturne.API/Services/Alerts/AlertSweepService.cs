@@ -428,7 +428,7 @@ public class AlertSweepService : BackgroundService
                 TrendRate = (decimal?)fresh?.TrendRate,
                 LastReadingAt = last.At,
             };
-            return await enricher.EnrichAsync(baseContext, syntheticRules, tenantContext.TenantId, ct);
+            return await enricher.EnrichAsync(baseContext, syntheticRules, ct);
         }
         catch (Exception ex)
         {
@@ -516,7 +516,7 @@ public class AlertSweepService : BackgroundService
                     TrendRate = null,
                     LastReadingAt = last.At,
                 };
-                enriched = await enricher.EnrichAsync(baseContext, rules, tenantId, ct);
+                enriched = await enricher.EnrichAsync(baseContext, rules, ct);
             }
             catch (Exception ex)
             {

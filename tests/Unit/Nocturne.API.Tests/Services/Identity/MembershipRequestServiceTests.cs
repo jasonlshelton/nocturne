@@ -13,6 +13,8 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
+using Nocturne.Infrastructure.Data.Repositories;
+
 namespace Nocturne.API.Tests.Services.Identity;
 
 public class MembershipRequestServiceTests : IDisposable
@@ -49,9 +51,11 @@ public class MembershipRequestServiceTests : IDisposable
             .ReturnsAsync(new InAppNotificationDto());
 
         _service = new MembershipRequestService(
-            _dbContext.AsFactory(),
+            new TenantRepository(_dbContext.AsFactory()),
+            new TenantMembershipRepository(_dbContext.AsFactory()),
+            new SubjectRepository(_dbContext.AsFactory()),
             _tenantService.Object,
-            new TenantRoleService(_dbContext.AsFactory(), TimeProvider.System),
+            new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory()), TimeProvider.System),
             _notificationService.Object,
             TimeProvider.System,
             NullLogger<MembershipRequestService>.Instance);

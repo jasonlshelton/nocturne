@@ -33,7 +33,6 @@ public class WidgetSummaryService : IWidgetSummaryService
     private readonly INotificationV1Service _notificationService;
     private readonly IGlucoseStatusClassifier _statusClassifier;
     private readonly IAlertRepository _alertRepository;
-    private readonly ITenantAccessor _tenantAccessor;
     private readonly ICategoryReadContext _categoryReadContext;
     private readonly TimeProvider _time;
     private readonly ILogger<WidgetSummaryService> _logger;
@@ -51,7 +50,6 @@ public class WidgetSummaryService : IWidgetSummaryService
         INotificationV1Service notificationService,
         IGlucoseStatusClassifier statusClassifier,
         IAlertRepository alertRepository,
-        ITenantAccessor tenantAccessor,
         ICategoryReadContext categoryReadContext,
         TimeProvider timeProvider,
         ILogger<WidgetSummaryService> logger
@@ -65,7 +63,6 @@ public class WidgetSummaryService : IWidgetSummaryService
         _notificationService = notificationService;
         _statusClassifier = statusClassifier;
         _alertRepository = alertRepository;
-        _tenantAccessor = tenantAccessor;
         _categoryReadContext = categoryReadContext;
         _logger = logger;
     }
@@ -161,7 +158,7 @@ public class WidgetSummaryService : IWidgetSummaryService
             var thresholds = _categoryReadContext.IsShare
                 ? _statusClassifier.Defaults
                 : _statusClassifier.ResolveThresholds(
-                    await _alertRepository.GetEnabledRulesAsync(_tenantAccessor.TenantId, cancellationToken));
+                    await _alertRepository.GetEnabledRulesAsync(cancellationToken));
             current.Status = _statusClassifier.Classify(
                 current.Sgv,
                 DateTimeOffset.FromUnixTimeMilliseconds(current.Mills).UtcDateTime,

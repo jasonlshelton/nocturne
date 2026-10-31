@@ -3,6 +3,7 @@ using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Infrastructure.Data.Services;
 
@@ -230,6 +231,25 @@ public class TreatmentFoodRepository : ITreatmentFoodRepository
         if (deleted > 0)
             await ReportWrittenAsync();
         return deleted;
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceForCarbIntakesAsync(
+        IReadOnlyCollection<Guid> carbIntakeIds,
+        IReadOnlyCollection<TreatmentFood> entries,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await using var db = await _contexts.CreateAsync(cancellationToken);
+        var purged = await db.ExecuteInTransactionAsync(async ct =>
+        {
+            var count = await db.TreatmentFoods.PurgeAsync(tf => carbIntakeIds.Contains(tf.CarbIntakeId), ct);
+            db.TreatmentFoods.AddRange(entries.Select(TreatmentFoodMapper.ToEntity));
+            await db.SaveChangesAsync(ct);
+            return count;
+        }, ct: cancellationToken);
+        if (purged > 0 || entries.Count > 0)
+            await ReportWrittenAsync();
     }
 
     /// <summary>

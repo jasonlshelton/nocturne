@@ -1,10 +1,17 @@
 using FluentAssertions;
+using Moq;
+using Nocturne.API.Services.Auth;
+using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Migration;
 using Nocturne.API.Services.SetupHub;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Alerts;
+using Nocturne.Core.Models.Configuration;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Tests.Shared.Infrastructure;
+using Nocturne.Tests.Shared.Mocks;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.SetupHub;
@@ -37,7 +44,21 @@ public class AlertSetupServiceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private AlertSetupService Service() => new(_factory, null!, null!, null!, null!, null!, TimeProvider.System);
+    private AlertSetupService Service(string? ownerAppearanceUnits = null)
+    {
+        var tenants = new TenantRepository(_factory);
+        var appearance = new Mock<ITenantAppearanceReader>();
+        appearance
+            .Setup(a => a.GetTenantAppearanceAsync(TenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UserDisplayPreferences { GlucoseUnits = ownerAppearanceUnits });
+        var setup = new Mock<ITenantService>();
+        setup
+            .Setup(t => t.GetDefaultGlucoseUnitsAsync(TenantId, It.IsAny<CancellationToken>()))
+            .Returns(async (Guid id, CancellationToken ct) => (await tenants.GetAsync(id, ct))?.DefaultGlucoseUnits);
+        var units = new TenantGlucoseUnits(MockTenantAccessor.Create(TenantId).Object, appearance.Object, setup.Object);
+
+        return new(_factory, tenants, units, new TenantMembershipRepository(_factory), new SubjectRepository(_factory), new AlertRuleRepository(_factory), null!, null!, null!, null!, null!, TimeProvider.System);
+    }
 
     private async Task MigrationRun(
         string state, NightscoutAlarmSettings? settings, DateTime? startedAt = null, string? rawSettings = null)
@@ -260,5 +281,34 @@ public class AlertSetupServiceTests : IDisposable
 
         status.GlucoseUnits.Should().Be("mmol");
         Rule(status, StarterAlertKind.Low).Threshold.Should().Be(4.4m);
+    }
+
+    [Fact]
+    public async Task AMemberWithNoChoiceReadsTheOwnersAppearanceBeforeTheSetupDefault()
+    {
+        await MigrationRun("Completed", NightscoutSettings);
+        _db.Tenants.Single(t => t.Id == TenantId).DefaultGlucoseUnits = "mg/dl";
+        await _db.SaveChangesAsync();
+
+        var status = await Service(ownerAppearanceUnits: "mmol").GetAsync(CallerId, CancellationToken.None);
+
+        status.GlucoseUnits.Should().Be("mmol");
+        Rule(status, StarterAlertKind.Low).Threshold.Should().Be(4.4m);
+    }
+
+    [Fact]
+    public async Task AMembersOwnChoiceWinsOverTheTenantsUnits()
+    {
+        await MigrationRun("Completed", NightscoutSettings);
+        _db.Subjects.Add(new SubjectEntity
+        {
+            Id = CallerId, Name = "caller",
+            Preferences = new UserDisplayPreferences { GlucoseUnits = "mg/dl" }.Serialize(),
+        });
+        await _db.SaveChangesAsync();
+
+        var status = await Service(ownerAppearanceUnits: "mmol").GetAsync(CallerId, CancellationToken.None);
+
+        status.GlucoseUnits.Should().Be("mg/dl");
     }
 }

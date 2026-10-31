@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Nocturne.API.Helpers;
 using Nocturne.API.Services.ProfileActivations;
 using Nocturne.API.Services.Treatments;
 using Nocturne.Connectors.Core.Constants;
@@ -228,13 +229,6 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             && !ProduceNote && !ProduceBolusCalc && !ProduceDeviceEvent && !DelegateToStateSpan;
     }
 
-    private static string? SanitizeForLog(string? value)
-    {
-        return value?
-            .Replace("\r", string.Empty)
-            .Replace("\n", string.Empty);
-    }
-
     /// <summary>
     /// Classifies which v4 records a legacy <see cref="Treatment"/> decomposes into, based on its
     /// <see cref="Treatment.EventType"/> and the insulin/carb data present. This mapping is shared
@@ -244,7 +238,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     private TreatmentClassification ClassifyTreatment(Treatment treatment)
     {
         var eventType = treatment.EventType?.Trim();
-        var sanitizedEventTypeForLog = SanitizeForLog(treatment.EventType);
+        var sanitizedEventTypeForLog = LogText.Sanitize(treatment.EventType);
         var hasInsulin = treatment.Insulin is > 0;
         var hasCarbs = treatment.Carbs is > 0;
 
@@ -433,7 +427,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             result.SkippedUnsupported++;
             Logger.LogWarning(
                 "Skipped a treatment whose event type Nocturne does not store: {EventType}",
-                SanitizeForLog(treatment.EventType));
+                LogText.Sanitize(treatment.EventType));
         }
 
         // Handle StateSpan delegation
@@ -854,7 +848,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         };
 
         if (await UpsertTreatmentSpanAsync(db, stateSpan, result, ct))
-            Logger.LogDebug("Delegated Temporary Override treatment {LegacyId} to IStateSpanService", SanitizeForLog(treatment.Id));
+            Logger.LogDebug("Delegated Temporary Override treatment {LegacyId} to IStateSpanService", LogText.Sanitize(treatment.Id));
     }
 
     private async Task DecomposeTemporaryTargetAsync(Treatment treatment, V4Models.DecompositionResult result, WriteOrigin origin, CancellationToken ct)
@@ -879,7 +873,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         };
 
         if (await UpsertTreatmentSpanAsync(db, stateSpan, result, ct))
-            Logger.LogDebug("Delegated Temporary Target treatment {LegacyId} to IStateSpanService", SanitizeForLog(treatment.Id));
+            Logger.LogDebug("Delegated Temporary Target treatment {LegacyId} to IStateSpanService", LogText.Sanitize(treatment.Id));
     }
 
     /// <summary>
@@ -1372,7 +1366,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
 
         Logger.LogWarning(
             "Refused to write a {EventType} under temp basal {LegacyId}",
-            SanitizeForLog(treatment.EventType), SanitizeForLog(treatment.Id));
+            LogText.Sanitize(treatment.EventType), LogText.Sanitize(treatment.Id));
         return true;
     }
 
@@ -1550,7 +1544,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             metadata[ProfileSpanMetadata.OriginalDurationKey] = originalDuration;
 
         if (treatment.Duration is { } duration)
-            metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
+            metadata[StateSpanMetadataExtensions.UploadedDurationKey] = duration;
 
         if (treatment.DurationInMilliseconds is { } durationMs)
             metadata[ProfileSpanMetadata.DurationInMillisecondsKey] = durationMs;
@@ -1628,7 +1622,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             metadata["durationType"] = treatment.DurationType;
 
         if (treatment.Duration is { } duration)
-            metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
+            metadata[StateSpanMetadataExtensions.UploadedDurationKey] = duration;
 
         var uploaded = LegacyTreatmentTables.UploadedOverrideFields
             .Select(key => (Key: key, Value: treatment.AdditionalProperties?.GetValueOrDefault(key)))
@@ -1651,7 +1645,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             metadata[LegacyTreatmentTables.UploadedEventTypeKey] = eventType;
 
         if (treatment.Duration is { } duration)
-            metadata[LegacyTreatmentTables.UploadedDurationKey] = duration;
+            metadata[StateSpanMetadataExtensions.UploadedDurationKey] = duration;
 
         if (treatment.TargetTop.HasValue)
             metadata["targetTop"] = treatment.TargetTop.Value;

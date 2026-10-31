@@ -80,6 +80,8 @@ public class TreatmentCreateBroadcastTests
         Decomposes(carbs);
         _carbs.Setup(r => r.GetByIdAsync(carbs.Id, It.IsAny<CancellationToken>())).ReturnsAsync(carbs);
         _boluses.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>())).ReturnsAsync([bolus]);
+        _carbs.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>())).ReturnsAsync([carbs]);
+        _boluses.Setup(r => r.GetByIdAsync(bolus.Id, It.IsAny<CancellationToken>())).ReturnsAsync(bolus);
         Serves(new Treatment
         {
             Id = bolus.Id.ToString(), EventType = "Meal Bolus", Insulin = 4, Carbs = 40, Mills = bolus.Mills,
@@ -94,6 +96,89 @@ public class TreatmentCreateBroadcastTests
             .Should().Be(Wire(served!).GetProperty("_id").GetString())
             .And.Be(MongoObjectId.FromGuid(bolus.Id));
         Wire(announced.Doc).GetProperty("insulin").GetDouble().Should().Be(4);
+    }
+
+    /// <summary>
+    /// A client that keeps the create response's id reads the same treatment back by it, so the
+    /// response names the meal by its bolus, as the event and every read do.
+    /// </summary>
+    [Fact]
+    public async Task ACreatedCarbHalfIsAnsweredWithTheIdTheMealReadsServe()
+    {
+        var correlation = Guid.CreateVersion7();
+        var bolus = new Bolus { Id = Guid.CreateVersion7(), Timestamp = At, Insulin = 4, CorrelationId = correlation };
+        var carbs = new CarbIntake
+        {
+            Id = Guid.CreateVersion7(), Timestamp = At, Carbs = 40, CorrelationId = correlation, LegacyId = ClientId,
+        };
+        Decomposes(carbs);
+        _carbs.Setup(r => r.GetByIdAsync(carbs.Id, It.IsAny<CancellationToken>())).ReturnsAsync(carbs);
+        _boluses.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>())).ReturnsAsync([bolus]);
+        _carbs.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>())).ReturnsAsync([carbs]);
+        _boluses.Setup(r => r.GetByIdAsync(bolus.Id, It.IsAny<CancellationToken>())).ReturnsAsync(bolus);
+        Serves(new Treatment
+        {
+            Id = bolus.Id.ToString(), EventType = "Meal Bolus", Insulin = 4, Carbs = 40, Mills = bolus.Mills,
+        });
+
+        var created = await _service.CreateTreatmentsAsync(
+            [new Treatment { Id = ClientId, EventType = "Carb Correction", Carbs = 40, Mills = carbs.Mills }]);
+
+        var served = await _service.GetTreatmentByIdAsync(created.Single().Id!);
+        var servedByCarbId = await _service.GetTreatmentByIdAsync(carbs.Id.ToString());
+        var announced = _creates.Should().ContainSingle().Subject;
+        Wire(created.Single()).GetProperty("_id").GetString()
+            .Should().Be(MongoObjectId.FromGuid(bolus.Id))
+            .And.Be(Wire(served!).GetProperty("_id").GetString())
+            .And.Be(Wire(servedByCarbId!).GetProperty("_id").GetString())
+            .And.Be(Wire(announced.Doc).GetProperty("_id").GetString());
+    }
+
+    /// <summary>
+    /// Only the largest carb intake of a correlation is half of its Meal Bolus; a smaller one is served
+    /// as a Carb Correction under its own id, so a client that deletes by the response id deletes that
+    /// carb and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task ACreatedExtraCarbIsAnsweredWithItsOwnIdAndDeletedAlone()
+    {
+        var correlation = Guid.CreateVersion7();
+        var bolus = new Bolus { Id = Guid.CreateVersion7(), Timestamp = At, Insulin = 4, CorrelationId = correlation };
+        var mealCarbs = new CarbIntake
+        {
+            Id = Guid.CreateVersion7(), Timestamp = At, Carbs = 40, CorrelationId = correlation,
+        };
+        var extra = new CarbIntake
+        {
+            Id = Guid.CreateVersion7(), Timestamp = At, Carbs = 10, CorrelationId = correlation, LegacyId = ClientId,
+        };
+        Decomposes(extra);
+        _carbs.Setup(r => r.GetByIdAsync(extra.Id, It.IsAny<CancellationToken>())).ReturnsAsync(extra);
+        _carbs.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([mealCarbs, extra]);
+        _boluses.Setup(r => r.GetByCorrelationIdAsync(correlation, It.IsAny<CancellationToken>())).ReturnsAsync([bolus]);
+        Serves(new Treatment
+        {
+            Id = extra.Id.ToString(), EventType = "Carb Correction", Carbs = 10, Mills = extra.Mills,
+        });
+        _decomposer
+            .Setup(d => d.DeleteByLegacyIdAsync(ClientId, WriteOrigin.Live, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var created = await _service.CreateTreatmentsAsync(
+            [new Treatment { Id = ClientId, EventType = "Carb Correction", Carbs = 10, Mills = extra.Mills }]);
+        var deleted = await _service.DeleteTreatmentAsync(created.Single().Id!);
+
+        Wire(created.Single()).GetProperty("_id").GetString().Should().Be(MongoObjectId.FromGuid(extra.Id));
+        Wire(_creates.Should().ContainSingle().Subject.Doc).GetProperty("_id").GetString()
+            .Should().Be(MongoObjectId.FromGuid(extra.Id));
+        deleted.Should().BeTrue();
+        _decomposer.Verify(
+            d => d.DeleteByLegacyIdAsync(It.IsAny<string>(), WriteOrigin.Live, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _decomposer.Verify(
+            d => d.DeleteByLegacyIdAsync(ClientId, WriteOrigin.Live, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     /// <summary>

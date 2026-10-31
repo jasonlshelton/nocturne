@@ -6,6 +6,7 @@ using Moq;
 using Nocturne.API.Configuration;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Auth;
+using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Platform;
 using Nocturne.Core.Contracts.Entries;
 using Nocturne.Core.Contracts.Legacy;
@@ -54,8 +55,7 @@ public class AlexaServiceTests
             _mockProperties.Object,
             _mockDData.Object,
             _httpContextAccessor,
-            _mockAppearance.Object,
-            Mock.Of<ITenantAccessor>(),
+            new TenantGlucoseUnits(Mock.Of<ITenantAccessor>(), _mockAppearance.Object, Mock.Of<ITenantService>()),
             new FakeTimeProvider(Now),
             Mock.Of<ILogger<AlexaService>>()
         );

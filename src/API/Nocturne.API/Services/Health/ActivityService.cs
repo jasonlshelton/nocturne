@@ -1,4 +1,5 @@
 using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.API.Helpers;
 using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Legacy;
@@ -574,12 +575,10 @@ public class ActivityService : IActivityService
     {
         try
         {
-            var sanitizedFindForLog = find?.Replace("\r", string.Empty).Replace("\n", string.Empty);
-
             _logger.LogDebug(
                 "Counting activity records in {Categories} with find: {Find}",
                 string.Join(",", categories),
-                sanitizedFindForLog);
+                LogText.Sanitize(find));
 
             var query = FindQuery.Parse(find);
             var structured = !query.IsEmpty;

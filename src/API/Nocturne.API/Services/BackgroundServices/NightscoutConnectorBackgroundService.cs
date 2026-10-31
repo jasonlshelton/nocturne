@@ -38,7 +38,7 @@ public class NightscoutConnectorBackgroundService
     /// concurrently and a failure falls back to polling, so this only bounds how long service
     /// startup waits on unreachable Nightscout instances.
     /// </summary>
-    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+    internal TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <param name="serviceProvider">Service provider used to create a DI scope per sync cycle.</param>
     /// <param name="budget">The process-wide budget.</param>

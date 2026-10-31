@@ -4,12 +4,13 @@
  */
 import { z } from "zod";
 import { getRequestEvent, query } from "$app/server";
-import { ClusterConfidence, SleepSource } from "#lib/api/index.js";
+import { ClusterConfidence, GlucoseUnit, SleepSource } from "#lib/api/index.js";
 import { fetchAllGlucose } from "./glucose-pagination";
 import { DateRangeSchema, resolvePatientToday, resolveReportRange } from "./report-range";
 import { readable } from "#lib/server/patient-timezone.js";
 import { compare } from "#lib/api/generated/cgmComparisons.generated.remote.js";
 import { getTrends } from "#lib/api/generated/sleepReports.generated.remote.js";
+import { getBasalAnalysis, getHourlyInsulinDelivery } from "#lib/api/generated/statistics.generated.remote.js";
 
 export type { DateRangeInput } from "./report-range";
 
@@ -28,6 +29,27 @@ export const getReportSubject = query(async () => {
 
 /** The patient's current calendar day as `YYYY-MM-DD`, which reports build relative windows from. */
 export const getReportsToday = query(async () => resolvePatientToday());
+
+/**
+ * The instants a picked range spans: midnight opening its first day through the last millisecond
+ * of its last day, both read in the patient's zone. For a view that draws the range itself.
+ */
+export const getReportRange = query(DateRangeSchema, async (input) => {
+  const { startDate, endDate } = await resolveReportRange(input);
+  return { startDate, endDate };
+});
+
+/** Basal delivery statistics, temp basal counts and hourly percentiles over the patient's days. */
+export const getBasalAnalysisReport = query(DateRangeSchema, async (input) => {
+  const { startDate, endDate } = await resolveReportRange(input, 14);
+  return getBasalAnalysis({ startDate, endDate });
+});
+
+/** Hourly insulin delivery over the patient's days. */
+export const getHourlyDeliveryReport = query(DateRangeSchema, async (input) => {
+  const { startDate, endDate } = await resolveReportRange(input, 14);
+  return getHourlyInsulinDelivery({ startDate, endDate });
+});
 
 /** Get sensor glucose readings for a date range */
 export const getEntries = query(DateRangeSchema.optional(), async (input) => {
@@ -124,7 +146,7 @@ export const getReadingCount = query(
 
 /**
  * Server-side extended analytics and averaged stats for a date range: the overview, executive
- * summary, AGP, comparison and glucose distribution reports render these computed metrics.
+ * summary, AGP and glucose distribution reports render these computed metrics.
  */
 export const getReportsAnalysis = query(
   DateRangeSchema.optional(),
@@ -159,15 +181,21 @@ export const getReportsAnalysis = query(
 );
 
 /**
- * Insulin and carbohydrate delivery over a date range, with the per-day figures the API takes
- * over the window's calendar days.
+ * Two periods' glucose and insulin figures with each metric's change from the first to the second,
+ * which the comparison report renders as served. Glucose is served in `units`.
  */
-export const getReportsInsulinDelivery = query(
-  DateRangeSchema.optional(),
-  async (input) => {
+export const getReportsComparison = query(
+  z.object({ a: DateRangeSchema, b: DateRangeSchema, units: z.enum(GlucoseUnit) }),
+  async ({ a, b, units }) => {
     const { apiClient } = getRequestEvent().locals;
-    const { startDate, endDate } = await resolveReportRange(input);
-    return apiClient.statistics.getInsulinDeliveryStatistics(startDate, endDate);
+    const [rangeA, rangeB] = await Promise.all([resolveReportRange(a), resolveReportRange(b)]);
+    return apiClient.statistics.getPeriodComparison(
+      rangeA.startDate,
+      rangeA.endDate,
+      rangeB.startDate,
+      rangeB.endDate,
+      units
+    );
   }
 );
 

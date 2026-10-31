@@ -228,7 +228,7 @@ public class TrackersController : ControllerBase, IWriteScopedController
     {
         var tenantId = _tenantAccessor.TenantId;
         var excursions = await _alerts.GetUnacknowledgedExcursionIdsAsync(
-            tenantId, TrackerAlertRuleSyncService.ManagedByTag(definitionId), ct);
+            TrackerAlertRuleSyncService.ManagedByTag(definitionId), ct);
 
         foreach (var excursionId in excursions)
         {
