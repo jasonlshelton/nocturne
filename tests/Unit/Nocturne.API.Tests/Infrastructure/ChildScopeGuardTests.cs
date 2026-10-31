@@ -110,7 +110,6 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Auth/ShareLinkRotatedNotifier.cs: ShareLinkRotatedNotifier.NotifyAsync",
         "src/API/Nocturne.API/Services/Connectors/ConnectorCursorResetJobService.cs: ConnectorResetJob.ExecuteAsync",
         "src/API/Nocturne.API/Services/Connectors/ConnectorSyncService.cs: ConnectorSyncService.TriggerSyncAsync",
-        "src/API/Nocturne.API/Services/Demo/DemoDataPurge.cs: DemoPurgeWrites.ReportInTenantAsync",
         "src/API/Nocturne.API/Services/Devices/SensorSessionInferenceRunner.cs: SensorSessionInferenceRunner.RunAsync",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.CreateTenantScope",
         "src/API/Nocturne.API/Services/Migration/MigrationJobService.cs: MigrationJob.ExecuteApiMigrationAsync",
@@ -123,6 +122,7 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Seeding/SampleDataSeeder.cs: SampleDataSeeder.SeedInTenantScopeAsync",
         "src/API/Nocturne.API/Services/V4/LoopClosedLoopStamper.cs: LoopClosedLoopStamper.RunAsync",
         "src/API/Nocturne.API/Services/V4/TempBasalRateReresolver.cs: TempBasalRateReresolver.RunAsync",
+        "src/Infrastructure/Nocturne.Infrastructure.Data/Repositories/DemoDataPurgeRepository.cs: DemoDataPurgeRepository.ReportInTenantAsync",
     ];
 
     private static readonly IReadOnlyList<string> Openers = Scan();

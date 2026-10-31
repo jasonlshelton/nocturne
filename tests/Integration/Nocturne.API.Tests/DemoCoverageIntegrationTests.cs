@@ -6,6 +6,7 @@ using FluentAssertions;
 using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.Seeding;
 using Nocturne.Core.Constants;
+using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Profiles;
 using Nocturne.Core.Models.Configuration;
@@ -139,8 +140,7 @@ public sealed class DemoCoverageIntegrationTests(
             dbContext.SensorGlucose.Add(realReading);
             await dbContext.SaveChangesAsync();
 
-            await Nocturne.API.Services.Demo.DemoDataPurge.PurgeEntriesAsync(dbContext, CancellationToken.None);
-            await Nocturne.API.Services.Demo.DemoDataPurge.PurgeTreatmentsAsync(dbContext, TimeProvider.System, CancellationToken.None);
+            await scope.ServiceProvider.GetRequiredService<IDemoDataPurge>().PurgeAsync(CancellationToken.None);
             (await dbContext.SensorGlucose.IgnoreQueryFilters().AnyAsync(r => r.Id == realReading.Id)).Should().BeTrue();
             (await dbContext.CompressionLowSuggestions.IgnoreQueryFilters()
                 .AnyAsync(s => s.Id == realSuggestion.Id)).Should().BeTrue();
