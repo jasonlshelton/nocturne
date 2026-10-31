@@ -538,6 +538,14 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     ];
 
     /// <summary>
+    /// The tables a connector watermarks on their newest timestamp, adding the span-shaped
+    /// <see cref="TempBasalEntity"/>, whose <see cref="IObservationTimestamped.Timestamp"/> is the
+    /// span start.
+    /// </summary>
+    internal static readonly Type[] V4WatermarkedEntities =
+        [.. V4TimeSeriesRecordEntities, typeof(TempBasalEntity)];
+
+    /// <summary>
     /// V4 record tables whose lists read one tenant newest-first by timestamp, then id on the tables
     /// that tie-break on it.
     /// </summary>
@@ -767,7 +775,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
         // tenant whose newest row for that source is old reads most of the table to return one
         // value. The deleted_at filter keeps the scan index-only: soft-deleted rows left in the
         // index have to be skipped a heap fetch at a time, which is why it is not a size saving.
-        foreach (var entity in V4TimeSeriesRecordEntities.Select(t => modelBuilder.Entity(t)))
+        foreach (var entity in V4WatermarkedEntities.Select(t => modelBuilder.Entity(t)))
         {
             entity.HasIndex(
                     nameof(ITenantScoped.TenantId),

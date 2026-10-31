@@ -84,9 +84,9 @@ public class ModelConventionTests
     /// to be skipped a heap fetch at a time, which costs the index-only scan.
     /// </summary>
     [Fact]
-    public void EveryV4RecordTable_HasTheTenantSourceWatermarkIndex() =>
+    public void EveryWatermarkedTable_HasTheTenantSourceWatermarkIndex() =>
         AssertFamily(
-            NocturneDbContext.V4TimeSeriesRecordEntities,
+            NocturneDbContext.V4WatermarkedEntities,
             "_tenant_source_timestamp",
             i => Columns(i).SequenceEqual([
                     nameof(ITenantScoped.TenantId),
