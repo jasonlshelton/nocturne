@@ -49,12 +49,7 @@ public class HostPersistenceGuardTests
         new("alert rules (#3100)",
             ["AlertRuleEntity", "AlertRuleChannelEntity"],
             ["AlertRules", "AlertRuleChannels"],
-            [
-                new("src/API/Nocturne.API/Controllers/V4/Monitoring/AlertInvitesController.cs",
-                    "reads whether a channel exists before minting an invite; moves behind the repository in #3107"),
-                new("src/API/Nocturne.API/Services/Platform/InstanceKey/UndecryptableSecretScanner.cs",
-                    "reads every channel secret of the tenant for the instance-key scan; moves behind the repository in #3107"),
-            ]),
+            []),
         new("OAuth tokens (#3101)",
             ["OAuthAuthorizationCodeEntity", "OAuthRefreshTokenEntity", "OAuthDeviceCodeEntity"],
             ["OAuthAuthorizationCodes", "OAuthRefreshTokens", "OAuthDeviceCodes"],

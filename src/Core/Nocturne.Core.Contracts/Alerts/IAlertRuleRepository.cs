@@ -4,9 +4,9 @@ using Nocturne.Core.Models.Alerts;
 namespace Nocturne.Core.Contracts.Alerts;
 
 /// <summary>
-/// Writes to alert rules and their channels, and the reads that find rules by their tag: the
-/// feature that manages them or the starter kind they were made as. The reads every caller shares
-/// are on <see cref="IAlertRepository"/>.
+/// Writes to alert rules and their channels, the reads that find rules by their tag (the feature
+/// that manages them or the starter kind they were made as), and the reads of a tenant's channels.
+/// The reads every caller shares are on <see cref="IAlertRepository"/>.
 /// </summary>
 /// <remarks>
 /// Every method runs as the scope's reader on its tenant, except <see cref="SetScopeClassAsync"/>,
@@ -66,6 +66,14 @@ public interface IAlertRuleRepository
     /// </summary>
     Task<IReadOnlyDictionary<Guid, IReadOnlyList<AlertRuleChannelSnapshot>>> GetChannelsAsync(
         IReadOnlyCollection<Guid> ruleIds, CancellationToken ct);
+
+    /// <summary>Whether the tenant has a channel with <paramref name="channelId"/>.</summary>
+    Task<bool> ChannelExistsAsync(Guid channelId, CancellationToken ct);
+
+    /// <summary>
+    /// The tenant's channels that carry a secret, by rule name and then channel order.
+    /// </summary>
+    Task<IReadOnlyList<AlertChannelSecret>> GetChannelSecretsAsync(CancellationToken ct);
 
     /// <summary>The distinct destinations of the tenant's stored <c>in_app</c> channels.</summary>
     Task<IReadOnlySet<string>> GetInAppDestinationsAsync(CancellationToken ct);

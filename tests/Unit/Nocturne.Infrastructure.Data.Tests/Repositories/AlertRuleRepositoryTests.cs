@@ -19,6 +19,7 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 public class AlertRuleRepositoryTests
 {
     private static readonly Guid Tenant = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid OtherTenant = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly DateTimeOffset Now = new(2026, 10, 31, 9, 0, 0, TimeSpan.Zero);
 
     private readonly DbContextOptions<NocturneDbContext> _options = new DbContextOptionsBuilder<NocturneDbContext>()
@@ -239,6 +240,58 @@ public class AlertRuleRepositoryTests
         channels[a].Select(c => c.Destination).Should().Equal("x", "https://w");
         destinations.Should().BeEquivalentTo(["x"]);
         _ = b;
+    }
+
+    [Fact]
+    public async Task AChannelExistsOnlyForTheTenantThatOwnsIt()
+    {
+        await using var db = Db();
+        var repo = Repository(db);
+        var ruleId = await repo.CreateAsync(
+            new NewAlertRule(Low(), [new AlertRuleChannelWrite(ChannelType.InApp, "member")]), CancellationToken.None);
+        await using var seed = Db();
+        var channelId = (await seed.AlertRuleChannels.SingleAsync(c => c.AlertRuleId == ruleId)).Id;
+
+        await using var other = new NocturneDbContext(_options) { TenantId = OtherTenant };
+        var otherRepo = Repository(other);
+
+        (await repo.ChannelExistsAsync(channelId, CancellationToken.None)).Should().BeTrue();
+        (await otherRepo.ChannelExistsAsync(channelId, CancellationToken.None)).Should().BeFalse();
+        (await repo.ChannelExistsAsync(Guid.NewGuid(), CancellationToken.None)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ChannelSecretsListsOnlyChannelsWithASecretUnderTheirRuleNameInChannelOrder()
+    {
+        await using var db = Db();
+        var repo = Repository(db);
+        var zed = await repo.CreateAsync(
+            new NewAlertRule(Low() with { Name = "Zed" },
+            [
+                new AlertRuleChannelWrite(ChannelType.Webhook, "https://z2.example", Secret: "cipher-z2"),
+                new AlertRuleChannelWrite(ChannelType.InApp, "member"),
+                new AlertRuleChannelWrite(ChannelType.Webhook, "https://z1.example", "Zed hook", Secret: "cipher-z1"),
+            ]),
+            CancellationToken.None);
+        var alpha = await repo.CreateAsync(
+            new NewAlertRule(Low() with { Name = "Alpha" },
+                [new AlertRuleChannelWrite(ChannelType.Webhook, "https://a.example", Secret: "cipher-a")]),
+            CancellationToken.None);
+        await repo.CreateAsync(
+            new NewAlertRule(Low() with { Name = "Plain" }, [new AlertRuleChannelWrite(ChannelType.Webhook, "https://p.example")]),
+            CancellationToken.None);
+        await using var other = new NocturneDbContext(_options) { TenantId = OtherTenant };
+        await Repository(other).CreateAsync(
+            new NewAlertRule(Low() with { Name = "Elsewhere" },
+                [new AlertRuleChannelWrite(ChannelType.Webhook, "https://e.example", Secret: "cipher-e")]),
+            CancellationToken.None);
+
+        var secrets = await repo.GetChannelSecretsAsync(CancellationToken.None);
+
+        secrets.Should().Equal(
+            new AlertChannelSecret(alpha, "Alpha", "https://a.example", null, "cipher-a"),
+            new AlertChannelSecret(zed, "Zed", "https://z2.example", null, "cipher-z2"),
+            new AlertChannelSecret(zed, "Zed", "https://z1.example", "Zed hook", "cipher-z1"));
     }
 
     [Fact]

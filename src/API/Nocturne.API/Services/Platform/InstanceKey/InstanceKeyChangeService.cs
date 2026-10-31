@@ -26,7 +26,6 @@ namespace Nocturne.API.Services.Platform.InstanceKey;
 public class InstanceKeyChangeService(
     IServiceProvider serviceProvider,
     InstanceKeyCheck keyCheck,
-    UndecryptableSecretScanner scanner,
     IOwnerNoticeLedger ledger,
     ActiveTenantSnapshot activeTenants,
     ITenantMembershipRepository members,
@@ -169,7 +168,10 @@ public class InstanceKeyChangeService(
 
     private async Task<bool> ReconcilePlatformAsync(Guid generation, CancellationToken cancellationToken)
     {
-        var found = await scanner.ScanPlatformAsync(cancellationToken);
+        IReadOnlyList<UndecryptablePlatformSetting> found;
+        await using (var scanScope = TenantJobScope.Open(serviceProvider, null, AuditEndpoint))
+            found = await scanScope.ServiceProvider.GetRequiredService<UndecryptableSecretScanner>()
+                .ScanPlatformAsync(cancellationToken);
         var metadata = new Dictionary<string, object>
         {
             ["PlatformSettings"] = found.Select(s => s.Category).ToList(),
