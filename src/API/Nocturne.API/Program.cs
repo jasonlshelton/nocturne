@@ -165,6 +165,7 @@ builder.Services.AddDevOnlyEversenseMock(builder.Environment, builder.Configurat
 builder.Services.AddScoped<SampleDataSeeder>();
 
 builder.Services.AddSingleton<ReadAccessLogWriter>();
+builder.Services.AddHostedService<ReadAccessLogDrain>();
 builder.Services.AddScoped<ReadAccessAuditFilter>();
 builder.Services.AddControllers(options =>
 {

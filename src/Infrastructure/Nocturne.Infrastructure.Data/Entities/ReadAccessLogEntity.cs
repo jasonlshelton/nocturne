@@ -27,11 +27,13 @@ public class ReadAccessLogEntity : ITenantScoped
     /// <summary>Display name of the caller, denormalized for historical retention.</summary>
     [Column("actor_name")]
     [MaxLength(128)]
+    [FitToColumn]
     public string? ActorName { get; set; }
 
     /// <summary>Authentication mechanism used (e.g. "Bearer", "ApiSecret").</summary>
     [Column("auth_type")]
     [MaxLength(50)]
+    [FitToColumn]
     public string? AuthType { get; set; }
 
     /// <summary>OAuth grant or API token ID authorizing the request.</summary>
@@ -50,6 +52,7 @@ public class ReadAccessLogEntity : ITenantScoped
     /// <summary>Client IP address of the request.</summary>
     [Column("ip_address")]
     [MaxLength(45)]
+    [FitToColumn]
     public string? IpAddress { get; set; }
 
     /// <summary>User-Agent header from the request.</summary>
@@ -60,11 +63,13 @@ public class ReadAccessLogEntity : ITenantScoped
     [Required]
     [Column("endpoint")]
     [MaxLength(200)]
+    [FitToColumn]
     public string Endpoint { get; set; } = null!;
 
     /// <summary>CLR type name of the accessed entity (e.g. "SensorGlucose").</summary>
     [Column("entity_type")]
     [MaxLength(100)]
+    [FitToColumn]
     public string? EntityType { get; set; }
 
     /// <summary>Number of records returned in the response.</summary>
@@ -78,6 +83,7 @@ public class ReadAccessLogEntity : ITenantScoped
     /// <summary>Request trace identifier for cross-service tracing.</summary>
     [Column("correlation_id")]
     [MaxLength(50)]
+    [FitToColumn]
     public string? TraceId { get; set; }
 
     /// <summary>HTTP status code of the response.</summary>
