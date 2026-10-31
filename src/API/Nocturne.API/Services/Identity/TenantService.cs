@@ -268,28 +268,37 @@ public partial class TenantService : ITenantService
         if (member.IsSystemSubject)
             return new MemberRemovalResult(false, "Cannot remove system subject memberships");
 
-        if (await members.IsLastOwnerAsync(tenantId, member.Id, ct))
+        var (outcome, grants) = await unit.CommitAsync<(OwnerGuardedChange, IReadOnlyList<OAuthGrantRecord>)>(
+            async token =>
+            {
+                var removal = await members.RemoveMemberUnlessLastOwnerAsync(tenantId, member.Id, token);
+                if (removal != OwnerGuardedChange.Changed)
+                    return (removal, []);
+
+                // Chat identity directory rows are global and carry no membership join, so a link left
+                // behind here would keep answering bot commands for this tenant. It goes in the same
+                // SaveChanges as the membership so the two cannot come apart, and is scoped to this
+                // tenant: the same subject's links to tenants they still belong to must survive.
+                var chatLinks = await context.ChatIdentityDirectory
+                    .Where(d => d.TenantId == tenantId && d.NocturneUserId == subjectId)
+                    .ToListAsync(token);
+
+                // Grants carry no membership join either; left live, every one would work again the
+                // moment the subject is re-added. They are staged on the unit with the removal, so one
+                // commit lands both.
+                var active = await new OAuthGrantRepository(unit).GetActiveForSubjectAsync(subjectId, token);
+
+                context.ChatIdentityDirectory.RemoveRange(chatLinks);
+                await _grantRevocation.StageAsync(unit, active, token);
+                await context.SaveChangesAsync(token);
+                return (removal, active);
+            },
+            ct: ct);
+
+        if (outcome == OwnerGuardedChange.LastOwner)
             return new MemberRemovalResult(false, TenantOwnerFilter.LastOwnerRefusal);
 
-        // Chat identity directory rows are global and carry no membership join, so a link left
-        // behind here would keep answering bot commands for this tenant. It goes in the same
-        // SaveChanges as the membership so the two cannot come apart, and is scoped to this
-        // tenant: the same subject's links to tenants they still belong to must survive.
-        var chatLinks = await context.ChatIdentityDirectory
-            .Where(d => d.TenantId == tenantId && d.NocturneUserId == subjectId)
-            .ToListAsync(ct);
-
-        // Grants carry no membership join either; left live, every one would work again the moment
-        // the subject is re-added. They are staged on the unit with the removal, so one commit lands
-        // both.
-        var grants = await new OAuthGrantRepository(unit).GetActiveForSubjectAsync(subjectId, ct);
-
-        await members.RemoveMemberAsync(tenantId, member.Id, ct);
-        context.ChatIdentityDirectory.RemoveRange(chatLinks);
-        await _grantRevocation.StageAsync(unit, grants, ct);
-        await unit.CommitAsync(token => context.SaveChangesAsync(token), ct);
         _grantRevocation.EvictSessions(grants);
-
         return new MemberRemovalResult(true);
     }
 

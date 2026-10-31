@@ -178,7 +178,7 @@ public sealed class MemberInviteControllerAuditTests : IDisposable
                 It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AuthAuditActor?>(),
                 It.IsAny<Guid?>()))
-            .Callback(() => callsAfterSave.AddRange(((RecordingRepository)repository).CallsAfterReplaceRoles))
+            .Callback(() => callsAfterSave.AddRange(((RecordingRepository)repository).CallsAfterTheRoleChange))
             .Returns(Task.CompletedTask);
 
         await SetRoles(Controller(repository, Scope.FullAccess), _owner.Id, _caretaker.Id);
@@ -270,13 +270,13 @@ public sealed class MemberInviteControllerAuditTests : IDisposable
         _audit.VerifyNoOtherCalls();
     }
 
-    /// <summary>Forwards to a real repository and records each call made after <c>ReplaceRolesAsync</c>.</summary>
+    /// <summary>Forwards to a real repository and records each call made after <c>ReplaceRolesUnlessLastOwnerAsync</c>.</summary>
     public class RecordingRepository : DispatchProxy
     {
         private ITenantMembershipRepository _inner = null!;
         private bool _saved;
 
-        public List<string> CallsAfterReplaceRoles { get; } = [];
+        public List<string> CallsAfterTheRoleChange { get; } = [];
 
         public static ITenantMembershipRepository Wrap(ITenantMembershipRepository inner)
         {
@@ -288,8 +288,8 @@ public sealed class MemberInviteControllerAuditTests : IDisposable
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (_saved)
-                CallsAfterReplaceRoles.Add(targetMethod!.Name);
-            _saved |= targetMethod!.Name == nameof(ITenantMembershipRepository.ReplaceRolesAsync);
+                CallsAfterTheRoleChange.Add(targetMethod!.Name);
+            _saved |= targetMethod!.Name == nameof(ITenantMembershipRepository.ReplaceRolesUnlessLastOwnerAsync);
             try
             {
                 return targetMethod.Invoke(_inner, args);

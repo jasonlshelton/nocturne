@@ -134,12 +134,15 @@ public class TenantMembershipRepositoryTests : IDisposable
         (await Members().FindPublicMemberAsync(_tenant, CancellationToken.None))!.Id.Should().Be(publicMember.Id);
         (await Members().ListMembersAsync(_tenant, CancellationToken.None)).Should().HaveCount(5);
 
-        (await Members().IsLastOwnerAsync(_tenant, first.Id, CancellationToken.None)).Should().BeFalse();
         (await Members().AnyOtherOwnerAsync(_tenant, first.Id, CancellationToken.None)).Should().BeTrue();
-        (await Members().RemoveMemberAsync(_tenant, second.Id, CancellationToken.None)).Should().BeTrue();
-        (await Members().IsLastOwnerAsync(_tenant, first.Id, CancellationToken.None)).Should().BeTrue("the deactivated owner does not count");
+        (await Members().RemoveMemberUnlessLastOwnerAsync(_tenant, second.Id, CancellationToken.None)).Should().Be(OwnerGuardedChange.Changed);
+        (await Members().RemoveMemberUnlessLastOwnerAsync(_tenant, first.Id, CancellationToken.None))
+            .Should().Be(OwnerGuardedChange.LastOwner, "the deactivated owner does not count");
+        (await Members().ReplaceRolesUnlessLastOwnerAsync(_tenant, first.Id, [_ownerRole], [_caretakerRole], Now, CancellationToken.None))
+            .Should().Be(OwnerGuardedChange.LastOwner);
         (await Members().AnyOtherOwnerAsync(_tenant, first.Id, CancellationToken.None)).Should().BeFalse();
-        (await Members().IsLastOwnerAsync(_tenant, caretaker.Id, CancellationToken.None)).Should().BeFalse("not an owner");
+        (await Members().ReplaceRolesUnlessLastOwnerAsync(_tenant, caretaker.Id, [_caretakerRole], [], Now, CancellationToken.None))
+            .Should().Be(OwnerGuardedChange.Changed, "not an owner");
 
         await Subjects().UpdateAsync(first.SubjectId, new SubjectEdit(Preferences: "{\"units\":\"mmol\"}"), CancellationToken.None);
         (await Members().GetEarliestOwnerPreferencesAsync(_tenant, CancellationToken.None)).Should().Be("{\"units\":\"mmol\"}");
@@ -194,7 +197,9 @@ public class TenantMembershipRepositoryTests : IDisposable
         (await Members().SetUsernameAsync(_tenant, missing, "x", CancellationToken.None)).Should().BeFalse();
         (await Members().SetCreatedFromInviteAsync(_tenant, missing, invite, CancellationToken.None)).Should().BeFalse();
         (await Members().ReplaceRolesAsync(_tenant, missing, [], [], Now, CancellationToken.None)).Should().BeFalse();
-        (await Members().RemoveMemberAsync(_tenant, missing, CancellationToken.None)).Should().BeFalse();
+        (await Members().ReplaceRolesUnlessLastOwnerAsync(_tenant, missing, [_ownerRole], [], Now, CancellationToken.None))
+            .Should().Be(OwnerGuardedChange.NotFound);
+        (await Members().RemoveMemberUnlessLastOwnerAsync(_tenant, missing, CancellationToken.None)).Should().Be(OwnerGuardedChange.NotFound);
     }
 
     [Fact]

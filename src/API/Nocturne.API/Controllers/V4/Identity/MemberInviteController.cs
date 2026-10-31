@@ -336,11 +336,6 @@ public class MemberInviteController : ControllerBase
         if (!(await _tenantRoleService.ValidateRoleGrantAsync(tenantId, removed, grantedScopes, ct)).Ok)
             return Problem(detail: UngrantableRoleRemovalDetail, statusCode: 403);
 
-        var ownerRoleId = await _members.FindRoleIdBySlugAsync(tenantId, RoleSeeds.Owner, ct);
-        var keepsOwner = ownerRoleId is { } owner && request.RoleIds.Contains(owner);
-        if (!keepsOwner && await _members.IsLastOwnerAsync(tenantId, member.Id, ct))
-            return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
-
         var rolesAfter = await _tenantRoleService.GetRolePermissionsAsync(tenantId, request.RoleIds, ct);
         if (await WouldExemptAClampedMemberAsync(member, rolesAfter.Concat(member.DirectPermissions ?? []), ct))
             return Problem(detail: HttpContextExtensions.HistoryCeilingDetail, statusCode: 403);
@@ -350,8 +345,14 @@ public class MemberInviteController : ControllerBase
             : (await _members.ListRolesAsync(tenantId, ct)).Where(r => added.Contains(r.Id)).Select(r => r.Slug).ToList();
         var removedSlugs = member.Roles.Where(r => removed.Contains(r.RoleId)).Select(r => r.Slug).ToList();
 
-        if (await _members.ReplaceRolesAsync(tenantId, member.Id, removed, added, DateTime.UtcNow, ct))
-            await AuditMemberChangeAsync(member.SubjectId, RoleDetailKey, addedSlugs, removedSlugs);
+        switch (await _members.ReplaceRolesUnlessLastOwnerAsync(tenantId, member.Id, removed, added, DateTime.UtcNow, ct))
+        {
+            case OwnerGuardedChange.LastOwner:
+                return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
+            case OwnerGuardedChange.Changed:
+                await AuditMemberChangeAsync(member.SubjectId, RoleDetailKey, addedSlugs, removedSlugs);
+                break;
+        }
 
         if (member.IsPublicSubject())
             publicAccessCache.Evict(tenantId);
@@ -391,19 +392,20 @@ public class MemberInviteController : ControllerBase
                 tenantId, [caretaker], HttpContext.GetGrantedScopes(), ct)).Ok)
             return Problem(detail: "Cannot step down to a role with more access than you have.", statusCode: 403);
 
-        if (await _members.IsLastOwnerAsync(tenantId, member.Id, ct))
-            return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
-
         var removed = member.Roles.Where(r => r.RoleId != caretaker).ToList();
         var assigned = member.Roles.All(r => r.RoleId != caretaker);
-        if (await _members.ReplaceRolesAsync(
-                tenantId, member.Id, removed.Select(r => r.RoleId).ToList(), assigned ? [caretaker] : [], DateTime.UtcNow, ct))
+        switch (await _members.ReplaceRolesUnlessLastOwnerAsync(
+                    tenantId, member.Id, removed.Select(r => r.RoleId).ToList(), assigned ? [caretaker] : [], DateTime.UtcNow, ct))
         {
-            await AuditMemberChangeAsync(
-                subjectId,
-                RoleDetailKey,
-                assigned ? [RoleSeeds.Caretaker] : [],
-                removed.Select(r => r.Slug));
+            case OwnerGuardedChange.LastOwner:
+                return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
+            case OwnerGuardedChange.Changed:
+                await AuditMemberChangeAsync(
+                    subjectId,
+                    RoleDetailKey,
+                    assigned ? [RoleSeeds.Caretaker] : [],
+                    removed.Select(r => r.Slug));
+                break;
         }
 
         return NoContent();

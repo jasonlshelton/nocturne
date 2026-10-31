@@ -91,14 +91,18 @@ public interface ITenantMembershipRepository
     /// <summary>The stored display preferences of the longest-standing owner; null when the tenant has no owner or the owner saved none.</summary>
     Task<string?> GetEarliestOwnerPreferencesAsync(Guid tenantId, CancellationToken ct);
 
-    /// <summary>Whether <paramref name="memberId"/> holds the owner role and no other owner who can sign in would remain without it.</summary>
-    Task<bool> IsLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
-
     /// <summary>Whether an owner of <paramref name="tenantId"/> other than <paramref name="memberId"/> can sign in.</summary>
     Task<bool> AnyOtherOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
-    /// <summary>Removes the membership and its roles; false when there is no such membership.</summary>
-    Task<bool> RemoveMemberAsync(Guid tenantId, Guid memberId, CancellationToken ct);
+    /// <summary>
+    /// Removes the membership and its roles, refused with <see cref="OwnerGuardedChange.LastOwner"/>
+    /// when it holds the owner role and no other owner who can sign in would remain.
+    /// </summary>
+    /// <remarks>
+    /// The check and the removal hold the tenant's owner lock. Over a unit, call it inside the
+    /// unit's commit, which then holds the lock until it commits the removal.
+    /// </remarks>
+    Task<OwnerGuardedChange> RemoveMemberUnlessLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
     /// <summary>Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how many.</summary>
     /// <remarks>On a platform context: the demo reset retires its visitor from every tenant it joined.</remarks>
@@ -120,7 +124,17 @@ public interface ITenantMembershipRepository
     /// Removes the roles <paramref name="removedRoleIds"/> from the membership, assigns
     /// <paramref name="addedRoleIds"/>, and stamps it updated at <paramref name="now"/>, in one save.
     /// </summary>
+    /// <remarks>Does not check for the last owner. For a membership a person holds, use <see cref="ReplaceRolesUnlessLastOwnerAsync"/>.</remarks>
     Task<bool> ReplaceRolesAsync(
+        Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds, IReadOnlyCollection<Guid> addedRoleIds,
+        DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="ReplaceRolesAsync"/>, refused with <see cref="OwnerGuardedChange.LastOwner"/> when
+    /// it removes the owner role from the membership and no other owner who can sign in would remain.
+    /// </summary>
+    /// <remarks>Holds the tenant's owner lock as <see cref="RemoveMemberUnlessLastOwnerAsync"/> does.</remarks>
+    Task<OwnerGuardedChange> ReplaceRolesUnlessLastOwnerAsync(
         Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds, IReadOnlyCollection<Guid> addedRoleIds,
         DateTime now, CancellationToken ct);
 
