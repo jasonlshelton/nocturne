@@ -10,7 +10,12 @@ import { DateRangeSchema, resolvePatientToday, resolveReportRange } from "./repo
 import { readable } from "#lib/server/patient-timezone.js";
 import { compare } from "#lib/api/generated/cgmComparisons.generated.remote.js";
 import { getTrends } from "#lib/api/generated/sleepReports.generated.remote.js";
-import { getBasalAnalysis, getHourlyInsulinDelivery } from "#lib/api/generated/statistics.generated.remote.js";
+import {
+  getBasalAnalysis,
+  getDailyBasalBolusRatios,
+  getHourlyInsulinDelivery,
+  getInsulinDeliveryStatistics,
+} from "#lib/api/generated/statistics.generated.remote.js";
 
 export type { DateRangeInput } from "./report-range";
 
@@ -49,6 +54,18 @@ export const getBasalAnalysisReport = query(DateRangeSchema, async (input) => {
 export const getHourlyDeliveryReport = query(DateRangeSchema, async (input) => {
   const { startDate, endDate } = await resolveReportRange(input, 14);
   return getHourlyInsulinDelivery({ startDate, endDate });
+});
+
+/** Headline insulin figures over the patient's days. */
+export const getInsulinDeliveryReport = query(DateRangeSchema, async (input) => {
+  const { startDate, endDate } = await resolveReportRange(input, 30);
+  return getInsulinDeliveryStatistics({ startDate, endDate });
+});
+
+/** Daily basal and bolus totals against carbs over the patient's days. */
+export const getDailyBasalBolusReport = query(DateRangeSchema, async (input) => {
+  const { startDate, endDate } = await resolveReportRange(input, 30);
+  return getDailyBasalBolusRatios({ startDate, endDate });
 });
 
 /** Get sensor glucose readings for a date range */
