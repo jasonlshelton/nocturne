@@ -21303,7 +21303,7 @@ msgstr ""
 msgid "Delete this lab result?"
 msgstr ""
 
-#. 0: formatA1c(pendingDeleteLabResult.a1cDisplay); 1: formatLongDate(toDate(pendingDeleteLabResult.measuredAt))
+#. 0: formatA1c(pendingDeleteLabResult.a1cDisplay); 1: formatLongDate(labDay(pendingDeleteLabResult.measuredAt))
 #: src/routes/(authenticated)/reports/ehba1c/+page.svelte
 msgid "Delete the {0} lab result from {1}."
 msgstr ""
