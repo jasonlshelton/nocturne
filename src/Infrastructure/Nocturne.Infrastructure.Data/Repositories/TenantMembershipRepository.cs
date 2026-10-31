@@ -375,8 +375,10 @@ public class TenantMembershipRepository : ITenantMembershipRepository
     {
         await using var lease = await OpenForTenantAsync(tenantId, ct);
         // One statement: the stamp outlives the request that earned it, so nothing is tracked.
+        var staleBefore = LastUsedStamp.StaleBefore(at);
         await lease.Context.TenantMembers
-            .Where(m => m.Id == memberId && m.TenantId == tenantId)
+            .Where(m => m.Id == memberId && m.TenantId == tenantId
+                && (m.LastUsedAt == null || m.LastUsedAt < staleBefore))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.LastUsedAt, at)
                 .SetProperty(m => m.LastUsedIp, ipAddress)

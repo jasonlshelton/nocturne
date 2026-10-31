@@ -212,6 +212,33 @@ public class TenantMembershipRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task AUseStampWithinTheIntervalOfTheStoredOneChangesNothing()
+    {
+        var member = await JoinAsync(await SubjectAsync("Used"), _caretakerRole);
+        await Members().RecordUseAsync(_tenant, member.Id, Now, "10.0.0.1", "agent", CancellationToken.None);
+
+        await Members().RecordUseAsync(
+            _tenant, member.Id, Now + LastUsedStamp.Interval, "10.0.0.2", "other", CancellationToken.None);
+
+        await using (var held = _db.CreateContext())
+        {
+            (await held.TenantMembers.SingleAsync(m => m.Id == member.Id)).Should().BeEquivalentTo(new
+            {
+                LastUsedAt = (DateTime?)Now, LastUsedIp = "10.0.0.1", LastUsedUserAgent = "agent",
+            });
+        }
+
+        var due = Now + LastUsedStamp.Interval + TimeSpan.FromSeconds(1);
+        await Members().RecordUseAsync(_tenant, member.Id, due, "10.0.0.2", "other", CancellationToken.None);
+
+        await using var stamped = _db.CreateContext();
+        (await stamped.TenantMembers.SingleAsync(m => m.Id == member.Id)).Should().BeEquivalentTo(new
+        {
+            LastUsedAt = (DateTime?)due, LastUsedIp = "10.0.0.2", LastUsedUserAgent = "other",
+        });
+    }
+
+    [Fact]
     public async Task TheRequestReadJoinsTheSubjectFlagToTheMembership()
     {
         var subject = await SubjectAsync("Member");

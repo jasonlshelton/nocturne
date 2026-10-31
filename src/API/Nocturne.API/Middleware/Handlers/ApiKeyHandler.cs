@@ -26,16 +26,20 @@ public class ApiKeyHandler : IAuthHandler
 
     private readonly IOAuthGrantRepository _grants;
     private readonly TimeProvider _timeProvider;
+    private readonly LastUsedClaims _lastUsedClaims;
     private readonly ILogger<ApiKeyHandler> _logger;
 
     /// <param name="grants">The stored grants, pinned per read to the request's tenant.</param>
+    /// <param name="lastUsedClaims">Decides which concurrent request stamps the grant.</param>
     public ApiKeyHandler(
         IOAuthGrantRepository grants,
         TimeProvider timeProvider,
+        LastUsedClaims lastUsedClaims,
         ILogger<ApiKeyHandler> logger)
     {
         _grants = grants;
         _timeProvider = timeProvider;
+        _lastUsedClaims = lastUsedClaims;
         _logger = logger;
     }
 
@@ -89,7 +93,7 @@ public class ApiKeyHandler : IAuthHandler
         new RequestMembership(grant.SubjectId, tenantCtx.TenantId, MembershipFacts.From(found.Membership)).StoreOn(context);
 
         // 6. Fire-and-forget last-used stamp
-        if (LastUsedStamp.IsDue(grant.LastUsedAt, now))
+        if (_lastUsedClaims.TryClaim(grant.Id, grant.LastUsedAt))
         {
             _ = DirectGrantTokenHandler.RecordLastUsedAsync(
                 _grants, _logger, grant.Id, tenantCtx.TenantId,

@@ -33,19 +33,23 @@ public class DirectGrantTokenHandler : IAuthHandler
 
     private readonly IOAuthGrantRepository _grants;
     private readonly TimeProvider _timeProvider;
+    private readonly LastUsedClaims _lastUsedClaims;
     private readonly ILogger<DirectGrantTokenHandler> _logger;
 
     /// <summary>
     /// Creates a new instance of DirectGrantTokenHandler
     /// </summary>
     /// <param name="grants">The stored grants, pinned per read to the request's tenant.</param>
+    /// <param name="lastUsedClaims">Decides which concurrent request stamps the grant.</param>
     public DirectGrantTokenHandler(
         IOAuthGrantRepository grants,
         TimeProvider timeProvider,
+        LastUsedClaims lastUsedClaims,
         ILogger<DirectGrantTokenHandler> logger)
     {
         _grants = grants;
         _timeProvider = timeProvider;
+        _lastUsedClaims = lastUsedClaims;
         _logger = logger;
     }
 
@@ -84,7 +88,7 @@ public class DirectGrantTokenHandler : IAuthHandler
         new RequestMembership(grant.SubjectId, tenantCtx.TenantId, MembershipFacts.From(membership)).StoreOn(context);
 
         // Update last used metadata (fire and forget via separate context)
-        if (LastUsedStamp.IsDue(grant.LastUsedAt, now))
+        if (_lastUsedClaims.TryClaim(grant.Id, grant.LastUsedAt))
         {
             _ = RecordLastUsedAsync(
                 _grants, _logger, grant.Id, tenantCtx.TenantId,
