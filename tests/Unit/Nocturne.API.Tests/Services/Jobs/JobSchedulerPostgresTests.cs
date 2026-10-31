@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -424,6 +425,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
             provider,
             _clock,
             new JobMetrics(provider.GetRequiredService<IMeterFactory>()),
+            Options.Create(new JobSchedulerOptions()),
             NullLogger<JobScheduler>.Instance);
     }
 

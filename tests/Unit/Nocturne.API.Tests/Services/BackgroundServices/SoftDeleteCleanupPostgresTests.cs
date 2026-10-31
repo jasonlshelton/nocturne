@@ -8,12 +8,15 @@ using Nocturne.Infrastructure.Data.Entities.V4;
 using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Tests.Shared.Infrastructure;
 using Npgsql;
-using Nocturne.Infrastructure.Data.Repositories;
+using Microsoft.Extensions.DependencyInjection;
+using Nocturne.Core.Contracts.Jobs;
+using Nocturne.API.Tests.Services.Jobs;
+using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Tests.Services.BackgroundServices;
 
 /// <summary>
-/// <see cref="SoftDeleteCleanupService"/> on PostgreSQL under the runtime role and Row Level
+/// <see cref="SoftDeleteCleanupJob"/> on PostgreSQL under the runtime role and Row Level
 /// Security: each tenant's own retention row decides how long its soft-deleted records survive.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -39,6 +42,26 @@ public class SoftDeleteCleanupPostgresTests(SoftDeleteCleanupPostgresTests.Datab
     {
         public override ValueTask<NocturneDbContext> CreateAsync(CancellationToken ct = default) =>
             ValueTask.FromResult(create());
+    }
+
+    /// <summary>Runs the job for <paramref name="tenant"/> in a scope resolved to it.</summary>
+    private async Task RunForAsync(Guid tenant)
+    {
+        await using var services = new ServiceCollection()
+            .AddSingleton<INocturneDbContextFactory>(new Factory(() =>
+            {
+                var context = Context();
+                context.TenantId = tenant;
+                return context;
+            }))
+            .BuildServiceProvider();
+        var job = new SoftDeleteCleanupJob(new ConfigurationBuilder().Build(), NullLogger<SoftDeleteCleanupJob>.Instance);
+
+        var outcome = await job.RunAsync(
+            JobRuns.For(tenant, services),
+            CancellationToken.None);
+
+        outcome.Should().BeOfType<JobOutcome.Resumed>().Which.Cursor.Should().BeNull();
     }
 
     private NocturneDbContext Context() =>
@@ -93,7 +116,7 @@ public class SoftDeleteCleanupPostgresTests(SoftDeleteCleanupPostgresTests.Datab
     /// happens to share the purged id, stay.
     /// </summary>
     [Fact]
-    public async Task PurgeExpiredRecordsAsync_DeletesTheLinksOfThePurgedRowsWithThem()
+    public async Task RunAsync_DeletesTheLinksOfThePurgedRowsWithThem()
     {
         var tenant = Guid.NewGuid();
         await SeedTenantAsync(tenant, retentionDays: null, deletedDaysAgo: 40);
@@ -113,13 +136,7 @@ public class SoftDeleteCleanupPostgresTests(SoftDeleteCleanupPostgresTests.Datab
             await seed.SaveChangesAsync();
         }
 
-        var service = new SoftDeleteCleanupService(
-            new Factory(Context),
-            new TenantRepository(new Factory(Context)),
-            new ConfigurationBuilder().Build(),
-            NullLogger<SoftDeleteCleanupService>.Instance);
-
-        await service.PurgeExpiredRecordsAsync(CancellationToken.None);
+        await RunForAsync(tenant);
 
         await using var db = Context();
         db.TenantId = tenant;
@@ -147,20 +164,15 @@ public class SoftDeleteCleanupPostgresTests(SoftDeleteCleanupPostgresTests.Datab
     };
 
     [Fact]
-    public async Task PurgeExpiredRecordsAsync_AppliesEachTenantsOwnRetention()
+    public async Task RunAsync_AppliesEachTenantsOwnRetention()
     {
         var longRetention = Guid.NewGuid();
         var defaultRetention = Guid.NewGuid();
         await SeedTenantAsync(longRetention, retentionDays: 60, deletedDaysAgo: 40);
         await SeedTenantAsync(defaultRetention, retentionDays: null, deletedDaysAgo: 40);
 
-        var service = new SoftDeleteCleanupService(
-            new Factory(Context),
-            new TenantRepository(new Factory(Context)),
-            new ConfigurationBuilder().Build(),
-            NullLogger<SoftDeleteCleanupService>.Instance);
-
-        await service.PurgeExpiredRecordsAsync(CancellationToken.None);
+        await RunForAsync(longRetention);
+        await RunForAsync(defaultRetention);
 
         (await BodyWeightCountAsync(longRetention)).Should().Be(1);
         (await BodyWeightCountAsync(defaultRetention)).Should().Be(0);

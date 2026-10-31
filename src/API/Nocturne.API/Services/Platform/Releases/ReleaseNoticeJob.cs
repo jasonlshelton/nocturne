@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.Notifications;
 using Nocturne.Core.Contracts.Identity;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Models;
@@ -19,16 +20,21 @@ namespace Nocturne.API.Services.Platform.Releases;
 /// claim is released when the send fails, so every owner gets it once. Each check offers the current
 /// notices to every active tenant, so a tenant created later gets them on its first check.
 /// A newer notice archives the owner's older ones as <see cref="NotificationArchiveReason.Superseded"/>.
+/// It is one platform job that fans out over the tenants itself because the release status it offers
+/// them is one HTTP call shared by all of them.
+/// With <see cref="ReleaseCheckOptions.Enabled"/> off a run checks nothing and still comes due
+/// again, so its row is never overdue and turning the check back on needs no new row.
 /// </remarks>
-public class ReleaseNoticeService(
+public class ReleaseNoticeJob(
     IServiceProvider serviceProvider,
     ReleaseStatusService releaseStatus,
     IOwnerNoticeLedger ledger,
     ActiveTenantSnapshot activeTenants,
     IOptions<ReleaseCheckOptions> options,
-    TimeProvider timeProvider,
-    ILogger<ReleaseNoticeService> logger) : BackgroundService
+    ILogger<ReleaseNoticeJob> logger) : IScheduledJob
 {
+    internal const string JobName = "release-notices";
+
     internal const string AuditEndpoint = "service:release-notices";
 
     public const string Source = "release-check";
@@ -43,33 +49,15 @@ public class ReleaseNoticeService(
 
     public const string InstalledKind = "installed";
 
-    private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
+    public string Name => JobName;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public JobEnrolment Enrolment => JobEnrolment.Platform;
+
+    public async Task<JobOutcome> RunAsync(JobRun run, CancellationToken ct)
     {
-        if (!options.Value.Enabled)
-            return;
-
-        try
-        {
-            await Task.Delay(StartupDelay, timeProvider, stoppingToken);
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await CheckAsync(stoppingToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogError(ex, "Error checking for a new release");
-                }
-
-                await Task.Delay(options.Value.CheckInterval, timeProvider, stoppingToken);
-            }
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-        }
+        if (options.Value.Enabled)
+            await CheckAsync(ct);
+        return JobOutcome.Resume(null, run.StartedAt + options.Value.CheckInterval);
     }
 
     internal async Task CheckAsync(CancellationToken cancellationToken)

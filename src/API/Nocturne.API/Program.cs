@@ -145,8 +145,8 @@ builder.Services.AddResponseCaching();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
-builder.Services.AddHostedService<AuditRetentionService>();
-builder.Services.AddHostedService<SoftDeleteCleanupService>();
+builder.Services.AddScheduledJob<AuditRetentionJob>();
+builder.Services.AddScheduledJob<SoftDeleteCleanupJob>();
 builder.Services.AddSingleton<GoogleHealthCoordinator>();
 builder.Services.AddSingleton<IGoogleHealthGrantHolders, PostgresGoogleHealthGrantHolders>();
 builder.Services.AddSingleton<IGoogleHealthSyncCoordinator>(provider =>

@@ -5,7 +5,7 @@ using Nocturne.Infrastructure.Data;
 namespace Nocturne.API.Tests.Services.BackgroundServices;
 
 /// <summary>
-/// Pins the set of tables <see cref="SoftDeleteCleanupService"/> purges.
+/// Pins the set of tables <see cref="SoftDeleteCleanupJob"/> purges.
 /// </summary>
 [Trait("Category", "Unit")]
 public class SoftDeleteCleanupTablesTests
@@ -28,7 +28,7 @@ public class SoftDeleteCleanupTablesTests
             .Options;
         using var context = new NocturneDbContext(options);
 
-        var tables = SoftDeleteCleanupService.SoftDeletableTables(context.Model);
+        var tables = SoftDeleteCleanupJob.SoftDeletableTables(context.Model);
 
         tables.Select(t => t.Table).Should().Equal(Expected);
     }
@@ -41,7 +41,7 @@ public class SoftDeleteCleanupTablesTests
             .Options;
         using var context = new NocturneDbContext(options);
 
-        var linked = SoftDeleteCleanupService.SoftDeletableTables(context.Model)
+        var linked = SoftDeleteCleanupJob.SoftDeletableTables(context.Model)
             .Where(t => t.LinkedRecordType is not null)
             .ToDictionary(t => t.Table, t => t.LinkedRecordType);
 

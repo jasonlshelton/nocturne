@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Options;
 using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Infrastructure.Data.Services;
 
@@ -6,8 +7,9 @@ namespace Nocturne.API.Services.Jobs;
 
 /// <summary>
 /// Runs every registered <see cref="IScheduledJob"/> from <see cref="IJobLedger"/>: it enrols each
-/// job's rows, claims the due ones every <see cref="PollInterval"/>, runs up to
-/// <see cref="Parallelism"/> at once, and writes each run's outcome back to its row.
+/// job's rows, claims the due ones, runs up to <see cref="Parallelism"/> at once (<c>Jobs:Parallelism</c>,
+/// default <see cref="JobSchedulerOptions.DefaultParallelism"/>), and writes each run's outcome back
+/// to its row.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,11 +27,13 @@ namespace Nocturne.API.Services.Jobs;
 /// Each run gets a scope of its own for its row's tenant, reading as no one and system-attributed as
 /// <c>job:&lt;name&gt;</c>.
 /// </para>
+/// <para>
+/// A claim that fills every free slot may have left due rows behind, so until a claim comes back
+/// short each finished run claims again at once; an idle ledger is read every <see cref="PollInterval"/>.
+/// </para>
 /// </remarks>
 public sealed class JobScheduler : BackgroundService
 {
-    internal const int Parallelism = 4;
-
     internal static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     internal static readonly TimeSpan EnrolInterval = TimeSpan.FromMinutes(1);
     internal static readonly TimeSpan LeaseLength = TimeSpan.FromMinutes(2);
@@ -46,6 +50,8 @@ public sealed class JobScheduler : BackgroundService
     private readonly ILogger<JobScheduler> _logger;
     private readonly ConcurrentDictionary<Task, byte> _inFlight = new();
     private int _running;
+    private bool _backlog;
+    private TaskCompletionSource _wake = NewWake();
 
     public JobScheduler(
         IEnumerable<IScheduledJob> jobs,
@@ -53,6 +59,7 @@ public sealed class JobScheduler : BackgroundService
         IServiceProvider root,
         TimeProvider time,
         JobMetrics metrics,
+        IOptions<JobSchedulerOptions> options,
         ILogger<JobScheduler> logger)
     {
         var byName = new Dictionary<string, IScheduledJob>(StringComparer.Ordinal);
@@ -68,7 +75,11 @@ public sealed class JobScheduler : BackgroundService
         _time = time;
         _metrics = metrics;
         _logger = logger;
+        Parallelism = Math.Max(1, options.Value.Parallelism);
     }
+
+    /// <summary>How many runs this process holds at once.</summary>
+    internal int Parallelism { get; }
 
     /// <summary>This process's name, which prefixes the token of each lease it takes.</summary>
     internal string Holder { get; } = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -89,12 +100,12 @@ public sealed class JobScheduler : BackgroundService
         // Detach from the sequential hosted-service startup chain before touching anything.
         await Task.Yield();
 
-        using var timer = new PeriodicTimer(PollInterval, _time);
         var enrolledAt = DateTimeOffset.MinValue;
         try
         {
-            do
+            while (!stoppingToken.IsCancellationRequested)
             {
+                var wake = Volatile.Read(ref _wake);
                 try
                 {
                     if (_time.GetUtcNow() - enrolledAt >= EnrolInterval)
@@ -109,8 +120,12 @@ public sealed class JobScheduler : BackgroundService
                 {
                     _logger.LogError(ex, "The job scheduler could not read the job ledger");
                 }
+
+                using var tick = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                await Task.WhenAny(wake.Task, Task.Delay(PollInterval, _time, tick.Token));
+                await tick.CancelAsync();
+                Interlocked.CompareExchange(ref _wake, NewWake(), wake);
             }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -151,6 +166,7 @@ public sealed class JobScheduler : BackgroundService
 
         var now = _time.GetUtcNow();
         var leases = await _ledger.ClaimDueAsync(Holder, _jobs.Keys, free, now, now + LeaseLength, ct);
+        Volatile.Write(ref _backlog, leases.Count == free);
         foreach (var lease in leases)
         {
             Interlocked.Increment(ref _running);
@@ -243,8 +259,12 @@ public sealed class JobScheduler : BackgroundService
         {
             _metrics.RecordRun(lease.Job, outcome, _time.GetElapsedTime(started));
             Interlocked.Decrement(ref _running);
+            if (Volatile.Read(ref _backlog))
+                Volatile.Read(ref _wake).TrySetResult();
         }
     }
+
+    private static TaskCompletionSource NewWake() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// Extends the lease every <see cref="HeartbeatInterval"/> until <paramref name="ct"/> ends it.
@@ -286,4 +306,15 @@ public sealed class JobScheduler : BackgroundService
             return;
         }
     }
+}
+
+/// <summary><see cref="JobScheduler"/>'s settings, bound from <c>Jobs</c>.</summary>
+public sealed class JobSchedulerOptions
+{
+    public const string SectionName = "Jobs";
+
+    public const int DefaultParallelism = 4;
+
+    /// <summary>How many runs one process holds at once.</summary>
+    public int Parallelism { get; set; } = DefaultParallelism;
 }
