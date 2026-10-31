@@ -66,6 +66,7 @@ public class DemoAdminController : ControllerBase
             // reset that failed between wiping and re-seeding.
             await _tenants.UpdateAsync(existing.Id, _demoTenantService.TenantDefaults(existing), ct);
             await _demoTenantService.ConfigureAccessAsync(existing.Id, ct);
+            TenantCacheEviction.Evict(cache, existing.Slug, existing.ShareTokenHash);
             return Ok(ToDto((await _tenants.GetAsync(existing.Id, ct))!, alreadyExisted: true));
         }
 
@@ -78,15 +79,15 @@ public class DemoAdminController : ControllerBase
             _demoTenantService.TenantDefaults(createdTenant) with { IsDemo = true, DemoConfig = new DemoConfigEdit() },
             ct);
 
-        // TenantResolutionMiddleware caches the resolved context, IsDemo included, and
-        // CreateWithoutOwnerAsync may already have populated it. IsDemo gates the demo sign-in
-        // endpoint and the status field the login page keys off, so without this the tenant is
-        // non-demo for the cache lifetime — a login page with no passkey and no way in.
-        TenantResolutionMiddleware.EvictTenant(cache, created.Slug);
-
         // Open the Public subject's share grant and create the demo member visitors are
         // signed in as.
         await _demoTenantService.ConfigureAccessAsync(created.Id, ct);
+
+        // TenantResolutionMiddleware caches the resolved context, IsDemo included, and
+        // CreateWithoutOwnerAsync may already have populated it. IsDemo gates the demo sign-in
+        // endpoint and the status field the login page keys off, so without this the tenant is
+        // non-demo for the cache lifetime: a login page with no passkey and no way in.
+        TenantCacheEviction.Evict(cache, created.Slug);
 
         return Ok(ToDto((await _tenants.GetAsync(created.Id, ct))!, alreadyExisted: false));
     }
@@ -119,7 +120,7 @@ public class DemoAdminController : ControllerBase
         // IsActive is carried on the cached tenant context, same as IsDemo — so without evicting,
         // a deactivated demo keeps being served for the cache lifetime.
         if (activeChanged)
-            TenantResolutionMiddleware.EvictTenant(cache, tenant.Slug);
+            TenantCacheEviction.Evict(cache, tenant.Slug, tenant.ShareTokenHash);
 
         return Ok(ToDto(tenant, alreadyExisted: true));
     }

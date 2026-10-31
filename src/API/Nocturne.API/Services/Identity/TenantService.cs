@@ -6,7 +6,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Auth;
-using Nocturne.API.Services.Docs;
 using Nocturne.API.Services.SetupHub;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -126,7 +125,7 @@ public partial class TenantService : ITenantService
         await _roleService.SeedRolesForTenantAsync(tenant.Id, ct);
         await CreatePublicSubjectMembershipAsync(_members, tenant.Id, ct);
 
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
         return new TenantCreatedDto(tenant.Id, tenant.Slug, tenant.DisplayName, tenant.IsActive, tenant.SysCreatedAt);
     }
 
@@ -177,8 +176,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(DisplayName: displayName, IsActive: isActive, AllowAccessRequests: allowAccessRequests), ct);
 
-        // Invalidate cached tenant context
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToDto((await _tenants.GetAsync(id, ct))!);
     }
@@ -192,9 +190,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(AllowPublicDocs: allowPublicDocs), ct);
 
-        // The documentation paths resolve the tenant through a cache of their own, which holds
-        // the opt-in.
-        ScalarAuthProvider.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToSettingsDto(tenant with { AllowPublicDocs = allowPublicDocs });
     }
@@ -205,10 +201,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(DisplayName: displayName), ct);
 
-        // Both the host and the share-link resolutions cache a TenantContext, which carries the name.
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
-        if (tenant.ShareTokenHash is { } shareTokenHash)
-            ShareTokenCacheService.EvictByHash(_cache, shareTokenHash);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToSettingsDto(tenant with { DisplayName = displayName });
     }
@@ -247,8 +240,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.DeleteAsync(id, ct);
 
-        // Invalidate cached tenant context
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
     }
 
     public Task AddMemberAsync(
@@ -476,7 +468,7 @@ public partial class TenantService : ITenantService
             return new ProvisionResult(tenantId, ownerSubjectId, slug.ToLowerInvariant());
         }, ct: ct);
 
-        TenantResolutionMiddleware.EvictTenant(_cache, provisioned.Slug);
+        TenantCacheEviction.Evict(_cache, provisioned.Slug);
         return provisioned;
     }
 
