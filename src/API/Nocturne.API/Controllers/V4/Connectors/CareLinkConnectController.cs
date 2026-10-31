@@ -127,7 +127,7 @@ public partial class CareLinkConnectController : ControllerBase
     /// connector secret. Returns the discovered username/country for auto-filling the config form.
     /// </summary>
     [HttpPost("complete")]
-    [RemoteCommand(Invalidates = ["GetConfiguration", "GetAllConnectorStatus"])]
+    [RemoteCommand(Invalidates = ["Configuration_GetConfiguration", "Configuration_GetAllConnectorStatus"])]
     [ProducesResponseType(typeof(CareLinkConnectCompleteResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
