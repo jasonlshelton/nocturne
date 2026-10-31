@@ -148,6 +148,68 @@ public class ConnectorConfigurationRepositoryTests : IDisposable
         created.SecretsJson.Should().Be("{}");
     }
 
+    [Theory]
+    [InlineData("""{"region":"us"}""")]
+    [InlineData("""{"region":"us","enabled":true}""")]
+    [InlineData("""{"region":"us","Enabled":true}""")]
+    public async Task AConfigurationSaveAfterADisableKeepsTheConnectorDisabled(string saved)
+    {
+        await Configurations().SaveConfigurationAsync("glooko", """{"enabled":true,"region":"eu"}""", "owner", CancellationToken.None);
+        await Configurations().SetActiveAsync("glooko", false, "rhys", CancellationToken.None);
+
+        var record = await Configurations().SaveConfigurationAsync("glooko", saved, "erik", CancellationToken.None);
+
+        var config = JsonNode.Parse(record.ConfigurationJson)!.AsObject();
+        config.ToDictionary(p => p.Key, p => p.Value!.ToJsonString()).Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+        record.ModifiedBy.Should().Be("erik");
+        Row("glooko").ConfigurationJson.Should().Be(record.ConfigurationJson);
+    }
+
+    [Fact]
+    public async Task AConfigurationSaveKeepsTheStoredFlagWhateverCaseItIsStoredIn()
+    {
+        await Configurations().SaveConfigurationAsync("glooko", """{"Enabled":false,"region":"eu"}""", "owner", CancellationToken.None);
+
+        var record = await Configurations().SaveConfigurationAsync("glooko", """{"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().ToDictionary(p => p.Key, p => p.Value!.ToJsonString())
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+    }
+
+    [Theory]
+    [InlineData("enabled")]
+    [InlineData("Enabled")]
+    public async Task AConfigurationSaveOntoAStoredRowThatHasNoFlagTakesTheSavedFlag(string spelling)
+    {
+        Seed("dexcom");
+
+        var record = await Configurations().SaveConfigurationAsync(
+            "dexcom", $$"""{"{{spelling}}":false,"url":"b"}""", "erik", CancellationToken.None);
+
+        record.ConfigurationJson.Should().Be("""{"url":"b","enabled":false}""");
+        record.SecretsJson.Should().Be("""{"apiSecret":"sealed"}""");
+    }
+
+    [Fact]
+    public async Task AConfigurationSaveOntoAStoredRowThatHasNoFlagLeavesItWithNoneWhenTheSavedHasNone()
+    {
+        Seed("dexcom");
+
+        var record = await Configurations().SaveConfigurationAsync("dexcom", """{"url":"b"}""", "erik", CancellationToken.None);
+
+        record.ConfigurationJson.Should().Be("""{"url":"b"}""");
+    }
+
+    [Fact]
+    public async Task TheFirstConfigurationSaveStoresTheFlagItCarriesSpelledEnabled()
+    {
+        var record = await Configurations().SaveConfigurationAsync("glooko", """{"Enabled":false,"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().ToDictionary(p => p.Key, p => p.Value!.ToJsonString())
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+    }
+
     [Fact]
     public async Task DeletingReturnsTheDeletedRowOrNull()
     {
