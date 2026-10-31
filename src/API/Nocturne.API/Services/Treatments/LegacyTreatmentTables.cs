@@ -769,7 +769,8 @@ internal static class LegacyTreatmentTables
             repositories => repositories.CarbIntakes,
             c => c.CarbIntakes, RecordType.CarbIntake, CarbIntakeMapper.ToDomainModel,
             (r, foods) => ProjectCarbCorrection(r, foods.For(r.Id)),
-            correlated: (repositories, id, ct) => repositories.CarbIntakes.GetByCorrelationIdAsync(id, ct)),
+            CountCarbIntakesServedApartAsync,
+            (repositories, id, ct) => repositories.CarbIntakes.GetByCorrelationIdAsync(id, ct)),
         new LegacyTreatmentTable<BGCheck, BGCheckEntity>(
             repositories => repositories.BGChecks,
             c => c.BGChecks, RecordType.BGCheck, BGCheckMapper.ToDomainModel,
@@ -815,20 +816,40 @@ internal static class LegacyTreatmentTables
     /// those <see cref="NotesServedWithAnotherRecord"/>.
     /// </summary>
     private static async Task<long> CountNotesServedApartAsync(
+        NocturneDbContext context, DateTime? from, DateTime? to, CancellationToken ct) =>
+        await InWindow(context, context.Notes, RecordType.Note, from, to).LongCountAsync(ct)
+        - await InWindow(context, NotesServedWithAnotherRecord(context), RecordType.Note, from, to).LongCountAsync(ct);
+
+    /// <summary>
+    /// The carb intakes served as treatments of their own in the window, bounds inclusive: every
+    /// carb intake but the one <see cref="PairMeals"/> serves as the half of each Meal Bolus. A
+    /// correlation pairs once, when the window holds a bolus and a carb intake of it, so a pair split
+    /// by the window edge counts as whichever half is inside and a further carb intake of the
+    /// correlation counts on its own.
+    /// </summary>
+    private static async Task<long> CountCarbIntakesServedApartAsync(
         NocturneDbContext context, DateTime? from, DateTime? to, CancellationToken ct)
     {
-        IQueryable<NoteEntity> InWindow(IQueryable<NoteEntity> notes)
-        {
-            notes = notes.AsNoTracking().ExcludeNonPrimary(context, RecordType.Note);
-            if (from is { } lower)
-                notes = notes.Where(n => n.Timestamp >= lower);
-            if (to is { } upper)
-                notes = notes.Where(n => n.Timestamp <= upper);
-            return notes;
-        }
+        var carbs = InWindow(context, context.CarbIntakes, RecordType.CarbIntake, from, to);
+        var boluses = InWindow(context, context.Boluses, RecordType.Bolus, from, to);
+        var pairedMeals = carbs
+            .Where(c => c.CorrelationId != null && boluses.Any(b => b.CorrelationId == c.CorrelationId))
+            .Select(c => c.CorrelationId)
+            .Distinct();
 
-        return await InWindow(context.Notes).LongCountAsync(ct)
-            - await InWindow(NotesServedWithAnotherRecord(context)).LongCountAsync(ct);
+        return await carbs.LongCountAsync(ct) - await pairedMeals.LongCountAsync(ct);
+    }
+
+    private static IQueryable<TEntity> InWindow<TEntity>(
+        NocturneDbContext context, IQueryable<TEntity> rows, RecordType recordType, DateTime? from, DateTime? to)
+        where TEntity : V4TimeSeriesEntityBase
+    {
+        rows = rows.AsNoTracking().ExcludeNonPrimary(context, recordType);
+        if (from is { } lower)
+            rows = rows.Where(r => r.Timestamp >= lower);
+        if (to is { } upper)
+            rows = rows.Where(r => r.Timestamp <= upper);
+        return rows;
     }
 
     /// <summary>
