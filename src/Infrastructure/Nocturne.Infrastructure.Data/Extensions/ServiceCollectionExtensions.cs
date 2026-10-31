@@ -16,6 +16,7 @@ using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Connectors;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -172,6 +173,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IRecoveryCodeRepository, RecoveryCodeRepository>();
         services.AddTransient<IConnectorConfigurationRepository, ConnectorConfigurationRepository>();
         services.AddTransient<IConnectorResetJobRepository, ConnectorResetJobRepository>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddTransient<IJobLedger, JobLedgerRepository>();
         services.AddScoped<SourceOwnedDataRepository>();
         services.AddScoped<ISourceOwnedDataReader>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
         services.AddScoped<ISourceOwnedDataPurge>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());

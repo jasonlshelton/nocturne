@@ -225,7 +225,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<ConnectorResetJobEntity> ConnectorResetJobs { get; set; }
 
-    public DbSet<PendingTenantJobEntity> PendingTenantJobs { get; set; }
+    public DbSet<JobLedgerEntity> JobLedger { get; set; }
 
     public DbSet<LinkedRecordEntity> LinkedRecords { get; set; }
 
@@ -421,8 +421,6 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<ReadAccessLogEntity> ReadAccessLog { get; set; }
 
     public DbSet<TenantAuditConfigEntity> TenantAuditConfig { get; set; }
-
-    public DbSet<BackfillCompletionEntity> BackfillCompletions { get; set; }
 
     public DbSet<TenantDataRetentionConfigEntity> TenantDataRetentionConfig { get; set; }
 
@@ -1566,23 +1564,22 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             .HasIndex(j => j.State)
             .HasDatabaseName("ix_connector_reset_jobs_state");
 
+        // NULLS NOT DISTINCT, so a platform job's row (no tenant) is one row too.
         modelBuilder
-            .Entity<BackfillCompletionEntity>()
-            .HasKey(c => new { c.Backfill, c.TenantId });
+            .Entity<JobLedgerEntity>()
+            .HasIndex(j => new { j.Job, j.TenantId })
+            .IsUnique()
+            .AreNullsDistinct(false)
+            .HasDatabaseName("ux_job_ledger_job_tenant");
 
         modelBuilder
-            .Entity<BackfillCompletionEntity>()
-            .HasOne<TenantEntity>()
-            .WithMany()
-            .HasForeignKey(c => c.TenantId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .Entity<JobLedgerEntity>()
+            .HasIndex(j => j.NextDueAt)
+            .HasFilter("next_due_at IS NOT NULL")
+            .HasDatabaseName("ix_job_ledger_due");
 
         modelBuilder
-            .Entity<PendingTenantJobEntity>()
-            .HasKey(j => new { j.TenantId, j.Job });
-
-        modelBuilder
-            .Entity<PendingTenantJobEntity>()
+            .Entity<JobLedgerEntity>()
             .HasOne<TenantEntity>()
             .WithMany()
             .HasForeignKey(j => j.TenantId)
