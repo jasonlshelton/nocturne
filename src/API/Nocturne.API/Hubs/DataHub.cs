@@ -24,6 +24,12 @@ public class DataHub : TenantAwareHub
     private readonly ILogger<DataHub> _logger;
     private readonly IHubTokenAuthorizer _tokenAuthorizer;
 
+    /// <summary>
+    /// One uploader's 48 hours at a 5-minute cadence (576 statuses) with slack. The read is newest
+    /// first, so with several uploaders the oldest part of the window is cut.
+    /// </summary>
+    private const int RetroDeviceStatusLimit = 600;
+
     public DataHub(ILogger<DataHub> logger, IHubTokenAuthorizer tokenAuthorizer)
     {
         _logger = logger;
@@ -198,12 +204,14 @@ public class DataHub : TenantAwareHub
             var endTime = request.LoadedMills;
             var startTime = endTime - (48 * 60 * 60 * 1000); // 48 hours before
 
+            var window = $"{{\"mills\": {{\"$gte\": {startTime}, \"$lt\": {endTime}}}}}";
+
             var authorization = HubAuthorizationState.Resolve(Context)!;
 
             // Load retro data from multiple collections. The glucose gate is the method's declared
             // scope; treatments and device status answer to their own.
             var entries = await entryService.GetEntriesAsync(
-                find: $"{{\"mills\": {{\"$gte\": {startTime}, \"$lt\": {endTime}}}}}",
+                find: window,
                 count: 1000
             );
 
@@ -211,7 +219,7 @@ public class DataHub : TenantAwareHub
             if (authorization.Satisfies(Scope.TreatmentsRead))
             {
                 treatments = await treatmentService.GetTreatmentsAsync(
-                    find: $"{{\"mills\": {{\"$gte\": {startTime}, \"$lt\": {endTime}}}}}",
+                    find: window,
                     count: 1000
                 );
             }
@@ -220,8 +228,8 @@ public class DataHub : TenantAwareHub
             if (authorization.Satisfies(Scope.DevicesRead))
             {
                 deviceStatuses = await deviceStatusService.GetDeviceStatusesAsync(
-                    FindQuery.Empty,
-                    count: 1000,
+                    FindQuery.ParseDeviceStatus(window),
+                    count: RetroDeviceStatusLimit,
                     skip: 0,
                     cancellationToken: default
                 );
