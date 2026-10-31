@@ -4,6 +4,11 @@ using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
+using Microsoft.EntityFrameworkCore;
+using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Services.Identity;
 
@@ -13,10 +18,13 @@ namespace Nocturne.API.Services.Identity;
 /// </summary>
 public class MembershipRequestService : IMembershipRequestService
 {
+    private static readonly DecideMembershipRequestResult AlreadyAMember =
+        new(false, "The subject is already a member.");
+
     private readonly ITenantRepository _tenants;
     private readonly ITenantMembershipRepository _members;
     private readonly ISubjectRepository _subjects;
-    private readonly ITenantService _tenantService;
+    private readonly INocturneDbContextFactory _contexts;
     private readonly ITenantRoleService _tenantRoleService;
     private readonly IInAppNotificationService _notificationService;
     private readonly TimeProvider _time;
@@ -26,7 +34,7 @@ public class MembershipRequestService : IMembershipRequestService
         ITenantRepository tenants,
         ITenantMembershipRepository members,
         ISubjectRepository subjects,
-        ITenantService tenantService,
+        INocturneDbContextFactory contexts,
         ITenantRoleService tenantRoleService,
         IInAppNotificationService notificationService,
         TimeProvider timeProvider,
@@ -35,7 +43,7 @@ public class MembershipRequestService : IMembershipRequestService
         _tenants = tenants ?? throw new ArgumentNullException(nameof(tenants));
         _members = members ?? throw new ArgumentNullException(nameof(members));
         _subjects = subjects ?? throw new ArgumentNullException(nameof(subjects));
-        _tenantService = tenantService;
+        _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _tenantRoleService = tenantRoleService;
         _notificationService = notificationService;
         _time = timeProvider;
@@ -140,13 +148,28 @@ public class MembershipRequestService : IMembershipRequestService
         if (request.Status != MembershipRequestRecord.Pending)
             return new DecideMembershipRequestResult(false, "Request is no longer pending.");
 
-        await _members.DecideRequestAsync(
-            tenantId, requestId,
-            new MembershipRequestDecision(MembershipRequestRecord.Approved, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, roleIds),
-            ct);
+        await using (var unit = await DbUnitOfWork.OpenForTenantAsync(_contexts, tenantId, ct))
+        {
+            var members = new TenantMembershipRepository(unit);
+            if (!await members.DecideRequestAsync(
+                    tenantId, requestId,
+                    new MembershipRequestDecision(MembershipRequestRecord.Approved, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, roleIds),
+                    ct))
+                return new DecideMembershipRequestResult(false, "Request not found.");
 
-        await _tenantService.AddMemberAsync(
-            tenantId, request.SubjectId, roleIds, limitTo24Hours: limitTo24Hours, ct: ct);
+            if (!await members.AddMemberAsync(
+                    new NewTenantMember(tenantId, request.SubjectId, roleIds, LimitTo24Hours: limitTo24Hours), ct))
+                return AlreadyAMember;
+
+            try
+            {
+                await unit.CommitAsync(token => unit.Context.SaveChangesAsync(token), ct);
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+            {
+                return AlreadyAMember;
+            }
+        }
 
         _logger.LogInformation(
             "MembershipRequestAudit: {Event} request_id={RequestId} tenant_id={TenantId} subject_id={SubjectId} decided_by={DecidedBy}",
