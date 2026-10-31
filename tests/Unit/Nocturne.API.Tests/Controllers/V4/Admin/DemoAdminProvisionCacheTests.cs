@@ -7,6 +7,7 @@ using Nocturne.API.Controllers.V4.Admin;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
@@ -155,7 +156,7 @@ public class DemoAdminProvisionCacheTests : IDisposable
         return new DemoAdminController(
             tenantService.Object, demoTenantService,
             new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()),
-            dbFactory.Object.AsNocturneFactory(), TimeProvider.System);
+            Mock.Of<IDemoDataPurge>());
     }
 
     public void Dispose()

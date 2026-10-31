@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Connectors;
@@ -62,7 +63,7 @@ public class DataSourceServiceStatsTests : IDisposable
     private DataSourceService CreateService(NocturneDbContext context) => new(
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
-        new DemoDataPurger(context.AsFactory(), TimeProvider.System),
+        new DemoDataPurgeRepository(context.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>()),
         new ConnectorConfigurationRepository(context.AsFactory()),
         _sensorGlucose.Object,
         _meterGlucose.Object,

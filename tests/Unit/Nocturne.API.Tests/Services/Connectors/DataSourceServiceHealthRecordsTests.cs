@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Connectors;
@@ -57,7 +58,7 @@ public class DataSourceServiceHealthRecordsTests : IDisposable
     private DataSourceService CreateService(NocturneDbContext context, params IConnectorDataPurge[] dataPurges) => new(
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
-        new DemoDataPurger(context.AsFactory(), TimeProvider.System),
+        new DemoDataPurgeRepository(context.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>()),
         new ConnectorConfigurationRepository(context.AsFactory()),
         Mock.Of<ISensorGlucoseRepository>(),
         Mock.Of<IMeterGlucoseRepository>(),

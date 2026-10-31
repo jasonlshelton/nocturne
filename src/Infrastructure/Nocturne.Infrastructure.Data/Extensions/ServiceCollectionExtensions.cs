@@ -175,6 +175,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SourceOwnedDataRepository>();
         services.AddScoped<ISourceOwnedDataReader>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
         services.AddScoped<ISourceOwnedDataPurge>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
+        services.AddScoped<IDemoDataPurge, DemoDataPurgeRepository>();
 
         // Register avatar storage
         services.AddScoped<IAvatarStore, DatabaseAvatarStore>();

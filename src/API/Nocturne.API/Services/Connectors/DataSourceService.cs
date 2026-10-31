@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Nocturne.API.Services.Demo;
 using Nocturne.API.Services.ProfileActivations;
 using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
@@ -34,7 +33,7 @@ public class DataSourceService : IDataSourceService
 
     private readonly ISourceOwnedDataReader _sourceData;
     private readonly ISourceOwnedDataPurge _sourcePurge;
-    private readonly DemoDataPurger _demoPurge;
+    private readonly IDemoDataPurge _demoPurge;
     private readonly IConnectorConfigurationRepository _configurations;
     private readonly ISensorGlucoseRepository _sensorGlucose;
     private readonly IMeterGlucoseRepository _meterGlucose;
@@ -50,7 +49,7 @@ public class DataSourceService : IDataSourceService
     public DataSourceService(
         ISourceOwnedDataReader sourceData,
         ISourceOwnedDataPurge sourcePurge,
-        DemoDataPurger demoPurge,
+        IDemoDataPurge demoPurge,
         IConnectorConfigurationRepository configurations,
         ISensorGlucoseRepository sensorGlucose,
         IMeterGlucoseRepository meterGlucose,

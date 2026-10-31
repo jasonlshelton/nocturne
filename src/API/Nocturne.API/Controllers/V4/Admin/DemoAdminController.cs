@@ -1,17 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Services.Seeding;
 using Nocturne.Core.Constants;
+using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Identity;
-using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Repositories;
-using Nocturne.Infrastructure.Data.Services;
-using Nocturne.Infrastructure.Data.Entities;
 
 namespace Nocturne.API.Controllers.V4.Admin;
 
@@ -35,24 +32,20 @@ public class DemoAdminController : ControllerBase
     private readonly DemoTenantService _demoTenantService;
     private readonly ITenantRepository _tenants;
     private readonly ITenantMembershipRepository _members;
-    private readonly INocturneDbContextFactory _factory;
-    private readonly TimeProvider _time;
+    private readonly IDemoDataPurge _purge;
 
-    /// <param name="factory">For the demo purges and the unit a provision writes the demo config row in.</param>
     public DemoAdminController(
         ITenantService tenantService,
         DemoTenantService demoTenantService,
         ITenantRepository tenants,
         ITenantMembershipRepository members,
-        INocturneDbContextFactory factory,
-        TimeProvider time)
+        IDemoDataPurge purge)
     {
         _tenantService = tenantService;
         _demoTenantService = demoTenantService;
         _tenants = tenants;
         _members = members;
-        _factory = factory;
-        _time = time;
+        _purge = purge;
     }
 
     /// <summary>
@@ -159,18 +152,8 @@ public class DemoAdminController : ControllerBase
         if (tenant is null)
             return NotFound();
 
-        await using var db = await _factory.CreateForTenantAsync(tenant.Id, ct);
-
-        var writes = new DemoPurgeWrites();
-        try
-        {
-            var deleted = await writes.PurgeEntriesAsync(db, ct);
-            return Ok(new DemoDeleteResultDto(deleted));
-        }
-        finally
-        {
-            await writes.ReportInTenantAsync(HttpContext.RequestServices, TenantContextOf(tenant));
-        }
+        var deleted = await _purge.PurgeEntriesAsync(TenantContextOf(tenant), ct);
+        return Ok(new DemoDeleteResultDto(deleted));
     }
 
     /// <summary>
@@ -185,19 +168,8 @@ public class DemoAdminController : ControllerBase
         if (tenant is null)
             return NotFound();
 
-        await using var db = await _factory.CreateForTenantAsync(tenant.Id, ct);
-
-        var writes = new DemoPurgeWrites();
-        try
-        {
-            var treatments = await writes.PurgeTreatmentsAsync(db, _time, ct);
-            var deviceStatus = await writes.PurgeDeviceStatusAsync(db, ct);
-            return Ok(new DemoDeleteResultDto(treatments + deviceStatus));
-        }
-        finally
-        {
-            await writes.ReportInTenantAsync(HttpContext.RequestServices, TenantContextOf(tenant));
-        }
+        var deleted = await _purge.PurgeTreatmentsAsync(TenantContextOf(tenant), ct);
+        return Ok(new DemoDeleteResultDto(deleted));
     }
 
     /// <summary>

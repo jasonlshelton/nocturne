@@ -1,47 +1,41 @@
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Nocturne.API.Controllers.V4.Admin;
-using Nocturne.API.Services.Connectors;
-using Nocturne.API.Services.Demo;
 using Nocturne.Core.Constants;
-using Nocturne.Core.Contracts.Audit;
-using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
-using Nocturne.Core.Contracts.V4.Repositories;
+using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
-using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
-using Nocturne.Infrastructure.Data.Repositories;
 
-namespace Nocturne.API.Tests.Services.Demo;
+namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 
 /// <summary>
-/// The demo purge has two callers — <see cref="DemoAdminController"/>'s entries/treatments deletes
-/// and <see cref="DataSourceService.DeleteDemoDataAsync"/> — and they used to hand-copy the type
-/// list, which drifted. Both now route through the one owner, so each has to empty exactly the same
-/// set of tables and account for the same rows.
+/// <see cref="DemoDataPurgeRepository"/> has three entry points, the scope's purge and the two a
+/// platform admin calls per tenant, and each has to empty exactly the same tables and account for the
+/// same rows. A table added to the seeder and to one group but not another leaves a row behind or a
+/// count short here.
 /// </summary>
 [Trait("Category", "Unit")]
 public class DemoDataPurgeParityTests : IDisposable
 {
     private static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
+    private static readonly TenantContext Tenant = new(TenantId, "demo", "Nocturne Demo", true, true);
+
     /// <summary>Number of rows <see cref="SeedOneDemoRowOfEveryType"/> writes.</summary>
     private const int SeededRows = 14;
 
     private readonly SqliteTestDatabase _db;
-
-    private readonly Mock<ISensorGlucoseRepository> _sensorGlucose = new();
-    private readonly Mock<IMeterGlucoseRepository> _meterGlucose = new();
-    private readonly Mock<ICalibrationRepository> _calibrations = new();
-    private readonly Mock<IConnectorConfigurationService> _connectorConfig = new();
+    private readonly List<(Guid? Tenant, IReadOnlyCollection<Type> Models)> _tenantReports = [];
+    private readonly Mock<ILegacyReadCacheInvalidation> _scopeReads = new();
+    private readonly List<Type> _scopeReported = [];
 
     public DemoDataPurgeParityTests()
     {
@@ -50,6 +44,11 @@ public class DemoDataPurgeParityTests : IDisposable
         using var db = NewContext();
         db.Tenants.Add(new TenantEntity { Id = TenantId, Slug = "demo", IsDemo = true });
         db.SaveChanges();
+
+        _scopeReads
+            .Setup(r => r.WrittenAsync(It.IsAny<IReadOnlyCollection<Type>>()))
+            .Callback((IReadOnlyCollection<Type> models) => _scopeReported.AddRange(models))
+            .Returns(Task.CompletedTask);
     }
 
     public void Dispose()
@@ -60,35 +59,31 @@ public class DemoDataPurgeParityTests : IDisposable
 
     private NocturneDbContext NewContext() => _db.CreateContext(TenantId);
 
-    private sealed class ContextFactory(DbContextOptions<NocturneDbContext> options)
-        : IDbContextFactory<NocturneDbContext>
+    private INocturneDbContextFactory TenantlessScopeFactory() => _db.CreateContext(Guid.Empty).AsFactory();
+
+    /// <summary>
+    /// A purge whose own scope resolves no tenant, as a platform admin's request does: its factory's
+    /// <c>CreateAsync</c> reads as no tenant, so only a context pinned to the tenant sees the demo rows,
+    /// and every report made from a scope the purge opens is recorded with the tenant that scope read as.
+    /// </summary>
+    private DemoDataPurgeRepository PlatformAdminPurge()
     {
-        public NocturneDbContext CreateDbContext() => new(options);
+        var services = new ServiceCollection();
+        services.AddScoped<ITenantAccessor, ScopeTenantAccessor>();
+        services.AddScoped(_ => Mock.Of<ICategoryReadContext>());
+        services.AddScoped<ILegacyReadCacheInvalidation>(
+            sp => new TenantRecordingLegacyReads(sp.GetRequiredService<ITenantAccessor>(), _tenantReports));
+
+        return new DemoDataPurgeRepository(
+            TenantlessScopeFactory(), TimeProvider.System,
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
     }
 
-    private DemoAdminController CreateController() =>
-        new(Mock.Of<ITenantService>(), null!, new TenantRepository((new ContextFactory(_db.Options)).AsNocturneFactory()),
-            new TenantMembershipRepository((new ContextFactory(_db.Options)).AsNocturneFactory()),
-            (new ContextFactory(_db.Options)).AsNocturneFactory(), TimeProvider.System)
-        {
-            ControllerContext = new DemoAdminRequest().Context,
-        };
+    private DemoDataPurgeRepository ScopePurge() =>
+        new(NewContext().AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>(), _scopeReads.Object);
 
-    private DataSourceService CreateService(NocturneDbContext context) => new(
-        new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
-        new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
-        new DemoDataPurger(context.AsFactory(), TimeProvider.System),
-        new ConnectorConfigurationRepository(context.AsFactory()),
-        _sensorGlucose.Object,
-        _meterGlucose.Object,
-        _calibrations.Object,
-        Mock.Of<IAuditContext>(),
-        _connectorConfig.Object,
-        Nocturne.API.Tests.Infrastructure.ProfileActivationTestDeps.Writer(context),
-        [],
-        [],
-        TimeProvider.System,
-        NullLogger<DataSourceService>.Instance);
+    private DemoDataPurgeRepository ScopePurgeOver(NocturneDbContext context) =>
+        new(context.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>(), _scopeReads.Object);
 
     /// <summary>One demo row in every table the demo seeder and the realtime tick write to.</summary>
     private void SeedOneDemoRowOfEveryType(bool softDeleted = false)
@@ -198,50 +193,65 @@ public class DemoDataPurgeParityTests : IDisposable
             + await db.ApsSnapshots.IgnoreQueryFilters().LongCountAsync();
     }
 
-    private async Task<long> ControllerPurgeAsync()
+    private async Task<long> TenantPurgeAsync()
     {
-        var controller = CreateController();
-
-        var treatments = ((DemoDeleteResultDto)((OkObjectResult)await controller.DeleteTreatments(default)).Value!).DeletedCount;
-        var entries = ((DemoDeleteResultDto)((OkObjectResult)await controller.DeleteEntries(default)).Value!).DeletedCount;
-
-        return entries + treatments;
+        var purge = PlatformAdminPurge();
+        return await purge.PurgeTreatmentsAsync(Tenant, default) + await purge.PurgeEntriesAsync(Tenant, default);
     }
 
-    private async Task<long> ServicePurgeAsync()
+    private async Task<long> ScopePurgeTotalAsync()
     {
-        await using var ctx = NewContext();
-        var result = await CreateService(ctx).DeleteDemoDataAsync();
-
-        result.Success.Should().BeTrue();
-        return result.TotalDeleted;
+        var counts = await ScopePurge().PurgeAsync(default);
+        return counts.Glucose + counts.Treatments + counts.DeviceStatus;
     }
 
     [Fact]
     public async Task BothPurgePaths_AccountForEveryDemoRowAndLeaveNothingBehind()
     {
         SeedOneDemoRowOfEveryType();
-        var controllerDeleted = await ControllerPurgeAsync();
+        var tenantDeleted = await TenantPurgeAsync();
         (await RemainingDemoRowsAsync()).Should().Be(0);
 
         SeedOneDemoRowOfEveryType();
-        var serviceDeleted = await ServicePurgeAsync();
+        var scopeDeleted = await ScopePurgeTotalAsync();
         (await RemainingDemoRowsAsync()).Should().Be(0);
 
-        controllerDeleted.Should().Be(SeededRows);
-        serviceDeleted.Should().Be(SeededRows);
+        tenantDeleted.Should().Be(SeededRows);
+        scopeDeleted.Should().Be(SeededRows);
     }
 
     [Fact]
-    public async Task ServicePurge_ReportsTheModelsOfEveryGroupItDeleted()
+    public async Task BothPurgePaths_PurgeRowsAVisitorHadAlreadyDeleted()
+    {
+        SeedOneDemoRowOfEveryType(softDeleted: true);
+        await TenantPurgeAsync();
+        (await RemainingDemoRowsAsync()).Should().Be(0);
+
+        SeedOneDemoRowOfEveryType(softDeleted: true);
+        await ScopePurgeTotalAsync();
+        (await RemainingDemoRowsAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ScopePurge_CountsEachGroupSeparately()
     {
         SeedOneDemoRowOfEveryType();
-        var reads = new RecordingLegacyReads();
 
-        await using var ctx = NewContext();
-        await new DemoDataPurger(ctx.AsFactory(), TimeProvider.System, reads).PurgeAsync(default);
+        var counts = await ScopePurge().PurgeAsync(default);
 
-        reads.Models.Should().Contain([
+        counts.Glucose.Should().Be(3);
+        counts.Treatments.Should().Be(10);
+        counts.DeviceStatus.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ScopePurge_ReportsTheModelsOfEveryGroupItDeleted()
+    {
+        SeedOneDemoRowOfEveryType();
+
+        await ScopePurge().PurgeAsync(default);
+
+        _scopeReported.Should().Contain([
             typeof(SensorGlucose), typeof(MeterGlucose), typeof(Calibration),
             typeof(Bolus), typeof(CarbIntake), typeof(BGCheck), typeof(Note), typeof(DeviceEvent),
             typeof(BolusCalculation), typeof(TempBasal), typeof(StateSpan), typeof(ApsSnapshot),
@@ -249,59 +259,83 @@ public class DemoDataPurgeParityTests : IDisposable
     }
 
     [Fact]
-    public async Task ServicePurge_ReportsNothingWhenThereIsNothingToDelete()
+    public async Task ScopePurge_ReportsNothingWhenThereIsNothingToDelete()
     {
-        var reads = new RecordingLegacyReads();
+        await ScopePurge().PurgeAsync(default);
 
-        await using var ctx = NewContext();
-        await new DemoDataPurger(ctx.AsFactory(), TimeProvider.System, reads).PurgeAsync(default);
-
-        reads.Models.Should().BeEmpty();
+        _scopeReported.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ServicePurge_ReportsTheGroupThatFailedPartWayAndNoGroupThatNeverStarted()
+    public async Task ScopePurge_ReportsTheGroupThatFailedPartWayAndNoGroupThatNeverStarted()
     {
         SeedOneDemoRowOfEveryType();
-        var reads = new RecordingLegacyReads();
 
         await using var ctx = NewContext();
         await ctx.Database.ExecuteSqlRawAsync("DROP TABLE lab_hba1c_results");
-        var purge = () => new DemoDataPurger(ctx.AsFactory(), TimeProvider.System, reads).PurgeAsync(default);
+        var purge = () => ScopePurgeOver(ctx).PurgeAsync(default);
 
         await purge.Should().ThrowAsync<Exception>();
 
-        reads.Models.Should().Contain([typeof(Bolus), typeof(CarbIntake)])
+        _scopeReported.Should().Contain([typeof(Bolus), typeof(CarbIntake)])
             .And.NotContain([typeof(SensorGlucose), typeof(ApsSnapshot)]);
     }
 
     [Fact]
-    public async Task BothPurgePaths_PurgeRowsAVisitorHadAlreadyDeleted()
-    {
-        // The demo tenant is regenerated wholesale, so a soft-deleted row has to go too; leaving it
-        // behind makes it unreadable and unpurgeable.
-        SeedOneDemoRowOfEveryType(softDeleted: true);
-
-        await ControllerPurgeAsync();
-
-        (await RemainingDemoRowsAsync()).Should().Be(0);
-    }
-
-    [Fact]
-    public async Task ServicePurge_ReportsThePerTypeCountsItsCallerRenders()
+    public async Task PurgeEntries_ReportsTheGlucoseModelsAsTheDemoTenant()
     {
         SeedOneDemoRowOfEveryType();
 
-        await using var ctx = NewContext();
-        var result = await CreateService(ctx).DeleteDemoDataAsync();
+        await PlatformAdminPurge().PurgeEntriesAsync(Tenant, default);
 
-        result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("Glucose", 3));
-        result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("Treatments", 10));
-        result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("DeviceStatus", 1));
+        var report = _tenantReports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().BeEquivalentTo([typeof(SensorGlucose), typeof(MeterGlucose), typeof(Calibration)]);
     }
 
     [Fact]
-    public async Task ServicePurge_PreservesRealReviewRowsAndDeletesSuggestionsOnDemoDevice()
+    public async Task PurgeTreatments_ReportsTheTreatmentAndDeviceStatusModelsAsTheDemoTenant()
+    {
+        SeedOneDemoRowOfEveryType();
+
+        await PlatformAdminPurge().PurgeTreatmentsAsync(Tenant, default);
+
+        var report = _tenantReports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().Contain([typeof(Bolus), typeof(CarbIntake), typeof(StateSpan), typeof(ApsSnapshot)])
+            .And.NotContain(typeof(SensorGlucose));
+    }
+
+    [Fact]
+    public async Task PurgeTreatments_ThatFailsPartWay_StillReportsTheGroupAndNoGroupThatNeverStarted()
+    {
+        SeedOneDemoRowOfEveryType();
+        await using (var db = NewContext())
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE lab_hba1c_results");
+
+        var purge = () => PlatformAdminPurge().PurgeTreatmentsAsync(Tenant, default);
+
+        await purge.Should().ThrowAsync<Exception>();
+
+        var report = _tenantReports.Should().ContainSingle().Subject;
+        report.Tenant.Should().Be(TenantId);
+        report.Models.Should().Contain([typeof(Bolus), typeof(CarbIntake)])
+            .And.NotContain([typeof(SensorGlucose), typeof(ApsSnapshot)]);
+    }
+
+    [Fact]
+    public async Task ATenantPurgeThatDeletesNothing_ReportsNothing()
+    {
+        var purge = PlatformAdminPurge();
+
+        await purge.PurgeEntriesAsync(Tenant, default);
+        await purge.PurgeTreatmentsAsync(Tenant, default);
+
+        _tenantReports.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ScopePurge_PreservesRealReviewRowsAndDeletesSuggestionsOnDemoDevice()
     {
         var deviceId = Guid.CreateVersion7();
         var demoTime = DateTime.UtcNow;
@@ -342,12 +376,33 @@ public class DemoDataPurgeParityTests : IDisposable
             db.SaveChanges();
         }
 
-        await using (var db = NewContext())
-            await CreateService(db).DeleteDemoDataAsync();
+        await ScopePurge().PurgeAsync(default);
 
         await using var verify = NewContext();
         (await verify.CompressionLowSuggestions.Select(s => s.Id).ToListAsync())
             .Should().ContainSingle().Which.Should().Be(realSuggestion);
         (await verify.StateSpans.CountAsync()).Should().Be(0);
+    }
+
+    private sealed class ScopeTenantAccessor : ITenantAccessor
+    {
+        public Guid TenantId => Context?.TenantId ?? Guid.Empty;
+
+        public bool IsResolved => Context is not null;
+
+        public TenantContext? Context { get; private set; }
+
+        public void SetTenant(TenantContext context) => Context = context;
+    }
+
+    private sealed class TenantRecordingLegacyReads(
+        ITenantAccessor tenant, List<(Guid? Tenant, IReadOnlyCollection<Type> Models)> reports)
+        : ILegacyReadCacheInvalidation
+    {
+        public Task WrittenAsync(IReadOnlyCollection<Type> models)
+        {
+            reports.Add((tenant.Context?.TenantId, models));
+            return Task.CompletedTask;
+        }
     }
 }

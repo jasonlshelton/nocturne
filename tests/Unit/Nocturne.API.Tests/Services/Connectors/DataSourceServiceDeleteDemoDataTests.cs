@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Connectors;
@@ -56,7 +57,7 @@ public class DataSourceServiceDeleteDemoDataTests : IDisposable
     private DataSourceService CreateService(NocturneDbContext context) => new(
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
         new SourceOwnedDataRepository(context.AsFactory(), Mock.Of<IAuditContext>()),
-        new DemoDataPurger(context.AsFactory(), TimeProvider.System),
+        new DemoDataPurgeRepository(context.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>()),
         new ConnectorConfigurationRepository(context.AsFactory()),
         _sensorGlucose.Object,
         _meterGlucose.Object,
@@ -76,6 +77,11 @@ public class DataSourceServiceDeleteDemoDataTests : IDisposable
         var timestamp = DateTime.UtcNow;
 
         using var db = NewContext();
+        db.MeterGlucose.Add(new MeterGlucoseEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = TenantId, DataSource = DataSources.DemoService,
+            Timestamp = timestamp, Mgdl = 118, DeletedAt = deletedAt,
+        });
         db.Boluses.Add(new BolusEntity
         {
             Id = Guid.CreateVersion7(), TenantId = TenantId, DataSource = DataSources.DemoService,
@@ -137,11 +143,13 @@ public class DataSourceServiceDeleteDemoDataTests : IDisposable
             var result = await CreateService(ctx).DeleteDemoDataAsync();
 
             result.Success.Should().BeTrue();
+            result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("Glucose", 1));
             result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("Treatments", 8));
             result.DeletedCounts.Should().Contain(new KeyValuePair<string, long>("DeviceStatus", 1));
         }
 
         await using var assert = NewContext();
+        (await assert.MeterGlucose.IgnoreQueryFilters().CountAsync()).Should().Be(0);
         (await assert.Boluses.IgnoreQueryFilters().CountAsync()).Should().Be(0);
         (await assert.CarbIntakes.IgnoreQueryFilters().CountAsync()).Should().Be(0);
         (await assert.BGChecks.IgnoreQueryFilters().CountAsync()).Should().Be(0);
