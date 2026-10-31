@@ -16,7 +16,8 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 /// Row Level Security: the system-pinned setup-gate read answers for the tenant it pins from a
 /// scope that reads as another tenant or as no one; a subject-pinned enumeration runs under the
 /// <c>subject_pin</c> policy, which admits that subject's rows and hides every other; and a
-/// tenant-pinned request read reaches a tenant-scoped table the scope's own tenant could not.
+/// tenant-pinned request read reaches a tenant-scoped table the scope's own tenant could not, and
+/// the owner lock makes the second of two owners leaving at once read the first one's write.
 /// </summary>
 [Trait("Category", "Integration")]
 public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryPostgresTests.Database database)
@@ -198,5 +199,42 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
         (await asB.GetRequestAsync(a.Tenant, id, CancellationToken.None))!.Message.Should().Be("in");
         (await asB.ListPendingRequestsAsync(a.Tenant, CancellationToken.None)).Select(r => r.Id).Should().Equal(id);
         (await asB.ListPendingRequestsAsync(b.Tenant, CancellationToken.None)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OwnerLock_TheOnlyTwoOwnersLeavingAtOnceLeaveOneOwnerAndRefuseTheSecond()
+    {
+        var seeded = await SeedTenantAsync("f");
+        var factory = new Factory(Context, seeded.Tenant);
+        var members = new TenantMembershipRepository(factory);
+        var ownerRole = (await members.FindRoleIdBySlugAsync(seeded.Tenant, RoleSeeds.Owner, CancellationToken.None))!.Value;
+        var caretakerRole = (await members.FindRoleIdBySlugAsync(seeded.Tenant, RoleSeeds.Caretaker, CancellationToken.None))!.Value;
+        var secondOwner = await new SubjectRepository(factory).CreateAsync(new NewSubject("f-second-owner"), CancellationToken.None);
+        await members.AddMemberAsync(new NewTenantMember(seeded.Tenant, secondOwner, [ownerRole]), CancellationToken.None);
+        var removedId = (await members.FindMemberAsync(seeded.Tenant, seeded.Owner, CancellationToken.None))!.Id;
+        var steppingDownId = (await members.FindMemberAsync(seeded.Tenant, secondOwner, CancellationToken.None))!.Id;
+
+        var staged = new TaskCompletionSource();
+        var commit = new TaskCompletionSource();
+        await using var unit = await DbUnitOfWork.OpenForTenantAsync(factory, seeded.Tenant);
+        var removal = unit.CommitAsync(
+            async ct =>
+            {
+                var outcome = await new TenantMembershipRepository(unit).RemoveMemberUnlessLastOwnerAsync(seeded.Tenant, removedId, ct);
+                staged.TrySetResult();
+                await commit.Task;
+                await unit.Context.SaveChangesAsync(ct);
+                return outcome;
+            });
+        await staged.Task;
+
+        var stepDown = Task.Run(() => members.ReplaceRolesUnlessLastOwnerAsync(
+            seeded.Tenant, steppingDownId, [ownerRole], [caretakerRole], DateTime.UtcNow, CancellationToken.None));
+        await PostgresLockWaits.UntilBlockedAsync(database.AppConnectionString, stepDown);
+        commit.SetResult();
+
+        (await removal).Should().Be(OwnerGuardedChange.Changed);
+        (await stepDown).Should().Be(OwnerGuardedChange.LastOwner, "it reads the committed removal under the lock");
+        (await members.ListOwnersAsync(seeded.Tenant, CancellationToken.None)).Select(o => o.Id).Should().Equal(steppingDownId);
     }
 }

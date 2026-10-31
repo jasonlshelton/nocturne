@@ -237,35 +237,66 @@ public class TenantMembershipRepository : ITenantMembershipRepository
     }
 
     /// <inheritdoc/>
-    public virtual async Task<bool> IsLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct)
-    {
-        await using var lease = await OpenForTenantAsync(tenantId, ct);
-        return await lease.Context.TenantMembers.AsNoTracking().IsLastOwnerAsync(tenantId, memberId, ct);
-    }
-
-    /// <inheritdoc/>
     public virtual async Task<bool> AnyOtherOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct)
     {
         await using var lease = await OpenForTenantAsync(tenantId, ct);
         return await lease.Context.TenantMembers.AsNoTracking().OwnersOf(tenantId).AnyAsync(m => m.Id != memberId, ct);
     }
 
-    /// <inheritdoc/>
-    public virtual async Task<bool> RemoveMemberAsync(Guid tenantId, Guid memberId, CancellationToken ct)
-    {
-        await using var lease = await OpenForTenantAsync(tenantId, ct);
-        var db = lease.Context;
-        var member = await db.TenantMembers
-            .Include(m => m.MemberRoles)
-            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == memberId, ct);
-        if (member is null)
-            return false;
+    private const int OwnersLockClass = 0x4E4F_574E;
 
-        db.TenantMemberRoles.RemoveRange(member.MemberRoles);
-        db.TenantMembers.Remove(member);
-        await SaveAsync(db, ct);
-        return true;
+    /// <summary>
+    /// Runs <paramref name="change"/> under the tenant's owner lock (<see cref="AdvisoryLockExtensions"/>)
+    /// and saves it when it reports <see cref="OwnerGuardedChange.Changed"/>: on this repository's unit,
+    /// whose owner commits it, else on a new unit pinned to <paramref name="tenantId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Two owners each stepping down or removing the other both find another owner when they read
+    /// before either writes, and the tenant is left with none, which nothing inside it can repair.
+    /// Holding the lock from the check to the commit makes the second read the first one's write.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The repository is over a unit with no transaction open.</exception>
+    private async Task<OwnerGuardedChange> UnderOwnersLockAsync(
+        Guid tenantId,
+        Func<NocturneDbContext, CancellationToken, Task<OwnerGuardedChange>> change,
+        CancellationToken ct)
+    {
+        if (_unit is not null)
+        {
+            await _unit.Context.LockForTransactionAsync(OwnersLockClass, tenantId, ct);
+            return await change(_unit.Context, ct);
+        }
+
+        await using var unit = await DbUnitOfWork.OpenForTenantAsync(Pinnable, tenantId, ct);
+        return await unit.CommitAsync(
+            async token =>
+            {
+                await unit.Context.LockForTransactionAsync(OwnersLockClass, tenantId, token);
+                var outcome = await change(unit.Context, token);
+                if (outcome == OwnerGuardedChange.Changed)
+                    await unit.Context.SaveChangesAsync(token);
+                return outcome;
+            },
+            ct: ct);
     }
+
+    /// <inheritdoc/>
+    public virtual Task<OwnerGuardedChange> RemoveMemberUnlessLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct) =>
+        UnderOwnersLockAsync(tenantId, async (db, token) =>
+        {
+            if (await Members(db).IsLastOwnerAsync(tenantId, memberId, token))
+                return OwnerGuardedChange.LastOwner;
+
+            var member = await db.TenantMembers
+                .Include(m => m.MemberRoles)
+                .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == memberId, token);
+            if (member is null)
+                return OwnerGuardedChange.NotFound;
+
+            db.TenantMemberRoles.RemoveRange(member.MemberRoles);
+            db.TenantMembers.Remove(member);
+            return OwnerGuardedChange.Changed;
+        }, ct);
 
     /// <inheritdoc/>
     public virtual async Task<int> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct)
@@ -346,7 +377,32 @@ public class TenantMembershipRepository : ITenantMembershipRepository
         DateTime now, CancellationToken ct)
     {
         await using var lease = await OpenForTenantAsync(tenantId, ct);
-        var db = lease.Context;
+        if (!await StageRoleReplacementAsync(lease.Context, tenantId, memberId, removedRoleIds, addedRoleIds, now, ct))
+            return false;
+
+        await SaveAsync(lease.Context, ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public virtual Task<OwnerGuardedChange> ReplaceRolesUnlessLastOwnerAsync(
+        Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds, IReadOnlyCollection<Guid> addedRoleIds,
+        DateTime now, CancellationToken ct) =>
+        UnderOwnersLockAsync(tenantId, async (db, token) =>
+        {
+            if (await Roles(db).AnyAsync(r => r.TenantId == tenantId && r.Slug == RoleSeeds.Owner && removedRoleIds.Contains(r.Id), token)
+                && await Members(db).IsLastOwnerAsync(tenantId, memberId, token))
+                return OwnerGuardedChange.LastOwner;
+
+            return await StageRoleReplacementAsync(db, tenantId, memberId, removedRoleIds, addedRoleIds, now, token)
+                ? OwnerGuardedChange.Changed
+                : OwnerGuardedChange.NotFound;
+        }, ct);
+
+    private static async Task<bool> StageRoleReplacementAsync(
+        NocturneDbContext db, Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds,
+        IReadOnlyCollection<Guid> addedRoleIds, DateTime now, CancellationToken ct)
+    {
         var member = await db.TenantMembers
             .Include(m => m.MemberRoles)
             .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == memberId, ct);
@@ -365,7 +421,6 @@ public class TenantMembershipRepository : ITenantMembershipRepository
         }
 
         member.SysUpdatedAt = now;
-        await SaveAsync(db, ct);
         return true;
     }
 

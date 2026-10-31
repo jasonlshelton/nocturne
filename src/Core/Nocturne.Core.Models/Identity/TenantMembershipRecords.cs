@@ -118,3 +118,11 @@ public sealed record PlatformAdminMembership(Guid SubjectId, Guid TenantId, stri
 /// platform admins there are, so the caller can tell how many have no tenant to be told in.
 /// </summary>
 public sealed record PlatformAdminDirectory(IReadOnlyList<PlatformAdminMembership> Memberships, int ActivePlatformAdmins);
+
+/// <summary>What a membership change that may not leave the tenant without an owner found.</summary>
+public enum OwnerGuardedChange
+{
+    Changed,
+    NotFound,
+    LastOwner,
+}
