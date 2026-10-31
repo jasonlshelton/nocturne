@@ -312,10 +312,10 @@ public class DevAdminController : ControllerBase
 
         try
         {
-            var cachedSlugs = await db.ExecuteInTransactionAsync(async token =>
+            var cachedTenants = await db.ExecuteInTransactionAsync(async token =>
             {
                 // Declared inside the retryable body so a second attempt starts from an empty set.
-                var resolvableSlugs = new HashSet<string>(StringComparer.Ordinal);
+                var resolvableTenants = new HashSet<(string Slug, string? ShareTokenHash)>();
 
                 // Collect all subject IDs and passkey IDs from the snapshot for non-scoped upsert
                 var allSubjectDtos = snapshot.Tenants.SelectMany(t => t.Subjects).ToList();
@@ -382,7 +382,7 @@ public class DevAdminController : ControllerBase
                     if (existingTenant is not null)
                     {
                         // A rename leaves the outgoing slug cached and still resolving to this row.
-                        resolvableSlugs.Add(existingTenant.Slug);
+                        resolvableTenants.Add((existingTenant.Slug, existingTenant.ShareToken));
 
                         // Update scalar properties in-place
                         existingTenant.Slug = td.Slug;
@@ -404,7 +404,7 @@ public class DevAdminController : ControllerBase
                         });
                     }
 
-                    resolvableSlugs.Add(td.Slug);
+                    resolvableTenants.Add((td.Slug, null));
                 }
                 await db.SaveChangesAsync(token);
 
@@ -561,13 +561,13 @@ public class DevAdminController : ControllerBase
                     await db.SaveChangesAsync(token);
                 }
 
-                return resolvableSlugs;
+                return resolvableTenants;
             }, ct: ct);
 
             // After the commit, not beside the writes: a request served mid-transaction reads
             // the pre-restore rows and would re-cache them for the full duration.
-            foreach (var slug in cachedSlugs)
-                TenantResolutionMiddleware.EvictTenant(_cache, slug);
+            foreach (var (slug, shareTokenHash) in cachedTenants)
+                TenantCacheEviction.Evict(_cache, slug, shareTokenHash);
 
             _logger.LogInformation("Dev snapshot import completed successfully");
             return Ok(new { success = true, tenantsImported = snapshot.Tenants.Count });
