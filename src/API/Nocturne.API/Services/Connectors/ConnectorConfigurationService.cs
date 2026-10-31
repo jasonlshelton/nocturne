@@ -81,15 +81,12 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
             return null;
         }
 
-        // Read enabled from config JSON
-        var isActive = GetEnabledFromConfig(entity.ConfigurationJson);
-
         var response = new ConnectorConfigurationResponse
         {
             ConnectorName = entity.ConnectorName,
             Configuration = JsonDocument.Parse(entity.ConfigurationJson),
             SchemaVersion = entity.SchemaVersion,
-            IsActive = isActive,
+            IsActive = ConnectorEnabledKey.IsEnabled(entity.ConfigurationJson),
             LastModified = entity.LastModified,
             ModifiedBy = entity.ModifiedBy,
             LastSyncAttempt = entity.LastSyncAttempt,
@@ -153,9 +150,6 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
         var canonicalName = ConnectorNames.Canonical(connectorName);
         var configJson = configuration.RootElement.GetRawText();
 
-        // Read the enabled state from the config JSON (defaults to false if not present)
-        var enabledFromConfig = GetEnabledFromConfig(configJson);
-
         var entity = await _configurations.SaveConfigurationAsync(canonicalName, configJson, modifiedBy, ct);
         _logger.LogInformation("Saved configuration for connector {ConnectorName}", connectorName);
         InvalidateCaches(entity);
@@ -173,7 +167,7 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
             ConnectorName = entity.ConnectorName,
             Configuration = JsonDocument.Parse(entity.ConfigurationJson),
             SchemaVersion = entity.SchemaVersion,
-            IsActive = enabledFromConfig,
+            IsActive = ConnectorEnabledKey.IsEnabled(entity.ConfigurationJson),
             LastModified = entity.LastModified,
             ModifiedBy = entity.ModifiedBy
         };
@@ -335,8 +329,7 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
         {
             var hasDbConfig = dbConfigs.TryGetValue(connector.ConnectorName, out var dbConfig);
 
-            // Read enabled from config JSON
-            var isEnabled = hasDbConfig && GetEnabledFromConfig(dbConfig!.ConfigurationJson);
+            var isEnabled = hasDbConfig && ConnectorEnabledKey.IsEnabled(dbConfig!.ConfigurationJson);
 
             var status = new ConnectorStatusInfo
             {
@@ -351,30 +344,6 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Reads the enabled field from the configuration JSON.
-    /// Returns true if the field is not present (backwards compatibility - existing connectors default to enabled).
-    /// Returns false only if explicitly set to false or there's a parsing error.
-    /// </summary>
-    internal static bool GetEnabledFromConfig(string configJson)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(configJson);
-            if (doc.RootElement.TryGetProperty("enabled", out var enabledProp))
-            {
-                return enabledProp.GetBoolean();
-            }
-            // If enabled field is not present, default to true for backwards compatibility
-            // This ensures existing connector configs continue to work after the migration
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 
     /// <inheritdoc />

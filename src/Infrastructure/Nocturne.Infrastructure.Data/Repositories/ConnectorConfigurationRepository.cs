@@ -15,21 +15,16 @@ namespace Nocturne.Infrastructure.Data.Repositories;
 /// <remarks>
 /// Registered transient, like the factory it holds. Writes are tracked reads and saves, which update
 /// only the columns they change, so a health report cannot undo a configuration save. The cursor,
-/// low-water-mark and enabled-flag writes are the exception on PostgreSQL: each is one jsonb-path
-/// statement, so two writers of different keys on the same row cannot drop each other's key, as a
-/// read-modify-write of the whole object could. A dropped low-water mark is stranded history the
-/// failure marks exist to prevent, and a toggle that re-wrote the configuration it read would undo a
-/// configuration saved in between. Same-key writes stay last-writer-wins.
+/// low-water-mark, enabled-flag and configuration writes are the exception on PostgreSQL: each is one
+/// jsonb statement, so two writers of different keys on the same row cannot drop each other's key, as
+/// a read-modify-write of the whole object could. A dropped low-water mark is stranded history the
+/// failure marks exist to prevent, a toggle that re-wrote the configuration it read would undo a
+/// configuration saved in between, and a configuration saved from a form that read the flag earlier
+/// would undo a toggle. Same-key writes stay last-writer-wins.
 /// </remarks>
 public class ConnectorConfigurationRepository : IConnectorConfigurationRepository
 {
     private const string ConnectorSourceSuffix = "-connector";
-
-    private static readonly JsonSerializerOptions CamelCase = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
 
     private readonly INocturneDbContextFactory _contexts;
     private readonly TimeProvider _time;
@@ -74,9 +69,17 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
     }
 
     /// <inheritdoc/>
-    public virtual Task<ConnectorConfigurationRecord> SaveConfigurationAsync(
-        string connectorName, string configurationJson, string? modifiedBy, CancellationToken ct) =>
-        UpsertAsync(connectorName, modifiedBy, entity => entity.ConfigurationJson = configurationJson, ct);
+    public virtual async Task<ConnectorConfigurationRecord> SaveConfigurationAsync(
+        string connectorName, string configurationJson, string? modifiedBy, CancellationToken ct)
+    {
+        await using var db = await _contexts.CreateAsync(ct);
+        if (db.Database.IsNpgsql()
+            && await SaveConfigurationInPlaceAsync(db, connectorName, configurationJson, modifiedBy, ct) is { } record)
+            return record;
+
+        return await UpsertAsync(db, connectorName, modifiedBy, entity =>
+            entity.ConfigurationJson = ConnectorEnabledKey.CarryOver(configurationJson, entity.ConfigurationJson), ct);
+    }
 
     /// <inheritdoc/>
     public virtual Task<ConnectorConfigurationRecord> SaveSecretsAsync(
@@ -93,7 +96,7 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
             return record;
 
         return await UpsertAsync(db, connectorName, modifiedBy,
-            entity => entity.ConfigurationJson = WithEnabled(entity.ConfigurationJson, isActive), ct);
+            entity => entity.ConfigurationJson = ConnectorEnabledKey.With(entity.ConfigurationJson, isActive), ct);
     }
 
     /// <inheritdoc/>
@@ -277,20 +280,58 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
                     coalesce((SELECT jsonb_object_agg(e.key, e.value)
                               FROM jsonb_each(CASE WHEN jsonb_typeof(configuration) = 'object'
                                   THEN configuration ELSE jsonb_build_object() END) AS e
-                              WHERE lower(e.key) <> 'enabled'), jsonb_build_object()),
-                    ARRAY['enabled'], to_jsonb({isActive})),
+                              WHERE lower(e.key) <> {ConnectorEnabledKey.Name}), jsonb_build_object()),
+                    ARRAY[{ConnectorEnabledKey.Name}], to_jsonb({isActive})),
                 last_modified = {now},
                 modified_by = {modifiedBy},
                 sys_updated_at = {now.UtcDateTime}
             WHERE tenant_id = {db.TenantId} AND connector_name = {name}
             """, ct);
-        if (updated == 0)
-            return null;
+        return updated == 0 ? null : await ReadWrittenAsync(db, name, ct);
+    }
 
+    /// <summary>
+    /// Stores the configuration on PostgreSQL in one statement that keeps the stored <c>enabled</c>
+    /// key, whatever the document carries, so a toggle committed first is never undone by a save
+    /// that read the configuration before it. A stored row with no key takes the document's, as
+    /// <see cref="ConnectorEnabledKey.CarryOver"/> does. Null when the connector has no row. A row deleted
+    /// after the update matched it throws, as in <see cref="SetEnabledInPlaceAsync"/>.
+    /// </summary>
+    private async Task<ConnectorConfigurationRecord?> SaveConfigurationInPlaceAsync(
+        NocturneDbContext db, string connectorName, string configurationJson, string? modifiedBy, CancellationToken ct)
+    {
+        var name = ConnectorNames.Canonical(connectorName);
+        var now = _time.GetUtcNow();
+        var updated = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE connector_configurations
+            SET configuration = coalesce((SELECT jsonb_object_agg(e.key, e.value)
+                                          FROM jsonb_each({configurationJson}::jsonb) AS e
+                                          WHERE lower(e.key) <> {ConnectorEnabledKey.Name}), jsonb_build_object())
+                    || coalesce((SELECT jsonb_build_object({ConnectorEnabledKey.Name}, s.value)
+                                 FROM jsonb_each(CASE WHEN jsonb_typeof(configuration) = 'object'
+                                     THEN configuration ELSE jsonb_build_object() END) AS s
+                                 WHERE lower(s.key) = {ConnectorEnabledKey.Name}
+                                 LIMIT 1),
+                             (SELECT jsonb_build_object({ConnectorEnabledKey.Name}, d.value)
+                              FROM jsonb_each({configurationJson}::jsonb) AS d
+                              WHERE lower(d.key) = {ConnectorEnabledKey.Name}
+                              LIMIT 1),
+                             jsonb_build_object()),
+                last_modified = {now},
+                modified_by = {modifiedBy},
+                sys_updated_at = {now.UtcDateTime}
+            WHERE tenant_id = {db.TenantId} AND connector_name = {name}
+            """, ct);
+        return updated == 0 ? null : await ReadWrittenAsync(db, name, ct);
+    }
+
+    private static async Task<ConnectorConfigurationRecord> ReadWrittenAsync(
+        NocturneDbContext db, string name, CancellationToken ct)
+    {
         var entity = await db.ConnectorConfigurations.AsNoTracking()
             .FirstOrDefaultAsync(c => c.ConnectorName == name, ct);
         return entity is null
-            ? throw new DbUpdateConcurrencyException("The connector configuration was deleted while its enabled flag was written.")
+            ? throw new DbUpdateConcurrencyException("The connector configuration was deleted while it was written.")
             : ToRecord(entity);
     }
 
@@ -397,20 +438,6 @@ public class ConnectorConfigurationRepository : IConnectorConfigurationRepositor
             // A corrupt blob reads as empty, so it can never wedge a sync.
             return new JsonObject();
         }
-    }
-
-    private static string WithEnabled(string configurationJson, bool enabled)
-    {
-        var config = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(configurationJson, CamelCase)
-            ?? new Dictionary<string, JsonElement>();
-
-        if (config.Keys.FirstOrDefault(k => k.Equals("enabled", StringComparison.OrdinalIgnoreCase)) is { } existing)
-            config.Remove(existing);
-
-        using var doc = JsonDocument.Parse(enabled ? "true" : "false");
-        config["enabled"] = doc.RootElement.Clone();
-
-        return JsonSerializer.Serialize(config, CamelCase);
     }
 
     private static string FitErrorMessage(string message)

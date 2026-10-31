@@ -508,7 +508,7 @@ public partial class DeviceSetupService(
 
         var connectors = await connectorConfigurations.ListAsync(ct);
         found.AddRange(connectors
-            .Where(c => ConnectorConfigurationService.GetEnabledFromConfig(c.ConfigurationJson))
+            .Where(c => ConnectorEnabledKey.IsEnabled(c.ConfigurationJson))
             .Select(c => c.ConnectorName)
             .Order()
             .Select(n => new DeviceEvidence(DeviceEvidenceSource.Connector, n)));

@@ -236,6 +236,108 @@ public class ConnectorConfigurationRepositoryPostgresTests(ConnectorConfiguratio
         config["enabled"]!.GetValue<bool>().Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("""{"region":"us"}""")]
+    [InlineData("""{"region":"us","enabled":true}""")]
+    [InlineData("""{"region":"us","Enabled":true}""")]
+    public async Task AConfigurationSaveAfterADisableKeepsTheConnectorDisabled(string saved)
+    {
+        var a = await SeedTenantAsync();
+        var configurations = Configurations(a);
+        await configurations.SaveConfigurationAsync("glooko", """{"enabled":true,"region":"eu"}""", "owner", CancellationToken.None);
+        await configurations.SetActiveAsync("glooko", false, "rhys", CancellationToken.None);
+
+        var record = await configurations.SaveConfigurationAsync("glooko", saved, "erik", CancellationToken.None);
+
+        var config = JsonNode.Parse(record.ConfigurationJson)!.AsObject();
+        config.ToDictionary(p => p.Key, p => p.Value!.ToJsonString()).Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+        record.ModifiedBy.Should().Be("erik");
+        (await configurations.FindAsync("glooko", CancellationToken.None))!.ConfigurationJson.Should().Be(record.ConfigurationJson);
+    }
+
+    [Fact]
+    public async Task AConfigurationSaveKeepsTheStoredFlagWhateverCaseItIsStoredIn()
+    {
+        var a = await SeedTenantAsync();
+        await Configurations(a).SaveConfigurationAsync("glooko", """{"Enabled":false,"region":"eu"}""", "owner", CancellationToken.None);
+
+        var record = await Configurations(a).SaveConfigurationAsync("glooko", """{"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().ToDictionary(p => p.Key, p => p.Value!.ToJsonString())
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+    }
+
+    [Theory]
+    [InlineData("enabled")]
+    [InlineData("Enabled")]
+    public async Task AConfigurationSaveOntoAStoredRowThatHasNoFlagTakesTheSavedFlag(string spelling)
+    {
+        var a = await SeedTenantAsync();
+        await Configurations(a).SaveSecretsAsync("glooko", """{"password":"x"}""", "owner", CancellationToken.None);
+
+        var record = await Configurations(a).SaveConfigurationAsync(
+            "glooko", $$"""{"{{spelling}}":false,"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().ToDictionary(p => p.Key, p => p.Value!.ToJsonString())
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+        JsonNode.Parse(record.SecretsJson)!["password"]!.GetValue<string>().Should().Be("x");
+    }
+
+    [Fact]
+    public async Task AConfigurationSaveOntoAStoredRowThatHasNoFlagLeavesItWithNoneWhenTheSavedHasNone()
+    {
+        var a = await SeedTenantAsync();
+        await Configurations(a).SaveSecretsAsync("glooko", """{"password":"x"}""", "owner", CancellationToken.None);
+
+        var record = await Configurations(a).SaveConfigurationAsync("glooko", """{"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().Select(p => p.Key).Should().Equal("region");
+    }
+
+    [Fact]
+    public async Task TheFirstConfigurationSaveStoresTheFlagItCarriesSpelledEnabled()
+    {
+        var a = await SeedTenantAsync();
+
+        var record = await Configurations(a).SaveConfigurationAsync("glooko", """{"Enabled":false,"region":"us"}""", "erik", CancellationToken.None);
+
+        JsonNode.Parse(record.ConfigurationJson)!.AsObject().ToDictionary(p => p.Key, p => p.Value!.ToJsonString())
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["enabled"] = "false", ["region"] = "\"us\"" });
+    }
+
+    [Fact]
+    public async Task AConfigurationSaveBlockedByAToggleKeepsTheToggledFlagAndSavesTheConfiguration()
+    {
+        var a = await SeedTenantAsync();
+        await Configurations(a).SaveConfigurationAsync("glooko", """{"enabled":true,"region":"eu"}""", "owner", CancellationToken.None);
+
+        await using var toggler = new NpgsqlConnection(database.MigratorConnectionString);
+        await toggler.OpenAsync();
+        await using var toggle = await toggler.BeginTransactionAsync();
+        await using (var cmd = toggler.CreateCommand())
+        {
+            cmd.Transaction = toggle;
+            cmd.CommandText = """
+                SELECT set_config('app.current_tenant_id', @tenant, true);
+                UPDATE connector_configurations SET configuration = '{"enabled":false,"region":"eu"}'::jsonb
+                WHERE tenant_id = @tenant::uuid AND connector_name = 'glooko'
+                """;
+            cmd.Parameters.Add(new NpgsqlParameter("@tenant", a.ToString()));
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var save = Task.Run(() => Configurations(a).SaveConfigurationAsync(
+            "glooko", """{"enabled":true,"region":"us"}""", "erik", CancellationToken.None));
+        await WaitForAWriterBlockedByAsync(toggler);
+        await toggle.CommitAsync();
+        var saved = await save;
+
+        var config = JsonNode.Parse(saved.ConfigurationJson)!.AsObject();
+        config["region"]!.GetValue<string>().Should().Be("us");
+        config["enabled"]!.GetValue<bool>().Should().BeFalse();
+    }
+
     private async Task WaitForAWriterBlockedByAsync(NpgsqlConnection blocker)
     {
         await using var conn = new NpgsqlConnection(database.MigratorConnectionString);
@@ -248,7 +350,7 @@ public class ConnectorConfigurationRepositoryPostgresTests(ConnectorConfiguratio
         while ((long)(await cmd.ExecuteScalarAsync())! == 0)
         {
             if (DateTime.UtcNow > deadline)
-                throw new TimeoutException("The toggle never waited on the saving transaction's row lock.");
+                throw new TimeoutException("The writer never waited on the blocking transaction's row lock.");
             await Task.Delay(25);
         }
     }

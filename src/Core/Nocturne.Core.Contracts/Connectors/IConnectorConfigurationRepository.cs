@@ -33,7 +33,9 @@ public interface IConnectorConfigurationRepository
 
     /// <summary>
     /// Stores <paramref name="configurationJson"/> as the connector's configuration, creating its row
-    /// with no secrets when there is none.
+    /// with no secrets when there is none. A stored row that has an <c>enabled</c> key keeps it,
+    /// whatever the document carries; a row with none, and a new row, take the document's
+    /// (<see cref="ConnectorEnabledKey"/>). The key is stored spelled <c>enabled</c>.
     /// </summary>
     Task<ConnectorConfigurationRecord> SaveConfigurationAsync(
         string connectorName, string configurationJson, string? modifiedBy, CancellationToken ct);
