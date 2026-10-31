@@ -99,7 +99,8 @@ public sealed class MemberInviteControllerStepDownTests : IDisposable
             new TenantRoleService(new TenantMembershipRepository(_db.AsFactory()), TimeProvider.System),
             Mock.Of<ITenantMemberService>(),
             tenantAccessor.Object,
-            new TenantMembershipRepository(_db.AsFactory()))
+            new TenantMembershipRepository(_db.AsFactory()),
+            _audit.Object)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext },
         };
@@ -116,7 +117,7 @@ public sealed class MemberInviteControllerStepDownTests : IDisposable
     {
         AddRecipientAsOwner();
 
-        var result = await Controller(Scope.FullAccess).StepDown(_audit.Object, CancellationToken.None);
+        var result = await Controller(Scope.FullAccess).StepDown(CancellationToken.None);
 
         result.Should().BeOfType<NoContentResult>();
         (await HelperRoleSlugsAsync()).Should().Equal(RoleSeeds.Caretaker);
@@ -131,7 +132,7 @@ public sealed class MemberInviteControllerStepDownTests : IDisposable
     {
         AddRecipientAsOwner();
 
-        await Controller(Scope.FullAccess).StepDown(_audit.Object, CancellationToken.None);
+        await Controller(Scope.FullAccess).StepDown(CancellationToken.None);
 
         _audit.Verify(a => a.LogAsync(
             AuthAuditEventType.RoleRemoved, _helperSubjectId, true, It.IsAny<string?>(), It.IsAny<string?>(),
@@ -143,9 +144,27 @@ public sealed class MemberInviteControllerStepDownTests : IDisposable
     }
 
     [Fact]
+    public async Task AuditsNothingForACallerWhoAlreadyHoldsOnlyCaretaker()
+    {
+        _db.TenantMemberRoles.RemoveRange(_db.TenantMemberRoles.Where(mr => mr.TenantMemberId == _helperMemberId));
+        _db.TenantMemberRoles.Add(new TenantMemberRoleEntity
+        {
+            Id = Guid.CreateVersion7(), TenantMemberId = _helperMemberId, TenantRoleId = _caretaker.Id,
+        });
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        var result = await Controller(Scope.FullAccess).StepDown(CancellationToken.None);
+
+        result.Should().BeOfType<NoContentResult>();
+        (await HelperRoleSlugsAsync()).Should().Equal(RoleSeeds.Caretaker);
+        _audit.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task RefusesTheLastOwner_AndChangesAndAuditsNothing()
     {
-        var result = await Controller(Scope.FullAccess).StepDown(_audit.Object, CancellationToken.None);
+        var result = await Controller(Scope.FullAccess).StepDown(CancellationToken.None);
 
         var problem = result.Should().BeOfType<ObjectResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -166,7 +185,7 @@ public sealed class MemberInviteControllerStepDownTests : IDisposable
         _db.ChangeTracker.Clear();
 
         var result = await Controller([.. RoleSeeds.Permissions[RoleSeeds.Viewer]])
-            .StepDown(_audit.Object, CancellationToken.None);
+            .StepDown(CancellationToken.None);
 
         result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
         (await HelperRoleSlugsAsync()).Should().Equal(RoleSeeds.Viewer);
