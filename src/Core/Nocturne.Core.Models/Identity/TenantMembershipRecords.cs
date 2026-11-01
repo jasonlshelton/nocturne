@@ -49,7 +49,8 @@ public sealed record NewTenantMember(
     IReadOnlyList<string>? DirectPermissions = null,
     string? Label = null,
     string? Username = null,
-    bool LimitTo24Hours = false);
+    bool LimitTo24Hours = false,
+    Guid? CreatedFromInviteId = null);
 
 /// <summary>A row of <c>tenant_roles</c>, with how many members hold it.</summary>
 public sealed record TenantRoleRecord(
