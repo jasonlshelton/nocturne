@@ -86,7 +86,14 @@ public class DDataService : IDDataService
     public Task<DData> GetDDataAsync(
         long timestamp,
         CancellationToken cancellationToken = default
-    ) => LoadDDataAsync(new DData { LastUpdated = timestamp }, cancellationToken);
+    ) => GetDDataAsync(timestamp, DDataCollections.All, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<DData> GetDDataAsync(
+        long timestamp,
+        DDataCollections collections,
+        CancellationToken cancellationToken = default
+    ) => LoadDDataAsync(new DData { LastUpdated = timestamp }, collections, cancellationToken);
 
     /// <inheritdoc />
     public async Task<DDataFrame> GetDDataFrameAsync(
@@ -101,26 +108,40 @@ public class DDataService : IDDataService
                 LastUpdated = timestamp,
                 Page = isLive ? null : new DDataFramePage { After = timestamp },
             },
+            DDataCollections.All,
             cancellationToken);
         frame.Sgvs = frame.Sgvs.OrderBy(e => e.Mills).ToList();
         return frame;
     }
 
-    private async Task<T> LoadDDataAsync<T>(T ddata, CancellationToken cancellationToken)
+    private async Task<T> LoadDDataAsync<T>(
+        T ddata,
+        DDataCollections collections,
+        CancellationToken cancellationToken
+    )
         where T : DData
     {
         var timestamp = ddata.LastUpdated;
 
         // Sequential: see INocturneDbContextFactory.
-        await LoadSgvsAsync(ddata, timestamp, cancellationToken);
-        await LoadTreatmentsAsync(ddata, timestamp, cancellationToken);
-        await LoadMbgsAsync(ddata, timestamp, cancellationToken);
-        await LoadCalsAsync(ddata, timestamp, cancellationToken);
-        await LoadProfilesAsync(ddata, cancellationToken);
-        await LoadDeviceStatusAsync(ddata, timestamp, cancellationToken);
-        await LoadFoodAsync(ddata, cancellationToken);
-        await LoadActivityAsync(ddata, timestamp, cancellationToken);
-        await LoadDbStatsAsync(ddata, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Sgvs))
+            await LoadSgvsAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Treatments))
+            await LoadTreatmentsAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Mbgs))
+            await LoadMbgsAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Cals))
+            await LoadCalsAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Profiles))
+            await LoadProfilesAsync(ddata, cancellationToken);
+        if (collections.HasFlag(DDataCollections.DeviceStatus))
+            await LoadDeviceStatusAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Food))
+            await LoadFoodAsync(ddata, cancellationToken);
+        if (collections.HasFlag(DDataCollections.Activity))
+            await LoadActivityAsync(ddata, timestamp, cancellationToken);
+        if (collections.HasFlag(DDataCollections.DbStats))
+            await LoadDbStatsAsync(ddata, cancellationToken);
 
         // Process treatments to create filtered lists
         var processedTreatments = ProcessTreatments(ddata.Treatments, false);
