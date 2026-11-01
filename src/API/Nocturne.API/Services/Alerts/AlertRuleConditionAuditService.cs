@@ -13,8 +13,7 @@ namespace Nocturne.API.Services.Alerts;
 /// find and fix it. Changes nothing.
 /// </summary>
 /// <remarks>
-/// Per tenant because <c>alert_rules</c> is RLS-scoped and fail-closed; see
-/// <see cref="RuleScopeClassBackfillService"/>, which scans the same way.
+/// Per tenant because <c>alert_rules</c> is RLS-scoped and fail-closed.
 /// </remarks>
 public sealed class AlertRuleConditionAuditService : BackgroundService
 {

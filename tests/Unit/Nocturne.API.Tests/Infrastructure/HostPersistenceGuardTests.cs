@@ -106,6 +106,10 @@ public class HostPersistenceGuardTests
             ["DataSourceMetadataEntity"],
             ["DataSourceMetadata"],
             []),
+        new("job ledger (#3155)",
+            ["JobLedgerEntity"],
+            ["JobLedger"],
+            []),
     ];
 
     private const string Host = "src/API/Nocturne.API";

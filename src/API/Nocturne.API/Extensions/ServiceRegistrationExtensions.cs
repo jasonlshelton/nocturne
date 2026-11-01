@@ -42,6 +42,7 @@ using Nocturne.API.Services.Sleep;
 using Nocturne.API.Services.Health;
 using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Legacy;
+using Nocturne.API.Services.Jobs;
 using Nocturne.API.Services.Monitoring;
 using Nocturne.API.Services.NotificationActionHandlers;
 using Nocturne.API.Services.Notifications;
@@ -64,6 +65,7 @@ using Nocturne.Core.Contracts.SetupHub;
 using Nocturne.Core.Contracts.Timezones;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Alerts;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Analytics;
 using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Devices;
@@ -707,11 +709,26 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
+    /// Registers <typeparamref name="TJob"/> with <see cref="JobScheduler"/>, which runs it from the job ledger.
+    /// </summary>
+    public static IServiceCollection AddScheduledJob<TJob>(this IServiceCollection services)
+        where TJob : class, IScheduledJob
+    {
+        services.AddSingleton<IScheduledJob, TJob>();
+        return services;
+    }
+
+    /// <summary>
     /// Domain CRUD services for entries, treatments, device status, profiles,
     /// food, activities, trackers, and all other data-owning services.
     /// </summary>
     public static IServiceCollection AddDomainServices(this IServiceCollection services)
     {
+        services.AddMetrics();
+        services.AddSingleton<JobMetrics>();
+        services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddMeter(JobMetrics.MeterName));
+        services.AddHostedService<JobScheduler>();
+
         // Demo mode
         services.AddSingleton<IDemoModeService, DemoModeService>();
         services.AddSingleton<DemoUISettingsProxy>();
@@ -846,10 +863,9 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IDeviceEventReactor, TrackerTriggerService>();
         services.AddScoped<TrackerDeviceEventWriter>();
         // Tracker notifications ride the alert engine: thresholds are synthesised into
-        // managed tracker_age alert rules, backfilled once at startup for pre-existing
-        // definitions (and self-healing if a managed rule is ever lost).
+        // managed tracker_age alert rules, backfilled daily (TrackerAlertRuleBackfillJob).
         services.AddScoped<ITrackerAlertRuleSyncService, TrackerAlertRuleSyncService>();
-        services.AddHostedService<TrackerAlertRuleBackfillService>();
+        services.AddScheduledJob<TrackerAlertRuleBackfillJob>();
         services.AddScoped<ConsumableTrackerWriter>();
         services.AddScoped<ILegacyFallbackService, LegacyFallbackService>();
         services.AddScoped<IDeviceAgeService, DeviceAgeService>();
@@ -984,10 +1000,10 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<RelativeTempBasalRates>();
         services.AddScoped<ITempBasalRateReresolver, TempBasalRateReresolver>();
         services.AddScoped<ILoopClosedLoopStamper, LoopClosedLoopStamper>();
-        services.AddHostedService<TempBasalRateSweepService>();
+        services.AddScheduledJob<ProfileVersionsMovedJob>();
         services.AddScoped<ITreatmentDecomposer, TreatmentDecomposer>();
         services.AddScoped<IDeviceStatusDecomposer, DeviceStatusDecomposer>();
-        services.AddHostedService<ApsSnapshotCurvesBackfillService>();
+        services.AddScheduledJob<ApsSnapshotCurvesJob>();
         services.AddHostedService<TempBasalOriginCorroborationService>();
         services.AddScoped<IActivityDecomposer, ActivityDecomposer>();
         services.AddScoped<IProfileDecomposer, ProfileDecomposer>();
@@ -1144,9 +1160,9 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IAlertReferenceService, AlertReferenceService>();
         services.AddScoped<IAlertReplayService, AlertReplayService>();
         // Scope-class classification (scoped Do Not Disturb, ADR 0004): stateless over
-        // the static native engine, so a singleton. Backfilled once at startup.
+        // the static native engine, so a singleton. Backfilled once per tenant.
         services.AddSingleton<IRuleScopeClassifier, RuleScopeClassifier>();
-        services.AddHostedService<RuleScopeClassBackfillService>();
+        services.AddScheduledJob<RuleScopeClassBackfillJob>();
         services.AddSingleton<IAlertRuleConditionValidator, AlertRuleConditionValidator>();
         services.AddHostedService<AlertRuleConditionAuditService>();
 
