@@ -133,7 +133,7 @@ public class SubjectServiceDeleteTests : IDisposable
         var service = new SubjectService(
             new SubjectRepository(dbContext.AsFactory()), audit, Mock.Of<IRecoveryCodeService>(), NullLogger<SubjectService>.Instance);
 
-        (await service.DeleteSubjectAsync(_deletedId)).Should().BeTrue();
+        (await service.DeleteSubjectAsync(_deletedId)).Should().BeOfType<SubjectChange.Changed>();
     }
 
     private async Task<Dictionary<Guid, AuthAuditLogEntity>> ReadRowsAsync()

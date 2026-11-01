@@ -210,7 +210,7 @@ public class SubjectRepositoryTests : IDisposable
         var id = await CreateAsync(new NewSubject("Old", Username: "old", Email: "old@x.example", Notes: "keep"));
 
         (await Subjects().UpdateAsync(id, new SubjectEdit(Name: "New", IsPlatformAdmin: true, LastLoginAt: Now), CancellationToken.None))
-            .Should().BeTrue();
+            .Should().BeOfType<SubjectChange.Changed>();
         var edited = await GetAsync(id);
         edited.Should().BeEquivalentTo(new
         {
@@ -221,16 +221,18 @@ public class SubjectRepositoryTests : IDisposable
         (await GetAsync(id)).Should().BeEquivalentTo(new { PreferredLanguage = "fr", Preferences = "{}" });
         (await GetAsync(id)).Should().BeEquivalentTo(new { ApprovalStatus = "Pending", IsActive = false });
 
-        var profile = await Subjects().UpdateProfileAsync(id, new SubjectProfile("P", null, null, true), CancellationToken.None);
-        profile.Should().BeEquivalentTo(new { Name = "P", Email = (string?)null, Notes = (string?)null, IsActive = true });
+        var profile = await Subjects().UpdateProfileAsync(id, new SubjectProfile("P", null, null), CancellationToken.None);
+        profile.Should().BeEquivalentTo(new { Name = "P", Email = (string?)null, Notes = (string?)null, IsActive = false },
+            "a profile edit does not change whether the subject is active");
 
         (await Subjects().SetAccessRequestMessageAsync(id, "please", CancellationToken.None)).Should().BeTrue();
         (await GetAsync(id)).AccessRequestMessage.Should().Be("please");
         await Subjects().SetAccessRequestMessageAsync(id, null, CancellationToken.None);
         (await GetAsync(id)).AccessRequestMessage.Should().BeNull();
 
-        (await Subjects().UpdateAsync(Guid.CreateVersion7(), new SubjectEdit(Name: "x"), CancellationToken.None)).Should().BeFalse();
-        (await Subjects().UpdateProfileAsync(Guid.CreateVersion7(), new SubjectProfile("x", null, null, true), CancellationToken.None)).Should().BeNull();
+        (await Subjects().UpdateAsync(Guid.CreateVersion7(), new SubjectEdit(Name: "x"), CancellationToken.None)).Should().BeOfType<SubjectChange.NotFound>();
+        (await Subjects().UpdateAsync(Guid.CreateVersion7(), new SubjectEdit(IsActive: false), CancellationToken.None)).Should().BeOfType<SubjectChange.NotFound>();
+        (await Subjects().UpdateProfileAsync(Guid.CreateVersion7(), new SubjectProfile("x", null, null), CancellationToken.None)).Should().BeNull();
         (await Subjects().SetAccessRequestMessageAsync(Guid.CreateVersion7(), null, CancellationToken.None)).Should().BeFalse();
     }
 
@@ -274,8 +276,8 @@ public class SubjectRepositoryTests : IDisposable
             db.SaveChanges();
         }
 
-        (await Subjects().DeleteAsync(deleted, CancellationToken.None)).Should().BeTrue();
-        (await Subjects().DeleteAsync(deleted, CancellationToken.None)).Should().BeFalse();
+        (await Subjects().DeleteAsync(deleted, CancellationToken.None)).Should().BeOfType<SubjectChange.Changed>();
+        (await Subjects().DeleteAsync(deleted, CancellationToken.None)).Should().BeOfType<SubjectChange.NotFound>();
 
         await using var check = _db.CreateContext();
         var rows = await check.AuthAuditLog.ToDictionaryAsync(a => a.Id);

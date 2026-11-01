@@ -244,17 +244,14 @@ public class TenantMembershipRepository : ITenantMembershipRepository
         return await lease.Context.TenantMembers.AsNoTracking().OwnersOf(tenantId).AnyAsync(m => m.Id != memberId, ct);
     }
 
-    private const int OwnersLockClass = 0x4E4F_574E;
-
     /// <summary>
-    /// Runs <paramref name="change"/> under the tenant's owner lock (<see cref="AdvisoryLockExtensions"/>)
+    /// Runs <paramref name="change"/> under the tenant's owner lock (<see cref="TenantOwnerLock"/>)
     /// and saves it when it reports <see cref="OwnerGuardedChange.Changed"/>: on this repository's unit,
     /// whose owner commits it, else on a new unit pinned to <paramref name="tenantId"/>.
     /// </summary>
     /// <remarks>
-    /// Two owners each stepping down or removing the other both find another owner when they read
-    /// before either writes, and the tenant is left with none, which nothing inside it can repair.
-    /// Holding the lock from the check to the commit makes the second read the first one's write.
+    /// Holding the lock from the check to the commit makes the second of two owners stepping down or
+    /// removing each other read the first one's write.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The repository is over a unit with no transaction open.</exception>
     private async Task<OwnerGuardedChange> UnderOwnersLockAsync(
@@ -264,7 +261,7 @@ public class TenantMembershipRepository : ITenantMembershipRepository
     {
         if (_unit is not null)
         {
-            await _unit.Context.LockForTransactionAsync(OwnersLockClass, tenantId, ct);
+            await _unit.Context.LockTenantOwnersAsync(tenantId, ct);
             return await change(_unit.Context, ct);
         }
 
@@ -272,7 +269,7 @@ public class TenantMembershipRepository : ITenantMembershipRepository
         return await unit.CommitAsync(
             async token =>
             {
-                await unit.Context.LockForTransactionAsync(OwnersLockClass, tenantId, token);
+                await unit.Context.LockTenantOwnersAsync(tenantId, token);
                 var outcome = await change(unit.Context, token);
                 if (outcome == OwnerGuardedChange.Changed)
                     await unit.Context.SaveChangesAsync(token);
@@ -300,21 +297,34 @@ public class TenantMembershipRepository : ITenantMembershipRepository
         }, ct);
 
     /// <inheritdoc/>
-    public virtual async Task<int> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct)
+    public virtual async Task<SubjectMembershipsRemoval> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct)
     {
-        await using var lease = await OpenPlatformAsync(ct);
-        var db = lease.Context;
+        if (_unit is not null)
+            return await RemoveMembershipsUnderOwnerLocksAsync(_unit.Context, subjectId, ct);
+
+        await using var unit = await DbUnitOfWork.OpenPlatformAsync(Pinnable, ct);
+        return await unit.CommitAsync(
+            async token =>
+            {
+                var removal = await RemoveMembershipsUnderOwnerLocksAsync(unit.Context, subjectId, token);
+                await unit.Context.SaveChangesAsync(token);
+                return removal;
+            },
+            ct: ct);
+    }
+
+    private static async Task<SubjectMembershipsRemoval> RemoveMembershipsUnderOwnerLocksAsync(
+        NocturneDbContext db, Guid subjectId, CancellationToken ct)
+    {
+        var leftWithoutOwner = await db.LockTenantsOfSubjectAsync(subjectId, ct);
         var memberships = await db.TenantMembers
             .Include(m => m.MemberRoles)
             .Where(m => m.SubjectId == subjectId)
             .ToListAsync(ct);
-        if (memberships.Count == 0)
-            return 0;
 
         db.TenantMemberRoles.RemoveRange(memberships.SelectMany(m => m.MemberRoles));
         db.TenantMembers.RemoveRange(memberships);
-        await SaveAsync(db, ct);
-        return memberships.Count;
+        return new SubjectMembershipsRemoval(memberships.Count, leftWithoutOwner);
     }
 
     /// <inheritdoc/>

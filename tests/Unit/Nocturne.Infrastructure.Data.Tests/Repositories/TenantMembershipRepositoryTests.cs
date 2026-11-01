@@ -317,9 +317,15 @@ public class TenantMembershipRepositoryTests : IDisposable
             .UpdateAsync(_otherTenant, new TenantEdit(IsActive: false), CancellationToken.None);
         (await Members().ListTenantsOfSubjectAsync(subject, activeOnly: true, CancellationToken.None)).Select(t => t.Slug).Should().Equal("home");
 
-        (await Members().RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None)).Should().Be(2);
+        var removal = await Members().RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None);
+        removal.Removed.Should().Be(2);
+        removal.TenantsLeftWithoutOwner.Should().Equal(
+            [new LastOwnerTenant(_otherTenant, "other")],
+            "the subject was the only owner of the tenant it owned: the removal goes ahead and names it");
         (await Members().ListTenantIdsOfSubjectAsync(subject, CancellationToken.None)).Should().BeEmpty();
-        (await Members().RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None)).Should().Be(0);
+        var again = await Members().RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None);
+        again.Removed.Should().Be(0);
+        again.TenantsLeftWithoutOwner.Should().BeEmpty();
     }
 
     [Fact]

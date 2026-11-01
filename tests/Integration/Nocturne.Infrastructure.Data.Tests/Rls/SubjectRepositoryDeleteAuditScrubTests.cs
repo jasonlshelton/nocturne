@@ -1,3 +1,4 @@
+using Nocturne.Core.Models.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Nocturne.Infrastructure.Data.Services;
 using Npgsql;
@@ -127,7 +128,7 @@ public class SubjectRepositoryDeleteAuditScrubTests : IAsyncLifetime
             TenantReaderData.Resolve(scope.ServiceProvider, _memberTenant);
 
         var repository = new SubjectRepository(scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>());
-        (await repository.DeleteAsync(_leaver, CancellationToken.None)).Should().BeTrue();
+        (await repository.DeleteAsync(_leaver, CancellationToken.None)).Should().BeOfType<SubjectChange.Changed>();
     }
 
     private async Task<Dictionary<Guid, (string? Name, string? Ip)>> MutationRowsAsync(Guid tenant)

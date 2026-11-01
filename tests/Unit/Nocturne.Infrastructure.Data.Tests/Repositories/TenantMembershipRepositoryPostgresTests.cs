@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Infrastructure.Data.Services;
@@ -236,5 +237,150 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
         (await removal).Should().Be(OwnerGuardedChange.Changed);
         (await stepDown).Should().Be(OwnerGuardedChange.LastOwner, "it reads the committed removal under the lock");
         (await members.ListOwnersAsync(seeded.Tenant, CancellationToken.None)).Select(o => o.Id).Should().Equal(steppingDownId);
+    }
+
+    /// <summary>
+    /// A tenant of two owners, the first leaving: its removal is staged on a unit and holds the owner
+    /// lock while <paramref name="contend"/> runs against the second owner, which must wait for it.
+    /// </summary>
+    private async Task<(T Contender, OwnerGuardedChange Removal, Seeded Seeded, Guid SecondOwner)> RaceAgainstFirstOwnerLeavingAsync<T>(
+        string slug, Func<INocturneDbContextFactory, Guid, Task<T>> contend)
+    {
+        var seeded = await SeedTenantAsync(slug);
+        var factory = new Factory(Context, seeded.Tenant);
+        var members = new TenantMembershipRepository(factory);
+        var ownerRole = (await members.FindRoleIdBySlugAsync(seeded.Tenant, RoleSeeds.Owner, CancellationToken.None))!.Value;
+        var secondOwner = await new SubjectRepository(factory).CreateAsync(new NewSubject($"{slug}-second-owner"), CancellationToken.None);
+        await members.AddMemberAsync(new NewTenantMember(seeded.Tenant, secondOwner, [ownerRole]), CancellationToken.None);
+        var removedId = (await members.FindMemberAsync(seeded.Tenant, seeded.Owner, CancellationToken.None))!.Id;
+
+        var staged = new TaskCompletionSource();
+        var commit = new TaskCompletionSource();
+        await using var unit = await DbUnitOfWork.OpenForTenantAsync(factory, seeded.Tenant);
+        var removal = unit.CommitAsync(
+            async ct =>
+            {
+                var outcome = await new TenantMembershipRepository(unit).RemoveMemberUnlessLastOwnerAsync(seeded.Tenant, removedId, ct);
+                staged.TrySetResult();
+                await commit.Task;
+                await unit.Context.SaveChangesAsync(ct);
+                return outcome;
+            });
+        await staged.Task;
+
+        var contender = Task.Run(() => contend(factory, secondOwner));
+        await PostgresLockWaits.UntilBlockedAsync(database.AppConnectionString, contender);
+        commit.SetResult();
+
+        return (await contender, await removal, seeded, secondOwner);
+    }
+
+    [Fact]
+    public async Task OwnerLock_DeletingTheSecondOwnerWaitsForTheFirstLeavingAndIsRefused()
+    {
+        var raced = await RaceAgainstFirstOwnerLeavingAsync("g", (factory, second) =>
+            new SubjectRepository(factory).DeleteAsync(second, CancellationToken.None));
+
+        raced.Removal.Should().Be(OwnerGuardedChange.Changed);
+        raced.Contender.Should().BeOfType<SubjectChange.LastOwnerOf>()
+            .Which.OwnedTenants.Select(t => t.TenantId).Should().Equal(raced.Seeded.Tenant);
+        var factory = new Factory(Context, raced.Seeded.Tenant);
+        (await new SubjectRepository(factory).GetAsync(raced.SecondOwner, CancellationToken.None)).Should().NotBeNull();
+        (await new TenantMembershipRepository(factory).IsMemberAsync(raced.Seeded.Tenant, raced.SecondOwner, CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OwnerLock_DeactivatingTheSecondOwnerWaitsForTheFirstLeavingAndIsRefused()
+    {
+        var raced = await RaceAgainstFirstOwnerLeavingAsync("h", (factory, second) =>
+            new SubjectRepository(factory).UpdateAsync(second, new SubjectEdit(IsActive: false), CancellationToken.None));
+
+        raced.Removal.Should().Be(OwnerGuardedChange.Changed);
+        raced.Contender.Should().BeOfType<SubjectChange.LastOwnerOf>()
+            .Which.OwnedTenants.Select(t => t.TenantId).Should().Equal(raced.Seeded.Tenant);
+        var factory = new Factory(Context, raced.Seeded.Tenant);
+        (await new SubjectRepository(factory).GetAsync(raced.SecondOwner, CancellationToken.None))!.IsActive.Should().BeTrue();
+        (await new TenantMembershipRepository(factory).ListOwnersAsync(raced.Seeded.Tenant, CancellationToken.None))
+            .Select(o => o.SubjectId).Should().Equal(raced.SecondOwner);
+    }
+
+    [Fact]
+    public async Task OwnerLock_RemovingEveryMembershipWaitsForTheFirstLeavingAndNamesTheTenantItLeavesWithoutAnOwner()
+    {
+        var raced = await RaceAgainstFirstOwnerLeavingAsync("i", (factory, second) =>
+            new TenantMembershipRepository(factory).RemoveMembershipsOfSubjectAsync(second, CancellationToken.None));
+
+        raced.Removal.Should().Be(OwnerGuardedChange.Changed);
+        raced.Contender.Removed.Should().Be(1);
+        raced.Contender.TenantsLeftWithoutOwner.Select(t => t.TenantId).Should().Equal(raced.Seeded.Tenant);
+        (await new TenantMembershipRepository(new Factory(Context, raced.Seeded.Tenant))
+            .ListOwnersAsync(raced.Seeded.Tenant, CancellationToken.None)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OwnerLock_AnOwnerAddedWhileASubjectsMembershipsAreLockedWaitsForTheCommit()
+    {
+        var seeded = await SeedTenantAsync("l");
+        var factory = new Factory(Context, seeded.Tenant);
+        var members = new TenantMembershipRepository(factory);
+        var ownerRole = (await members.FindRoleIdBySlugAsync(seeded.Tenant, RoleSeeds.Owner, CancellationToken.None))!.Value;
+        var subject = await new SubjectRepository(factory).CreateAsync(new NewSubject("l-visitor"), CancellationToken.None);
+
+        var locked = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        await using var holder = await DbUnitOfWork.OpenPlatformAsync(factory);
+        var holding = holder.CommitAsync(async ct =>
+        {
+            var leftWithoutOwner = await holder.Context.LockTenantsOfSubjectAsync(subject, ct);
+            locked.TrySetResult();
+            await release.Task;
+            return leftWithoutOwner;
+        });
+        await locked.Task;
+
+        var adding = Task.Run(() => members.AddMemberAsync(new NewTenantMember(seeded.Tenant, subject, [ownerRole]), CancellationToken.None));
+        await PostgresLockWaits.UntilBlockedAsync(database.AppConnectionString, adding);
+        release.SetResult();
+
+        (await holding).Should().BeEmpty("the subject held no membership when its tenants were read");
+        (await adding).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OwnerLock_ASubjectWithTwoTenantsTakesTheLowerTenantsLockBeforeWaitingOnTheHigher()
+    {
+        var a = await SeedTenantAsync("j");
+        var b = await SeedTenantAsync("k");
+        var (low, high) = string.CompareOrdinal(a.Tenant.ToString(), b.Tenant.ToString()) < 0 ? (a.Tenant, b.Tenant) : (b.Tenant, a.Tenant);
+        var factory = new Factory(Context, a.Tenant);
+        var members = new TenantMembershipRepository(factory);
+        var subject = await new SubjectRepository(factory).CreateAsync(new NewSubject("j-visitor"), CancellationToken.None);
+        foreach (var tenant in new[] { low, high })
+        {
+            var caretaker = (await members.FindRoleIdBySlugAsync(tenant, RoleSeeds.Caretaker, CancellationToken.None))!.Value;
+            await members.AddMemberAsync(new NewTenantMember(tenant, subject, [caretaker]), CancellationToken.None);
+        }
+
+        var held = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        await using var holder = await DbUnitOfWork.OpenPlatformAsync(factory);
+        var holding = holder.CommitAsync(async ct =>
+        {
+            await holder.Context.LockTenantOwnersAsync(high, ct);
+            held.TrySetResult();
+            await release.Task;
+        });
+        await held.Task;
+
+        var removal = Task.Run(() => members.RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None));
+        await PostgresLockWaits.UntilBlockedAsync(database.AppConnectionString, removal);
+
+        await using var probe = await DbUnitOfWork.OpenPlatformAsync(factory);
+        var lowIsHeld = !await probe.CommitAsync(ct => probe.Context.TryLockForTransactionAsync(TenantOwnerLock.Class, low, ct));
+        release.SetResult();
+        await holding;
+
+        lowIsHeld.Should().BeTrue("the removal holds the lower tenant's lock while it waits for the higher's");
+        (await removal).Removed.Should().Be(2);
     }
 }
