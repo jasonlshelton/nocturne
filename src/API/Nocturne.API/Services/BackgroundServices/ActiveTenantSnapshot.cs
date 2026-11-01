@@ -6,14 +6,14 @@ namespace Nocturne.API.Services.BackgroundServices;
 public sealed record ActiveTenant(Guid Id, string Slug, string DisplayName);
 
 /// <summary>
-/// The active tenants the background sweeps visit, read at most once per <see cref="Ttl"/> for all of
-/// them. One read per <see cref="ConnectorBackgroundService{TConfig}"/> per tick would cost a query and
-/// an unleased connection each, outside the <see cref="ConnectorSyncBudget"/>.
+/// The active tenants the background sweeps and the connectors' real-time listeners visit, read at
+/// most once per <see cref="Ttl"/> for all of them, so each pass costs no query and no connection of
+/// its own.
 /// </summary>
 /// <remarks>
 /// A tenant created or deactivated is seen by the sweeps within <see cref="Ttl"/> plus one refresh. A
 /// failed refresh serves the last good list for another <see cref="Ttl"/>, so an outage costs one query
-/// per window rather than one per poller tick; with no list yet, the failure reaches the caller.
+/// per window rather than one per pass; with no list yet, the failure reaches the caller.
 /// </remarks>
 public sealed class ActiveTenantSnapshot(
     ITenantRepository tenantRepository,

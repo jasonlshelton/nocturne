@@ -55,7 +55,6 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Alerts/AlertSweepService.cs: AlertSweepService.ProcessTenantSnoozesAsync",
         "src/API/Nocturne.API/Services/Auth/AuthorizationSeedService.cs: AuthorizationSeedService.StartAsync",
         "src/API/Nocturne.API/Services/Auth/OidcProviderService.cs: OidcProviderService.SyncConfigProvidersAsync",
-        "src/API/Nocturne.API/Services/BackgroundServices/ConnectorBackgroundService.cs: ConnectorBackgroundService.SyncForTenantAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/DeduplicationReconciliationBackgroundService.cs: DeduplicationReconciliationBackgroundService.ReconcileAllTenantsAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/DemoServiceHealthMonitor.cs: DemoServiceHealthMonitor.CleanupDemoDataAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/NightscoutConnectorBackgroundService.cs: NightscoutConnectorBackgroundService.StartListenerForTenantAsync",

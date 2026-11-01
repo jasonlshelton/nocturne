@@ -12,6 +12,7 @@ using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Connectors;
 using Nocturne.API.Services.DevOnly;
 using Nocturne.API.Services.Seeding;
+using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Connectors;
@@ -44,6 +45,7 @@ public class DevAdminController : ControllerBase
     private readonly ITenantService _tenantService;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _time;
+    private readonly IEnumerable<IConnectorCacheInvalidator> _connectorInvalidators;
     private readonly ILogger<DevAdminController> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -58,6 +60,7 @@ public class DevAdminController : ControllerBase
     /// <param name="tenantService">Service for tenant lifecycle management.</param>
     /// <param name="cache">Tenant-resolution cache, which a restored snapshot invalidates.</param>
     /// <param name="timeProvider">Clock that stamps seeded fixture credentials.</param>
+    /// <param name="connectorInvalidators">Told of each connector configuration an import writes, as the configuration service tells them of its writes.</param>
     /// <param name="logger">Logger instance.</param>
     public DevAdminController(
         INocturneDbContextFactory contexts,
@@ -68,6 +71,7 @@ public class DevAdminController : ControllerBase
         ITenantService tenantService,
         IMemoryCache cache,
         TimeProvider timeProvider,
+        IEnumerable<IConnectorCacheInvalidator> connectorInvalidators,
         ILogger<DevAdminController> logger
     )
     {
@@ -79,7 +83,18 @@ public class DevAdminController : ControllerBase
         _tenantService = tenantService;
         _cache = cache;
         _time = timeProvider;
+        _connectorInvalidators = connectorInvalidators;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// What the configuration service does after each of its writes: the token caches drop the
+    /// connector's session and its poller makes the tenant's job ledger row due a minute after the write.
+    /// </summary>
+    private void InvalidateConnector(string connectorName, Guid tenantId)
+    {
+        foreach (var invalidator in _connectorInvalidators)
+            invalidator.Invalidate(connectorName, tenantId);
     }
 
     // ── Export ───────────────────────────────────────────────────────────
@@ -569,6 +584,9 @@ public class DevAdminController : ControllerBase
             foreach (var (slug, shareTokenHash) in cachedTenants)
                 TenantCacheEviction.Evict(_cache, slug, shareTokenHash);
 
+            foreach (var c in snapshot.Tenants.SelectMany(ts => ts.ConnectorConfigurations))
+                InvalidateConnector(c.ConnectorName, c.TenantId);
+
             _logger.LogInformation("Dev snapshot import completed successfully");
             return Ok(new { success = true, tenantsImported = snapshot.Tenants.Count });
         }
@@ -991,6 +1009,9 @@ public class DevAdminController : ControllerBase
 
                 await db.SaveChangesAsync(token);
             }, ct);
+
+            foreach (var c in snapshot.ConnectorConfigurations)
+                InvalidateConnector(c.ConnectorName, id);
 
             _logger.LogInformation("Scoped snapshot import completed for tenant {Slug}", tenant.Slug);
             return Ok(new { success = true });
