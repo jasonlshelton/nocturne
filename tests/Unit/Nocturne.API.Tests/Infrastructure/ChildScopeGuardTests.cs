@@ -61,7 +61,6 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/BackgroundServices/DemoServiceHealthMonitor.cs: DemoServiceHealthMonitor.CleanupDemoDataAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/NightscoutConnectorBackgroundService.cs: NightscoutConnectorBackgroundService.StartListenerForTenantAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/NocturneRemoteConnectorBackgroundService.cs: NocturneRemoteConnectorBackgroundService.StartRealtimeListenersAsync",
-        "src/API/Nocturne.API/Services/BackgroundServices/NotificationCleanupService.cs: NotificationCleanupService.ExecuteAsync",
         "src/API/Nocturne.API/Services/BackgroundServices/TempBasalOriginCorroborationService.cs: TempBasalOriginCorroborationService.RunAsync",
         "src/API/Nocturne.API/Services/Chat/ChatIdentityPendingLinkCleanupService.cs: ChatIdentityPendingLinkCleanupService.SweepAsync",
         "src/API/Nocturne.API/Services/Compatibility/DiscrepancyMaintenanceService.cs: DiscrepancyMaintenanceService.PerformMaintenanceAsync",
@@ -73,7 +72,7 @@ public partial class ChildScopeGuardTests
         "src/API/Nocturne.API/Services/Notifications/NotificationResolutionService.cs: NotificationResolutionService.EvaluateAllTenantsAsync",
         "src/API/Nocturne.API/Services/Platform/InstanceKey/InstanceKeyChangeService.cs: InstanceKeyChangeService.ReconcilePlatformAsync",
         "src/API/Nocturne.API/Services/Platform/InstanceKey/InstanceKeyChangeService.cs: InstanceKeyChangeService.ReconcileTenantAsync",
-        "src/API/Nocturne.API/Services/Platform/Releases/ReleaseNoticeService.cs: ReleaseNoticeService.NotifyOwnersAsync",
+        "src/API/Nocturne.API/Services/Platform/Releases/ReleaseNoticeJob.cs: ReleaseNoticeJob.NotifyOwnersAsync",
 
         // Credential and identity lookups: subjects, grants, memberships and guest links, which no
         // category or history policy narrows.

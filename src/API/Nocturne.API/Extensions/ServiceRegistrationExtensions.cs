@@ -427,7 +427,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IAutoUpdateProbe, WatchtowerProbe>();
         services.AddHttpClient(WatchtowerProbe.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(5));
         services.AddSingleton<ReleaseStatusService>();
-        services.AddHostedService<ReleaseNoticeService>();
+        services.AddScheduledJob<ReleaseNoticeJob>();
 
         services.AddSingleton<InstanceKeyCheck>();
         services.AddTransient<UndecryptableSecretScanner>();
@@ -593,7 +593,8 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IAccessRequestService, AccessRequestService>();
         services.AddScoped<IGuestLinkService, GuestLinkService>();
         services.AddSingleton<IOAuthTokenRevocationCache, OAuthTokenRevocationCache>();
-        services.AddHostedService<OAuthCodeCleanupService>();
+        services.AddScheduledJob<OAuthCodeCleanupJob>();
+        services.AddScheduledJob<OAuthStepUpTokenCleanupJob>();
 
         services.AddHostedService<AuthorizationSeedService>();
 
@@ -727,6 +728,7 @@ public static class ServiceRegistrationExtensions
         services.AddMetrics();
         services.AddSingleton<JobMetrics>();
         services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddMeter(JobMetrics.MeterName));
+        services.AddOptions<JobSchedulerOptions>().BindConfiguration(JobSchedulerOptions.SectionName);
         services.AddHostedService<JobScheduler>();
 
         // Demo mode
@@ -1083,7 +1085,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
         services.AddScoped<IInAppNotificationService, InAppNotificationService>();
         services.AddHostedService<NotificationResolutionService>();
-        services.AddHostedService<NotificationCleanupService>();
+        services.AddScheduledJob<NotificationCleanupJob>();
 
         // Notification template registry (singleton -- templates are immutable after startup)
         var templateRegistry = new NotificationTemplateRegistry().AddBuiltInTemplates();

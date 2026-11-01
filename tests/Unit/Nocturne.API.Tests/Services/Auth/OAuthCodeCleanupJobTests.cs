@@ -9,15 +9,19 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
 using Nocturne.Infrastructure.Data.Repositories;
+using Microsoft.Extensions.DependencyInjection;
+using Nocturne.API.Tests.Services.Jobs;
+using Nocturne.Core.Contracts.Auth;
+using Nocturne.Core.Contracts.Jobs;
 
 namespace Nocturne.API.Tests.Services.Auth;
 
 /// <summary>
-/// The sweep deletes a registered client nothing has used within a day, on every tenant, and keeps
-/// any client a grant, a live code or the Scalar docs page still names.
+/// The job deletes a tenant's registered client nothing has used within a day, and keeps any client
+/// a grant, a live code or the Scalar docs page still names.
 /// </summary>
 [Trait("Category", "Unit")]
-public class OAuthCodeCleanupServiceTests : IDisposable
+public class OAuthCodeCleanupJobTests : IDisposable
 {
     private readonly Guid _tenantA = Guid.CreateVersion7();
     private readonly Guid _tenantB = Guid.CreateVersion7();
@@ -25,9 +29,9 @@ public class OAuthCodeCleanupServiceTests : IDisposable
     private readonly SqliteTestDatabase _db;
     private readonly NocturneDbContext _seed;
 
-    private static readonly DateTime LongAgo = DateTime.UtcNow - OAuthCodeCleanupService.UnusedClientRetention - TimeSpan.FromHours(1);
+    private static readonly DateTime LongAgo = DateTime.UtcNow - OAuthCodeCleanupJob.UnusedClientRetention - TimeSpan.FromHours(1);
 
-    public OAuthCodeCleanupServiceTests()
+    public OAuthCodeCleanupJobTests()
     {
         _db = TestDbContextFactory.CreateSqliteWithTenant(_tenantA);
         _seed = _db.CreateContext(Guid.Empty);
@@ -36,8 +40,21 @@ public class OAuthCodeCleanupServiceTests : IDisposable
         _seed.SaveChanges();
     }
 
-    private OAuthCodeCleanupService CreateService() =>
-        new(_seed.AsFactory(), new TenantRepository(_seed.AsFactory()), new OAuthTokenRepository(_seed.AsFactory()), new OAuthClientRepository(_seed.AsFactory()), NullLogger<OAuthCodeCleanupService>.Instance);
+    private Task RunAsync(Guid tenantId) => RunAsync(tenantId, _seed.AsFactory());
+
+    private static async Task RunAsync(Guid tenantId, INocturneDbContextFactory contexts)
+    {
+        await using var services = new ServiceCollection()
+            .AddSingleton<IOAuthTokenRepository>(new OAuthTokenRepository(contexts))
+            .AddSingleton<IOAuthClientRepository>(new OAuthClientRepository(contexts))
+            .BuildServiceProvider();
+        var started = DateTimeOffset.UtcNow;
+
+        var outcome = await new OAuthCodeCleanupJob(NullLogger<OAuthCodeCleanupJob>.Instance)
+            .RunAsync(JobRuns.For(tenantId, services, started), CancellationToken.None);
+
+        outcome.Should().Be(JobOutcome.Resume(null, started + TimeSpan.FromHours(1)));
+    }
 
     private async Task<OAuthClientEntity> ClientAsync(
         Guid tenantId, string clientId, DateTime createdAt, string? softwareId = null)
@@ -64,29 +81,29 @@ public class OAuthCodeCleanupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CleanupAsync_DeletesUnusedClientsOlderThanADay_OnEveryTenant()
+    public async Task RunAsync_DeletesTheTenantsUnusedClientsOlderThanADay_AndNoOtherTenants()
     {
         await ClientAsync(_tenantA, "unused-a", LongAgo);
         await ClientAsync(_tenantB, "unused-b", LongAgo);
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().BeEmpty();
-        (await RemainingAsync(_tenantB)).Should().BeEmpty();
+        (await RemainingAsync(_tenantB)).Should().Equal("unused-b");
     }
 
     [Fact]
-    public async Task CleanupAsync_KeepsAnUnusedClientYoungerThanADay()
+    public async Task RunAsync_KeepsAnUnusedClientYoungerThanADay()
     {
         await ClientAsync(_tenantA, "young", DateTime.UtcNow - TimeSpan.FromHours(23));
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().Equal("young");
     }
 
     [Fact]
-    public async Task CleanupAsync_KeepsAClientWhoseOnlyGrantIsRevoked()
+    public async Task RunAsync_KeepsAClientWhoseOnlyGrantIsRevoked()
     {
         var client = await ClientAsync(_tenantA, "revoked", LongAgo);
         await using (var db = _db.CreateContext(_tenantA))
@@ -103,13 +120,13 @@ public class OAuthCodeCleanupServiceTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().Equal("revoked");
     }
 
     [Fact]
-    public async Task CleanupAsync_KeepsAClientWithALiveAuthorizationCode()
+    public async Task RunAsync_KeepsAClientWithALiveAuthorizationCode()
     {
         var client = await ClientAsync(_tenantA, "auth-code", LongAgo);
         await using (var db = _db.CreateContext(_tenantA))
@@ -127,13 +144,13 @@ public class OAuthCodeCleanupServiceTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().Equal("auth-code");
     }
 
     [Fact]
-    public async Task CleanupAsync_KeepsAClientWithALiveDeviceCode()
+    public async Task RunAsync_KeepsAClientWithALiveDeviceCode()
     {
         await ClientAsync(_tenantA, "device-code", LongAgo);
         await using (var db = _db.CreateContext(_tenantA))
@@ -150,13 +167,13 @@ public class OAuthCodeCleanupServiceTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().Equal("device-code");
     }
 
     [Fact]
-    public async Task CleanupAsync_DeletesAClientWhoseOnlyCodeHasExpired()
+    public async Task RunAsync_DeletesAClientWhoseOnlyCodeHasExpired()
     {
         await ClientAsync(_tenantA, "expired-code", LongAgo);
         await using (var db = _db.CreateContext(_tenantA))
@@ -173,43 +190,55 @@ public class OAuthCodeCleanupServiceTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().BeEmpty();
     }
 
     [Fact]
-    public async Task CleanupAsync_KeepsTheScalarClient()
+    public async Task RunAsync_KeepsTheScalarClient()
     {
         await ClientAsync(_tenantA, "scalar", LongAgo, ScalarAuthProvider.ScalarSoftwareId);
 
-        await CreateService().CleanupAsync(CancellationToken.None);
+        await RunAsync(_tenantA);
 
         (await RemainingAsync(_tenantA)).Should().Equal("scalar");
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    [InlineData(false, true)]
-    public async Task CleanupAsync_ATenantThatFails_DoesNotStopTheOthers(bool tenantAFails, bool retriesExhausted)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_ADatabaseFailure_FailsTheRunSoTheLedgerRetriesIt(bool retriesExhausted)
     {
         await ClientAsync(_tenantA, "unused-a", LongAgo);
-        await ClientAsync(_tenantB, "unused-b", LongAgo);
-        var failing = tenantAFails ? _tenantA : _tenantB;
-        var contexts = new FailingForTenantFactory(_seed.AsFactory(), failing, retriesExhausted);
-        var service = new OAuthCodeCleanupService(
-            contexts,
-            new TenantRepository(contexts),
-            new OAuthTokenRepository(contexts),
-            new OAuthClientRepository(contexts),
-            NullLogger<OAuthCodeCleanupService>.Instance);
+        var contexts = new FailingForTenantFactory(_seed.AsFactory(), _tenantA, retriesExhausted);
 
-        await service.CleanupAsync(CancellationToken.None);
+        var act = () => RunAsync(_tenantA, contexts);
 
-        (await RemainingAsync(failing)).Should().HaveCount(1);
-        (await RemainingAsync(tenantAFails ? _tenantB : _tenantA)).Should().BeEmpty();
+        await act.Should().ThrowAsync<Exception>();
+        (await RemainingAsync(_tenantA)).Should().Equal("unused-a");
+    }
+
+    [Fact]
+    public async Task StepUpTokenCleanup_DeletesTokensExpiredBeyondTheBuffer()
+    {
+        await using (var db = _db.CreateContext(Guid.Empty))
+        {
+            db.TotpStepUpTokens.AddRange(
+                new TotpStepUpTokenEntity { Id = Guid.CreateVersion7(), SubjectId = _subjectId, ExpiresAt = LongAgo },
+                new TotpStepUpTokenEntity { Id = Guid.CreateVersion7(), SubjectId = _subjectId, ExpiresAt = DateTime.UtcNow.AddMinutes(5) });
+            await db.SaveChangesAsync();
+        }
+
+        await using var services = new ServiceCollection().AddSingleton(_seed.AsFactory()).BuildServiceProvider();
+        var started = DateTimeOffset.UtcNow;
+        var outcome = await new OAuthStepUpTokenCleanupJob(NullLogger<OAuthStepUpTokenCleanupJob>.Instance)
+            .RunAsync(JobRuns.Platform(services, started), CancellationToken.None);
+
+        outcome.Should().Be(JobOutcome.Resume(null, started + TimeSpan.FromHours(1)));
+        await using var check = _db.CreateContext(Guid.Empty);
+        (await check.TotpStepUpTokens.Select(t => t.ExpiresAt).ToListAsync())
+            .Should().ContainSingle().Which.Should().BeAfter(DateTime.UtcNow);
     }
 
     public void Dispose()

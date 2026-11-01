@@ -18,10 +18,12 @@ using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 using static Nocturne.API.Tests.Services.Platform.Releases.ReleaseStatusServiceTests;
 using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.API.Tests.Services.Jobs;
+using Nocturne.Core.Contracts.Jobs;
 
 namespace Nocturne.API.Tests.Services.Platform.Releases;
 
-public sealed class ReleaseNoticeServiceTests : IDisposable
+public sealed class ReleaseNoticeJobTests : IDisposable
 {
     private static readonly Guid SecondTenant = Guid.NewGuid();
 
@@ -36,7 +38,7 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
     private readonly HashSet<string> _failingOwners = [];
     private readonly ServiceProvider _provider;
 
-    public ReleaseNoticeServiceTests()
+    public ReleaseNoticeJobTests()
     {
         _database.SeedTenant(SecondTenant, "second");
 
@@ -65,7 +67,7 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
 
         var repository = new Mock<IInAppNotificationRepository>();
         repository
-            .Setup(r => r.GetActiveBySourceAsync(It.IsAny<string>(), ReleaseNoticeService.Source, It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetActiveBySourceAsync(It.IsAny<string>(), ReleaseNoticeJob.Source, It.IsAny<CancellationToken>()))
             .ReturnsAsync((string userId, string _, CancellationToken _) => _active.Where(n => n.UserId == userId).ToList());
 
         var owners = new Mock<ITenantOwnerResolver>();
@@ -92,10 +94,10 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
 
         await service.CheckAsync(CancellationToken.None);
 
-        _sent.Where(s => s.Type == ReleaseNoticeService.ReleaseInstalledType)
+        _sent.Where(s => s.Type == ReleaseNoticeJob.ReleaseInstalledType)
             .Should().OnlyContain(s => s.Version == "0.2.7")
             .And.Subject.Select(s => s.UserId).Should().BeEquivalentTo(owners);
-        var available = _sent.Where(s => s.Type == ReleaseNoticeService.UpdateAvailableType).ToList();
+        var available = _sent.Where(s => s.Type == ReleaseNoticeJob.UpdateAvailableType).ToList();
         available.Select(s => s.UserId).Should().BeEquivalentTo(owners);
         available.Should().OnlyContain(s => s.Version == "0.2.8"
             && (string)s.Metadata["AutoUpdateMode"] == "Automatic"
@@ -106,6 +108,30 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
         await CreateService("0.2.7").CheckAsync(CancellationToken.None);
 
         _sent.Should().BeEmpty("the ledger, not the notifications, records what was sent");
+    }
+
+    [Fact]
+    public async Task ARunChecksAndComesDueAgainAfterTheCheckInterval()
+    {
+        _releases.Setup(r => r.GetLatestAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Release("0.2.8"));
+        var job = CreateService("0.2.8", checkOptions: new ReleaseCheckOptions { CheckInterval = TimeSpan.FromHours(3) });
+
+        var outcome = await job.RunAsync(JobRuns.Platform(_provider, _clock.GetUtcNow()), CancellationToken.None);
+
+        outcome.Should().Be(JobOutcome.Resume(null, _clock.GetUtcNow().AddHours(3)));
+        _sent.Select(s => s.UserId).Should().BeEquivalentTo(await OwnersAsync());
+    }
+
+    [Fact]
+    public async Task ADisabledCheckSendsNothingAndStillComesDueAfterTheCheckInterval()
+    {
+        var job = CreateService("0.2.8", checkOptions: new ReleaseCheckOptions { Enabled = false, CheckInterval = TimeSpan.FromHours(3) });
+
+        var outcome = await job.RunAsync(JobRuns.Platform(_provider, _clock.GetUtcNow()), CancellationToken.None);
+
+        outcome.Should().Be(JobOutcome.Resume(null, _clock.GetUtcNow().AddHours(3)));
+        _sent.Should().BeEmpty();
+        _releases.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -122,8 +148,8 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
     {
         _releases.Setup(r => r.GetLatestAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Release("0.2.8"));
         var owner = OwnersOf(SecondTenant)[0];
-        var olderAvailable = Active(owner, ReleaseNoticeService.UpdateAvailableType, "0.2.8");
-        var olderInstalled = Active(owner, ReleaseNoticeService.ReleaseInstalledType);
+        var olderAvailable = Active(owner, ReleaseNoticeJob.UpdateAvailableType, "0.2.8");
+        var olderInstalled = Active(owner, ReleaseNoticeJob.ReleaseInstalledType);
 
         await CreateService("0.2.8").CheckAsync(CancellationToken.None);
 
@@ -142,10 +168,10 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
         foreach (var subject in OwnersOf(tenant))
         {
             await Ledger().TryClaimAsync(
-                ReleaseNoticeService.InstalledKind, "0.2.7", tenant, Guid.Parse(subject), CancellationToken.None);
+                ReleaseNoticeJob.InstalledKind, "0.2.7", tenant, Guid.Parse(subject), CancellationToken.None);
         }
-        var olderAvailable = Active(owner, ReleaseNoticeService.UpdateAvailableType, "0.2.8");
-        var installed = Active(owner, ReleaseNoticeService.ReleaseInstalledType);
+        var olderAvailable = Active(owner, ReleaseNoticeJob.UpdateAvailableType, "0.2.8");
+        var installed = Active(owner, ReleaseNoticeJob.ReleaseInstalledType);
 
         await CreateService("0.2.7").CheckAsync(CancellationToken.None);
 
@@ -191,14 +217,14 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(ReleaseNoticeService.UpdateAvailableType, "0.2.9", ReleaseNoticeService.UpdateAvailableType, "0.2.8", true)]
-    [InlineData(ReleaseNoticeService.UpdateAvailableType, "0.2.9", ReleaseNoticeService.ReleaseInstalledType, "0.2.7", false)]
-    [InlineData(ReleaseNoticeService.ReleaseInstalledType, "0.2.8", ReleaseNoticeService.ReleaseInstalledType, "0.2.7", true)]
-    [InlineData(ReleaseNoticeService.ReleaseInstalledType, "0.2.8", ReleaseNoticeService.UpdateAvailableType, "0.2.8", true)]
-    [InlineData(ReleaseNoticeService.ReleaseInstalledType, "0.2.8", ReleaseNoticeService.UpdateAvailableType, "0.2.9", false)]
+    [InlineData(ReleaseNoticeJob.UpdateAvailableType, "0.2.9", ReleaseNoticeJob.UpdateAvailableType, "0.2.8", true)]
+    [InlineData(ReleaseNoticeJob.UpdateAvailableType, "0.2.9", ReleaseNoticeJob.ReleaseInstalledType, "0.2.7", false)]
+    [InlineData(ReleaseNoticeJob.ReleaseInstalledType, "0.2.8", ReleaseNoticeJob.ReleaseInstalledType, "0.2.7", true)]
+    [InlineData(ReleaseNoticeJob.ReleaseInstalledType, "0.2.8", ReleaseNoticeJob.UpdateAvailableType, "0.2.8", true)]
+    [InlineData(ReleaseNoticeJob.ReleaseInstalledType, "0.2.8", ReleaseNoticeJob.UpdateAvailableType, "0.2.9", false)]
     public void ANoticeSupersedesWhatItReplaces(string type, string version, string olderType, string olderVersion, bool superseded)
     {
-        ReleaseNoticeService.Supersedes(type, version, olderType, olderVersion).Should().Be(superseded);
+        ReleaseNoticeJob.Supersedes(type, version, olderType, olderVersion).Should().Be(superseded);
     }
 
     private string[] OwnersOf(Guid tenantId)
@@ -217,7 +243,7 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
     {
         var entity = new InAppNotificationEntity
         {
-            Id = Guid.NewGuid(), UserId = userId, Type = type, Source = ReleaseNoticeService.Source, SourceId = version,
+            Id = Guid.NewGuid(), UserId = userId, Type = type, Source = ReleaseNoticeJob.Source, SourceId = version,
         };
         _active.Add(entity);
         return entity;
@@ -229,21 +255,20 @@ public sealed class ReleaseNoticeServiceTests : IDisposable
     private ActiveTenantSnapshot Snapshot() => new(
         new TenantRepository(_provider.GetRequiredService<INocturneDbContextFactory>()), _clock, NullLogger<ActiveTenantSnapshot>.Instance);
 
-    private ReleaseNoticeService CreateService(string version, bool isRelease = true)
+    private ReleaseNoticeJob CreateService(string version, bool isRelease = true, ReleaseCheckOptions? checkOptions = null)
     {
-        var options = Options.Create(new ReleaseCheckOptions());
+        var options = Options.Create(checkOptions ?? new ReleaseCheckOptions());
         var running = new RunningRelease(version, isRelease);
         var status = new ReleaseStatusService(
             _releases.Object, _probe.Object, running, options, _clock, NullLogger<ReleaseStatusService>.Instance);
 
-        return new ReleaseNoticeService(
+        return new ReleaseNoticeJob(
             _provider,
             status,
             Ledger(),
             Snapshot(),
             options,
-            _clock,
-            NullLogger<ReleaseNoticeService>.Instance);
+            NullLogger<ReleaseNoticeJob>.Instance);
     }
 
     public void Dispose()

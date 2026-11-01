@@ -600,7 +600,7 @@ public class AuditControllerTests : IDisposable
     // audit rows age out while the soft-deleted entities they describe still live,
     // losing user-delete attribution. The effective window is the tenant's configured
     // value, or the instance default (30d here, floored at 7d) when unset or when no
-    // retention row exists — matching SoftDeleteCleanupService. A null (infinite) audit
+    // retention row exists — matching SoftDeleteCleanupJob. A null (infinite) audit
     // retention always covers it. The symmetric direction (rejecting a soft-delete
     // retention bump that exceeds audit retention) will land when the
     // TenantDataRetentionConfig update endpoint exists.

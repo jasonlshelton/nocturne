@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Diagnostics.Metrics;
@@ -53,8 +54,73 @@ public class JobSchedulerTests
         await scheduler.PollAsync(default);
         await scheduler.DrainAsync();
 
-        claimed.Should().Equal(JobScheduler.Parallelism, JobScheduler.Parallelism);
-        job.Runs.Should().HaveCount(2 * JobScheduler.Parallelism);
+        claimed.Should().Equal(JobSchedulerOptions.DefaultParallelism, JobSchedulerOptions.DefaultParallelism);
+        job.Runs.Should().HaveCount(2 * JobSchedulerOptions.DefaultParallelism);
+    }
+
+    [Fact]
+    public async Task A_backlog_runs_to_the_end_within_one_tick_and_an_idle_ledger_is_read_once_a_tick()
+    {
+        var job = new ProbeJob("probe");
+        var scheduler = Scheduler(job);
+        var due = 12;
+        var claims = 0;
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyCollection<string> _, int limit, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
+            {
+                Interlocked.Increment(ref claims);
+                var take = Math.Min(limit, due);
+                due -= take;
+                return Enumerable.Range(0, take).Select(_ => Lease("probe")).ToList();
+            });
+
+        await scheduler.StartAsync(default);
+        try
+        {
+            await WaitUntilAsync(() => job.Runs.Count == 12);
+            _clock.GetUtcNow().Should().Be(Now, "the backlog ran without waiting for a tick");
+
+            await Task.Delay(200);
+            var settled = Volatile.Read(ref claims);
+            _clock.Advance(JobScheduler.PollInterval - TimeSpan.FromSeconds(1));
+            await Task.Delay(200);
+            Volatile.Read(ref claims).Should().Be(settled, "a short claim ends the refill until the next tick");
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            await WaitUntilAsync(() => Volatile.Read(ref claims) == settled + 1);
+            await Task.Delay(200);
+            Volatile.Read(ref claims).Should().Be(settled + 1);
+        }
+        finally
+        {
+            await scheduler.StopAsync(default);
+        }
+
+        job.Runs.Should().HaveCount(12);
+    }
+
+    [Fact]
+    public async Task Parallelism_comes_from_the_options()
+    {
+        var scheduler = Scheduler(new JobSchedulerOptions { Parallelism = 7 }, new ProbeJob("probe"));
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        await scheduler.PollAsync(default);
+
+        _ledger.Verify(l => l.ClaimDueAsync(
+            It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), 7,
+            It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("The condition did not hold within 10 seconds.");
+            await Task.Delay(10);
+        }
     }
 
     [Fact]
@@ -192,7 +258,7 @@ public class JobSchedulerTests
         _ledger.Invocations.Clear();
         await scheduler.PollAsync(default);
         _ledger.Verify(l => l.ClaimDueAsync(
-            It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), JobScheduler.Parallelism,
+            It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), JobSchedulerOptions.DefaultParallelism,
             It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), "the run gave its slot back");
     }
 
@@ -255,7 +321,9 @@ public class JobSchedulerTests
     private static JobLease Lease(string job, JobCursor? cursor = null, int attempts = 0) =>
         new(Guid.CreateVersion7(), job, Tenant, cursor, attempts, Now, $"test:{Guid.NewGuid():N}");
 
-    private JobScheduler Scheduler(params IScheduledJob[] jobs)
+    private JobScheduler Scheduler(params IScheduledJob[] jobs) => Scheduler(new JobSchedulerOptions(), jobs);
+
+    private JobScheduler Scheduler(JobSchedulerOptions options, params IScheduledJob[] jobs)
     {
         var services = new ServiceCollection();
         services.AddMetrics();
@@ -268,6 +336,7 @@ public class JobSchedulerTests
             provider,
             _clock,
             new JobMetrics(provider.GetRequiredService<IMeterFactory>()),
+            Options.Create(options),
             NullLogger<JobScheduler>.Instance);
     }
 
