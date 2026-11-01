@@ -358,6 +358,8 @@ public class TenantMembershipRepositoryTests : IDisposable
         await Subjects().GrantPlatformAdminAsync([admin, homeless, retired], CancellationToken.None);
         var home = await JoinAsync(admin, _ownerRole);
         (await Members().AddMemberAsync(new NewTenantMember(_otherTenant, admin, []), CancellationToken.None)).Should().BeTrue();
+        var other = (await Members().FindMemberAsync(_otherTenant, admin, CancellationToken.None))!;
+        SetJoinedAt(other.Id, Now);
         SetJoinedAt(home.Id, Now.AddDays(1));
         await JoinAsync(await SubjectAsync("Nobody"), _caretakerRole);
 
