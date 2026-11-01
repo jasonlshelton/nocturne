@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Nocturne.API.Controllers.V4.Base;
 using Nocturne.Core.Contracts.Jobs;
 using OpenApi.Remote.Attributes;
 
@@ -13,9 +14,13 @@ namespace Nocturne.API.Controllers.V4.PlatformAdmin;
 [Authorize(Roles = "platform_admin")]
 public class JobLedgerController(IJobLedger ledger) : ControllerBase
 {
+    internal const int DefaultLimit = 200;
+    internal const int MaxLimit = 1000;
+
+    /// <param name="limit">How many rows to return, at most <see cref="MaxLimit"/>; failing rows come first.</param>
     [HttpGet]
     [RemoteQuery]
-    [ProducesResponseType(typeof(IReadOnlyList<JobLedgerEntry>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<JobLedgerEntry>>> List(CancellationToken ct) =>
-        Ok(await ledger.ListAsync(ct));
+    [ProducesResponseType(typeof(JobLedgerListing), StatusCodes.Status200OK)]
+    public async Task<ActionResult<JobLedgerListing>> List([FromQuery] int limit = DefaultLimit, CancellationToken ct = default) =>
+        Ok(await ledger.ListAsync(Math.Clamp(V4ReadLimits.ClampLimit(limit), 1, MaxLimit), ct));
 }

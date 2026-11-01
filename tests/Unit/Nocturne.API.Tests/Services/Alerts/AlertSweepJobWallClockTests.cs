@@ -24,11 +24,11 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.Alerts;
 
 /// <summary>
-/// Rules driven only by <see cref="AlertSweepService"/> ticks, through the real orchestrator and
+/// Rules driven only by <see cref="AlertSweepJob"/> runs, through the real orchestrator and
 /// evaluation engine over in-memory tracker state.
 /// </summary>
 [Trait("Category", "Unit")]
-public class AlertSweepServiceWallClockTests
+public class AlertSweepJobWallClockTests
 {
     private static readonly Guid Tenant = Guid.Parse("00000000-0000-0000-0003-000000000001");
     private static readonly Guid RuleId = Guid.Parse("00000000-0000-0000-0003-000000000002");
@@ -314,10 +314,11 @@ public class AlertSweepServiceWallClockTests
 
     private sealed class Fixture
     {
-        private readonly AlertSweepService _sweep;
+        private readonly AlertSweepJob _sweep;
+        private readonly ServiceProvider _services;
 
         public ManualTimeProvider Time { get; } = new();
-        public ListLogger<AlertSweepService> Logger { get; } = new();
+        public ListLogger<AlertSweepJob> Logger { get; } = new();
         public ListLogger<AlertOrchestrator> OrchestratorLogger { get; } = new();
         public InMemoryTrackerRepository TrackerRepo { get; }
         public DateTime? LastReadingAt { get; set; }
@@ -339,7 +340,7 @@ public class AlertSweepServiceWallClockTests
         public Task SweepAt(DateTime at)
         {
             Time.SetUtcNow(at);
-            return _sweep.EvaluateWallClockRulesAsync(CancellationToken.None);
+            return _sweep.RunAsync(_services, Tenant, Time.GetUtcNow());
         }
 
         public Fixture(
@@ -375,13 +376,10 @@ public class AlertSweepServiceWallClockTests
 
             services.AddSingleton<IAlertEvaluationEngine>(EngineTestHarness.BuildRustEngine(Time, TrackerRepo));
 
-            var repository = new Mock<IAlertRepository>();
+            var repository = AlertSweepRuns.Repository(Tenant, () => LastReadingAt);
             repository
-                .Setup(x => x.GetAllEnabledRulesAsync(It.IsAny<CancellationToken>()))
+                .Setup(x => x.GetEnabledRulesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => Rules.ToList());
-            repository
-                .Setup(x => x.GetTenantAlertContextAsync(Tenant, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new TenantAlertContext(Tenant, "subject", "slug", "Slug", true, LastReadingAt));
             repository
                 .Setup(x => x.CreateInstanceAsync(It.IsAny<CreateAlertInstanceRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((CreateAlertInstanceRequest r, CancellationToken _) =>
@@ -446,8 +444,8 @@ public class AlertSweepServiceWallClockTests
             services.AddSingleton<ILogger<AlertOrchestrator>>(OrchestratorLogger);
             services.AddScoped<IAlertOrchestrator, AlertOrchestrator>();
 
-            _sweep = new AlertSweepService(
-                services.BuildServiceProvider(), Logger, Time);
+            _services = services.BuildServiceProvider();
+            _sweep = new AlertSweepJob(Logger);
         }
     }
 }

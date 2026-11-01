@@ -28,7 +28,7 @@ namespace Nocturne.API.Services.Jobs;
 /// <c>job:&lt;name&gt;</c>.
 /// </para>
 /// <para>
-/// A claim that fills every free slot, or all the room a job's <see cref="IScheduledJob.MaxConcurrency"/>
+/// A claim that fills every free slot, or all the room a group's <see cref="IScheduledJob.MaxConcurrency"/>
 /// left it, may have left due rows behind, so until a claim comes back short of both each finished run
 /// claims again at once; an idle ledger is read every <see cref="PollInterval"/>.
 /// </para>
@@ -50,7 +50,7 @@ public sealed class JobScheduler : BackgroundService
     private readonly JobMetrics _metrics;
     private readonly ILogger<JobScheduler> _logger;
     private readonly ConcurrentDictionary<Task, byte> _inFlight = new();
-    private readonly ConcurrentDictionary<string, int> _runningByJob = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _runningByGroup = new(StringComparer.Ordinal);
     private int _running;
     private bool _backlog;
     private TaskCompletionSource _wake = NewWake();
@@ -69,6 +69,12 @@ public sealed class JobScheduler : BackgroundService
         {
             if (!byName.TryAdd(job.Name, job))
                 throw new InvalidOperationException($"Two scheduled jobs are named '{job.Name}'.");
+        }
+
+        foreach (var group in byName.Values.GroupBy(j => j.ConcurrencyGroup, StringComparer.Ordinal))
+        {
+            if (group.Select(j => j.MaxConcurrency).Distinct().Count() > 1)
+                throw new InvalidOperationException($"The jobs of concurrency group '{group.Key}' declare different caps.");
         }
 
         _jobs = byName;
@@ -162,8 +168,8 @@ public sealed class JobScheduler : BackgroundService
     }
 
     /// <summary>
-    /// Claims as many due rows as there are free slots, and no more of one job's rows than its
-    /// <see cref="IScheduledJob.MaxConcurrency"/> leaves room for, and starts a run for each.
+    /// Claims as many due rows as there are free slots, and no more of one concurrency group's rows
+    /// than its <see cref="IScheduledJob.MaxConcurrency"/> leaves room for, and starts a run for each.
     /// </summary>
     /// <returns>How many runs it started.</returns>
     internal async Task<int> PollAsync(CancellationToken ct)
@@ -173,25 +179,29 @@ public sealed class JobScheduler : BackgroundService
             return 0;
 
         var room = new Dictionary<string, int>(StringComparer.Ordinal);
+        var groups = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var job in _jobs.Values)
         {
-            var left = job.MaxConcurrency - _runningByJob.GetValueOrDefault(job.Name);
-            if (left > 0)
-                room[job.Name] = left;
+            var left = job.MaxConcurrency - _runningByGroup.GetValueOrDefault(job.ConcurrencyGroup);
+            if (left <= 0)
+                continue;
+            room[job.Name] = left;
+            groups[job.Name] = job.ConcurrencyGroup;
         }
 
         if (room.Count == 0)
             return 0;
 
         var now = _time.GetUtcNow();
-        var leases = await _ledger.ClaimDueAsync(Holder, room, free, now, now + LeaseLength, ct);
+        var leases = await _ledger.ClaimDueAsync(Holder, room, groups, free, now, now + LeaseLength, ct);
         Volatile.Write(
             ref _backlog,
-            leases.Count == free || leases.GroupBy(l => l.Job).Any(claimed => claimed.Count() == room[claimed.Key]));
+            leases.Count == free
+            || leases.GroupBy(l => groups[l.Job]).Any(claimed => claimed.Count() == room[claimed.First().Job]));
         foreach (var lease in leases)
         {
             Interlocked.Increment(ref _running);
-            _runningByJob.AddOrUpdate(lease.Job, 1, (_, n) => n + 1);
+            _runningByGroup.AddOrUpdate(_jobs[lease.Job].ConcurrencyGroup, 1, (_, n) => n + 1);
             var run = Task.Run(() => RunAsync(lease, now, ct), CancellationToken.None);
             _inFlight.TryAdd(run, 0);
             _ = run.ContinueWith(t => _inFlight.TryRemove(t, out _), TaskScheduler.Default);
@@ -279,7 +289,7 @@ public sealed class JobScheduler : BackgroundService
         }
         finally
         {
-            _runningByJob.AddOrUpdate(lease.Job, 0, (_, n) => n - 1);
+            _runningByGroup.AddOrUpdate(job.ConcurrencyGroup, 0, (_, n) => n - 1);
             Interlocked.Decrement(ref _running);
             if (Volatile.Read(ref _backlog))
                 Volatile.Read(ref _wake).TrySetResult();

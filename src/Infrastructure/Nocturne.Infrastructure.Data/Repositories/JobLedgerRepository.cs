@@ -33,15 +33,19 @@ public class JobLedgerRepository : IJobLedger
             UPDATE job_ledger
             SET lease_holder = @holder || ':' || gen_random_uuid(), lease_until = @until, last_started_at = @now
             WHERE id IN (
-                SELECT due.id
-                FROM unnest(@jobs, @caps) AS j(job, cap)
-                CROSS JOIN LATERAL (
-                    SELECT id, next_due_at FROM job_ledger
-                    WHERE job = j.job AND next_due_at <= @now AND (lease_until IS NULL OR lease_until < @now)
-                    ORDER BY next_due_at
-                    LIMIT j.cap
-                    FOR UPDATE SKIP LOCKED) due
-                ORDER BY due.next_due_at
+                SELECT ranked.id
+                FROM (
+                    SELECT due.id, due.next_due_at, j.cap,
+                           row_number() OVER (PARTITION BY j.grp ORDER BY due.next_due_at) AS in_group
+                    FROM unnest(@jobs, @caps, @groups) AS j(job, cap, grp)
+                    CROSS JOIN LATERAL (
+                        SELECT id, next_due_at FROM job_ledger
+                        WHERE job = j.job AND next_due_at <= @now AND (lease_until IS NULL OR lease_until < @now)
+                        ORDER BY next_due_at
+                        LIMIT j.cap
+                        FOR UPDATE SKIP LOCKED) due) ranked
+                WHERE ranked.in_group <= ranked.cap
+                ORDER BY ranked.next_due_at
                 LIMIT @limit)
             RETURNING id, job, tenant_id, cursor, attempts, next_due_at, lease_holder)
         SELECT c.id, c.job, c.tenant_id, c.cursor::text, c.attempts, c.next_due_at, c.lease_holder,
@@ -141,7 +145,13 @@ public class JobLedgerRepository : IJobLedger
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<JobLease>> ClaimDueAsync(
-        string holder, IReadOnlyDictionary<string, int> jobs, int limit, DateTimeOffset now, DateTimeOffset leaseUntil, CancellationToken ct)
+        string holder,
+        IReadOnlyDictionary<string, int> jobs,
+        IReadOnlyDictionary<string, string> groups,
+        int limit,
+        DateTimeOffset now,
+        DateTimeOffset leaseUntil,
+        CancellationToken ct)
     {
         var claimable = jobs.Where(j => j.Value > 0).ToList();
         if (limit <= 0 || claimable.Count == 0)
@@ -157,6 +167,10 @@ public class JobLedgerRepository : IJobLedger
         command.Parameters.Add(new NpgsqlParameter("caps", NpgsqlDbType.Array | NpgsqlDbType.Integer)
         {
             Value = claimable.Select(j => Math.Min(j.Value, limit)).ToArray(),
+        });
+        command.Parameters.Add(new NpgsqlParameter("groups", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = claimable.Select(j => groups.GetValueOrDefault(j.Key, j.Key)).ToArray(),
         });
 
         var leases = new List<JobLease>();
@@ -241,13 +255,14 @@ public class JobLedgerRepository : IJobLedger
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<JobLedgerEntry>> ListAsync(CancellationToken ct)
+    public async Task<JobLedgerListing> ListAsync(int limit, CancellationToken ct)
     {
         await using var db = await _contexts.CreatePlatformAsync(ct);
         var rows = await db.JobLedger.AsNoTracking()
-            .OrderBy(j => j.Job).ThenBy(j => j.TenantId)
+            .OrderByDescending(j => j.Attempts > 0).ThenBy(j => j.Job).ThenBy(j => j.TenantId)
+            .Take(limit + 1)
             .ToListAsync(ct);
-        return rows.Select(j => new JobLedgerEntry(
+        return new JobLedgerListing(rows.Take(limit).Select(j => new JobLedgerEntry(
                 j.Id,
                 j.Job,
                 j.TenantId,
@@ -258,7 +273,8 @@ public class JobLedgerRepository : IJobLedger
                 Utc(j.LeaseUntil),
                 j.Attempts,
                 j.LastError))
-            .ToList();
+            .ToList(),
+            rows.Count > limit);
     }
 
     /// <inheritdoc/>

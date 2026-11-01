@@ -25,13 +25,13 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.Alerts;
 
 /// <summary>
-/// Drives <see cref="AlertSweepService.CheckSnoozedInstancesAsync"/> end to end over mocked
+/// Drives <see cref="AlertSweepJob"/>'s snooze pass end to end over mocked
 /// persistence and glucose, with the real engine evaluating snooze conditions. Every clear must
 /// hand the instance to <see cref="IAlertSnoozeService.ResumeAsync"/> and no extension may, so <see cref="ShouldBeCleared"/> and <see cref="ShouldBeExtended"/> check
 /// that too.
 /// </summary>
 [Trait("Category", "Unit")]
-public class AlertSweepServiceSnoozeTests
+public class AlertSweepJobSnoozeTests
 {
     private static readonly DateTime Now = new(2026, 9, 23, 12, 0, 0, DateTimeKind.Utc);
     private static readonly Guid Tenant = Guid.NewGuid();
@@ -39,7 +39,7 @@ public class AlertSweepServiceSnoozeTests
     private const string LowRule = """{"direction":"below","value":70}""";
     private const string HighRule = """{"direction":"above","value":180}""";
 
-    private readonly Mock<IAlertRepository> _repository = new();
+    private readonly Mock<IAlertRepository> _repository = AlertSweepRuns.Repository(Tenant, () => Now.AddMinutes(-1));
     private readonly Mock<ICanonicalGlucoseService> _canonical = new();
     private readonly List<UpdateAlertInstanceRequest> _updates = [];
     private readonly List<SensorContext> _enricherInputs = [];
@@ -47,11 +47,8 @@ public class AlertSweepServiceSnoozeTests
     private Func<Guid, bool> _resumeThrowsFor = _ => false;
     private List<SensorGlucose> _readings = [];
 
-    public AlertSweepServiceSnoozeTests()
+    public AlertSweepJobSnoozeTests()
     {
-        _repository
-            .Setup(r => r.GetTenantAlertContextAsync(Tenant, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TenantAlertContext(Tenant, "owner", "slug", "Slug", true, Now.AddMinutes(-1)));
         _repository
             .Setup(r => r.UpdateInstanceAsync(It.IsAny<UpdateAlertInstanceRequest>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateAlertInstanceRequest, CancellationToken>((u, _) => _updates.Add(u))
@@ -68,9 +65,8 @@ public class AlertSweepServiceSnoozeTests
         string clientConfiguration,
         int snoozeCount = 1,
         AlertConditionType type = AlertConditionType.Threshold,
-        string conditionParams = LowRule,
-        Guid? tenant = null)
-        => new(Guid.NewGuid(), tenant ?? Tenant, Guid.NewGuid(), "triggered", snoozeCount,
+        string conditionParams = LowRule)
+        => new(Guid.NewGuid(), Tenant, Guid.NewGuid(), "triggered", snoozeCount,
             Guid.NewGuid(), type, conditionParams, clientConfiguration);
 
     private static SensorGlucose Reading(double minutesAgo, double mgdl, double? trendRate = null) => new()
@@ -140,9 +136,7 @@ public class AlertSweepServiceSnoozeTests
         services.AddScoped<IAlertEvaluationEngine, RustBackedAlertEngine>();
 
         await using var provider = services.BuildServiceProvider();
-        var sut = new AlertSweepService(provider, NullLogger<AlertSweepService>.Instance, clock);
-
-        await sut.CheckSnoozedInstancesAsync(CancellationToken.None);
+        await new AlertSweepJob(NullLogger<AlertSweepJob>.Instance).RunAsync(provider, Tenant, clock.GetUtcNow());
     }
 
     private UpdateAlertInstanceRequest UpdateFor(SnoozedInstanceSnapshot instance)
@@ -432,23 +426,6 @@ public class AlertSweepServiceSnoozeTests
     }
 
     [NativeFact]
-    public async Task FailureForOneTenant_DoesNotStopAnother()
-    {
-        var otherTenant = Guid.NewGuid();
-        _repository
-            .Setup(r => r.GetTenantAlertContextAsync(otherTenant, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("tenant lookup failed"));
-        FiveMinuteReadings(50, 60, 75);
-        var broken = Instance(SmartOn, tenant: otherTenant);
-        var healthy = Instance(SmartOn);
-
-        await SweepAsync(broken, healthy);
-
-        _updates.Should().NotContain(u => u.Id == broken.InstanceId);
-        ShouldBeExtended(healthy);
-    }
-
-    [NativeFact]
     public async Task Resume_runs_in_the_tenants_system_attributed_scope()
     {
         var instance = Instance("""{"snooze":{"smartSnooze":false}}""");
@@ -456,7 +433,7 @@ public class AlertSweepServiceSnoozeTests
         await SweepAsync(instance);
 
         _resumed.Should().ContainSingle().Which.Should().Be(
-            (instance.InstanceId, Tenant, "service:alert-sweep"));
+            (instance.InstanceId, Tenant, "job:alert-sweep"));
     }
 
     [NativeFact]

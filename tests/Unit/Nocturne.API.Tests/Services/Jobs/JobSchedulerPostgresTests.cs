@@ -121,7 +121,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var survivor = Scheduler(job);
         await survivor.EnrolAsync(default);
         var ledger = Ledger();
-        var dead = (await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), 1, _clock.GetUtcNow(), _clock.GetUtcNow() + JobScheduler.LeaseLength, default)).Single();
+        var dead = (await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), NoGroups, 1, _clock.GetUtcNow(), _clock.GetUtcNow() + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(JobScheduler.LeaseLength - TimeSpan.FromSeconds(1));
         (await RunDueAsync(survivor)).Should().Be(0, "the dead holder's lease has not run out");
@@ -247,11 +247,11 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var first = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var first = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromSeconds(1));
         var now = _clock.GetUtcNow();
-        var second = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), 1, now, now + JobScheduler.LeaseLength, default)).Single();
+        var second = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), NoGroups, 1, now, now + JobScheduler.LeaseLength, default)).Single();
 
         second.Holder.Should().NotBe(first.Holder);
         await ledger.CompleteAsync(first, now, null, null, default);
@@ -367,7 +367,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default);
+        await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default);
 
         _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromMinutes(1));
         var requested = _clock.GetUtcNow();
@@ -384,7 +384,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var slow = (await ledger.ClaimDueAsync("slow", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var slow = (await ledger.ClaimDueAsync("slow", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromMinutes(1));
         var requested = _clock.GetUtcNow();
@@ -401,7 +401,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
         await ledger.CompleteAsync(lease, Start, null, null, default);
 
         await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
@@ -422,7 +422,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(2));
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
@@ -441,7 +441,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(5));
         await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
@@ -464,7 +464,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
         _clock.Advance(TimeSpan.FromSeconds(70));
@@ -485,7 +485,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(5));
         await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
@@ -501,7 +501,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(5));
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
@@ -521,7 +521,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(5));
         await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(3), default);
@@ -539,7 +539,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), NoGroups, 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(TimeSpan.FromSeconds(5));
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
@@ -564,7 +564,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         await Scheduler(job).EnrolAsync(default);
         await Ledger().RequestAsync(PlatformJob.JobName, null, default);
 
-        (await Ledger().ListAsync(default)).Where(r => r.Job == PlatformJob.JobName)
+        (await Ledger().ListAsync(1000, default)).Rows.Where(r => r.Job == PlatformJob.JobName)
             .Should().ContainSingle().Which.TenantId.Should().BeNull();
         (await RunDueAsync(scheduler)).Should().Be(1);
         job.Tenants.Should().Equal([(TenantContext?)null]);
@@ -593,6 +593,8 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
     }
 
     private static IReadOnlyDictionary<string, int> Only(string job) => new Dictionary<string, int> { [job] = int.MaxValue };
+
+    private static readonly IReadOnlyDictionary<string, string> NoGroups = new Dictionary<string, string>();
 
     private static async Task WaitForAsync(Func<Task<bool>> condition)
     {
@@ -643,7 +645,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         _clock);
 
     private async Task<JobLedgerEntry> RowAsync(string job, Guid tenant) =>
-        (await Ledger().ListAsync(default)).Single(r => r.Job == job && r.TenantId == tenant);
+        (await Ledger().ListAsync(100_000, default)).Rows.Single(r => r.Job == job && r.TenantId == tenant);
 
     private async Task<Guid> SeedTenantAsync()
     {

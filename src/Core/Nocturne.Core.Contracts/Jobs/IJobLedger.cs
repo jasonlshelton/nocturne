@@ -23,13 +23,21 @@ namespace Nocturne.Core.Contracts.Jobs;
 public interface IJobLedger
 {
     /// <summary>
-    /// Leases up to <paramref name="limit"/> due rows of <paramref name="jobs"/>, and no more of one
-    /// job's rows than the number it maps to, until <paramref name="leaseUntil"/>, earliest due first,
-    /// skipping rows another claim has locked. Each lease's token is <paramref name="holder"/> and a
-    /// suffix unique to the claim.
+    /// Leases up to <paramref name="limit"/> due rows of <paramref name="jobs"/> until
+    /// <paramref name="leaseUntil"/>, earliest due first, skipping rows another claim has locked. Each
+    /// job maps to its group's room, and <paramref name="groups"/> maps each job to its group: no more
+    /// rows of one group's jobs together than that room, which every job of the group maps to alike. A
+    /// job missing from <paramref name="groups"/> is a group of its own. Each lease's token is
+    /// <paramref name="holder"/> and a suffix unique to the claim.
     /// </summary>
     Task<IReadOnlyList<JobLease>> ClaimDueAsync(
-        string holder, IReadOnlyDictionary<string, int> jobs, int limit, DateTimeOffset now, DateTimeOffset leaseUntil, CancellationToken ct);
+        string holder,
+        IReadOnlyDictionary<string, int> jobs,
+        IReadOnlyDictionary<string, string> groups,
+        int limit,
+        DateTimeOffset now,
+        DateTimeOffset leaseUntil,
+        CancellationToken ct);
 
     /// <summary>Extends <paramref name="lease"/> while it is still held; false when it is not.</summary>
     Task<bool> ExtendLeaseAsync(JobLease lease, DateTimeOffset leaseUntil, CancellationToken ct);
@@ -85,8 +93,10 @@ public interface IJobLedger
     /// </remarks>
     Task RequestAsync(string job, Guid? tenantId, TimeSpan after, CancellationToken ct);
 
-    /// <summary>Every row, for the platform admin view.</summary>
-    Task<IReadOnlyList<JobLedgerEntry>> ListAsync(CancellationToken ct);
+    /// <summary>
+    /// Up to <paramref name="limit"/> rows, those whose last run failed first, for the platform admin view.
+    /// </summary>
+    Task<JobLedgerListing> ListAsync(int limit, CancellationToken ct);
 
     /// <summary>How many rows' last run failed.</summary>
     Task<int> CountFailingAsync(CancellationToken ct);
@@ -98,6 +108,10 @@ public interface IJobLedger
 /// <param name="Holder">The claim's token in <c>lease_holder</c>.</param>
 public sealed record JobLease(
     Guid Id, string Job, TenantContext? Tenant, JobCursor? Cursor, int Attempts, DateTimeOffset DueAt, string Holder);
+
+/// <summary>A page of <see cref="IJobLedger.ListAsync"/>.</summary>
+/// <param name="Capped">Whether the ledger holds more rows than <paramref name="Rows"/>.</param>
+public sealed record JobLedgerListing(IReadOnlyList<JobLedgerEntry> Rows, bool Capped);
 
 /// <summary>A <c>job_ledger</c> row, without its cursor.</summary>
 public sealed record JobLedgerEntry(

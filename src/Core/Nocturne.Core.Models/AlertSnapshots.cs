@@ -95,7 +95,7 @@ public record ExcursionRuleSnapshot(Guid AlertRuleId, string Name);
 /// Pairing of an open excursion with its owning rule, restricted to rules
 /// that have <see cref="AlertRule.AutoResolveEnabled"/> set. Returned by
 /// <see cref="Nocturne.Core.Contracts.Alerts.IAlertRepository.GetAutoResolveExcursionsAsync"/>
-/// for periodic auto-resolve evaluation by the sweep service.
+/// for periodic auto-resolve evaluation by the alert sweep.
 /// </summary>
 public record AutoResolveExcursionSnapshot(
     Guid ExcursionId,

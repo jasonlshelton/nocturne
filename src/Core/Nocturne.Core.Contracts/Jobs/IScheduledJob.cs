@@ -17,6 +17,13 @@ public interface IScheduledJob
     static readonly TimeSpan DefaultMaxBackoff = TimeSpan.FromHours(1);
 
     /// <summary>
+    /// How long a per-tenant job parks an inactive tenant's row before it looks again, rather than
+    /// taking a slot every interval: a reactivated tenant is picked up without any reactivation path
+    /// having to reach the ledger.
+    /// </summary>
+    static readonly TimeSpan InactiveTenantRecheck = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// The job's row key in <c>job_ledger</c>. Only rows of registered names are claimed, so a row no
     /// deployed version registers stays due and is scanned past on every claim: the change that
     /// removes or renames a job deletes its rows (<c>DELETE FROM job_ledger WHERE job = '...'</c> in a
@@ -37,10 +44,16 @@ public interface IScheduledJob
     TimeSpan Spread => TimeSpan.Zero;
 
     /// <summary>
-    /// The most runs of this job one process holds at once, so a job whose runs are all stuck (an
-    /// upstream outage holding each run to its timeout) leaves the other slots to the other jobs.
+    /// The most runs of this job's <see cref="ConcurrencyGroup"/> one process holds at once, so jobs
+    /// whose runs are all stuck (an upstream outage holding each run to its timeout) leave the other
+    /// slots to the other jobs. Every job of one group declares the same cap.
     /// </summary>
     int MaxConcurrency => int.MaxValue;
+
+    /// <summary>
+    /// The jobs whose runs count together against <see cref="MaxConcurrency"/>; by default the job alone.
+    /// </summary>
+    string ConcurrencyGroup => Name;
 
     /// <summary>Runs the job once for its row.</summary>
     Task<JobOutcome> RunAsync(JobRun run, CancellationToken ct);

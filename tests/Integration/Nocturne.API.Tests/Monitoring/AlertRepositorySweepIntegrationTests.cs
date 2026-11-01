@@ -16,9 +16,8 @@ namespace Nocturne.API.Tests.Integration.Monitoring;
 /// <summary>
 /// Exercises <see cref="AlertRepository"/> against the real PostgreSQL instance under Row-Level
 /// Security (the runtime <c>nocturne_app</c> role is <c>NOBYPASSRLS</c>). This is the half the
-/// InMemory unit tests cannot cover: the cross-tenant sweep methods must iterate active tenants,
-/// since the fail-closed RLS policy admits no "see all" value, and a method without a tenant must
-/// read the scope's tenant and nothing of another's.
+/// InMemory unit tests cannot cover: a method without a tenant must read the scope's tenant and
+/// nothing of another's, and one that takes a tenant must read that tenant from a scope that has none.
 ///
 /// The repository is constructed over a context factory wired with the same
 /// <see cref="TenantConnectionInterceptor"/> the app uses, so <c>context.TenantId</c> drives the
@@ -34,7 +33,7 @@ public class AlertRepositorySweepIntegrationTests : ApiIntegrationTestBase
         : base(fixture, output) { }
 
     [Fact]
-    public async Task SweepAndPerTenantReads_AreCorrectlyTenantScoped_UnderRls()
+    public async Task PerTenantReads_AreCorrectlyTenantScoped_UnderRls()
     {
         // Two fresh tenants (unique slugs so re-runs against a persisted container don't collide).
         var suffix = Guid.NewGuid().ToString("N")[..8];
@@ -57,13 +56,7 @@ public class AlertRepositorySweepIntegrationTests : ApiIntegrationTestBase
         await SeedRuleAsync(factory, tenantA, "High A", AlertConditionType.Threshold);
         await SeedRuleAsync(factory, tenantB, "Signal loss B", AlertConditionType.SignalLoss);
 
-        // The sweep's scope resolves no tenant.
-        var sweep = new AlertRepository(factory.AsNocturneFactory());
-
-        var all = await sweep.GetAllEnabledRulesAsync(CancellationToken.None);
-        var sweepTenants = all.Select(r => r.TenantId).ToHashSet();
-        sweepTenants.Should().Contain(tenantA);
-        sweepTenants.Should().Contain(tenantB);
+        var noTenant = new AlertRepository(factory.AsNocturneFactory());
 
         var rulesA = await new AlertRepository(factory.AsNocturneFactory(tenantA))
             .GetEnabledRulesAsync(CancellationToken.None);
@@ -75,7 +68,7 @@ public class AlertRepositorySweepIntegrationTests : ApiIntegrationTestBase
         rulesB.Select(r => r.Name).Should().BeEquivalentTo(["Signal loss B"]);
         rulesB.Should().OnlyContain(r => r.TenantId == tenantB);
 
-        (await sweep.GetEnabledRulesAsync(CancellationToken.None))
+        (await noTenant.GetEnabledRulesAsync(CancellationToken.None))
             .Should().BeEmpty("a scope with no tenant reads no tenant's rules");
     }
 
@@ -108,9 +101,6 @@ public class AlertRepositorySweepIntegrationTests : ApiIntegrationTestBase
         var read = await repo.ReadEnabledRulesAsync(stale, CancellationToken.None);
         read.Rules.Select(r => r.Name).Should().Equal("Readable");
         read.UnreadableRuleIds.Should().BeEquivalentTo([legacyType, legacySeverity]);
-
-        var all = await repo.GetAllEnabledRulesAsync(CancellationToken.None);
-        all.Select(r => r.Name).Should().Contain(["Readable", "Other tenant"]);
 
         logger.Errors.Should().Contain(m => m.Contains(legacyType.ToString()) && m.Contains("threshold_low"));
         logger.Errors.Should().Contain(m => m.Contains(legacySeverity.ToString()) && m.Contains("normal"));

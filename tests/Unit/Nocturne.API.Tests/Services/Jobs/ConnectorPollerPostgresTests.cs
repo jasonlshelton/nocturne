@@ -383,7 +383,7 @@ public sealed class ConnectorPollerPostgresTests(ConnectorPollerPostgresTests.Da
         _clock);
 
     private async Task<JobLedgerEntry> RowAsync(Guid tenant) =>
-        (await Ledger().ListAsync(default)).Single(r => r.Job == PollerName && r.TenantId == tenant);
+        (await Ledger().ListAsync(100_000, default)).Rows.Single(r => r.Job == PollerName && r.TenantId == tenant);
 
     private async Task<DateTimeOffset> DueAtAsync(Guid tenant) => (await RowAsync(tenant)).NextDueAt!.Value;
 
