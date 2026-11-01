@@ -49,7 +49,8 @@ public sealed record NewTenantMember(
     IReadOnlyList<string>? DirectPermissions = null,
     string? Label = null,
     string? Username = null,
-    bool LimitTo24Hours = false);
+    bool LimitTo24Hours = false,
+    Guid? CreatedFromInviteId = null);
 
 /// <summary>A row of <c>tenant_roles</c>, with how many members hold it.</summary>
 public sealed record TenantRoleRecord(
@@ -118,3 +119,17 @@ public sealed record PlatformAdminMembership(Guid SubjectId, Guid TenantId, stri
 /// platform admins there are, so the caller can tell how many have no tenant to be told in.
 /// </summary>
 public sealed record PlatformAdminDirectory(IReadOnlyList<PlatformAdminMembership> Memberships, int ActivePlatformAdmins);
+
+/// <summary>
+/// What removing every membership of a subject did: how many it removed, and the tenants that
+/// were left with no owner who can sign in because of it.
+/// </summary>
+public sealed record SubjectMembershipsRemoval(int Removed, IReadOnlyList<LastOwnerTenant> TenantsLeftWithoutOwner);
+
+/// <summary>What a membership change that may not leave the tenant without an owner found.</summary>
+public enum OwnerGuardedChange
+{
+    Changed,
+    NotFound,
+    LastOwner,
+}

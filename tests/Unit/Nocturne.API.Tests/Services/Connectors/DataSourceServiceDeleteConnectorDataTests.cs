@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -94,7 +95,7 @@ public class DataSourceServiceDeleteConnectorDataTests : IDisposable
         params IConnectorPurgeGuard[] purgeGuards) => new(
         new SourceOwnedDataRepository(context.AsFactory(), _auditContext),
         new SourceOwnedDataRepository(context.AsFactory(), _auditContext),
-        new DemoDataPurger(context.AsFactory(), TimeProvider.System),
+        new DemoDataPurgeRepository(context.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>()),
         new ConnectorConfigurationRepository(context.AsFactory()),
         _sensorGlucose.Object,
         _meterGlucose.Object,
@@ -409,7 +410,7 @@ public class DataSourceServiceDeleteConnectorDataTests : IDisposable
             var service = new DataSourceService(
                 new SourceOwnedDataRepository(ctx.AsFactory(), _auditContext),
                 new SourceOwnedDataRepository(ctx.AsFactory(), _auditContext),
-                new DemoDataPurger(ctx.AsFactory(), TimeProvider.System),
+                new DemoDataPurgeRepository(ctx.AsFactory(), TimeProvider.System, Mock.Of<IServiceScopeFactory>()),
                 new ConnectorConfigurationRepository(ctx.AsFactory()), _sensorGlucose.Object, _meterGlucose.Object, _calibrations.Object, _auditContext,
                 _connectorConfig.Object, writer, [], [], TimeProvider.System, NullLogger<DataSourceService>.Instance);
             (await service.DeleteConnectorDataAsync(ConnectorId)).Success.Should().BeTrue();

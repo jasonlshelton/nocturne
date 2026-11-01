@@ -426,7 +426,7 @@ public class MemberScopeMiddlewareTests
         var publicScopes = (IReadOnlySet<string>)new HashSet<string> { Scope.GlucoseRead };
 
         var middleware = new MemberScopeMiddleware(
-            _ => Task.CompletedTask, Mock.Of<ITenantMembershipRepository>(), NullLogger<MemberScopeMiddleware>.Instance);
+            _ => Task.CompletedTask, Mock.Of<ITenantMembershipRepository>(), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
         var context = new DefaultHttpContext();
         context.Items["AuthContext"] = new AuthContext
         {
@@ -677,7 +677,7 @@ public class MemberScopeMiddlewareTests
 
         var detached = new GatedFactory(provider.GetRequiredService<INocturneDbContextFactory>());
         var middleware = new MemberScopeMiddleware(
-            _ => Task.CompletedTask, new TenantMembershipRepository(detached), NullLogger<MemberScopeMiddleware>.Instance);
+            _ => Task.CompletedTask, new TenantMembershipRepository(detached), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
 
         await using (var request = provider.CreateAsyncScope())
         {
@@ -790,7 +790,7 @@ public class MemberScopeMiddlewareTests
         await StoreMembershipAsync(context, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), subjectId);
 
         var middleware = new MemberScopeMiddleware(
-            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), NullLogger<MemberScopeMiddleware>.Instance);
+            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
         await middleware.InvokeAsync(context);
 
         return (category, scoped);
@@ -840,7 +840,7 @@ public class MemberScopeMiddlewareTests
         await StoreMembershipAsync(context, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), subjectId);
 
         var middleware = new MemberScopeMiddleware(
-            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), NullLogger<MemberScopeMiddleware>.Instance);
+            _ => Task.CompletedTask, new TenantMembershipRepository(db.ContextFactory.AsNocturneFactory()), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
         await middleware.InvokeAsync(context);
 
         return context;
@@ -920,7 +920,7 @@ public class MemberScopeMiddlewareTests
         RequestDelegate next = _ => Task.CompletedTask;
 
         var middleware = new MemberScopeMiddleware(
-            next, Mock.Of<ITenantMembershipRepository>(), NullLogger<MemberScopeMiddleware>.Instance);
+            next, Mock.Of<ITenantMembershipRepository>(), new LastUsedClaims(TimeProvider.System), NullLogger<MemberScopeMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         context.Items["AuthContext"] = authContext;

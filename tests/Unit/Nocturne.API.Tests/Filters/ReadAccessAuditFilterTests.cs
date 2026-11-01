@@ -31,13 +31,20 @@ public class ReadAccessAuditFilterTests
     private readonly Mock<IDbContextFactory<NocturneDbContext>> _contextFactory = new();
     private readonly ILogger<ReadAccessAuditFilter> _logger = NullLogger<ReadAccessAuditFilter>.Instance;
 
-    private ReadAccessAuditFilter CreateFilter() =>
-        new(
-            _configCache.Object,
-            _auditContext.Object,
-            new ReadAccessLogWriter(_contextFactory.Object.AsNocturneFactory(), NullLogger<ReadAccessLogWriter>.Instance),
-            CredentialRouteRedactor.Create(),
-            _logger);
+    private ReadAccessLogWriter? _writer;
+
+    private ReadAccessAuditFilter CreateFilter()
+    {
+        _writer = new ReadAccessLogWriter(
+            _contextFactory.Object.AsNocturneFactory(), TimeProvider.System, NullLogger<ReadAccessLogWriter>.Instance);
+        return new(_configCache.Object, _auditContext.Object, _writer, CredentialRouteRedactor.Create(), _logger);
+    }
+
+    private Task DrainQueuedAsync()
+    {
+        _writer!.Complete();
+        return _writer.DrainAsync();
+    }
 
     private static (ResultExecutingContext executingContext, ResultExecutionDelegate next) CreateContexts(
         string path,
@@ -88,6 +95,7 @@ public class ReadAccessAuditFilterTests
         var (ctx, next) = CreateContexts("/api/v1/entries", "GET", tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         _contextFactory.Verify(
             f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()),
@@ -101,6 +109,7 @@ public class ReadAccessAuditFilterTests
         var (ctx, next) = CreateContexts("/api/v4/entries", "POST", tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         _contextFactory.Verify(
             f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()),
@@ -118,6 +127,7 @@ public class ReadAccessAuditFilterTests
         var (ctx, next) = CreateContexts("/api/v4/entries", "GET", tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         _contextFactory.Verify(
             f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()),
@@ -136,6 +146,7 @@ public class ReadAccessAuditFilterTests
             statusCode: 401, tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         _contextFactory.Verify(
             f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()),
@@ -154,6 +165,7 @@ public class ReadAccessAuditFilterTests
             statusCode: 403, tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         _contextFactory.Verify(
             f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()),
@@ -210,6 +222,7 @@ public class ReadAccessAuditFilterTests
             statusCode: 404, tenantContext: TestTenantContext);
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         // Wait for the fire-and-forget write with a generous timeout.
         var completed = await saveCompleted.WaitAsync(TimeSpan.FromSeconds(5));
@@ -260,6 +273,7 @@ public class ReadAccessAuditFilterTests
             });
 
         await filter.OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         (await saveCompleted.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue();
 
@@ -296,6 +310,7 @@ public class ReadAccessAuditFilterTests
         var (ctx, next) = CreateContexts("/api/v4/entries", "GET", tenantContext: TestTenantContext);
 
         await CreateFilter().OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         (await saveCompleted.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue();
         written!.ActorSubjectId.Should().Be(caller);
@@ -334,6 +349,7 @@ public class ReadAccessAuditFilterTests
             tenantContext: TestTenantContext);
 
         await CreateFilter().OnResultExecutionAsync(ctx, next);
+        await DrainQueuedAsync();
 
         (await saveCompleted.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue();
         written!.Endpoint.Should().Be($"GET {CredentialRouteRedactor.AlertInvitePath}");
@@ -375,6 +391,7 @@ public class ReadAccessAuditFilterTests
         // Should not throw
         var act = () => filter.OnResultExecutionAsync(ctx, next);
         await act.Should().NotThrowAsync();
+        await DrainQueuedAsync();
     }
 
     #region ExtractResultMetadata Tests

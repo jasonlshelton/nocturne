@@ -804,27 +804,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.ToTable("auth_audit_log");
                 });
 
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.BackfillCompletionEntity", b =>
-                {
-                    b.Property<string>("Backfill")
-                        .HasColumnType("text")
-                        .HasColumnName("backfill");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTime>("CompletedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("completed_at");
-
-                    b.HasKey("Backfill", "TenantId");
-
-                    b.HasIndex("TenantId");
-
-                    b.ToTable("backfill_completions");
-                });
-
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.BodyWeightEntity", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -2469,6 +2448,71 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.ToTable("instance_key_check");
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.JobLedgerEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<string>("Cursor")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("cursor");
+
+                    b.Property<string>("Job")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("job");
+
+                    b.Property<DateTime?>("LastCompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_completed_at");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTime?>("LastStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_started_at");
+
+                    b.Property<string>("LeaseHolder")
+                        .HasColumnType("text")
+                        .HasColumnName("lease_holder");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<DateTime?>("NextDueAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_due_at");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextDueAt")
+                        .HasDatabaseName("ix_job_ledger_due")
+                        .HasFilter("next_due_at IS NOT NULL");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("Job", "TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_job_ledger_job_tenant");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("Job", "TenantId"), false);
+
+                    b.ToTable("job_ledger");
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.LabHbA1cResultEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3684,26 +3728,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.HasIndex("SubjectId");
 
                     b.ToTable("passkey_credentials");
-                });
-
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.PendingTenantJobEntity", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<string>("Job")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("job");
-
-                    b.Property<DateTime>("RequestedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("requested_at");
-
-                    b.HasKey("TenantId", "Job");
-
-                    b.ToTable("pending_tenant_jobs");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.PlatformSettingsEntity", b =>
@@ -9235,6 +9259,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasDatabaseName("ix_temp_basals_tenant_source_sync_id")
                         .HasFilter("sync_identifier IS NOT NULL AND deleted_at IS NULL");
 
+                    b.HasIndex("TenantId", "DataSource", "Timestamp")
+                        .IsDescending(false, false, true)
+                        .HasDatabaseName("ix_temp_basals_tenant_source_timestamp")
+                        .HasFilter("deleted_at IS NULL");
+
                     b.HasIndex("TenantId", "SysUpdatedAt", "Id")
                         .HasDatabaseName("ix_temp_basals_tenant_history");
 
@@ -9794,15 +9823,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Navigation("RefreshToken");
                 });
 
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.BackfillCompletionEntity", b =>
-                {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.BodyWeightEntity", b =>
                 {
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
@@ -9989,6 +10009,14 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.JobLedgerEntity", b =>
+                {
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.LabHbA1cResultEntity", b =>
@@ -10199,15 +10227,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Subject");
-                });
-
-            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.PendingTenantJobEntity", b =>
-                {
-                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.ReadAccessLogEntity", b =>

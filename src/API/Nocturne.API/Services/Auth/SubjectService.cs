@@ -127,7 +127,7 @@ public class SubjectService : ISubjectService
     {
         var updated = await _subjects.UpdateProfileAsync(
             subject.Id,
-            new SubjectProfile(subject.Name, subject.Email, subject.Notes, subject.IsActive),
+            new SubjectProfile(subject.Name, subject.Email, subject.Notes),
             CancellationToken.None);
 
         if (updated is null)
@@ -144,38 +144,40 @@ public class SubjectService : ISubjectService
     }
 
     /// <inheritdoc />
-    public async Task<bool> DeleteSubjectAsync(Guid subjectId)
+    public async Task<SubjectChange> DeleteSubjectAsync(Guid subjectId)
     {
         var subject = await _subjects.GetAsync(subjectId, CancellationToken.None);
         if (subject == null)
         {
-            return false;
+            return new SubjectChange.NotFound();
         }
 
         if (subject.IsSystemSubject)
         {
             _logger.LogWarning("Attempted to delete system subject {SubjectId} ({Name})", subjectId, subject.Name);
-            return false;
+            return new SubjectChange.NotFound();
         }
 
-        if (!await _subjects.DeleteAsync(subjectId, CancellationToken.None))
+        var change = await _subjects.DeleteAsync(subjectId, CancellationToken.None);
+        if (change is not SubjectChange.Changed)
         {
-            return false;
+            return change;
         }
 
         _logger.LogInformation("Deleted subject {SubjectId}", subjectId);
 
         await _auditService.LogAsync(AuthAuditEventType.SubjectDeleted, subjectId, success: true);
 
-        return true;
+        return change;
     }
 
     /// <inheritdoc />
-    public Task<bool> ActivateSubjectAsync(Guid subjectId) =>
-        _subjects.UpdateAsync(subjectId, new SubjectEdit(IsActive: true), CancellationToken.None);
+    public async Task<bool> ActivateSubjectAsync(Guid subjectId) =>
+        await _subjects.UpdateAsync(subjectId, new SubjectEdit(IsActive: true), CancellationToken.None)
+            is SubjectChange.Changed;
 
     /// <inheritdoc />
-    public Task<bool> DeactivateSubjectAsync(Guid subjectId) =>
+    public Task<SubjectChange> DeactivateSubjectAsync(Guid subjectId) =>
         _subjects.UpdateAsync(subjectId, new SubjectEdit(IsActive: false), CancellationToken.None);
 
     /// <inheritdoc />

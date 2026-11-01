@@ -76,7 +76,25 @@ public sealed record SubjectEdit(
     DateTime? LastLoginAt = null);
 
 /// <summary>The profile fields an administrator's edit replaces together, null members included.</summary>
-public sealed record SubjectProfile(string Name, string? Email, string? Notes, bool IsActive);
+public sealed record SubjectProfile(string Name, string? Email, string? Notes);
+
+/// <summary>A tenant a change to a subject would leave without an owner who can sign in.</summary>
+public sealed record LastOwnerTenant(Guid TenantId, string Slug);
+
+/// <summary>
+/// What a change to a subject that may not leave a tenant without an owner found. It is refused
+/// with <see cref="LastOwnerOf"/> while the subject is the last owner of any tenant.
+/// </summary>
+public abstract record SubjectChange
+{
+    private SubjectChange() { }
+
+    public sealed record Changed : SubjectChange;
+
+    public sealed record NotFound : SubjectChange;
+
+    public sealed record LastOwnerOf(IReadOnlyList<LastOwnerTenant> OwnedTenants) : SubjectChange;
+}
 
 /// <summary>What keeps a subject's credentials valid between requests.</summary>
 public sealed record SubjectSignInState(bool IsActive, bool IsPlatformAdmin);

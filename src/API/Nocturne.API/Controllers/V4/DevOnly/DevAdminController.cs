@@ -12,6 +12,7 @@ using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Connectors;
 using Nocturne.API.Services.DevOnly;
 using Nocturne.API.Services.Seeding;
+using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Connectors;
@@ -44,6 +45,7 @@ public class DevAdminController : ControllerBase
     private readonly ITenantService _tenantService;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _time;
+    private readonly IEnumerable<IConnectorCacheInvalidator> _connectorInvalidators;
     private readonly ILogger<DevAdminController> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -58,6 +60,7 @@ public class DevAdminController : ControllerBase
     /// <param name="tenantService">Service for tenant lifecycle management.</param>
     /// <param name="cache">Tenant-resolution cache, which a restored snapshot invalidates.</param>
     /// <param name="timeProvider">Clock that stamps seeded fixture credentials.</param>
+    /// <param name="connectorInvalidators">Told of each connector configuration an import writes, as the configuration service tells them of its writes.</param>
     /// <param name="logger">Logger instance.</param>
     public DevAdminController(
         INocturneDbContextFactory contexts,
@@ -68,6 +71,7 @@ public class DevAdminController : ControllerBase
         ITenantService tenantService,
         IMemoryCache cache,
         TimeProvider timeProvider,
+        IEnumerable<IConnectorCacheInvalidator> connectorInvalidators,
         ILogger<DevAdminController> logger
     )
     {
@@ -79,7 +83,18 @@ public class DevAdminController : ControllerBase
         _tenantService = tenantService;
         _cache = cache;
         _time = timeProvider;
+        _connectorInvalidators = connectorInvalidators;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// What the configuration service does after each of its writes: the token caches drop the
+    /// connector's session and its poller makes the tenant's job ledger row due a minute after the write.
+    /// </summary>
+    private void InvalidateConnector(string connectorName, Guid tenantId)
+    {
+        foreach (var invalidator in _connectorInvalidators)
+            invalidator.Invalidate(connectorName, tenantId);
     }
 
     // ── Export ───────────────────────────────────────────────────────────
@@ -312,10 +327,10 @@ public class DevAdminController : ControllerBase
 
         try
         {
-            var cachedSlugs = await db.ExecuteInTransactionAsync(async token =>
+            var cachedTenants = await db.ExecuteInTransactionAsync(async token =>
             {
                 // Declared inside the retryable body so a second attempt starts from an empty set.
-                var resolvableSlugs = new HashSet<string>(StringComparer.Ordinal);
+                var resolvableTenants = new HashSet<(string Slug, string? ShareTokenHash)>();
 
                 // Collect all subject IDs and passkey IDs from the snapshot for non-scoped upsert
                 var allSubjectDtos = snapshot.Tenants.SelectMany(t => t.Subjects).ToList();
@@ -382,7 +397,7 @@ public class DevAdminController : ControllerBase
                     if (existingTenant is not null)
                     {
                         // A rename leaves the outgoing slug cached and still resolving to this row.
-                        resolvableSlugs.Add(existingTenant.Slug);
+                        resolvableTenants.Add((existingTenant.Slug, existingTenant.ShareToken));
 
                         // Update scalar properties in-place
                         existingTenant.Slug = td.Slug;
@@ -404,7 +419,7 @@ public class DevAdminController : ControllerBase
                         });
                     }
 
-                    resolvableSlugs.Add(td.Slug);
+                    resolvableTenants.Add((td.Slug, null));
                 }
                 await db.SaveChangesAsync(token);
 
@@ -561,13 +576,16 @@ public class DevAdminController : ControllerBase
                     await db.SaveChangesAsync(token);
                 }
 
-                return resolvableSlugs;
+                return resolvableTenants;
             }, ct: ct);
 
             // After the commit, not beside the writes: a request served mid-transaction reads
             // the pre-restore rows and would re-cache them for the full duration.
-            foreach (var slug in cachedSlugs)
-                TenantResolutionMiddleware.EvictTenant(_cache, slug);
+            foreach (var (slug, shareTokenHash) in cachedTenants)
+                TenantCacheEviction.Evict(_cache, slug, shareTokenHash);
+
+            foreach (var c in snapshot.Tenants.SelectMany(ts => ts.ConnectorConfigurations))
+                InvalidateConnector(c.ConnectorName, c.TenantId);
 
             _logger.LogInformation("Dev snapshot import completed successfully");
             return Ok(new { success = true, tenantsImported = snapshot.Tenants.Count });
@@ -992,6 +1010,9 @@ public class DevAdminController : ControllerBase
                 await db.SaveChangesAsync(token);
             }, ct);
 
+            foreach (var c in snapshot.ConnectorConfigurations)
+                InvalidateConnector(c.ConnectorName, id);
+
             _logger.LogInformation("Scoped snapshot import completed for tenant {Slug}", tenant.Slug);
             return Ok(new { success = true });
         }
@@ -1069,8 +1090,7 @@ public class DevAdminController : ControllerBase
             .Where(r => r.TenantId == tenant.Id && r.IsSystem && r.Slug == RoleSeeds.Owner)
             .FirstAsync(ct);
 
-        await _tenantService.AddMemberAsync(
-            tenant.Id, subjectResult.Subject.Id, [ownerRole.Id], ct: ct);
+        await EnsureMemberAsync(tenant.Id, subjectResult.Subject.Id, [ownerRole.Id], label: null, ct);
 
         // 5. Dev identity fixture subjects as additional owners: their real
         // passkeys (re-seeded from docs/seed/dev-identities.json) can then sign
@@ -1081,8 +1101,7 @@ public class DevAdminController : ControllerBase
         {
             if (fixtureSubjectId == subjectResult.Subject.Id)
                 continue;
-            await _tenantService.AddMemberAsync(
-                tenant.Id, fixtureSubjectId, [ownerRole.Id], label: "dev fixture", ct: ct);
+            await EnsureMemberAsync(tenant.Id, fixtureSubjectId, [ownerRole.Id], "dev fixture", ct);
         }
 
         // 6. Mark onboarding complete. The web layout redirects every page to
@@ -1250,8 +1269,7 @@ public class DevAdminController : ControllerBase
             });
             await db.SaveChangesAsync(ct);
 
-            await _tenantService.AddMemberAsync(
-                tenant.Id, keeper.Subject.Id, [], label: "recovery keeper", ct: ct);
+            await EnsureMemberAsync(tenant.Id, keeper.Subject.Id, [], "recovery keeper", ct);
         }
 
         _logger.LogInformation(
@@ -1267,6 +1285,14 @@ public class DevAdminController : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeding wants the subject to be a member, so one that already is counts as done and the
+    /// result of <see cref="ITenantService.AddMemberAsync"/> is not read.
+    /// </summary>
+    private async Task EnsureMemberAsync(
+        Guid tenantId, Guid subjectId, List<Guid> roleIds, string? label, CancellationToken ct) =>
+        _ = await _tenantService.AddMemberAsync(tenantId, subjectId, roleIds, label: label, ct: ct);
 
     /// <summary>
     /// 400 for a rejected slug, with up to three valid alternatives so callers

@@ -11,6 +11,7 @@ using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.Notifications;
 using Nocturne.API.Services.Platform.InstanceKey;
 using Nocturne.Core.Constants;
+using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -71,6 +72,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
             new RecordingNotifications(sp.GetRequiredService<ITenantAccessor>(), this));
         services.AddTransient(_ => _key);
         services.AddTransient<IConnectorConfigurationRepository, ConnectorConfigurationRepository>();
+        services.AddScoped<IAlertRuleRepository, AlertRuleRepository>();
         services.AddTransient<UndecryptableSecretScanner>();
         _provider = services.BuildServiceProvider();
     }
@@ -141,7 +143,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
 
         var affected = _database.ContextFactory.AsNocturneFactory(Affected);
         var found = await new UndecryptableSecretScanner(
-            affected, new ConnectorConfigurationRepository(affected), _newKey).ScanTenantAsync(CancellationToken.None);
+            affected, new ConnectorConfigurationRepository(affected), new AlertRuleRepository(affected), _newKey).ScanTenantAsync(CancellationToken.None);
 
         found.AlertChannels.Select(c => (c.RuleName, c.Destination)).Should().Equal(
             ("Bare", ""), ("Mixed", "a.example.com"));
@@ -368,7 +370,6 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
         return new InstanceKeyChangeService(
             _provider,
             new InstanceKeyCheck(root, _key),
-            new UndecryptableSecretScanner(root, new ConnectorConfigurationRepository(root), _key),
             new OwnerNoticeLedger(root),
             new ActiveTenantSnapshot(new TenantRepository(snapshotContexts ?? root), _clock, NullLogger<ActiveTenantSnapshot>.Instance),
             new TenantMembershipRepository(root),

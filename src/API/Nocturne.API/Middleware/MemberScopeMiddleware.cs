@@ -28,6 +28,7 @@ public class MemberScopeMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ITenantMembershipRepository _detachedMembers;
+    private readonly LastUsedClaims _lastUsedClaims;
     private readonly ILogger<MemberScopeMiddleware> _logger;
 
     /// <summary>
@@ -38,14 +39,17 @@ public class MemberScopeMiddleware
     /// Resolved from the root with the middleware, so it reads no request's state; used for the
     /// last-used write that outlives the request.
     /// </param>
+    /// <param name="lastUsedClaims">Decides which concurrent request stamps the membership.</param>
     /// <param name="logger">Logger for membership resolution diagnostics.</param>
     public MemberScopeMiddleware(
         RequestDelegate next,
         ITenantMembershipRepository detachedMembers,
+        LastUsedClaims lastUsedClaims,
         ILogger<MemberScopeMiddleware> logger)
     {
         _next = next;
         _detachedMembers = detachedMembers;
+        _lastUsedClaims = lastUsedClaims;
         _logger = logger;
     }
 
@@ -142,14 +146,14 @@ public class MemberScopeMiddleware
             "Member {SubjectId} on tenant {TenantId} resolved with {PermCount} effective permissions (LimitTo24Hours={LimitTo24Hours})",
             authContext.SubjectId, authContext.TenantId, effectivePermissions.Count, membership.Access.LimitTo24Hours);
 
-        // Fire-and-forget LastUsedAt update, debounced by LastUsedStamp.
+        // Fire-and-forget LastUsedAt update, claimed through LastUsedClaims.
         // Skipped for AuthType.ApiKey. These columns back the "Last active" line on the
         // member card, which reports when the person was last active and from where; an uploader
         // polling on their key is not the member logging in, and attributing it would overwrite
         // that with the uploader's IP and user-agent. The grant row has its own LastUsedAt,
         // maintained by ApiKeyHandler, which is where key activity belongs.
         if (authContext.AuthType is not AuthType.ApiKey
-            && LastUsedStamp.IsDue(membership.LastUsedAt, DateTime.UtcNow))
+            && _lastUsedClaims.TryClaim(membership.Id, membership.LastUsedAt))
         {
             var membershipId = membership.Id;
             var ip = context.Connection.RemoteIpAddress?.ToString();
@@ -168,7 +172,7 @@ public class MemberScopeMiddleware
                 {
                     // Best-effort — don't let tracking failures affect the request. Warned rather
                     // than debugged: a write the database refuses would otherwise be invisible at
-                    // production log levels. <see cref="LastUsedStamp"/> bounds the rate to one per
+                    // production log levels. <see cref="LastUsedClaims"/> bounds the rate to one per
                     // member.
                     _logger.LogWarning(
                         ex, "Failed to record last-used for membership {MembershipId}", membershipId);

@@ -1,8 +1,10 @@
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Services.Treatments;
 using Nocturne.API.Services.V4;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
+using Nocturne.Infrastructure.Data;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Treatments;
@@ -46,5 +48,25 @@ public class LegacyTreatmentTablesTests
         };
 
         LegacyTreatmentTables.ProjectProfileActivation(activation).DataSource.Should().Be("nightscout-connector");
+    }
+
+    [Fact]
+    public void EveryTableReadsItsInstantsAsOneIndexableAnyNotAWindowOverItsWholeTable()
+    {
+        using var context = new NocturneDbContext(
+            new DbContextOptionsBuilder<NocturneDbContext>().UseNpgsql("Host=unused").Options)
+        {
+            TenantId = Guid.NewGuid(),
+        };
+        var instants = new[] { DateTime.UtcNow, DateTime.UtcNow.AddMinutes(1) };
+
+        foreach (var table in LegacyTreatmentTables.All)
+        {
+            var sql = table.AtQuery(context, instants).ToQueryString();
+
+            sql.Should().Contain("= ANY (", table.RecordType);
+            sql.Should().NotContain("ROW_NUMBER", table.RecordType);
+            sql.Should().NotContain("LATERAL", table.RecordType);
+        }
     }
 }

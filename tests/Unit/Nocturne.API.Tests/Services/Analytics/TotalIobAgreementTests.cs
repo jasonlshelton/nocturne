@@ -20,6 +20,7 @@ using Nocturne.API.Services.ChartData.Stages;
 using Nocturne.API.Services.Devices;
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Profiles;
+using Nocturne.API.Tests.Services.Profiles.Resolvers;
 using Nocturne.API.Services.Treatments;
 using Nocturne.API.Tests.Infrastructure;
 using Nocturne.Core.Clinical.Treatments;
@@ -432,14 +433,20 @@ public class TotalIobAgreementTests
     private async Task<double?> SummaryIobAsync()
     {
         var properties = new Mock<IPropertiesService>();
-        properties.Setup(p => p.GetAllPropertiesAsync(It.IsAny<CancellationToken>()))
+        properties.Setup(p => p.GetAllPropertiesAsync(It.IsAny<DData>(), It.IsAny<IobCobReading?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<string, object>());
+        var therapySettings = new Mock<ITherapySettingsRepository>();
+        therapySettings.Setup(t => t.GetDefaultsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        therapySettings.Setup(t => t.GetStoreIndexAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var ddata = new Mock<IDDataService>();
+        ddata.Setup(d => d.GetDDataAsync(It.IsAny<long>(), It.IsAny<DDataCollections>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DData());
         var service = new SummaryService(
-            Mock.Of<IDDataService>(), properties.Object, Reader(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-            Mock.Of<IActiveProfileResolver>(), Mock.Of<ITherapySettingsRepository>(),
+            ddata.Object, properties.Object, Reader(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+            ActiveProfileResolverMock.WithDefault().Object, therapySettings.Object,
             Mock.Of<IProfileProjectionService>(), TimeProvider.System, NullLogger<SummaryService>.Instance);
 
-        return (await service.ConstructStateAsync()).Iob;
+        return (await service.GetSummaryAsync()).State.Iob;
     }
 
     private async Task<object?> PropertiesAsync() => (await PropertiesIobAsync())["iob"];
@@ -448,7 +455,7 @@ public class TotalIobAgreementTests
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var ddata = new Mock<IDDataService>();
-        ddata.Setup(d => d.GetDDataAsync(It.IsAny<long>(), It.IsAny<CancellationToken>())).ReturnsAsync(new DData());
+        ddata.Setup(d => d.GetDDataAsync(It.IsAny<long>(), It.IsAny<DDataCollections>(), It.IsAny<CancellationToken>())).ReturnsAsync(new DData());
         var service = new PropertiesService(
             ddata.Object, NullLogger<PropertiesService>.Instance, Reader(now),
             Mock.Of<IAr2Service>(), Mock.Of<IDeviceAgeService>(), Mock.Of<ITherapySettingsResolver>(),

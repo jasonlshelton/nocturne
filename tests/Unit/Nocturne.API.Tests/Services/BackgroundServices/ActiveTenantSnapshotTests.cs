@@ -14,7 +14,8 @@ namespace Nocturne.API.Tests.Services.BackgroundServices;
 
 public sealed class ActiveTenantSnapshotTests : IDisposable
 {
-    private const int PollerCount = 13;
+    /// <summary>The two connector listeners and the five sweeps that read the snapshot.</summary>
+    private const int ReaderCount = 7;
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -35,11 +36,11 @@ public sealed class ActiveTenantSnapshotTests : IDisposable
     public void Dispose() => _db.Dispose();
 
     [Fact]
-    public async Task EveryPollerReadingAtOnce_SharesOneQuery()
+    public async Task EveryListenerAndSweepReadingAtOnce_SharesOneQuery()
     {
         _gate.Hold();
 
-        var reads = Enumerable.Range(0, PollerCount)
+        var reads = Enumerable.Range(0, ReaderCount)
             .Select(_ => _sut.GetAsync(CancellationToken.None))
             .ToList();
 

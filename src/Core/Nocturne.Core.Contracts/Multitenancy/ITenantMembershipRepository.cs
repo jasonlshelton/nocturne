@@ -26,7 +26,7 @@ public interface ITenantMembershipRepository
 {
     /// <summary>
     /// Stores a membership with its roles in one save; false when the subject is already a member,
-    /// including when another request made it one in the meantime.
+    /// including when another request made it one in the meantime. Any other failed save throws.
     /// </summary>
     Task<bool> AddMemberAsync(NewTenantMember member, CancellationToken ct);
 
@@ -91,18 +91,31 @@ public interface ITenantMembershipRepository
     /// <summary>The stored display preferences of the longest-standing owner; null when the tenant has no owner or the owner saved none.</summary>
     Task<string?> GetEarliestOwnerPreferencesAsync(Guid tenantId, CancellationToken ct);
 
-    /// <summary>Whether <paramref name="memberId"/> holds the owner role and no other owner who can sign in would remain without it.</summary>
-    Task<bool> IsLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
-
     /// <summary>Whether an owner of <paramref name="tenantId"/> other than <paramref name="memberId"/> can sign in.</summary>
     Task<bool> AnyOtherOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
-    /// <summary>Removes the membership and its roles; false when there is no such membership.</summary>
-    Task<bool> RemoveMemberAsync(Guid tenantId, Guid memberId, CancellationToken ct);
+    /// <summary>
+    /// Removes the membership and its roles, refused with <see cref="OwnerGuardedChange.LastOwner"/>
+    /// when it holds the owner role and no other owner who can sign in would remain.
+    /// </summary>
+    /// <remarks>
+    /// The check and the removal hold the tenant's owner lock. Over a unit, call it inside the
+    /// unit's commit, which then holds the lock until it commits the removal.
+    /// </remarks>
+    Task<OwnerGuardedChange> RemoveMemberUnlessLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
-    /// <summary>Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how many.</summary>
-    /// <remarks>On a platform context: the demo reset retires its visitor from every tenant it joined.</remarks>
-    Task<int> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct);
+    /// <summary>
+    /// Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how
+    /// many, with the tenants that are left with no owner who can sign in.
+    /// </summary>
+    /// <remarks>
+    /// On a platform context: the demo reset retires its visitor from every tenant it joined. It does
+    /// not refuse a last owner: anyone can get a session as the demo visitor, so a membership it holds
+    /// must go whatever role it carries. It holds the owner lock of every tenant the subject belongs
+    /// to, in ascending tenant id, until the removal commits, so the tenants it names are the ones
+    /// the commit leaves ownerless. Over a unit, call it inside the unit's commit.
+    /// </remarks>
+    Task<SubjectMembershipsRemoval> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct);
 
     /// <summary>Replaces the membership's direct permissions, null clearing them, and stamps it updated at <paramref name="now"/>.</summary>
     Task<bool> SetDirectPermissionsAsync(Guid tenantId, Guid memberId, IReadOnlyList<string>? permissions, DateTime now, CancellationToken ct);
@@ -113,20 +126,28 @@ public interface ITenantMembershipRepository
     /// <summary>Sets the membership's per-tenant sign-in name.</summary>
     Task<bool> SetUsernameAsync(Guid tenantId, Guid memberId, string? username, CancellationToken ct);
 
-    /// <summary>Records the invite the membership was accepted through.</summary>
-    Task<bool> SetCreatedFromInviteAsync(Guid tenantId, Guid memberId, Guid inviteId, CancellationToken ct);
-
     /// <summary>
     /// Removes the roles <paramref name="removedRoleIds"/> from the membership, assigns
     /// <paramref name="addedRoleIds"/>, and stamps it updated at <paramref name="now"/>, in one save.
     /// </summary>
+    /// <remarks>Does not check for the last owner. For a membership a person holds, use <see cref="ReplaceRolesUnlessLastOwnerAsync"/>.</remarks>
     Task<bool> ReplaceRolesAsync(
+        Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds, IReadOnlyCollection<Guid> addedRoleIds,
+        DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="ReplaceRolesAsync"/>, refused with <see cref="OwnerGuardedChange.LastOwner"/> when
+    /// it removes the owner role from the membership and no other owner who can sign in would remain.
+    /// </summary>
+    /// <remarks>Holds the tenant's owner lock as <see cref="RemoveMemberUnlessLastOwnerAsync"/> does.</remarks>
+    Task<OwnerGuardedChange> ReplaceRolesUnlessLastOwnerAsync(
         Guid tenantId, Guid memberId, IReadOnlyCollection<Guid> removedRoleIds, IReadOnlyCollection<Guid> addedRoleIds,
         DateTime now, CancellationToken ct);
 
     /// <summary>
     /// Stamps the membership as used at <paramref name="at"/> from <paramref name="ipAddress"/> and
     /// <paramref name="userAgent"/>, in one statement, so the write that outlives a request tracks nothing.
+    /// It writes only when the stored stamp is due (<see cref="Nocturne.Core.Models.Authorization.LastUsedStamp"/>).
     /// </summary>
     Task RecordUseAsync(Guid tenantId, Guid memberId, DateTime at, string? ipAddress, string? userAgent, CancellationToken ct);
 
@@ -220,7 +241,12 @@ public interface ITenantMembershipRepository
     /// <summary>The request <paramref name="requestId"/> of <paramref name="tenantId"/>; null when there is none.</summary>
     Task<MembershipRequestRecord?> GetRequestAsync(Guid tenantId, Guid requestId, CancellationToken ct);
 
-    /// <summary>Writes <paramref name="decision"/> onto the request; false when there is no such request.</summary>
+    /// <summary>
+    /// Writes <paramref name="decision"/> onto the request; false when there is no such request or
+    /// it is no longer pending. The write is one statement whose predicate is the pending status, so
+    /// the row's lock decides between two decisions made at once. On a unit it joins the transaction
+    /// only when called inside the work of <c>DbUnitOfWork.CommitAsync</c>.
+    /// </summary>
     Task<bool> DecideRequestAsync(Guid tenantId, Guid requestId, MembershipRequestDecision decision, CancellationToken ct);
 }
 

@@ -1,17 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Services.Seeding;
 using Nocturne.Core.Constants;
+using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Identity;
-using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Repositories;
-using Nocturne.Infrastructure.Data.Services;
-using Nocturne.Infrastructure.Data.Entities;
 
 namespace Nocturne.API.Controllers.V4.Admin;
 
@@ -35,24 +32,20 @@ public class DemoAdminController : ControllerBase
     private readonly DemoTenantService _demoTenantService;
     private readonly ITenantRepository _tenants;
     private readonly ITenantMembershipRepository _members;
-    private readonly INocturneDbContextFactory _factory;
-    private readonly TimeProvider _time;
+    private readonly IDemoDataPurge _purge;
 
-    /// <param name="factory">For the demo purges and the unit a provision writes the demo config row in.</param>
     public DemoAdminController(
         ITenantService tenantService,
         DemoTenantService demoTenantService,
         ITenantRepository tenants,
         ITenantMembershipRepository members,
-        INocturneDbContextFactory factory,
-        TimeProvider time)
+        IDemoDataPurge purge)
     {
         _tenantService = tenantService;
         _demoTenantService = demoTenantService;
         _tenants = tenants;
         _members = members;
-        _factory = factory;
-        _time = time;
+        _purge = purge;
     }
 
     /// <summary>
@@ -73,6 +66,7 @@ public class DemoAdminController : ControllerBase
             // reset that failed between wiping and re-seeding.
             await _tenants.UpdateAsync(existing.Id, _demoTenantService.TenantDefaults(existing), ct);
             await _demoTenantService.ConfigureAccessAsync(existing.Id, ct);
+            TenantCacheEviction.Evict(cache, existing.Slug, existing.ShareTokenHash);
             return Ok(ToDto((await _tenants.GetAsync(existing.Id, ct))!, alreadyExisted: true));
         }
 
@@ -85,15 +79,15 @@ public class DemoAdminController : ControllerBase
             _demoTenantService.TenantDefaults(createdTenant) with { IsDemo = true, DemoConfig = new DemoConfigEdit() },
             ct);
 
-        // TenantResolutionMiddleware caches the resolved context, IsDemo included, and
-        // CreateWithoutOwnerAsync may already have populated it. IsDemo gates the demo sign-in
-        // endpoint and the status field the login page keys off, so without this the tenant is
-        // non-demo for the cache lifetime — a login page with no passkey and no way in.
-        TenantResolutionMiddleware.EvictTenant(cache, created.Slug);
-
         // Open the Public subject's share grant and create the demo member visitors are
         // signed in as.
         await _demoTenantService.ConfigureAccessAsync(created.Id, ct);
+
+        // TenantResolutionMiddleware caches the resolved context, IsDemo included, and
+        // CreateWithoutOwnerAsync may already have populated it. IsDemo gates the demo sign-in
+        // endpoint and the status field the login page keys off, so without this the tenant is
+        // non-demo for the cache lifetime: a login page with no passkey and no way in.
+        TenantCacheEviction.Evict(cache, created.Slug);
 
         return Ok(ToDto((await _tenants.GetAsync(created.Id, ct))!, alreadyExisted: false));
     }
@@ -126,7 +120,7 @@ public class DemoAdminController : ControllerBase
         // IsActive is carried on the cached tenant context, same as IsDemo — so without evicting,
         // a deactivated demo keeps being served for the cache lifetime.
         if (activeChanged)
-            TenantResolutionMiddleware.EvictTenant(cache, tenant.Slug);
+            TenantCacheEviction.Evict(cache, tenant.Slug, tenant.ShareTokenHash);
 
         return Ok(ToDto(tenant, alreadyExisted: true));
     }
@@ -159,18 +153,8 @@ public class DemoAdminController : ControllerBase
         if (tenant is null)
             return NotFound();
 
-        await using var db = await _factory.CreateForTenantAsync(tenant.Id, ct);
-
-        var writes = new DemoPurgeWrites();
-        try
-        {
-            var deleted = await writes.PurgeEntriesAsync(db, ct);
-            return Ok(new DemoDeleteResultDto(deleted));
-        }
-        finally
-        {
-            await writes.ReportInTenantAsync(HttpContext.RequestServices, TenantContextOf(tenant));
-        }
+        var deleted = await _purge.PurgeEntriesAsync(TenantContextOf(tenant), ct);
+        return Ok(new DemoDeleteResultDto(deleted));
     }
 
     /// <summary>
@@ -185,19 +169,8 @@ public class DemoAdminController : ControllerBase
         if (tenant is null)
             return NotFound();
 
-        await using var db = await _factory.CreateForTenantAsync(tenant.Id, ct);
-
-        var writes = new DemoPurgeWrites();
-        try
-        {
-            var treatments = await writes.PurgeTreatmentsAsync(db, _time, ct);
-            var deviceStatus = await writes.PurgeDeviceStatusAsync(db, ct);
-            return Ok(new DemoDeleteResultDto(treatments + deviceStatus));
-        }
-        finally
-        {
-            await writes.ReportInTenantAsync(HttpContext.RequestServices, TenantContextOf(tenant));
-        }
+        var deleted = await _purge.PurgeTreatmentsAsync(TenantContextOf(tenant), ct);
+        return Ok(new DemoDeleteResultDto(deleted));
     }
 
     /// <summary>

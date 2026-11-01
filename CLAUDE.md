@@ -336,6 +336,11 @@ its own accessor, since every context of the request would follow.
 The GUCs are written when a connection opens, so a connection held open keeps the state it
 opened with; `PinTenantAsync` is for that case (see the `TenantReadContext` remarks).
 
+The pool every context opens skips Npgsql's session reset on pool return, so the interceptor
+writes every GUC on every open (an absent tenant or subject as `''`, which every policy reads as
+unset through `NULLIF`). Raw ADO.NET resolves `NpgsqlDataSource`, a separate pool that keeps the
+reset, and `SessionStateGuardTests` bans other session-level state in app SQL.
+
 #### Per-category public-share RLS
 
 Public share links (`{token}.share.{domain}`) serve an anonymous viewer who may

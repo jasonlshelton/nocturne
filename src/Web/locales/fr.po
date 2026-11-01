@@ -2851,6 +2851,7 @@ msgstr ""
 msgid "Completed"
 msgstr ""
 
+#: src/lib/components/admin/JobsTabContent.svelte
 #: src/lib/components/trackers/TrackerCompletionDialog.svelte
 #: src/lib/components/trackers/TrackerStartDialog.svelte
 #: src/routes/(authenticated)/notifications/+page.svelte
@@ -2975,6 +2976,7 @@ msgstr ""
 
 #: ../portal/src/routes/changelog/+page.svelte
 #: ../portal/src/routes/roadmap/+page.svelte
+#: src/lib/components/admin/JobsTabContent.svelte
 #: src/lib/components/connectors/ServerConnectorsCard.svelte
 #: src/routes/(authenticated)/reports/battery/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/+page.svelte
@@ -6524,6 +6526,7 @@ msgstr ""
 #~ msgid "Step Count"
 #~ msgstr ""
 
+#: src/lib/components/admin/JobsTabContent.svelte
 #: src/lib/components/settings/TokenScopeSelector.svelte
 #: src/lib/navigation/settings-navigation.svelte.ts
 msgid "Platform"
@@ -7691,6 +7694,7 @@ msgstr "{0} majeur"
 msgid "{0} minor"
 msgstr ""
 
+#: src/lib/components/admin/JobsTabContent.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
@@ -16774,9 +16778,8 @@ msgstr ""
 msgid "There is no data to display yet. Connect a data source in your settings to get started."
 msgstr ""
 
-#: src/routes/(authenticated)/settings/admin/+page.svelte
-msgid "Manage identity providers and integrations"
-msgstr ""
+#~ msgid "Manage identity providers and integrations"
+#~ msgstr ""
 
 #: src/routes/(authenticated)/settings/account/+page.svelte
 msgid "Account linked successfully."
@@ -17497,6 +17500,7 @@ msgstr ""
 msgid "Select a tenant"
 msgstr ""
 
+#: src/lib/components/admin/JobsTabContent.svelte
 #: src/routes/(authenticated)/settings/admin/connector-cursors/+page.svelte
 msgid "Tenant"
 msgstr ""
@@ -21303,7 +21307,7 @@ msgstr ""
 msgid "Delete this lab result?"
 msgstr ""
 
-#. 0: formatA1c(pendingDeleteLabResult.a1cDisplay); 1: formatLongDate(toDate(pendingDeleteLabResult.measuredAt))
+#. 0: formatA1c(pendingDeleteLabResult.a1cDisplay); 1: formatLongDate(labDay(pendingDeleteLabResult.measuredAt))
 #: src/routes/(authenticated)/reports/ehba1c/+page.svelte
 msgid "Delete the {0} lab result from {1}."
 msgstr ""
@@ -38458,4 +38462,58 @@ msgstr ""
 
 #: src/routes/(authenticated)/reports/readings/+page.svelte
 msgid "Error Loading Readings"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Background jobs"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Each job and tenant has one row. Rows with a failed last run show first."
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "No jobs are scheduled."
+msgstr ""
+
+#. 0: jobs.length
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "This list shows the first {0} rows only."
+msgstr ""
+
+#. 0: jobs.length
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "This list shows all {0} rows."
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Job"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Next run"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Last completed"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Attempts"
+msgstr ""
+
+#: src/lib/components/admin/JobsTabContent.svelte
+msgid "Last error"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/admin/+page.svelte
+msgid "Failed to load the background jobs."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/admin/+page.svelte
+msgid "Manage identity providers, integrations, and background jobs"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/admin/+page.svelte
+msgid "<0/> Jobs"
 msgstr ""

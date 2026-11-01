@@ -129,7 +129,7 @@ public class Ar2Tests
 
         var ddataService = new Mock<IDDataService>();
         ddataService
-            .Setup(x => x.GetDDataAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetDDataAsync(It.IsAny<long>(), It.IsAny<DDataCollections>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ddata);
 
         var service = new PropertiesService(

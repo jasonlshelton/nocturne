@@ -9,8 +9,8 @@ namespace Nocturne.API.Services.Alerts;
 
 /// <summary>
 /// Shared cleanup pathway invoked after an excursion closes (whether via the
-/// orchestrator's per-reading state machine or the sweep service's periodic
-/// tick): stamps <c>resolution_reason</c> on instances, expires their
+/// orchestrator's per-reading state machine or <see cref="AlertSweepJob"/>'s
+/// periodic run): stamps <c>resolution_reason</c> on instances, expires their
 /// pending deliveries, deletes members' mutes of the excursion, and broadcasts
 /// <c>alert_resolved</c>.
 /// </summary>

@@ -7,6 +7,7 @@ using Nocturne.API.Controllers.V4.Identity;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Identity;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
@@ -137,7 +138,8 @@ public sealed class MemberInviteControllerGrantCeilingTests : IDisposable
             new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory()), TimeProvider.System),
             Mock.Of<ITenantMemberService>(),
             tenantAccessor.Object,
-            new TenantMembershipRepository(_dbContext.AsFactory()))
+            new TenantMembershipRepository(_dbContext.AsFactory()),
+            Mock.Of<IAuthAuditService>())
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext },
         };

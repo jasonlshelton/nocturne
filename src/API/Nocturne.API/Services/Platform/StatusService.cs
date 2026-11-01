@@ -763,10 +763,8 @@ public class StatusService : IStatusService
         try
         {
             await using var ctx = await _dbContextFactory.CreatePlatformAsync();
-            var conn = ctx.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
-                await conn.OpenAsync();
-            return _postgresVersion = conn.ServerVersion;
+            await ctx.Database.OpenConnectionAsync();
+            return _postgresVersion = ctx.Database.GetDbConnection().ServerVersion;
         }
         catch (Exception ex)
         {

@@ -16,6 +16,7 @@ using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Connectors;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -82,9 +83,9 @@ public static class ServiceCollectionExtensions
         // Audit config cache (singleton — uses IDbContextFactory internally)
         services.TryAddSingleton<ITenantAuditConfigCache, TenantAuditConfigCache>();
 
-        // Register NpgsqlDataSource as a singleton - this manages the connection pool
         var dataSource = PostgresRuntimeOptions.BuildRuntimeDataSource(config);
-        services.AddSingleton(dataSource);
+        services.AddSingleton(new ContextDataSource(dataSource));
+        services.AddSingleton(PostgresRuntimeOptions.BuildRawDataSource(config));
 
         // Non-pooled: each acquisition is a fresh context, discarded after use. A faulted context
         // is never returned to a pool and reused, so a fault cannot poison later callers. Database
@@ -172,9 +173,12 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IRecoveryCodeRepository, RecoveryCodeRepository>();
         services.AddTransient<IConnectorConfigurationRepository, ConnectorConfigurationRepository>();
         services.AddTransient<IConnectorResetJobRepository, ConnectorResetJobRepository>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddTransient<IJobLedger, JobLedgerRepository>();
         services.AddScoped<SourceOwnedDataRepository>();
         services.AddScoped<ISourceOwnedDataReader>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
         services.AddScoped<ISourceOwnedDataPurge>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
+        services.AddScoped<IDemoDataPurge, DemoDataPurgeRepository>();
 
         // Register avatar storage
         services.AddScoped<IAvatarStore, DatabaseAvatarStore>();

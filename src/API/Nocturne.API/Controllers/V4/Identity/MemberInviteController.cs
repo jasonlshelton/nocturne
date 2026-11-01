@@ -36,6 +36,7 @@ public class MemberInviteController : ControllerBase
     private readonly ITenantMemberService _tenantMemberService;
     private readonly ITenantAccessor _tenantAccessor;
     private readonly ITenantMembershipRepository _members;
+    private readonly IAuthAuditService _audit;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MemberInviteController"/>.
@@ -46,13 +47,15 @@ public class MemberInviteController : ControllerBase
     /// <param name="tenantMemberService">Service for membership lookups.</param>
     /// <param name="tenantAccessor">Accessor for the current request tenant context.</param>
     /// <param name="members">The memberships and roles the member-management actions edit.</param>
+    /// <param name="audit">Records each role or permission a member-management action adds or removes.</param>
     public MemberInviteController(
         IMemberInviteService memberInviteService,
         ITenantService tenantService,
         ITenantRoleService tenantRoleService,
         ITenantMemberService tenantMemberService,
         ITenantAccessor tenantAccessor,
-        ITenantMembershipRepository members)
+        ITenantMembershipRepository members,
+        IAuthAuditService audit)
     {
         _memberInviteService = memberInviteService;
         _tenantService = tenantService;
@@ -60,6 +63,7 @@ public class MemberInviteController : ControllerBase
         _tenantMemberService = tenantMemberService;
         _tenantAccessor = tenantAccessor;
         _members = members ?? throw new ArgumentNullException(nameof(members));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     }
 
     /// <inheritdoc cref="IMemberInviteService.CreateInviteAsync"/>
@@ -332,16 +336,23 @@ public class MemberInviteController : ControllerBase
         if (!(await _tenantRoleService.ValidateRoleGrantAsync(tenantId, removed, grantedScopes, ct)).Ok)
             return Problem(detail: UngrantableRoleRemovalDetail, statusCode: 403);
 
-        var ownerRoleId = await _members.FindRoleIdBySlugAsync(tenantId, RoleSeeds.Owner, ct);
-        var keepsOwner = ownerRoleId is { } owner && request.RoleIds.Contains(owner);
-        if (!keepsOwner && await _members.IsLastOwnerAsync(tenantId, member.Id, ct))
-            return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
-
         var rolesAfter = await _tenantRoleService.GetRolePermissionsAsync(tenantId, request.RoleIds, ct);
         if (await WouldExemptAClampedMemberAsync(member, rolesAfter.Concat(member.DirectPermissions ?? []), ct))
             return Problem(detail: HttpContextExtensions.HistoryCeilingDetail, statusCode: 403);
 
-        await _members.ReplaceRolesAsync(tenantId, member.Id, removed, added, DateTime.UtcNow, ct);
+        var addedSlugs = added.Count == 0
+            ? []
+            : (await _members.ListRolesAsync(tenantId, ct)).Where(r => added.Contains(r.Id)).Select(r => r.Slug).ToList();
+        var removedSlugs = member.Roles.Where(r => removed.Contains(r.RoleId)).Select(r => r.Slug).ToList();
+
+        switch (await _members.ReplaceRolesUnlessLastOwnerAsync(tenantId, member.Id, removed, added, DateTime.UtcNow, ct))
+        {
+            case OwnerGuardedChange.LastOwner:
+                return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
+            case OwnerGuardedChange.Changed:
+                await AuditMemberChangeAsync(member.SubjectId, RoleDetailKey, addedSlugs, removedSlugs);
+                break;
+        }
 
         if (member.IsPublicSubject())
             publicAccessCache.Evict(tenantId);
@@ -366,7 +377,7 @@ public class MemberInviteController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> StepDown([FromServices] IAuthAuditService audit, CancellationToken ct)
+    public async Task<IActionResult> StepDown(CancellationToken ct)
     {
         if (HttpContext.GetSubjectId() is not { } subjectId)
             return Unauthorized();
@@ -381,25 +392,20 @@ public class MemberInviteController : ControllerBase
                 tenantId, [caretaker], HttpContext.GetGrantedScopes(), ct)).Ok)
             return Problem(detail: "Cannot step down to a role with more access than you have.", statusCode: 403);
 
-        if (await _members.IsLastOwnerAsync(tenantId, member.Id, ct))
-            return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
-
         var removed = member.Roles.Where(r => r.RoleId != caretaker).ToList();
         var assigned = member.Roles.All(r => r.RoleId != caretaker);
-        await _members.ReplaceRolesAsync(
-            tenantId, member.Id, removed.Select(r => r.RoleId).ToList(), assigned ? [caretaker] : [], DateTime.UtcNow, ct);
-
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var userAgent = Request.Headers.UserAgent.ToString();
-        foreach (var role in removed)
+        switch (await _members.ReplaceRolesUnlessLastOwnerAsync(
+                    tenantId, member.Id, removed.Select(r => r.RoleId).ToList(), assigned ? [caretaker] : [], DateTime.UtcNow, ct))
         {
-            await audit.LogAsync(AuthAuditEventType.RoleRemoved, subjectId, success: true, ipAddress: ip,
-                userAgent: userAgent, detailsJson: JsonSerializer.Serialize(new { role = role.Slug, kind = "tenant" }));
-        }
-        if (assigned)
-        {
-            await audit.LogAsync(AuthAuditEventType.RoleAssigned, subjectId, success: true, ipAddress: ip,
-                userAgent: userAgent, detailsJson: JsonSerializer.Serialize(new { role = RoleSeeds.Caretaker, kind = "tenant" }));
+            case OwnerGuardedChange.LastOwner:
+                return Problem(detail: TenantOwnerFilter.LastOwnerRefusal, statusCode: 400);
+            case OwnerGuardedChange.Changed:
+                await AuditMemberChangeAsync(
+                    subjectId,
+                    RoleDetailKey,
+                    assigned ? [RoleSeeds.Caretaker] : [],
+                    removed.Select(r => r.Slug));
+                break;
         }
 
         return NoContent();
@@ -471,7 +477,16 @@ public class MemberInviteController : ControllerBase
                 member, rolePermissions.Concat(request.DirectPermissions ?? []), ct))
             return Problem(detail: HttpContextExtensions.HistoryCeilingDetail, statusCode: 403);
 
-        await _members.SetDirectPermissionsAsync(tenantId, member.Id, request.DirectPermissions, DateTime.UtcNow, ct);
+        var permissionsBefore = member.DirectPermissions ?? [];
+        var permissionsAfter = request.DirectPermissions ?? [];
+        if (await _members.SetDirectPermissionsAsync(tenantId, member.Id, request.DirectPermissions, DateTime.UtcNow, ct))
+        {
+            await AuditMemberChangeAsync(
+                member.SubjectId,
+                PermissionDetailKey,
+                permissionsAfter.Except(permissionsBefore),
+                permissionsBefore.Except(permissionsAfter));
+        }
 
         if (isPublicSubject)
             publicAccessCache.Evict(tenantId);
@@ -555,6 +570,32 @@ public class MemberInviteController : ControllerBase
         "Cannot remove your own membership; ask another member with members.manage.";
 
     private const string UngrantableRoleRemovalDetail = "Cannot remove a role you cannot grant.";
+
+    private const string RoleDetailKey = "role";
+
+    private const string PermissionDetailKey = "permission";
+
+    /// <summary>
+    /// Writes one row per role or permission a committed edit removed or added, against the member's
+    /// subject, removed rows first.
+    /// </summary>
+    /// <param name="detailKey">The detail field that names the item: a role slug or a permission.</param>
+    private async Task AuditMemberChangeAsync(
+        Guid subjectId, string detailKey, IEnumerable<string> added, IEnumerable<string> removed)
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers.UserAgent.ToString();
+
+        async Task LogAsync(string eventType, string item) =>
+            await _audit.LogAsync(eventType, subjectId, success: true, ipAddress: ip, userAgent: userAgent,
+                detailsJson: JsonSerializer.Serialize(
+                    new Dictionary<string, string> { [detailKey] = item, ["kind"] = "tenant" }));
+
+        foreach (var item in removed)
+            await LogAsync(AuthAuditEventType.RoleRemoved, item);
+        foreach (var item in added)
+            await LogAsync(AuthAuditEventType.RoleAssigned, item);
+    }
 
     /// <summary>
     /// True when a history-clamped caller's edit would leave a clamped member holding permissions

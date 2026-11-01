@@ -108,8 +108,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>
     /// The subject whose own rows a subject-scoped cross-tenant read may reach (the tenant switcher,
     /// the caregiver overview, membership enumeration), carried to the <c>app.current_subject_id</c>
-    /// GUC. <see cref="Guid.Empty"/> leaves the GUC unset, and the <c>subject_pin</c> policy then
-    /// admits every row.
+    /// GUC. <see cref="Guid.Empty"/> writes it empty, which the <c>subject_pin</c> policy reads as unset,
+    /// admitting every row.
     /// </summary>
     public Guid SubjectId { get; internal set; }
 
@@ -225,7 +225,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<ConnectorResetJobEntity> ConnectorResetJobs { get; set; }
 
-    public DbSet<PendingTenantJobEntity> PendingTenantJobs { get; set; }
+    public DbSet<JobLedgerEntity> JobLedger { get; set; }
 
     public DbSet<LinkedRecordEntity> LinkedRecords { get; set; }
 
@@ -422,8 +422,6 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<TenantAuditConfigEntity> TenantAuditConfig { get; set; }
 
-    public DbSet<BackfillCompletionEntity> BackfillCompletions { get; set; }
-
     public DbSet<TenantDataRetentionConfigEntity> TenantDataRetentionConfig { get; set; }
 
     public DbSet<TenantDemoConfigEntity> TenantDemoConfigs => Set<TenantDemoConfigEntity>();
@@ -536,6 +534,14 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
         typeof(TargetRangeScheduleEntity),
         .. V4SnapshotEntities,
     ];
+
+    /// <summary>
+    /// The tables a connector watermarks on their newest timestamp, adding the span-shaped
+    /// <see cref="TempBasalEntity"/>, whose <see cref="IObservationTimestamped.Timestamp"/> is the
+    /// span start.
+    /// </summary>
+    internal static readonly Type[] V4WatermarkedEntities =
+        [.. V4TimeSeriesRecordEntities, typeof(TempBasalEntity)];
 
     /// <summary>
     /// V4 record tables whose lists read one tenant newest-first by timestamp, then id on the tables
@@ -767,7 +773,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
         // tenant whose newest row for that source is old reads most of the table to return one
         // value. The deleted_at filter keeps the scan index-only: soft-deleted rows left in the
         // index have to be skipped a heap fetch at a time, which is why it is not a size saving.
-        foreach (var entity in V4TimeSeriesRecordEntities.Select(t => modelBuilder.Entity(t)))
+        foreach (var entity in V4WatermarkedEntities.Select(t => modelBuilder.Entity(t)))
         {
             entity.HasIndex(
                     nameof(ITenantScoped.TenantId),
@@ -1566,23 +1572,22 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             .HasIndex(j => j.State)
             .HasDatabaseName("ix_connector_reset_jobs_state");
 
+        // NULLS NOT DISTINCT, so a platform job's row (no tenant) is one row too.
         modelBuilder
-            .Entity<BackfillCompletionEntity>()
-            .HasKey(c => new { c.Backfill, c.TenantId });
+            .Entity<JobLedgerEntity>()
+            .HasIndex(j => new { j.Job, j.TenantId })
+            .IsUnique()
+            .AreNullsDistinct(false)
+            .HasDatabaseName("ux_job_ledger_job_tenant");
 
         modelBuilder
-            .Entity<BackfillCompletionEntity>()
-            .HasOne<TenantEntity>()
-            .WithMany()
-            .HasForeignKey(c => c.TenantId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .Entity<JobLedgerEntity>()
+            .HasIndex(j => j.NextDueAt)
+            .HasFilter("next_due_at IS NOT NULL")
+            .HasDatabaseName("ix_job_ledger_due");
 
         modelBuilder
-            .Entity<PendingTenantJobEntity>()
-            .HasKey(j => new { j.TenantId, j.Job });
-
-        modelBuilder
-            .Entity<PendingTenantJobEntity>()
+            .Entity<JobLedgerEntity>()
             .HasOne<TenantEntity>()
             .WithMany()
             .HasForeignKey(j => j.TenantId)

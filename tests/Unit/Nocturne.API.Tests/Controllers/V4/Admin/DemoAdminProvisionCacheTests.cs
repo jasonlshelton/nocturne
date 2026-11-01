@@ -5,15 +5,19 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Nocturne.API.Controllers.V4.Admin;
 using Nocturne.API.Multitenancy;
+using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Demo;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models.Identity;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 using Nocturne.API.Services.Caching;
 using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Infrastructure.Data.Security;
 
 namespace Nocturne.API.Tests.Controllers.V4.Admin;
 
@@ -81,6 +85,29 @@ public class DemoAdminProvisionCacheTests : IDisposable
             .Should().BeFalse("a deactivated demo must stop being served at once");
         _cache.TryGetValue(TenantResolutionMiddleware.SoleTenantCacheKey, out _)
             .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpdateStatus_StopsTheShareLinkResolvingAsActiveWhenItDeactivates()
+    {
+        const string token = "share-token";
+        var controller = BuildController();
+        await controller.Provision(_cache, CancellationToken.None);
+
+        var tenants = new TenantRepository(_db.ContextFactory.AsNocturneFactory());
+        var demo = (await tenants.FindDemoTenantAsync(CancellationToken.None))!;
+        await tenants.SetShareTokenAsync(
+            demo.Id, new ShareTokenState(CredentialHash.ShareToken(token), "cipher", DateTime.UtcNow), CancellationToken.None);
+
+        var shareLinks = new ShareTokenCacheService(_cache, tenants, Mock.Of<ILogger<ShareTokenCacheService>>());
+        (await shareLinks.ResolveWithoutRecordingAccessAsync(token, CancellationToken.None))!
+            .IsActive.Should().BeTrue();
+
+        await controller.UpdateStatus(
+            new DemoStatusPatchDto(IsActive: false), _cache, CancellationToken.None);
+
+        (await shareLinks.ResolveWithoutRecordingAccessAsync(token, CancellationToken.None))!
+            .IsActive.Should().BeFalse("a deactivated demo must stop being served on its share link at once");
     }
 
     [Fact]
@@ -155,7 +182,7 @@ public class DemoAdminProvisionCacheTests : IDisposable
         return new DemoAdminController(
             tenantService.Object, demoTenantService,
             new TenantRepository(dbFactory.Object.AsNocturneFactory()), new TenantMembershipRepository(dbFactory.Object.AsNocturneFactory()),
-            dbFactory.Object.AsNocturneFactory(), TimeProvider.System);
+            Mock.Of<IDemoDataPurge>());
     }
 
     public void Dispose()

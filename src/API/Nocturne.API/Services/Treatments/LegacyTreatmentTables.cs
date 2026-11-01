@@ -102,6 +102,21 @@ internal interface ILegacyTreatmentTable
     );
 
     /// <summary>
+    /// The records <see cref="InRangeAsync"/> reads that start exactly at one of
+    /// <paramref name="instants"/>: at each instant, the first <paramref name="limit"/> in the order a
+    /// newest-first <see cref="InRangeAsync"/> reads them, as a read of that instant alone returns them.
+    /// </summary>
+    Task<IReadOnlyList<FetchedRecord>> AtAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<DateTime> instants,
+        int limit,
+        CancellationToken ct
+    );
+
+    /// <summary>The query <see cref="AtAsync"/> runs.</summary>
+    IQueryable AtQuery(NocturneDbContext context, IReadOnlyCollection<DateTime> instants);
+
+    /// <summary>
     /// A page of records changed at or after <paramref name="cursorMills"/>, oldest first, ending on
     /// a millisecond boundary, soft-deleted rows included.
     /// </summary>
@@ -230,7 +245,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     Func<LegacyTreatmentRepositories, Guid, CancellationToken, Task<IEnumerable<TRecord>>>? correlated = null
 ) : ILegacyKeyedTreatmentTable
     where TRecord : class, IV4Record
-    where TEntity : class, ISystemTimestamped, IIdentified, ISoftDeletable
+    where TEntity : class, ISystemTimestamped, IIdentified, ISoftDeletable, IObservationTimestamped
 {
     /// <inheritdoc />
     public string RecordType { get; } = typeof(TRecord).Name;
@@ -266,6 +281,38 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
         var records = await repository(repositories).GetAsync(
             range.From, range.To, device: null, source: null, range.Limit, offset: 0, range.Descending, ct);
         return records.Select(Fetch).ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reads the rows the repository's window read shows, as <see cref="LiveAsync"/> does, in the
+    /// order it reads them.
+    /// </remarks>
+    public async Task<IReadOnlyList<FetchedRecord>> AtAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<DateTime> instants,
+        int limit,
+        CancellationToken ct
+    )
+    {
+        var entities = await At(context, instants).ToListAsync(ct);
+
+        return LegacyTreatmentTables.FirstAtEach(entities, e => e.Timestamp, limit)
+            .Select(e => Fetch(toRecord(e))).ToList();
+    }
+
+    /// <inheritdoc />
+    IQueryable ILegacyTreatmentTable.AtQuery(NocturneDbContext context, IReadOnlyCollection<DateTime> instants) =>
+        At(context, instants);
+
+    private IQueryable<TEntity> At(NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
+    {
+        var at = instants.ToList();
+        return table(context)
+            .AsNoTracking()
+            .ExcludeNonPrimary(context, dedupType)
+            .Where(e => at.Contains(e.Timestamp))
+            .InObservationOrder(descending: true);
     }
 
     internal FetchedRecord Fetch(TRecord record) =>
@@ -403,16 +450,39 @@ internal sealed class LegacyStateSpanTable(
         CancellationToken ct
     )
     {
-        var window = InWindow(context, range.From, range.To);
-        var spans = await (range.Descending
-                ? window.OrderByDescending(s => s.StartTimestamp)
-                : window.OrderBy(s => s.StartTimestamp))
-            .ThenBy(s => s.Id)
+        var spans = await InStartOrder(InWindow(context, range.From, range.To), range.Descending)
             .Take(range.Limit)
             .ToListAsync(ct);
 
         return spans.Select(Fetched).ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FetchedRecord>> AtAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<DateTime> instants,
+        int limit,
+        CancellationToken ct
+    )
+    {
+        var spans = await At(context, instants).ToListAsync(ct);
+
+        return LegacyTreatmentTables.FirstAtEach(spans, s => s.StartTimestamp, limit).Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    IQueryable ILegacyTreatmentTable.AtQuery(NocturneDbContext context, IReadOnlyCollection<DateTime> instants) =>
+        At(context, instants);
+
+    private IQueryable<StateSpanEntity> At(NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
+    {
+        var at = instants.ToList();
+        return InStartOrder(Rows(context).Where(s => at.Contains(s.StartTimestamp)), descending: true);
+    }
+
+    private static IOrderedQueryable<StateSpanEntity> InStartOrder(IQueryable<StateSpanEntity> spans, bool descending) =>
+        (descending ? spans.OrderByDescending(s => s.StartTimestamp) : spans.OrderBy(s => s.StartTimestamp))
+            .ThenBy(s => s.Id);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
@@ -532,9 +602,7 @@ internal sealed class LegacyProfileActivationTable : ILegacyKeyedTreatmentTable
     {
         for (var page = 0; page < LatestSwitchMaxPages; page++)
         {
-            var rows = await InWindow(context, from, to)
-                .OrderByDescending(a => a.Timestamp)
-                .ThenBy(a => a.Id)
+            var rows = await InStartOrder(InWindow(context, from, to), descending: true)
                 .Skip(page * LatestSwitchPageSize)
                 .Take(LatestSwitchPageSize)
                 .ToListAsync(ct);
@@ -561,16 +629,41 @@ internal sealed class LegacyProfileActivationTable : ILegacyKeyedTreatmentTable
         CancellationToken ct
     )
     {
-        var window = InWindow(context, range.From, range.To);
-        var rows = await (range.Descending
-                ? window.OrderByDescending(a => a.Timestamp)
-                : window.OrderBy(a => a.Timestamp))
-            .ThenBy(a => a.Id)
+        var rows = await InStartOrder(InWindow(context, range.From, range.To), range.Descending)
             .Take(range.Limit)
             .ToListAsync(ct);
 
         return rows.Select(Fetched).ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FetchedRecord>> AtAsync(
+        NocturneDbContext context,
+        IReadOnlyCollection<DateTime> instants,
+        int limit,
+        CancellationToken ct
+    )
+    {
+        var rows = await At(context, instants).ToListAsync(ct);
+
+        return LegacyTreatmentTables.FirstAtEach(rows, a => a.Timestamp, limit).Select(Fetched).ToList();
+    }
+
+    /// <inheritdoc />
+    IQueryable ILegacyTreatmentTable.AtQuery(NocturneDbContext context, IReadOnlyCollection<DateTime> instants) =>
+        At(context, instants);
+
+    private static IQueryable<ProfileActivationEntity> At(
+        NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
+    {
+        var at = instants.ToList();
+        return InStartOrder(Rows(context).Where(a => at.Contains(a.Timestamp)), descending: true);
+    }
+
+    private static IOrderedQueryable<ProfileActivationEntity> InStartOrder(
+        IQueryable<ProfileActivationEntity> rows, bool descending) =>
+        (descending ? rows.OrderByDescending(a => a.Timestamp) : rows.OrderBy(a => a.Timestamp))
+            .ThenBy(a => a.Id);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<FetchedRecord>> ModifiedSinceAsync(
@@ -704,6 +797,19 @@ internal static class LegacyTreatmentTables
     }
 
     /// <summary>
+    /// The first <paramref name="limit"/> of <paramref name="newestFirst"/> at each instant, in the order
+    /// it was read.
+    /// </summary>
+    /// <remarks>
+    /// The limit is applied here, not in SQL: a per-instant limit in SQL is a correlated subquery that
+    /// SQLite cannot run, or a <c>ROW_NUMBER()</c> window that PostgreSQL runs over the tenant's whole
+    /// table. The read is bounded by the rows that share exactly the instants asked for, which is few.
+    /// </remarks>
+    internal static IEnumerable<TRow> FirstAtEach<TRow>(
+        IEnumerable<TRow> newestFirst, Func<TRow, DateTime> timestamp, int limit) =>
+        newestFirst.GroupBy(timestamp).SelectMany(atInstant => atInstant.Take(limit));
+
+    /// <summary>
     /// Every state span <see cref="StateSpanTables"/> serves that starts inside the window, bounds
     /// inclusive, as one tracked-entity query a bulk update can run against.
     /// </summary>
@@ -769,7 +875,8 @@ internal static class LegacyTreatmentTables
             repositories => repositories.CarbIntakes,
             c => c.CarbIntakes, RecordType.CarbIntake, CarbIntakeMapper.ToDomainModel,
             (r, foods) => ProjectCarbCorrection(r, foods.For(r.Id)),
-            correlated: (repositories, id, ct) => repositories.CarbIntakes.GetByCorrelationIdAsync(id, ct)),
+            CountCarbIntakesServedApartAsync,
+            (repositories, id, ct) => repositories.CarbIntakes.GetByCorrelationIdAsync(id, ct)),
         new LegacyTreatmentTable<BGCheck, BGCheckEntity>(
             repositories => repositories.BGChecks,
             c => c.BGChecks, RecordType.BGCheck, BGCheckMapper.ToDomainModel,
@@ -815,20 +922,40 @@ internal static class LegacyTreatmentTables
     /// those <see cref="NotesServedWithAnotherRecord"/>.
     /// </summary>
     private static async Task<long> CountNotesServedApartAsync(
+        NocturneDbContext context, DateTime? from, DateTime? to, CancellationToken ct) =>
+        await InWindow(context, context.Notes, RecordType.Note, from, to).LongCountAsync(ct)
+        - await InWindow(context, NotesServedWithAnotherRecord(context), RecordType.Note, from, to).LongCountAsync(ct);
+
+    /// <summary>
+    /// The carb intakes served as treatments of their own in the window, bounds inclusive: every
+    /// carb intake but the one <see cref="PairMeals"/> serves as the half of each Meal Bolus. A
+    /// correlation pairs once, when the window holds a bolus and a carb intake of it, so a pair split
+    /// by the window edge counts as whichever half is inside and a further carb intake of the
+    /// correlation counts on its own.
+    /// </summary>
+    private static async Task<long> CountCarbIntakesServedApartAsync(
         NocturneDbContext context, DateTime? from, DateTime? to, CancellationToken ct)
     {
-        IQueryable<NoteEntity> InWindow(IQueryable<NoteEntity> notes)
-        {
-            notes = notes.AsNoTracking().ExcludeNonPrimary(context, RecordType.Note);
-            if (from is { } lower)
-                notes = notes.Where(n => n.Timestamp >= lower);
-            if (to is { } upper)
-                notes = notes.Where(n => n.Timestamp <= upper);
-            return notes;
-        }
+        var carbs = InWindow(context, context.CarbIntakes, RecordType.CarbIntake, from, to);
+        var boluses = InWindow(context, context.Boluses, RecordType.Bolus, from, to);
+        var pairedMeals = carbs
+            .Where(c => c.CorrelationId != null && boluses.Any(b => b.CorrelationId == c.CorrelationId))
+            .Select(c => c.CorrelationId)
+            .Distinct();
 
-        return await InWindow(context.Notes).LongCountAsync(ct)
-            - await InWindow(NotesServedWithAnotherRecord(context)).LongCountAsync(ct);
+        return await carbs.LongCountAsync(ct) - await pairedMeals.LongCountAsync(ct);
+    }
+
+    private static IQueryable<TEntity> InWindow<TEntity>(
+        NocturneDbContext context, IQueryable<TEntity> rows, RecordType recordType, DateTime? from, DateTime? to)
+        where TEntity : V4TimeSeriesEntityBase
+    {
+        rows = rows.AsNoTracking().ExcludeNonPrimary(context, recordType);
+        if (from is { } lower)
+            rows = rows.Where(r => r.Timestamp >= lower);
+        if (to is { } upper)
+            rows = rows.Where(r => r.Timestamp <= upper);
+        return rows;
     }
 
     /// <summary>

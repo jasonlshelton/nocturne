@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Nocturne.Connectors.Core.Services;
+using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Infrastructure.Data.Services;
@@ -31,6 +32,7 @@ public sealed record TenantUndecryptableSecrets(
 public class UndecryptableSecretScanner(
     INocturneDbContextFactory contexts,
     IConnectorConfigurationRepository connectorConfigurations,
+    IAlertRuleRepository alertRules,
     ISecretEncryptionService encryption)
 {
     /// <summary>
@@ -43,13 +45,7 @@ public class UndecryptableSecretScanner(
             .Where(c => c.SecretsJson != "{}")
             .ToList();
 
-        await using var db = await contexts.CreateAsync(cancellationToken);
-
-        var channels = await db.AlertRuleChannels.AsNoTracking()
-            .Where(c => c.Secret != null)
-            .OrderBy(c => c.AlertRule!.Name).ThenBy(c => c.SortOrder)
-            .Select(c => new { c.AlertRuleId, RuleName = c.AlertRule!.Name, c.Destination, c.DestinationLabel, c.Secret })
-            .ToListAsync(cancellationToken);
+        var channels = await alertRules.GetChannelSecretsAsync(cancellationToken);
 
         return new TenantUndecryptableSecrets(
             connectors

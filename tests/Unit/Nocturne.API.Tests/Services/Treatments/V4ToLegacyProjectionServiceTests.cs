@@ -13,6 +13,7 @@ using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Entities.V4;
+using Nocturne.Infrastructure.Data.Mappers.V4;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
@@ -1155,11 +1156,11 @@ public class V4ToLegacyProjectionServiceTests
     {
         var (from, to) = (new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc));
         _bolusRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        _carbIntakeRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(2);
         _bgCheckRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(4);
         _deviceEventRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(8);
         _tempBasalRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(16);
         _bolusCalcRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>())).ReturnsAsync(32);
+        _dbContext.CarbIntakes.AddRange(Enumerable.Range(0, 2).Select(i => CarbIntake(from.AddMinutes(i), null)));
         _dbContext.ProfileActivations.AddRange(
             Enumerable.Range(0, 64).Select(i => Activation($"ps-{i}", from.AddMinutes(i)))
                 .Append(Activation(null, from.AddHours(2)))
@@ -1182,6 +1183,206 @@ public class V4ToLegacyProjectionServiceTests
             Phase = nameof(ProfileActivationPhase.Requested), Origin = nameof(ProfileActivationOrigin.Uploader),
             BaseProfileName = "Weekend",
         };
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_ABolusAndCarbIntakeOfOneMeal_AreOneTreatment()
+    {
+        var meals = Enumerable.Range(0, 3).Select(_ => Guid.CreateVersion7()).ToList();
+        _dbContext.Boluses.AddRange(meals.Select((id, i) => Bolus(Window.AddMinutes(i), id)));
+        _dbContext.CarbIntakes.AddRange(meals.Select((id, i) => CarbIntake(Window.AddMinutes(i), id)));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(3);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_ABolusAndACarbIntakeOfNoMeal_AreTwoTreatments()
+    {
+        _dbContext.Boluses.AddRange(
+            Bolus(Window, null),
+            Bolus(Window.AddMinutes(1), Guid.CreateVersion7()));
+        _dbContext.CarbIntakes.AddRange(
+            CarbIntake(Window.AddMinutes(2), null),
+            CarbIntake(Window.AddMinutes(3), Guid.CreateVersion7()));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(4);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_AnExtraCarbIntakeOfAMeal_IsServedOnItsOwn()
+    {
+        var meal = Guid.CreateVersion7();
+        _dbContext.Boluses.Add(Bolus(Window, meal));
+        _dbContext.CarbIntakes.AddRange(
+            CarbIntake(Window, meal, carbs: 40),
+            CarbIntake(Window.AddMinutes(5), meal, carbs: 10));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(2);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_AnExtraBolusOfAMeal_IsServedOnItsOwn()
+    {
+        var meal = Guid.CreateVersion7();
+        _dbContext.Boluses.AddRange(Bolus(Window, meal, insulin: 4), Bolus(Window.AddMinutes(5), meal, insulin: 1));
+        _dbContext.CarbIntakes.Add(CarbIntake(Window, meal));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(2);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_AMealWhoseCarbIntakeIsOutsideTheWindow_IsTheBolusAlone()
+    {
+        var meal = Guid.CreateVersion7();
+        _dbContext.Boluses.Add(Bolus(Window.AddMinutes(30), meal));
+        _dbContext.CarbIntakes.Add(CarbIntake(Window.AddMinutes(-30), meal));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(1);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_AMealWhoseBolusIsOutsideTheWindow_IsTheCarbIntakeAlone()
+    {
+        var meal = Guid.CreateVersion7();
+        _dbContext.Boluses.Add(Bolus(Window.AddMinutes(-30), meal));
+        _dbContext.CarbIntakes.Add(CarbIntake(Window.AddMinutes(30), meal));
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(1);
+    }
+
+    [Fact]
+    public async Task CountProjectedTreatments_ADeletedCarbIntakeOfAMeal_LeavesTheBolusServed()
+    {
+        var meal = Guid.CreateVersion7();
+        var deleted = CarbIntake(Window, meal);
+        deleted.DeletedAt = Window;
+        _dbContext.Boluses.Add(Bolus(Window, meal));
+        _dbContext.CarbIntakes.Add(deleted);
+        await _dbContext.SaveChangesAsync();
+
+        await AssertCountMatchesTheListAsync(1);
+    }
+
+    /// <summary>
+    /// Each instant is served as a read of it alone serves it: a meal pairs at one instant, a bolus
+    /// and a carb intake of one correlation at two instants do not, and a record between them is not read.
+    /// </summary>
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_ServesEachInstantAsAReadOfItAlone()
+    {
+        var later = Window.AddDays(365);
+        var (meal, split) = (Guid.CreateVersion7(), Guid.CreateVersion7());
+        var mealBolus = Bolus(later, meal, insulin: 4);
+        var splitBolus = Bolus(Window, split, insulin: 3);
+        var splitCarbs = CarbIntake(later, split);
+        var between = Bolus(Window.AddDays(100), correlationId: null);
+        _dbContext.Boluses.AddRange(mealBolus, splitBolus, between);
+        _dbContext.CarbIntakes.AddRange(CarbIntake(later, meal), splitCarbs);
+        await _dbContext.SaveChangesAsync();
+
+        var served = (await _service.GetProjectedTreatmentsAtAsync([Mills(Window), Mills(later)])).ToList();
+
+        served.Select(t => t.Id).Should().BeEquivalentTo(
+            [mealBolus.Id.ToString(), splitBolus.Id.ToString(), splitCarbs.Id.ToString()]);
+        served.Single(t => t.Id == mealBolus.Id.ToString()).EventType.Should().Be(TreatmentTypes.MealBolus);
+        served.Single(t => t.Id == splitBolus.Id.ToString()).Carbs.Should().BeNull();
+        served.Single(t => t.Id == splitCarbs.Id.ToString()).Insulin.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Each instant is limited on its own, as a read of it alone is: a crowded instant keeps the
+    /// records with the newest ids, and cannot take the rows of another instant in the same read.
+    /// </summary>
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_LimitsEachInstantOnItsOwnNewestIdFirst()
+    {
+        var (sparse, crowded) = (Window, Window.AddDays(1));
+        var pileUp = Enumerable.Range(0, 250).Select(_ => Bolus(crowded, correlationId: null)).ToList();
+        var alone = Bolus(sparse, correlationId: null);
+        _dbContext.Boluses.AddRange([.. pileUp, alone]);
+        await _dbContext.SaveChangesAsync();
+
+        var both = await IdsServedAtAsync(Mills(sparse), Mills(crowded));
+        var crowdedAlone = await IdsServedAtAsync(Mills(crowded));
+        var sparseAlone = await IdsServedAtAsync(Mills(sparse));
+
+        crowdedAlone.Should().BeEquivalentTo(pileUp.Select(b => b.Id).OrderDescending().Take(100).Select(id => id.ToString()));
+        sparseAlone.Should().Equal(alone.Id.ToString());
+        both.Should().BeEquivalentTo([.. crowdedAlone, .. sparseAlone]);
+    }
+
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_LeavesOutACopyDeduplicationDemoted()
+    {
+        var (primary, copy) = (Bolus(Window, correlationId: null), Bolus(Window, correlationId: null));
+        _dbContext.Boluses.AddRange(primary, copy);
+        _dbContext.LinkedRecords.Add(new LinkedRecordEntity
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = TenantId,
+            CanonicalId = Guid.CreateVersion7(),
+            RecordType = RecordTypeKeys.Key(RecordType.Bolus),
+            RecordId = copy.Id,
+            SourceTimestamp = Mills(Window),
+            DataSource = "glooko",
+            IsPrimary = false,
+        });
+        await _dbContext.SaveChangesAsync();
+
+        (await IdsServedAtAsync(Mills(Window))).Should().Equal(primary.Id.ToString());
+    }
+
+    private async Task<List<string?>> IdsServedAtAsync(params long[] instants) =>
+        [.. (await _service.GetProjectedTreatmentsAtAsync(instants)).Select(t => t.Id)];
+
+    private static readonly DateTime Window = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+    private static BolusEntity Bolus(DateTime at, Guid? correlationId, double insulin = 2) => new()
+    {
+        Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = at, CorrelationId = correlationId, Insulin = insulin,
+    };
+
+    private static CarbIntakeEntity CarbIntake(DateTime at, Guid? correlationId, double carbs = 30) => new()
+    {
+        Id = Guid.CreateVersion7(), TenantId = TenantId, Timestamp = at, CorrelationId = correlationId, Carbs = carbs,
+    };
+
+    /// <summary>
+    /// Counts the window from 12:00 to 13:00 and lists it from the same rows, so a count that
+    /// disagrees with what the list serves fails whichever of the two moved.
+    /// </summary>
+    private async Task AssertCountMatchesTheListAsync(long expected)
+    {
+        var (from, to) = (Window, Window.AddHours(1));
+        _bolusRepo.As<IV4Repository<Bolus>>()
+            .Setup(r => r.GetAsync(
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _dbContext.Boluses
+                .Where(b => b.Timestamp >= from && b.Timestamp <= to).AsEnumerable().Select(BolusMapper.ToDomainModel).ToList());
+        _carbIntakeRepo.As<IV4Repository<CarbIntake>>()
+            .Setup(r => r.GetAsync(
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _dbContext.CarbIntakes
+                .Where(c => c.Timestamp >= from && c.Timestamp <= to).AsEnumerable().Select(CarbIntakeMapper.ToDomainModel).ToList());
+        _bolusRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _dbContext.Boluses.Count(b => b.Timestamp >= from && b.Timestamp <= to));
+        _carbIntakeRepo.Setup(r => r.CountAsync(from, to, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _dbContext.CarbIntakes.Count(c => c.Timestamp >= from && c.Timestamp <= to));
+
+        var (fromMills, toMills) = (new DateTimeOffset(from).ToUnixTimeMilliseconds(), new DateTimeOffset(to).ToUnixTimeMilliseconds());
+        var served = await _service.GetProjectedTreatmentsAsync(fromMills, toMills, 100);
+        var counted = await _service.CountProjectedTreatmentsAsync(fromMills, toMills);
+
+        served.Should().HaveCount((int)expected);
+        counted.Should().Be(expected);
     }
 
     private V4ToLegacyProjectionService CreateService(NocturneDbContext dbContext) =>

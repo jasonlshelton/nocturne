@@ -190,7 +190,7 @@ public class DeviceEventRepository : SyncUpsertRepositoryBase<DeviceEvent, Devic
 
         query = ApplyReadVisibility(query, ctx);
 
-        query = descending ? query.OrderByDescending(e => e.Timestamp) : query.OrderBy(e => e.Timestamp);
+        query = query.InObservationOrder(descending);
         var entities = await query.Skip(offset).Take(limit).ToListAsync(ct);
         return entities.Select(DeviceEventMapper.ToDomainModel);
     }

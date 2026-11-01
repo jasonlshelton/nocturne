@@ -51,9 +51,9 @@ public interface IDeviceStatusService
     /// that ends early, cancelled or failed, still announces the statuses it wrote.
     /// </summary>
     /// <remarks>
-    /// Only an upload is announced: a <see cref="WriteOrigin.Live"/> create with no
-    /// <paramref name="source"/>. A device status carries no data source, so the upstream Nightscout
-    /// write-back cannot tell a connector's own statuses from new ones and would post them back.
+    /// Every <see cref="WriteOrigin.Live"/> create is announced. The announced statuses carry
+    /// <paramref name="source"/> as <see cref="DeviceStatus.DataSource"/>, which the upstream Nightscout
+    /// write-back skips for the Nightscout connector's own.
     /// </remarks>
     /// <param name="source">The connector the statuses came from, or <c>null</c> for an upload.</param>
     /// <returns>

@@ -145,8 +145,8 @@ builder.Services.AddResponseCaching();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
-builder.Services.AddHostedService<AuditRetentionService>();
-builder.Services.AddHostedService<SoftDeleteCleanupService>();
+builder.Services.AddScheduledJob<AuditRetentionJob>();
+builder.Services.AddScheduledJob<SoftDeleteCleanupJob>();
 builder.Services.AddSingleton<GoogleHealthCoordinator>();
 builder.Services.AddSingleton<IGoogleHealthGrantHolders, PostgresGoogleHealthGrantHolders>();
 builder.Services.AddSingleton<IGoogleHealthSyncCoordinator>(provider =>
@@ -165,6 +165,7 @@ builder.Services.AddDevOnlyEversenseMock(builder.Environment, builder.Configurat
 builder.Services.AddScoped<SampleDataSeeder>();
 
 builder.Services.AddSingleton<ReadAccessLogWriter>();
+builder.Services.AddHostedService<ReadAccessLogDrain>();
 builder.Services.AddScoped<ReadAccessAuditFilter>();
 builder.Services.AddControllers(options =>
 {
@@ -591,7 +592,7 @@ if (!isNSwagGeneration && !app.Environment.IsEnvironment("Testing"))
             migratorConnectionString, Nocturne.API.Services.BackgroundJobLiveStates.ByTable, logger);
     }
 
-    // Validate RLS, ownership, default privileges, and pool reset-on-close under the app role.
+    // Validate RLS, ownership, default privileges, and the context pool's isolation under the app role.
     await app.Services.ValidateDatabaseConfigurationAsync();
 
     // Sync config-managed OIDC providers to the database (satisfies FK constraints)

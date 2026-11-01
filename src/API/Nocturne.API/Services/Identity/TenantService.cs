@@ -6,7 +6,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Nocturne.API.Configuration;
 using Nocturne.API.Services.Auth;
-using Nocturne.API.Services.Docs;
 using Nocturne.API.Services.SetupHub;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -112,7 +111,8 @@ public partial class TenantService : ITenantService
 
         var ownerRoleId = await _members.FindRoleIdBySlugAsync(created.Id, RoleSeeds.Owner, ct)
             ?? throw new InvalidOperationException($"Tenant {created.Id} has no owner role after seeding.");
-        await AddMemberAsync(created.Id, creatorSubjectId, [ownerRoleId], ct: ct);
+        if (!await AddMemberAsync(created.Id, creatorSubjectId, [ownerRoleId], ct: ct))
+            throw new InvalidOperationException($"Subject {creatorSubjectId} is already a member of the new tenant {created.Id}.");
 
         return created;
     }
@@ -126,7 +126,7 @@ public partial class TenantService : ITenantService
         await _roleService.SeedRolesForTenantAsync(tenant.Id, ct);
         await CreatePublicSubjectMembershipAsync(_members, tenant.Id, ct);
 
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
         return new TenantCreatedDto(tenant.Id, tenant.Slug, tenant.DisplayName, tenant.IsActive, tenant.SysCreatedAt);
     }
 
@@ -177,8 +177,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(DisplayName: displayName, IsActive: isActive, AllowAccessRequests: allowAccessRequests), ct);
 
-        // Invalidate cached tenant context
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToDto((await _tenants.GetAsync(id, ct))!);
     }
@@ -192,9 +191,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(AllowPublicDocs: allowPublicDocs), ct);
 
-        // The documentation paths resolve the tenant through a cache of their own, which holds
-        // the opt-in.
-        ScalarAuthProvider.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToSettingsDto(tenant with { AllowPublicDocs = allowPublicDocs });
     }
@@ -205,10 +202,7 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.UpdateAsync(id, new TenantEdit(DisplayName: displayName), ct);
 
-        // Both the host and the share-link resolutions cache a TenantContext, which carries the name.
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
-        if (tenant.ShareTokenHash is { } shareTokenHash)
-            ShareTokenCacheService.EvictByHash(_cache, shareTokenHash);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
 
         return ToSettingsDto(tenant with { DisplayName = displayName });
     }
@@ -247,15 +241,12 @@ public partial class TenantService : ITenantService
         var tenant = await RequireAsync(id, ct);
         await _tenants.DeleteAsync(id, ct);
 
-        // Invalidate cached tenant context
-        TenantResolutionMiddleware.EvictTenant(_cache, tenant.Slug);
+        TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
     }
 
-    public Task AddMemberAsync(
+    public Task<bool> AddMemberAsync(
         Guid tenantId, Guid subjectId, List<Guid> roleIds, List<string>? directPermissions = null,
         string? label = null, bool limitTo24Hours = false, CancellationToken ct = default) =>
-        // Already a member is the caller's desired end state, including when another request made
-        // the subject one first.
         _members.AddMemberAsync(
             new NewTenantMember(tenantId, subjectId, roleIds, directPermissions, label, LimitTo24Hours: limitTo24Hours), ct);
 
@@ -276,28 +267,37 @@ public partial class TenantService : ITenantService
         if (member.IsSystemSubject)
             return new MemberRemovalResult(false, "Cannot remove system subject memberships");
 
-        if (await members.IsLastOwnerAsync(tenantId, member.Id, ct))
+        var (outcome, grants) = await unit.CommitAsync<(OwnerGuardedChange, IReadOnlyList<OAuthGrantRecord>)>(
+            async token =>
+            {
+                var removal = await members.RemoveMemberUnlessLastOwnerAsync(tenantId, member.Id, token);
+                if (removal != OwnerGuardedChange.Changed)
+                    return (removal, []);
+
+                // Chat identity directory rows are global and carry no membership join, so a link left
+                // behind here would keep answering bot commands for this tenant. It goes in the same
+                // SaveChanges as the membership so the two cannot come apart, and is scoped to this
+                // tenant: the same subject's links to tenants they still belong to must survive.
+                var chatLinks = await context.ChatIdentityDirectory
+                    .Where(d => d.TenantId == tenantId && d.NocturneUserId == subjectId)
+                    .ToListAsync(token);
+
+                // Grants carry no membership join either; left live, every one would work again the
+                // moment the subject is re-added. They are staged on the unit with the removal, so one
+                // commit lands both.
+                var active = await new OAuthGrantRepository(unit).GetActiveForSubjectAsync(subjectId, token);
+
+                context.ChatIdentityDirectory.RemoveRange(chatLinks);
+                await _grantRevocation.StageAsync(unit, active, token);
+                await context.SaveChangesAsync(token);
+                return (removal, active);
+            },
+            ct: ct);
+
+        if (outcome == OwnerGuardedChange.LastOwner)
             return new MemberRemovalResult(false, TenantOwnerFilter.LastOwnerRefusal);
 
-        // Chat identity directory rows are global and carry no membership join, so a link left
-        // behind here would keep answering bot commands for this tenant. It goes in the same
-        // SaveChanges as the membership so the two cannot come apart, and is scoped to this
-        // tenant: the same subject's links to tenants they still belong to must survive.
-        var chatLinks = await context.ChatIdentityDirectory
-            .Where(d => d.TenantId == tenantId && d.NocturneUserId == subjectId)
-            .ToListAsync(ct);
-
-        // Grants carry no membership join either; left live, every one would work again the moment
-        // the subject is re-added. They are staged on the unit with the removal, so one commit lands
-        // both.
-        var grants = await new OAuthGrantRepository(unit).GetActiveForSubjectAsync(subjectId, ct);
-
-        await members.RemoveMemberAsync(tenantId, member.Id, ct);
-        context.ChatIdentityDirectory.RemoveRange(chatLinks);
-        await _grantRevocation.StageAsync(unit, grants, ct);
-        await unit.CommitAsync(token => context.SaveChangesAsync(token), ct);
         _grantRevocation.EvictSessions(grants);
-
         return new MemberRemovalResult(true);
     }
 
@@ -476,7 +476,7 @@ public partial class TenantService : ITenantService
             return new ProvisionResult(tenantId, ownerSubjectId, slug.ToLowerInvariant());
         }, ct: ct);
 
-        TenantResolutionMiddleware.EvictTenant(_cache, provisioned.Slug);
+        TenantCacheEviction.Evict(_cache, provisioned.Slug);
         return provisioned;
     }
 

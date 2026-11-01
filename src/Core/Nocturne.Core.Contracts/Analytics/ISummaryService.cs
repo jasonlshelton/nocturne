@@ -45,11 +45,6 @@ public interface ISummaryService
     );
 
     /// <summary>
-    /// Port of legacy <c>constructState()</c>, built from the sandbox properties.
-    /// </summary>
-    Task<SummaryState> ConstructStateAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Merges consecutive temp basals with the same absolute rate; port of legacy
     /// <c>filterSameAbsTemps</c>.
     /// </summary>

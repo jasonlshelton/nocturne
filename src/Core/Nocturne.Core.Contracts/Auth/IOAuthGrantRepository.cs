@@ -36,14 +36,16 @@ public interface IOAuthGrantRepository
 
     /// <summary>
     /// Stamps when, and when <paramref name="presentation"/> is given from where and by what, grant
-    /// <paramref name="grantId"/> on <paramref name="tenantId"/> was presented, in one statement.
+    /// <paramref name="grantId"/> on <paramref name="tenantId"/> was presented, in one statement that
+    /// writes only when the stored stamp is due (<see cref="Nocturne.Core.Models.Authorization.LastUsedStamp"/>).
     /// </summary>
     Task RecordUseAsync(
         Guid tenantId, Guid grantId, DateTime now, GrantPresentation? presentation, CancellationToken ct);
 
     /// <summary>
     /// Stamps when, and when <paramref name="presentation"/> is given from where and by what, grant
-    /// <paramref name="grantId"/> was presented, in one statement.
+    /// <paramref name="grantId"/> was presented, in one statement that writes only when the stored
+    /// stamp is due (<see cref="Nocturne.Core.Models.Authorization.LastUsedStamp"/>).
     /// </summary>
     Task RecordUseAsync(Guid grantId, DateTime now, GrantPresentation? presentation, CancellationToken ct);
 

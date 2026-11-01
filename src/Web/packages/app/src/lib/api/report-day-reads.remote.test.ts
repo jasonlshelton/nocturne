@@ -14,6 +14,8 @@ const hoisted = vi.hoisted(() => ({
   battery: vi.fn(),
   basalAnalysis: vi.fn(),
   hourlyDelivery: vi.fn(),
+  insulinDelivery: vi.fn(),
+  dailyBasalBolus: vi.fn(),
 }));
 
 vi.mock("$app/server", () => ({
@@ -23,14 +25,21 @@ vi.mock("$app/server", () => ({
 
 const { getActogramRange } = await import("./actogram.remote");
 const { getBatteryReportData } = await import("./battery.remote");
-const { getBasalAnalysisReport, getHourlyDeliveryReport, getReportRange } =
-  await import("./reports.remote");
+const {
+  getBasalAnalysisReport,
+  getDailyBasalBolusReport,
+  getHourlyDeliveryReport,
+  getInsulinDeliveryReport,
+  getReportRange,
+} = await import("./reports.remote");
 
 function patientIn(timezone: string | null) {
   hoisted.actogram.mockReset().mockResolvedValue({});
   hoisted.battery.mockReset().mockResolvedValue([]);
   hoisted.basalAnalysis.mockReset().mockResolvedValue({});
   hoisted.hourlyDelivery.mockReset().mockResolvedValue({});
+  hoisted.insulinDelivery.mockReset().mockResolvedValue({});
+  hoisted.dailyBasalBolus.mockReset().mockResolvedValue({});
   hoisted.locals = {
     apiClient: {
       patientRecord: { getPatientTimezone: async () => ({ timezone }) },
@@ -38,6 +47,8 @@ function patientIn(timezone: string | null) {
       statistics: {
         getBasalAnalysis: hoisted.basalAnalysis,
         getHourlyInsulinDelivery: hoisted.hourlyDelivery,
+        getInsulinDeliveryStatistics: hoisted.insulinDelivery,
+        getDailyBasalBolusRatios: hoisted.dailyBasalBolus,
       },
       battery: {
         getBatteryStatistics: hoisted.battery,
@@ -159,6 +170,44 @@ describe("report reads of picked days", () => {
           "2025-06-01T00:00:00.000Z",
           "2025-06-14T23:59:59.999Z"
         );
+      }
+    });
+  });
+
+  describe("the insulin delivery report", () => {
+    const reads = () => [
+      hoisted.insulinDelivery,
+      hoisted.dailyBasalBolus,
+      hoisted.hourlyDelivery,
+    ];
+
+    async function readFortnight() {
+      await getInsulinDeliveryReport(FORTNIGHT);
+      await getDailyBasalBolusReport(FORTNIGHT);
+      await getHourlyDeliveryReport(FORTNIGHT);
+    }
+
+    it("reads a London patient's 14 days from London midnight to the last London millisecond", async () => {
+      await readFortnight();
+
+      for (const read of reads()) {
+        expect(read.mock.calls[0].slice(0, 2)).toEqual([
+          "2025-05-31T23:00:00.000Z",
+          "2025-06-14T22:59:59.999Z",
+        ]);
+      }
+    });
+
+    it("reads UTC days when no zone names the patient", async () => {
+      patientIn(null);
+
+      await readFortnight();
+
+      for (const read of reads()) {
+        expect(read.mock.calls[0].slice(0, 2)).toEqual([
+          "2025-06-01T00:00:00.000Z",
+          "2025-06-14T23:59:59.999Z",
+        ]);
       }
     });
   });
