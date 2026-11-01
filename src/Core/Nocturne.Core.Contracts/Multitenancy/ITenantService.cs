@@ -56,7 +56,12 @@ public interface ITenantService
     /// <summary>Permanently deletes a tenant and all associated data.</summary>
     Task DeleteAsync(Guid id, CancellationToken ct = default);
 
-    Task AddMemberAsync(Guid tenantId, Guid subjectId, List<Guid> roleIds, List<string>? directPermissions = null, string? label = null, bool limitTo24Hours = false, CancellationToken ct = default);
+    /// <summary>
+    /// Adds <paramref name="subjectId"/> to the tenant with its roles in one save. False when the
+    /// subject is already a member, including when another request made it one in the meantime;
+    /// any other failure throws.
+    /// </summary>
+    Task<bool> AddMemberAsync(Guid tenantId, Guid subjectId, List<Guid> roleIds, List<string>? directPermissions = null, string? label = null, bool limitTo24Hours = false, CancellationToken ct = default);
 
     /// <summary>
     /// Removes a subject's membership from the specified tenant. Refuses to remove a system

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Authorization;
 using Nocturne.Core.Contracts.Auth;
+using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
@@ -22,7 +23,7 @@ namespace Nocturne.API.Controllers.V4.PlatformAdmin;
 /// and adding them as a tenant member), or reject them (deactivating the subject record).
 /// </remarks>
 /// <seealso cref="ISubjectService"/>
-/// <seealso cref="ITenantService"/>
+/// <seealso cref="IAccessRequestService"/>
 [ApiController]
 [Tags("PlatformAdmin")]
 [Route("api/v4/admin/access-requests")]
@@ -32,8 +33,7 @@ public class AccessRequestController(
     ITenantMembershipRepository members,
     ISubjectRepository subjects,
     ISubjectService subjectService,
-    ITenantService tenantService,
-    ITenantRoleService tenantRoleService,
+    IAccessRequestService accessRequests,
     ITenantAccessor tenantAccessor,
     IInAppNotificationService notificationService,
     ILogger<AccessRequestController> logger) : ControllerBase
@@ -54,63 +54,45 @@ public class AccessRequestController(
         }).ToList());
     }
 
-    /// <inheritdoc cref="ITenantService.AddMemberAsync"/>
+    /// <inheritdoc cref="IAccessRequestService.ApproveAsync"/>
     [HttpPost("{subjectId:guid}/approve")]
     [RemoteCommand(Invalidates = ["GetPendingRequests"])]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> Approve(
         Guid subjectId,
         [FromBody] ApproveAccessRequestRequest request,
         CancellationToken ct)
     {
-        var subject = await subjects.GetAsync(subjectId, ct);
+        var result = await accessRequests.ApproveAsync(
+            subjectId,
+            tenantAccessor.Context?.TenantId,
+            request.RoleIds,
+            request.DirectPermissions,
+            request.LimitTo24Hours,
+            HttpContext.GetGrantedScopes(),
+            ct);
 
-        if (subject is not { ApprovalStatus: "Pending" })
-            return NotFound();
-
-        if (request.RoleIds.Count == 0 && (request.DirectPermissions == null || request.DirectPermissions.Count == 0))
-            return Problem(detail: "At least one role or direct permission is required", statusCode: 400, title: "Bad Request");
-
-        await subjects.UpdateAsync(subjectId, new SubjectEdit(IsActive: true, ApprovalStatus: "Approved"), ct);
-
-        var tenantContext = tenantAccessor.Context;
-        if (tenantContext != null)
+        switch (result.Outcome)
         {
-            var tenantId = tenantContext.TenantId;
-
-            var roleGrant = await tenantRoleService.ValidateRoleGrantAsync(
-                tenantId, request.RoleIds, HttpContext.GetGrantedScopes(), ct);
-            if (!roleGrant.Ok)
-            {
+            case ApproveAccessRequestOutcome.Approved:
+                return Ok();
+            case ApproveAccessRequestOutcome.NothingGranted:
+                return Problem(detail: "At least one role or direct permission is required", statusCode: 400, title: "Bad Request");
+            case ApproveAccessRequestOutcome.RoleGrantRefused:
+                var foreignRole = result.RoleGrant!.ErrorCode == RoleGrantValidation.ForeignRole;
                 return Problem(
-                    detail: roleGrant.ErrorDescription,
-                    statusCode: roleGrant.ErrorCode == RoleGrantValidation.ForeignRole ? 400 : 403,
-                    title: roleGrant.ErrorCode == RoleGrantValidation.ForeignRole ? "Bad Request" : "Forbidden");
-            }
-
-            await tenantService.AddMemberAsync(
-                tenantId, subjectId, request.RoleIds, request.DirectPermissions,
-                limitTo24Hours: request.LimitTo24Hours, ct: ct);
-
-            var ownerIds = await members.GetOwnerSubjectIdsAsync(tenantId, ct);
-
-            foreach (var ownerId in ownerIds)
-            {
-                await notificationService.ArchiveBySourceAsync(
-                    ownerId.ToString(),
-                    "passkey.anonymous_login_request",
-                    subjectId.ToString(),
-                    NotificationArchiveReason.Completed,
-                    ct);
-            }
+                    detail: result.RoleGrant.ErrorDescription,
+                    statusCode: foreignRole ? 400 : 403,
+                    title: foreignRole ? "Bad Request" : "Forbidden");
+            case ApproveAccessRequestOutcome.AlreadyMember:
+                return Problem(detail: "The subject is already a member.", statusCode: 409, title: "Conflict");
+            case ApproveAccessRequestOutcome.NotFound:
+                return NotFound();
+            default:
+                throw new ArgumentOutOfRangeException(nameof(result));
         }
-
-        logger.LogInformation(
-            "Access request approved: subject {SubjectId} ({Name}) assigned {RoleCount} roles",
-            subjectId, subject.Name, request.RoleIds.Count);
-
-        return Ok();
     }
 
     /// <inheritdoc cref="ISubjectService.DeleteSubjectAsync"/>

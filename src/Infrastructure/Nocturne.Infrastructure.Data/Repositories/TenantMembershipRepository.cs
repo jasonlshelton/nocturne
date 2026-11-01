@@ -82,9 +82,10 @@ public class TenantMembershipRepository : ITenantMembershipRepository
             Label = member.Label,
             Username = member.Username,
             LimitTo24Hours = member.LimitTo24Hours,
+            CreatedFromInviteId = member.CreatedFromInviteId,
         };
         db.TenantMembers.Add(entity);
-        foreach (var roleId in member.RoleIds)
+        foreach (var roleId in member.RoleIds.Distinct())
         {
             db.TenantMemberRoles.Add(new TenantMemberRoleEntity
             {
@@ -102,7 +103,7 @@ public class TenantMembershipRepository : ITenantMembershipRepository
             await db.SaveChangesAsync(ct);
             return true;
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             // Another request made the subject a member between the check and the save.
             return false;
@@ -354,19 +355,6 @@ public class TenantMembershipRepository : ITenantMembershipRepository
             return false;
 
         member.Username = username;
-        await SaveAsync(lease.Context, ct);
-        return true;
-    }
-
-    /// <inheritdoc/>
-    public virtual async Task<bool> SetCreatedFromInviteAsync(Guid tenantId, Guid memberId, Guid inviteId, CancellationToken ct)
-    {
-        await using var lease = await OpenForTenantAsync(tenantId, ct);
-        var member = await lease.Context.TenantMembers.FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == memberId, ct);
-        if (member is null)
-            return false;
-
-        member.CreatedFromInviteId = inviteId;
         await SaveAsync(lease.Context, ct);
         return true;
     }
@@ -795,16 +783,15 @@ public class TenantMembershipRepository : ITenantMembershipRepository
     public virtual async Task<bool> DecideRequestAsync(Guid tenantId, Guid requestId, MembershipRequestDecision decision, CancellationToken ct)
     {
         await using var lease = await OpenForTenantAsync(tenantId, ct);
-        var request = await lease.Context.MembershipRequests.FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == requestId, ct);
-        if (request is null)
-            return false;
-
-        request.Status = decision.Status;
-        request.DecidedBySubjectId = decision.DecidedBySubjectId;
-        request.DecidedAt = decision.DecidedAt;
-        request.RoleIds = decision.RoleIds?.ToList();
-        await SaveAsync(lease.Context, ct);
-        return true;
+        var roleIds = decision.RoleIds?.ToList();
+        var decided = await lease.Context.MembershipRequests
+            .Where(r => r.TenantId == tenantId && r.Id == requestId && r.Status == MembershipRequestRecord.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.Status, decision.Status)
+                .SetProperty(r => r.DecidedBySubjectId, decision.DecidedBySubjectId)
+                .SetProperty(r => r.DecidedAt, decision.DecidedAt)
+                .SetProperty(r => r.RoleIds, roleIds), ct);
+        return decided == 1;
     }
 
     private static IReadOnlyList<TenantMemberRecord> ToMembers(List<TenantMemberEntity> members) =>
