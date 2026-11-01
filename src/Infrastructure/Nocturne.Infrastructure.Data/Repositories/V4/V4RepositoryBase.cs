@@ -293,7 +293,7 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var query = InWindow(ctx.Set<TEntity>().AsNoTracking(), from, to, device);
         if (source != null) query = query.Where(e => e.DataSource == source);
-        query = descending ? query.OrderByDescending(e => e.Timestamp) : query.OrderBy(e => e.Timestamp);
+        query = query.InObservationOrder(descending);
         var entities = await query.Skip(offset).Take(limit).ToListAsync(ct);
         return entities.Select(ToDomain);
     }
@@ -338,6 +338,13 @@ public abstract class V4RepositoryBase<TModel, TEntity>
         await using var ctx = await ContextFactory.CreateAsync(ct);
         var entity = await ctx.Set<TEntity>().FindAsync([id], ct);
         return entity is null ? null : ToDomain(entity);
+    }
+
+    /// <inheritdoc cref="Core.Contracts.V4.Repositories.IV4Repository{T}.GetByIdsAsync" />
+    public async Task<IReadOnlyList<TModel>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
+    {
+        await using var ctx = await ContextFactory.CreateAsync(ct);
+        return await LoadAsync(ctx, ids, ct);
     }
 
     /// <summary>Returns a single record by its legacy (MongoDB ObjectId) identifier, or null.</summary>
@@ -730,9 +737,9 @@ public abstract class V4RepositoryBase<TModel, TEntity>
     /// </summary>
     protected internal virtual RecordType? DedupRecordType => null;
 
-    /// <summary>The live records of <paramref name="ids"/>, for a broadcast.</summary>
+    /// <summary>The live records of <paramref name="ids"/>.</summary>
     private async Task<IReadOnlyList<TModel>> LoadAsync(
-        NocturneDbContext ctx, IReadOnlyList<Guid> ids, CancellationToken ct) =>
+        NocturneDbContext ctx, IReadOnlyCollection<Guid> ids, CancellationToken ct) =>
         ids.Count == 0
             ? []
             : (await ctx.Set<TEntity>().AsNoTracking().Where(e => ids.Contains(e.Id)).ToListAsync(ct))

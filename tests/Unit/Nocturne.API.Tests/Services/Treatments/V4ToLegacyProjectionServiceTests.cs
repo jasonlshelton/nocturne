@@ -1269,6 +1269,78 @@ public class V4ToLegacyProjectionServiceTests
         await AssertCountMatchesTheListAsync(1);
     }
 
+    /// <summary>
+    /// Each instant is served as a read of it alone serves it: a meal pairs at one instant, a bolus
+    /// and a carb intake of one correlation at two instants do not, and a record between them is not read.
+    /// </summary>
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_ServesEachInstantAsAReadOfItAlone()
+    {
+        var later = Window.AddDays(365);
+        var (meal, split) = (Guid.CreateVersion7(), Guid.CreateVersion7());
+        var mealBolus = Bolus(later, meal, insulin: 4);
+        var splitBolus = Bolus(Window, split, insulin: 3);
+        var splitCarbs = CarbIntake(later, split);
+        var between = Bolus(Window.AddDays(100), correlationId: null);
+        _dbContext.Boluses.AddRange(mealBolus, splitBolus, between);
+        _dbContext.CarbIntakes.AddRange(CarbIntake(later, meal), splitCarbs);
+        await _dbContext.SaveChangesAsync();
+
+        var served = (await _service.GetProjectedTreatmentsAtAsync([Mills(Window), Mills(later)])).ToList();
+
+        served.Select(t => t.Id).Should().BeEquivalentTo(
+            [mealBolus.Id.ToString(), splitBolus.Id.ToString(), splitCarbs.Id.ToString()]);
+        served.Single(t => t.Id == mealBolus.Id.ToString()).EventType.Should().Be(TreatmentTypes.MealBolus);
+        served.Single(t => t.Id == splitBolus.Id.ToString()).Carbs.Should().BeNull();
+        served.Single(t => t.Id == splitCarbs.Id.ToString()).Insulin.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Each instant is limited on its own, as a read of it alone is: a crowded instant keeps the
+    /// records with the newest ids, and cannot take the rows of another instant in the same read.
+    /// </summary>
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_LimitsEachInstantOnItsOwnNewestIdFirst()
+    {
+        var (sparse, crowded) = (Window, Window.AddDays(1));
+        var pileUp = Enumerable.Range(0, 250).Select(_ => Bolus(crowded, correlationId: null)).ToList();
+        var alone = Bolus(sparse, correlationId: null);
+        _dbContext.Boluses.AddRange([.. pileUp, alone]);
+        await _dbContext.SaveChangesAsync();
+
+        var both = await IdsServedAtAsync(Mills(sparse), Mills(crowded));
+        var crowdedAlone = await IdsServedAtAsync(Mills(crowded));
+        var sparseAlone = await IdsServedAtAsync(Mills(sparse));
+
+        crowdedAlone.Should().BeEquivalentTo(pileUp.Select(b => b.Id).OrderDescending().Take(100).Select(id => id.ToString()));
+        sparseAlone.Should().Equal(alone.Id.ToString());
+        both.Should().BeEquivalentTo([.. crowdedAlone, .. sparseAlone]);
+    }
+
+    [Fact]
+    public async Task GetProjectedTreatmentsAt_LeavesOutACopyDeduplicationDemoted()
+    {
+        var (primary, copy) = (Bolus(Window, correlationId: null), Bolus(Window, correlationId: null));
+        _dbContext.Boluses.AddRange(primary, copy);
+        _dbContext.LinkedRecords.Add(new LinkedRecordEntity
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = TenantId,
+            CanonicalId = Guid.CreateVersion7(),
+            RecordType = RecordTypeKeys.Key(RecordType.Bolus),
+            RecordId = copy.Id,
+            SourceTimestamp = Mills(Window),
+            DataSource = "glooko",
+            IsPrimary = false,
+        });
+        await _dbContext.SaveChangesAsync();
+
+        (await IdsServedAtAsync(Mills(Window))).Should().Equal(primary.Id.ToString());
+    }
+
+    private async Task<List<string?>> IdsServedAtAsync(params long[] instants) =>
+        [.. (await _service.GetProjectedTreatmentsAtAsync(instants)).Select(t => t.Id)];
+
     private static readonly DateTime Window = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
     private static BolusEntity Bolus(DateTime at, Guid? correlationId, double insulin = 2) => new()

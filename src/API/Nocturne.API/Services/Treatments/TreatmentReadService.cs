@@ -191,7 +191,7 @@ internal class TreatmentReadService : ITreatmentStore
         IReadOnlyList<Treatment> treatments,
         WriteOrigin origin,
         CancellationToken ct = default,
-        ICollection<Treatment>? stored = null)
+        ICollection<StoredTreatment>? stored = null)
     {
         var results = new List<Treatment>();
         var rejected = new List<BulkWriteRejection<Treatment>>();
@@ -207,7 +207,7 @@ internal class TreatmentReadService : ITreatmentStore
                 result = await _decomposer.DecomposeAsync(treatment, origin, ct);
                 skippedDeleted += result.SkippedDeleted;
                 var created = await _store.ToCreatedAsync(treatment, result, ct);
-                results.Add(created);
+                results.Add(created.Created);
                 if (Wrote(result))
                     stored?.Add(created);
             }
@@ -231,7 +231,7 @@ internal class TreatmentReadService : ITreatmentStore
                 _logger.LogSkippedDeleted(nameof(Treatment), skippedDeleted);
                 var written = result is null ? results : [.. results, treatment];
                 if (result is not null && Wrote(result))
-                    stored?.Add(treatment);
+                    stored?.Add(new StoredTreatment.Unnamed(treatment));
                 return new TreatmentBatchFailedException(
                     new BulkWrite<Treatment>(written, skippedDeleted) { Rejected = rejected },
                     i, treatments.Count, failedOneStored: result is not null, ex);
@@ -241,6 +241,11 @@ internal class TreatmentReadService : ITreatmentStore
         _logger.LogSkippedDeleted(nameof(Treatment), skippedDeleted);
         return new BulkWrite<Treatment>(results, skippedDeleted) { Rejected = rejected };
     }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<Treatment?>> ReadBackAsync(
+        IReadOnlyList<StoredTreatment> stored, CancellationToken ct = default) =>
+        _store.ReadBackAsync(stored, ct);
 
     private static bool Wrote(DecompositionResult result) =>
         result.CreatedRecords.Count > 0 || result.UpdatedRecords.Count > 0;

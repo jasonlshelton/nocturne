@@ -27,6 +27,16 @@ internal interface IV4ToLegacyProjectionService
         CancellationToken ct = default
     );
 
+    /// <summary>
+    /// The treatments that start exactly at one of <paramref name="instants"/>, each served as a read
+    /// of its instant alone serves it: a bolus and a carb intake at different instants are not paired.
+    /// Each table is read once however many instants there are, and nothing between them is read.
+    /// </summary>
+    Task<IEnumerable<Treatment>> GetProjectedTreatmentsAtAsync(
+        IReadOnlyCollection<long> instants,
+        CancellationToken ct = default
+    );
+
     /// <inheritdoc cref="ITreatmentService.GetLatestTreatmentOfTypeAsync"/>
     /// <remarks>Served by an index seek, not a scan of the window.</remarks>
     Task<Treatment?> GetLatestProjectedTreatmentAsync(
