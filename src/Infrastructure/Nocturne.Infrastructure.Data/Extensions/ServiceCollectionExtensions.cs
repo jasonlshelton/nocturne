@@ -82,9 +82,9 @@ public static class ServiceCollectionExtensions
         // Audit config cache (singleton — uses IDbContextFactory internally)
         services.TryAddSingleton<ITenantAuditConfigCache, TenantAuditConfigCache>();
 
-        // Register NpgsqlDataSource as a singleton - this manages the connection pool
         var dataSource = PostgresRuntimeOptions.BuildRuntimeDataSource(config);
-        services.AddSingleton(dataSource);
+        services.AddSingleton(new ContextDataSource(dataSource));
+        services.AddSingleton(PostgresRuntimeOptions.BuildRawDataSource(config));
 
         // Non-pooled: each acquisition is a fresh context, discarded after use. A faulted context
         // is never returned to a pool and reused, so a fault cannot poison later callers. Database
