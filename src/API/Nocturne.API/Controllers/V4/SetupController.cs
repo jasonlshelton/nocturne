@@ -532,8 +532,12 @@ public partial class SetupController : ControllerBase
         // Ensure tenant membership with owner role — required when reusing a
         // subject from a previously deleted tenant.
         var ownerRoleId = await _members.FindRoleIdBySlugAsync(tenant.Id, RoleSeeds.Owner, ct);
-        if (ownerRoleId is { } roleId && !await _members.IsMemberAsync(tenant.Id, subjectId, ct))
-            await _tenantService.AddMemberAsync(tenant.Id, subjectId, [roleId], ct: ct);
+        if (ownerRoleId is { } roleId)
+        {
+            // Setup retries, so a subject that is already a member is the state it wants, and the
+            // result of the add is not read.
+            _ = await _tenantService.AddMemberAsync(tenant.Id, subjectId, [roleId], ct: ct);
+        }
 
         // Set per-tenant username on the membership
         if (await _members.FindMemberAsync(tenant.Id, subjectId, ct) is { } membership)

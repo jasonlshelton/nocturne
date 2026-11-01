@@ -111,7 +111,8 @@ public partial class TenantService : ITenantService
 
         var ownerRoleId = await _members.FindRoleIdBySlugAsync(created.Id, RoleSeeds.Owner, ct)
             ?? throw new InvalidOperationException($"Tenant {created.Id} has no owner role after seeding.");
-        await AddMemberAsync(created.Id, creatorSubjectId, [ownerRoleId], ct: ct);
+        if (!await AddMemberAsync(created.Id, creatorSubjectId, [ownerRoleId], ct: ct))
+            throw new InvalidOperationException($"Subject {creatorSubjectId} is already a member of the new tenant {created.Id}.");
 
         return created;
     }
@@ -243,11 +244,9 @@ public partial class TenantService : ITenantService
         TenantCacheEviction.Evict(_cache, tenant.Slug, tenant.ShareTokenHash);
     }
 
-    public Task AddMemberAsync(
+    public Task<bool> AddMemberAsync(
         Guid tenantId, Guid subjectId, List<Guid> roleIds, List<string>? directPermissions = null,
         string? label = null, bool limitTo24Hours = false, CancellationToken ct = default) =>
-        // Already a member is the caller's desired end state, including when another request made
-        // the subject one first.
         _members.AddMemberAsync(
             new NewTenantMember(tenantId, subjectId, roleIds, directPermissions, label, LimitTo24Hours: limitTo24Hours), ct);
 
