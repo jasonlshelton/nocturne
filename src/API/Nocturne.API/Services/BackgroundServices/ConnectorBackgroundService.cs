@@ -131,10 +131,16 @@ public abstract class ConnectorBackgroundService<TConfig> : IScheduledJob
     public TimeSpan Spread => TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Leaves slots to the other jobs while every tenant of this connector is stuck against an
-    /// unreachable upstream, each run held to <see cref="PerTenantSyncTimeout"/>.
+    /// Leaves slots to the other jobs while every connector's tenants are stuck against unreachable
+    /// upstreams, each run held to <see cref="PerTenantSyncTimeout"/>: the cap is shared by every
+    /// connector (<see cref="ConcurrencyGroup"/>), so the short jobs, the alert sweep among them, keep
+    /// the slots it leaves.
     /// </summary>
     public int MaxConcurrency => 8;
+
+    public string ConcurrencyGroup => ConnectorsGroup;
+
+    internal const string ConnectorsGroup = "connectors";
 
     /// <summary>
     /// How long after a configuration write the tenant is synced: a connect flow writes its
@@ -198,12 +204,6 @@ public abstract class ConnectorBackgroundService<TConfig> : IScheduledJob
     /// <c>ConnectorSyncService</c> uses for a manual sync too.
     /// </summary>
     protected static string AuditEndpoint => $"connector:{Registration.ConnectorId}";
-
-    /// <summary>
-    /// How long an inactive tenant's row waits before it is looked at again: a cheap parked recheck,
-    /// so a reactivated tenant syncs again without any reactivation path having to reach the ledger.
-    /// </summary>
-    internal static readonly TimeSpan InactiveRecheckInterval = TimeSpan.FromHours(1);
 
     /// <summary>
     /// How long a tenant with no usable configuration is parked: enablement can change without a
@@ -378,7 +378,7 @@ public abstract class ConnectorBackgroundService<TConfig> : IScheduledJob
     {
         var tenant = run.Tenant!;
         if (!tenant.IsActive)
-            return JobOutcome.Resume(null, run.StartedAt + InactiveRecheckInterval);
+            return JobOutcome.Resume(null, run.StartedAt + IScheduledJob.InactiveTenantRecheck);
 
         // Waiting for a slot is not the tenant's time, so the timeout starts once one is held.
         using var slot = await AcquireSlotAsync(tenant.Slug, ct);

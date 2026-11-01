@@ -1084,7 +1084,7 @@ public static class ServiceRegistrationExtensions
         // In-app notifications
         services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
         services.AddScoped<IInAppNotificationService, InAppNotificationService>();
-        services.AddHostedService<NotificationResolutionService>();
+        services.AddScheduledJob<NotificationResolutionJob>();
         services.AddScheduledJob<NotificationCleanupJob>();
 
         // Notification template registry (singleton -- templates are immutable after startup)
@@ -1186,11 +1186,8 @@ public static class ServiceRegistrationExtensions
         // Bot health tracking
         services.AddSingleton<BotHealthService>();
 
-        // Background sweep
-        services.AddHostedService<AlertSweepService>();
-
-        // Periodic cursor-driven deduplication reconciliation across active tenants
-        services.AddHostedService<Nocturne.API.Services.BackgroundServices.DeduplicationReconciliationBackgroundService>();
+        services.AddScheduledJob<AlertSweepJob>();
+        services.AddScheduledJob<DeduplicationReconciliationJob>();
 
         return services;
     }

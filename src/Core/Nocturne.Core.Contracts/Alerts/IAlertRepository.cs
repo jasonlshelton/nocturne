@@ -10,8 +10,7 @@ namespace Nocturne.Core.Contracts.Alerts;
 /// <remarks>
 /// A method runs as the scope's reader on its tenant unless it takes a tenant. One that takes a
 /// tenant pins it in place of the scope's and keeps the scope's share and history-clamp state: a
-/// loop calls it once per tenant from a scope that has none. The cross-tenant scans pin each
-/// active tenant in turn.
+/// loop calls it once per tenant from a scope that has none.
 /// </remarks>
 /// <seealso cref="IAlertOrchestrator"/>
 /// <seealso cref="IExcursionTracker"/>
@@ -98,10 +97,8 @@ public interface IAlertRepository
     Task ResolveInstancesForExcursionAsync(Guid excursionId, DateTime resolvedAt, string? resolutionReason, CancellationToken ct);
 
     /// <summary>
-    /// Returns every open excursion whose owning rule has auto-resolve enabled
-    /// and a non-null <c>AutoResolveParams</c>. Used by <c>AlertSweepService</c>
-    /// to evaluate auto-resolve conditions that don't depend on the latest
-    /// reading (e.g. time-of-day, IOB, sensor age).
+    /// Returns every open excursion of the tenant whose owning rule has auto-resolve enabled
+    /// and a non-null <c>AutoResolveParams</c>.
     /// </summary>
     Task<IReadOnlyList<AutoResolveExcursionSnapshot>> GetAutoResolveExcursionsAsync(CancellationToken ct);
 
@@ -141,7 +138,7 @@ public interface IAlertRepository
     Task<int> CountActiveExcursionsAsync(CancellationToken ct);
 
     /// <summary>
-    /// Returns all excursions that are currently in a hysteresis cool-down period.
+    /// Returns the tenant's excursions that are in a hysteresis cool-down period.
     /// </summary>
     /// <returns>A read-only list of excursion snapshots in hysteresis.</returns>
     Task<IReadOnlyList<HysteresisExcursionSnapshot>> GetExcursionsInHysteresisAsync(CancellationToken ct);
@@ -150,7 +147,6 @@ public interface IAlertRepository
     /// Returns the tenant-level alert context (global mute state, timezone, etc.) used
     /// by the orchestrator to evaluate scheduling rules.
     /// </summary>
-    /// <remarks>The sweep calls it once per tenant.</remarks>
     /// <returns>The tenant alert context, or <c>null</c> if the tenant has no alert configuration.</returns>
     Task<TenantAlertContext?> GetTenantAlertContextAsync(Guid tenantId, CancellationToken ct);
 
@@ -198,13 +194,7 @@ public interface IAlertRepository
     Task MarkInstanceSuppressedAsync(Guid instanceId, string reason, CancellationToken ct);
 
     /// <summary>
-    /// Returns every enabled rule across all active tenants, each tenant's in
-    /// <c>SortOrder</c>. The sweep selects the rules it evaluates on the wall clock from these.
-    /// </summary>
-    Task<IReadOnlyList<AlertRuleSnapshot>> GetAllEnabledRulesAsync(CancellationToken ct);
-
-    /// <summary>
-    /// Returns snoozed alert instances whose snooze period has expired as of
+    /// Returns the tenant's snoozed alert instances whose snooze period has expired as of
     /// <paramref name="asOf"/>, so they can resume escalation.
     /// </summary>
     /// <param name="asOf">The point-in-time cutoff for expired snoozes.</param>

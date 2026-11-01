@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.BackgroundServices;
-using Nocturne.API.Services.Notifications;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Connectors.Core.Extensions;
 using Nocturne.Connectors.Core.Interfaces;
@@ -143,12 +142,12 @@ public class ConnectorPollingRegistrationTests
     }
 
     /// <summary>
-    /// The snapshot saves a query and a connection per pass only while every listener poller and
-    /// sweep reads the one registered instance. Each is built the way the host builds it, over the
+    /// The snapshot saves a query and a connection per pass only while every listener poller reads
+    /// the one registered instance. Each is built the way the host builds it, over the
     /// snapshot registration the host uses, and asked which snapshot it holds.
     /// </summary>
     [Fact]
-    public void EveryListenerAndSweep_ReadsTheOneRegisteredActiveTenantSnapshot()
+    public void EveryListener_ReadsTheOneRegisteredActiveTenantSnapshot()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -161,16 +160,10 @@ public class ConnectorPollingRegistrationTests
         using var provider = services.BuildServiceProvider();
         var registered = provider.GetRequiredService<ActiveTenantSnapshot>();
 
-        Type[] sweeps =
-        [
-            typeof(DeduplicationReconciliationBackgroundService),
-            typeof(NotificationResolutionService),
-        ];
-
         var listeners = ScheduledPollers().Where(typeof(IConnectorRealtimeListeners).IsAssignableFrom).ToList();
         listeners.Should().NotBeEmpty();
 
-        foreach (var type in listeners.Concat(sweeps))
+        foreach (var type in listeners)
         {
             var instance = ActivatorUtilities.CreateInstance(provider, type);
             try

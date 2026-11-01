@@ -14,8 +14,7 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 
 /// <summary>
 /// Tenant scoping of <see cref="AlertRepository"/>: a method without a tenant reads the scope's, one
-/// with a tenant pins it over the scope's, and the cross-tenant sweeps read every active tenant
-/// whatever the scope's.
+/// with a tenant pins it over the scope's.
 /// </summary>
 /// <remarks>
 /// EF InMemory honours the <c>e.TenantId == context.TenantId</c> global filter but has no Row-Level
@@ -159,46 +158,28 @@ public class AlertRepositoryTenantScopingTests
     }
 
     [Fact]
-    public async Task GetAllEnabledRulesAsync_ReturnsRulesAcrossEveryActiveTenant()
-    {
-        var options = NewStore();
-        await SeedAsync(options, ctx =>
-        {
-            ctx.Tenants.AddRange(NewTenant(TenantA), NewTenant(TenantB));
-            ctx.AlertRules.AddRange(
-                NewRule(TenantA, "Signal loss A", AlertConditionType.SignalLoss),
-                NewRule(TenantB, "Signal loss B", AlertConditionType.SignalLoss),
-                NewRule(TenantA, "Threshold A"));
-        });
-
-        var repo = Repository(options, scopeTenant: Guid.Empty);
-
-        var rules = await repo.GetAllEnabledRulesAsync(CancellationToken.None);
-
-        rules.Select(r => (r.TenantId, r.Name)).Should().BeEquivalentTo(
-            [(TenantA, "Signal loss A"), (TenantA, "Threshold A"), (TenantB, "Signal loss B")]);
-    }
-
-    [Fact]
-    public async Task GetExcursionsInHysteresisAsync_SelectsByTrackerState()
+    public async Task GetExcursionsInHysteresisAsync_SelectsTheScopesTenantByTrackerState()
     {
         var options = NewStore();
         var legacy = NewRule(TenantA, "Legacy hysteresis");
-        var resumed = NewRule(TenantB, "Resumed");
+        var resumed = NewRule(TenantA, "Resumed");
+        var otherTenant = NewRule(TenantB, "Other tenant");
         var legacyExcursion = Guid.NewGuid();
         var resumedExcursion = Guid.NewGuid();
+        var otherTenantExcursion = Guid.NewGuid();
         var start = new DateTime(2026, 1, 5, 12, 0, 0, DateTimeKind.Utc);
         await SeedAsync(options, ctx =>
         {
             ctx.Tenants.AddRange(NewTenant(TenantA), NewTenant(TenantB));
-            ctx.AlertRules.AddRange(legacy, resumed);
+            ctx.AlertRules.AddRange(legacy, resumed, otherTenant);
             ctx.AlertExcursions.AddRange(
                 new AlertExcursionEntity { Id = legacyExcursion, TenantId = TenantA, AlertRuleId = legacy.Id, StartedAt = start },
                 new AlertExcursionEntity
                 {
-                    Id = resumedExcursion, TenantId = TenantB, AlertRuleId = resumed.Id, StartedAt = start,
+                    Id = resumedExcursion, TenantId = TenantA, AlertRuleId = resumed.Id, StartedAt = start,
                     HysteresisStartedAt = start.AddMinutes(5),
-                });
+                },
+                new AlertExcursionEntity { Id = otherTenantExcursion, TenantId = TenantB, AlertRuleId = otherTenant.Id, StartedAt = start });
             ctx.AlertTrackerState.AddRange(
                 new AlertTrackerStateEntity
                 {
@@ -207,11 +188,16 @@ public class AlertRepositoryTenantScopingTests
                 },
                 new AlertTrackerStateEntity
                 {
-                    AlertRuleId = resumed.Id, TenantId = TenantB, State = "active",
+                    AlertRuleId = resumed.Id, TenantId = TenantA, State = "active",
                     ActiveExcursionId = resumedExcursion, UpdatedAt = start.AddMinutes(6),
+                },
+                new AlertTrackerStateEntity
+                {
+                    AlertRuleId = otherTenant.Id, TenantId = TenantB, State = "hysteresis",
+                    ActiveExcursionId = otherTenantExcursion, UpdatedAt = start.AddMinutes(5),
                 });
         });
-        var repo = Repository(options, scopeTenant: Guid.Empty);
+        var repo = Repository(options, scopeTenant: TenantA);
 
         var inHysteresis = await repo.GetExcursionsInHysteresisAsync(CancellationToken.None);
 

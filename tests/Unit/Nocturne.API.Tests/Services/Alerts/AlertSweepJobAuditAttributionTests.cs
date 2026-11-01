@@ -20,30 +20,27 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.Alerts;
 
 [Trait("Category", "Unit")]
-public class AlertSweepServiceAuditAttributionTests
+public class AlertSweepJobAuditAttributionTests
 {
     private static readonly Guid Tenant = Guid.NewGuid();
 
     /// <summary>
     /// The orchestrator auto-acknowledges Info-severity excursions on contexts that read the
-    /// scope's audit context. The sweep has no request and no actor, so the scope must be
-    /// system-attributed or those acknowledgements land as user mutations with every actor field
-    /// null.
+    /// scope's audit context. The sweep has no request and no actor, so it must evaluate in the
+    /// run's system-attributed scope, not one of its own, or those acknowledgements land as user
+    /// mutations with every actor field null.
     /// </summary>
     [Fact]
-    public async Task EvaluateWallClockRulesAsync_SystemAttributesTheTenantScope()
+    public async Task The_wall_clock_pass_evaluates_in_the_runs_system_attributed_scope()
     {
         var rule = new AlertRuleSnapshot(
             Guid.NewGuid(), Tenant, "sensor expired", AlertConditionType.TrackerAge,
             "{}", AlertRuleSeverity.Info, "{}", 0, false, null);
 
-        var repository = new Mock<IAlertRepository>();
+        var repository = AlertSweepRuns.Repository(Tenant, () => null);
         repository
-            .Setup(x => x.GetAllEnabledRulesAsync(It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetEnabledRulesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([rule]);
-        repository
-            .Setup(x => x.GetTenantAlertContextAsync(Tenant, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TenantAlertContext(Tenant, "owner", "slug", "Slug", true, null));
 
         IAuditContext? scopeContextAudit = null;
         bool? ambientIsSystemMutation = null;
@@ -72,18 +69,12 @@ public class AlertSweepServiceAuditAttributionTests
             return orchestrator.Object;
         });
 
-        var sut = new AlertSweepService(
-            services.BuildServiceProvider(),
-            NullLogger<AlertSweepService>.Instance,
-            TimeProvider.System);
+        await new AlertSweepJob(NullLogger<AlertSweepJob>.Instance)
+            .RunAsync(services.BuildServiceProvider(), Tenant, DateTimeOffset.UtcNow);
 
-        // Act
-        await sut.EvaluateWallClockRulesAsync(CancellationToken.None);
-
-        // Assert
         scopeContextAudit.Should().NotBeNull();
         scopeContextAudit!.IsSystem.Should().BeTrue();
-        scopeContextAudit.Endpoint.Should().Be("service:alert-sweep");
+        scopeContextAudit.Endpoint.Should().Be("job:alert-sweep");
         ambientIsSystemMutation.Should().BeTrue();
     }
 }

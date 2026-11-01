@@ -40,8 +40,8 @@ public class JobSchedulerTests
         var job = new ProbeJob("probe") { Gate = new TaskCompletionSource() };
         var scheduler = Scheduler(job);
         var claimed = new List<int>();
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> _, int limit, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> _, IReadOnlyDictionary<string, string> _, int limit, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
             {
                 claimed.Add(limit);
                 return Enumerable.Range(0, limit).Select(_ => Lease("probe")).ToList();
@@ -65,8 +65,8 @@ public class JobSchedulerTests
         var scheduler = Scheduler(job);
         var due = 12;
         var completed = 0;
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> _, IReadOnlyDictionary<string, string> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
             {
                 var take = Math.Min(limit, due);
                 due -= take;
@@ -115,8 +115,8 @@ public class JobSchedulerTests
     {
         var scheduler = Scheduler(new ProbeJob("probe"));
         var claims = 0;
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, IReadOnlyDictionary<string, int> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, IReadOnlyDictionary<string, int> _, IReadOnlyDictionary<string, string> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
             {
                 _clock.Record(new LoopEvent(LoopStep.Claim, now, Short: true));
                 return Interlocked.Increment(ref claims) == 1
@@ -165,8 +165,8 @@ public class JobSchedulerTests
         var scheduler = Scheduler(capped, other);
         var offered = new List<IReadOnlyDictionary<string, int>>();
         var leases = new Queue<IReadOnlyList<JobLease>>([[Lease("capped"), Lease("capped")], [], []]);
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> jobs, int _, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> jobs, IReadOnlyDictionary<string, string> _, int _, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
             {
                 offered.Add(new Dictionary<string, int>(jobs));
                 return leases.Count > 0 ? leases.Dequeue() : [];
@@ -184,6 +184,48 @@ public class JobSchedulerTests
     }
 
     /// <summary>
+    /// The jobs of one concurrency group share its cap: each is offered the group's room, the claim is
+    /// told they are one group, and while the group is full neither is offered.
+    /// </summary>
+    [Fact]
+    public async Task Jobs_of_one_group_share_its_cap()
+    {
+        var gate = new TaskCompletionSource();
+        var a = new ProbeJob("a") { Gate = gate, MaxConcurrency = 2, Group = "g" };
+        var b = new ProbeJob("b") { Gate = gate, MaxConcurrency = 2, Group = "g" };
+        var other = new ProbeJob("other");
+        var scheduler = Scheduler(a, b, other);
+        var offered = new List<(Dictionary<string, int> Room, Dictionary<string, string> Groups)>();
+        var leases = new Queue<IReadOnlyList<JobLease>>([[Lease("a"), Lease("b")], []]);
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyDictionary<string, int> jobs, IReadOnlyDictionary<string, string> groups, int _, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
+            {
+                offered.Add((new Dictionary<string, int>(jobs), new Dictionary<string, string>(groups)));
+                return leases.Count > 0 ? leases.Dequeue() : [];
+            });
+
+        await scheduler.PollAsync(default);
+        await scheduler.PollAsync(default);
+        gate.SetResult();
+        await scheduler.DrainAsync();
+
+        offered[0].Room.Should().Contain("a", 2).And.Contain("b", 2);
+        offered[0].Groups.Should().Contain("a", "g").And.Contain("b", "g").And.Contain("other", "other");
+        offered[1].Room.Should().NotContainKey("a", "the group holds both of its runs")
+            .And.NotContainKey("b").And.ContainKey("other");
+    }
+
+    [Fact]
+    public void Jobs_of_one_group_with_different_caps_fail_construction()
+    {
+        var build = () => Scheduler(
+            new ProbeJob("a") { MaxConcurrency = 2, Group = "g" },
+            new ProbeJob("b") { MaxConcurrency = 3, Group = "g" });
+
+        build.Should().Throw<InvalidOperationException>().WithMessage("*'g'*");
+    }
+
+    /// <summary>
     /// A claim that took all the room a job's cap left it may have left that job's due rows behind,
     /// so a run ending wakes the loop to claim again, as a claim that filled every slot does.
     /// </summary>
@@ -192,7 +234,7 @@ public class JobSchedulerTests
     {
         var capped = new ProbeJob("capped") { MaxConcurrency = 2 };
         var scheduler = Scheduler(capped);
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Lease("capped"), Lease("capped")]);
 
         await scheduler.PollAsync(default);
@@ -205,13 +247,13 @@ public class JobSchedulerTests
     public async Task Parallelism_comes_from_the_options()
     {
         var scheduler = Scheduler(new JobSchedulerOptions { Parallelism = 7 }, new ProbeJob("probe"));
-        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         await scheduler.PollAsync(default);
 
         _ledger.Verify(l => l.ClaimDueAsync(
-            It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), 7,
+            It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), 7,
             It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()));
     }
 
@@ -361,7 +403,7 @@ public class JobSchedulerTests
         _ledger.Invocations.Clear();
         await scheduler.PollAsync(default);
         _ledger.Verify(l => l.ClaimDueAsync(
-            It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), JobSchedulerOptions.DefaultParallelism,
+            It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), JobSchedulerOptions.DefaultParallelism,
             It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), "the run gave its slot back");
     }
 
@@ -418,7 +460,7 @@ public class JobSchedulerTests
 
     private void Claims(JobLease lease)
     {
-        _ledger.SetupSequence(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        _ledger.SetupSequence(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, int>>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([lease])
             .ReturnsAsync([]);
     }
@@ -492,6 +534,10 @@ public class JobSchedulerTests
         public TimeSpan Spread { get; init; }
 
         public int MaxConcurrency { get; init; } = int.MaxValue;
+
+        public string? Group { get; init; }
+
+        public string ConcurrencyGroup => Group ?? name;
 
         public TaskCompletionSource? Gate { get; init; }
 

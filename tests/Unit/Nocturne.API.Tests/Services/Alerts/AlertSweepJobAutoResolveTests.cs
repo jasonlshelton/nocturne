@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Audit;
@@ -20,11 +19,11 @@ using Xunit;
 namespace Nocturne.API.Tests.Services.Alerts;
 
 /// <summary>
-/// The context <see cref="AlertSweepService.EvaluateAutoResolveAsync"/> hands the engine for an
-/// open auto-resolve excursion.
+/// The context <see cref="AlertSweepJob"/>'s auto-resolve pass hands the engine for an open
+/// auto-resolve excursion.
 /// </summary>
 [Trait("Category", "Unit")]
-public class AlertSweepServiceAutoResolveTests
+public class AlertSweepJobAutoResolveTests
 {
     private static readonly DateTime Now = new(2026, 9, 23, 12, 0, 0, DateTimeKind.Utc);
     private static readonly Guid Tenant = Guid.NewGuid();
@@ -43,13 +42,10 @@ public class AlertSweepServiceAutoResolveTests
             AlertRuleSeverity.Warning, "{}", 0, AutoResolveEnabled: true,
             AutoResolveParams: """{"type":"signal_loss","signal_loss":{"timeout_minutes":30}}""");
 
-        var repository = new Mock<IAlertRepository>();
+        var repository = AlertSweepRuns.Repository(Tenant, () => _anySourceLastReadingAt);
         repository
             .Setup(r => r.GetAutoResolveExcursionsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([new AutoResolveExcursionSnapshot(Guid.NewGuid(), Tenant, rule)]);
-        repository
-            .Setup(r => r.GetTenantAlertContextAsync(Tenant, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new TenantAlertContext(Tenant, "owner", "slug", "Slug", true, _anySourceLastReadingAt));
 
         var canonical = new Mock<ICanonicalGlucoseService>();
         canonical
@@ -84,10 +80,7 @@ public class AlertSweepServiceAutoResolveTests
         services.AddScoped<IAuditContext, AuditContext>();
 
         await using var provider = services.BuildServiceProvider();
-        var sut = new AlertSweepService(
-            provider, NullLogger<AlertSweepService>.Instance, new FakeTimeProvider(new DateTimeOffset(Now)));
-
-        await sut.EvaluateAutoResolveAsync(CancellationToken.None);
+        await new AlertSweepJob(NullLogger<AlertSweepJob>.Instance).RunAsync(provider, Tenant, new DateTimeOffset(Now));
     }
 
     [Fact]

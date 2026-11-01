@@ -291,7 +291,7 @@ public class ProfileVersionStartIntegrationTests : ApiIntegrationTestBase
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (true)
         {
-            var row = (await ledger.ListAsync(default))
+            var row = (await ledger.ListAsync(100_000, default)).Rows
                 .Single(j => j.Job == ProfileVersionsMovedJob.JobName && j.TenantId == Fixture.TenantId);
             if (row.NextDueAt is null || DateTime.UtcNow > deadline)
                 return row;
