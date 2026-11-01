@@ -108,8 +108,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>
     /// The subject whose own rows a subject-scoped cross-tenant read may reach (the tenant switcher,
     /// the caregiver overview, membership enumeration), carried to the <c>app.current_subject_id</c>
-    /// GUC. <see cref="Guid.Empty"/> leaves the GUC unset, and the <c>subject_pin</c> policy then
-    /// admits every row.
+    /// GUC. <see cref="Guid.Empty"/> writes it empty, which the <c>subject_pin</c> policy reads as unset,
+    /// admitting every row.
     /// </summary>
     public Guid SubjectId { get; internal set; }
 

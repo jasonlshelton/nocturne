@@ -9,7 +9,7 @@ namespace Nocturne.API.Middleware;
 /// <c>HttpContext.Items</c>.
 /// </summary>
 /// <remarks>
-/// Each context open costs a <c>set_config</c> round trip and a pool reset, and every authenticated
+/// Each context open costs a <c>set_config</c> round trip, and every authenticated
 /// request needs these facts before its controller runs. So they are read in one statement: joined to
 /// the grant by a handler that already reads one (<see cref="IOAuthGrantRepository"/>), otherwise
 /// joined to the subject's row with its platform-admin flag (<see cref="ReadAsync"/>). Nothing outlives

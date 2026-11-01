@@ -592,7 +592,7 @@ if (!isNSwagGeneration && !app.Environment.IsEnvironment("Testing"))
             migratorConnectionString, Nocturne.API.Services.BackgroundJobLiveStates.ByTable, logger);
     }
 
-    // Validate RLS, ownership, default privileges, and pool reset-on-close under the app role.
+    // Validate RLS, ownership, default privileges, and the context pool's isolation under the app role.
     await app.Services.ValidateDatabaseConfigurationAsync();
 
     // Sync config-managed OIDC providers to the database (satisfies FK constraints)
