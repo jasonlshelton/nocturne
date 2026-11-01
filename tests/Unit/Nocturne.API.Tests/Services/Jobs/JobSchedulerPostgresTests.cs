@@ -8,7 +8,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Nocturne.API.Multitenancy;
 using Nocturne.API.Services.Audit;
+using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.Jobs;
+using Nocturne.Connectors.Core.Extensions;
+using Nocturne.Connectors.Core.Models;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -118,7 +121,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var survivor = Scheduler(job);
         await survivor.EnrolAsync(default);
         var ledger = Ledger();
-        var dead = (await ledger.ClaimDueAsync("dead", [PagingJob.JobName], 1, _clock.GetUtcNow(), _clock.GetUtcNow() + JobScheduler.LeaseLength, default)).Single();
+        var dead = (await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), 1, _clock.GetUtcNow(), _clock.GetUtcNow() + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(JobScheduler.LeaseLength - TimeSpan.FromSeconds(1));
         (await RunDueAsync(survivor)).Should().Be(0, "the dead holder's lease has not run out");
@@ -244,11 +247,11 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        var first = (await ledger.ClaimDueAsync("process", [PagingJob.JobName], 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        var first = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
 
         _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromSeconds(1));
         var now = _clock.GetUtcNow();
-        var second = (await ledger.ClaimDueAsync("process", [PagingJob.JobName], 1, now, now + JobScheduler.LeaseLength, default)).Single();
+        var second = (await ledger.ClaimDueAsync("process", Only(PagingJob.JobName), 1, now, now + JobScheduler.LeaseLength, default)).Single();
 
         second.Holder.Should().NotBe(first.Holder);
         await ledger.CompleteAsync(first, now, null, null, default);
@@ -359,18 +362,198 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
     }
 
     [Fact]
-    public async Task A_request_on_a_row_whose_holder_died_does_not_push_it_later()
+    public async Task A_request_on_a_row_whose_holder_died_leaves_it_due()
     {
         var tenant = await SeedTenantAsync();
         var ledger = Ledger();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
-        await ledger.ClaimDueAsync("dead", [PagingJob.JobName], 1, Start, Start + JobScheduler.LeaseLength, default);
+        await ledger.ClaimDueAsync("dead", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default);
 
         _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromMinutes(1));
+        var requested = _clock.GetUtcNow();
         await ledger.RequestAsync(PagingJob.JobName, tenant, default);
 
-        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start);
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(
+            requested, "the row still names a holder, which may yet be finishing, so the request marks it");
+        (await RunDueAsync(Scheduler(new PagingJob()))).Should().Be(1, "the dead holder's lease has run out");
     }
+
+    [Fact]
+    public async Task A_request_landing_after_the_lease_ran_out_but_before_the_holder_finished_is_kept()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var slow = (await ledger.ClaimDueAsync("slow", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(JobScheduler.LeaseLength + TimeSpan.FromMinutes(1));
+        var requested = _clock.GetUtcNow();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        await ledger.CompleteAsync(slow, requested, null, requested + TimeSpan.FromHours(1), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(
+            requested, "the request came after the run started, so the run's later due time does not replace it");
+    }
+
+    [Fact]
+    public async Task A_delayed_request_reopens_a_finished_row_and_defers_a_due_one_and_an_immediate_request_pulls_it_back()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+        await ledger.CompleteAsync(lease, Start, null, null, default);
+
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromMinutes(1), "a finished row reopens after the delay");
+
+        _clock.Advance(TimeSpan.FromSeconds(10));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(
+            Start + TimeSpan.FromSeconds(70), "a delayed request defers the row to the delay after the last one");
+
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(10), "an immediate request pulls it back to now");
+    }
+
+    [Fact]
+    public async Task On_a_running_row_a_delayed_request_overrides_an_immediate_one_made_before_it()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        _clock.Advance(TimeSpan.FromSeconds(3));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.CompleteAsync(lease, _clock.GetUtcNow(), null, Start + TimeSpan.FromMinutes(5), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(
+            Start + TimeSpan.FromSeconds(65), "a configuration write settles everything pending");
+    }
+
+    [Fact]
+    public async Task On_a_running_row_an_immediate_request_brings_a_delayed_one_forward()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(65));
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        _clock.Advance(TimeSpan.FromSeconds(3));
+        await ledger.CompleteAsync(lease, _clock.GetUtcNow(), null, Start + TimeSpan.FromMinutes(5), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(7));
+    }
+
+    /// <summary>
+    /// A long run outlives a delayed request's delay; a second configuration write still defers the
+    /// row a minute past itself, not back to the first write's matured time.
+    /// </summary>
+    [Fact]
+    public async Task On_a_long_run_a_second_delayed_request_defers_past_the_first_ones_matured_time()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        _clock.Advance(TimeSpan.FromSeconds(70));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.CompleteAsync(lease, _clock.GetUtcNow(), null, Start + TimeSpan.FromMinutes(5), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(130));
+    }
+
+    /// <summary>
+    /// A configuration write during a run defers the row past a sooner outcome (an aligned time a few
+    /// seconds out), so no sync starts between that write and the next one.
+    /// </summary>
+    [Fact]
+    public async Task A_deferral_made_during_a_run_outlasts_a_sooner_outcome()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(1), default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.CompleteAsync(lease, _clock.GetUtcNow(), null, _clock.GetUtcNow() + TimeSpan.FromSeconds(30), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(65));
+    }
+
+    [Fact]
+    public async Task An_immediate_request_made_during_a_run_outlasts_a_later_outcome()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.CompleteAsync(lease, _clock.GetUtcNow(), null, _clock.GetUtcNow() + TimeSpan.FromMinutes(5), default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>
+    /// A deferral made during a run that fails is kept even when it is later than the retry: the retry
+    /// would otherwise start the sync before the configuration has settled.
+    /// </summary>
+    [Fact]
+    public async Task A_deferral_made_during_a_failed_run_is_kept_over_a_sooner_retry()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, TimeSpan.FromMinutes(3), default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        var retry = _clock.GetUtcNow() + JobScheduler.Backoff(1, ConnectorBackgroundService<TestConnectorConfiguration>.ConnectorMaxBackoff);
+        await ledger.FailAsync(lease, "boom", retry, default);
+
+        retry.Should().BeBefore(Start + TimeSpan.FromSeconds(185));
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(185));
+    }
+
+    [Fact]
+    public async Task An_immediate_request_made_during_a_failed_run_is_kept_over_a_later_retry()
+    {
+        var tenant = await SeedTenantAsync();
+        var ledger = Ledger();
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        var lease = (await ledger.ClaimDueAsync("p", Only(PagingJob.JobName), 1, Start, Start + JobScheduler.LeaseLength, default)).Single();
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.RequestAsync(PagingJob.JobName, tenant, default);
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        await ledger.FailAsync(
+            lease, "boom",
+            _clock.GetUtcNow() + JobScheduler.Backoff(1, ConnectorBackgroundService<TestConnectorConfiguration>.ConnectorMaxBackoff),
+            default);
+
+        (await RowAsync(PagingJob.JobName, tenant)).NextDueAt.Should().Be(Start + TimeSpan.FromSeconds(5));
+    }
+
+    [ConnectorRegistration("JobLedgerTest", "job-ledger-test", "JOBLEDGERTEST", "JobLedgerTest")]
+    private sealed class TestConnectorConfiguration : BaseConnectorConfiguration;
 
     [Fact]
     public async Task A_platform_job_has_one_row_however_often_it_is_enrolled()
@@ -386,6 +569,30 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         (await RunDueAsync(scheduler)).Should().Be(1);
         job.Tenants.Should().Equal([(TenantContext?)null]);
     }
+
+    [Fact]
+    public async Task A_job_whose_runs_are_stuck_leaves_the_other_slots_to_other_jobs()
+    {
+        for (var i = 0; i < 6; i++)
+            await SeedTenantAsync();
+        var stuck = new GatedJob { MaxConcurrency = 2 };
+        var daily = new DailyJob();
+        var scheduler = Scheduler(new JobSchedulerOptions { Parallelism = 4 }, stuck, daily);
+        await scheduler.EnrolAsync(default);
+
+        await WaitForAsync(async () =>
+        {
+            await scheduler.PollAsync(default);
+            await Task.Delay(20);
+            return daily.Runs == 6;
+        });
+
+        stuck.Started.Should().Be(2, "the stuck job never holds more than its cap");
+        stuck.Release();
+        await scheduler.DrainAsync();
+    }
+
+    private static IReadOnlyDictionary<string, int> Only(string job) => new Dictionary<string, int> { [job] = int.MaxValue };
 
     private static async Task WaitForAsync(Func<Task<bool>> condition)
     {
@@ -405,7 +612,9 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         return started;
     }
 
-    private JobScheduler Scheduler(params IScheduledJob[] jobs)
+    private JobScheduler Scheduler(params IScheduledJob[] jobs) => Scheduler(new JobSchedulerOptions(), jobs);
+
+    private JobScheduler Scheduler(JobSchedulerOptions schedulerOptions, params IScheduledJob[] jobs)
     {
         var services = new ServiceCollection();
         services.AddMetrics();
@@ -425,7 +634,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
             provider,
             _clock,
             new JobMetrics(provider.GetRequiredService<IMeterFactory>()),
-            Options.Create(new JobSchedulerOptions()),
+            Options.Create(schedulerOptions),
             NullLogger<JobScheduler>.Instance);
     }
 
@@ -488,6 +697,10 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         private int _cancelled;
 
         public int Cancelled => Volatile.Read(ref _cancelled);
+
+        public int Started => Volatile.Read(ref _started);
+
+        public int MaxConcurrency { get; init; } = int.MaxValue;
 
         public ConcurrentQueue<Guid> Runs { get; } = new();
 

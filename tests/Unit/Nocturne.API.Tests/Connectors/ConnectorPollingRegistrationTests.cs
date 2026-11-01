@@ -17,6 +17,7 @@ using Nocturne.Connectors.Core.Models;
 using Nocturne.Infrastructure.Data;
 using Xunit;
 using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Multitenancy;
 
 namespace Nocturne.API.Tests.Connectors;
@@ -36,8 +37,8 @@ public class ConnectorPollingRegistrationTests
     ];
 
     /// <summary>
-    /// Connectors that never poll: they receive or emit data by another route, so having no hosted
-    /// service is the design, not a gap. HomeAssistant is an outbound notify target the alert
+    /// Connectors that never poll: they receive or emit data by another route, so having no
+    /// scheduled job is the design, not a gap. HomeAssistant is an outbound notify target the alert
     /// delivery pipeline pushes to.
     /// </summary>
     private static readonly string[] NonPollingByDesign = ["HomeAssistant"];
@@ -126,6 +127,7 @@ public class ConnectorPollingRegistrationTests
         services.AddLogging();
         services.AddSingleton(new ConnectorSyncBudget());
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(Mock.Of<IJobLedger>());
         services.AddSingleton(ActiveTenantSnapshotTestDoubles.Unread());
         services.AddSingleton(nudge);
         using var provider = services.BuildServiceProvider();
@@ -133,7 +135,7 @@ public class ConnectorPollingRegistrationTests
         foreach (var poller in ScheduledPollers())
         {
             var connectorName = ConnectorRegistrationAttribute.DeclaredOn(PolledConfigurationOf(poller)).ConnectorName;
-            using var _ = (IDisposable)ActivatorUtilities.CreateInstance(provider, poller);
+            ActivatorUtilities.CreateInstance(provider, poller);
 
             nudge.HasSubscribers(connectorName).Should().BeTrue(
                 "{0} must forward ConnectorPollerNudge to the base constructor", poller.Name);
@@ -141,12 +143,12 @@ public class ConnectorPollingRegistrationTests
     }
 
     /// <summary>
-    /// The snapshot saves a query and a connection per tick only while every poller and sweep reads
-    /// the one registered instance. Each is built the way the host builds it, over the snapshot
-    /// registration the host uses, and asked which snapshot it holds.
+    /// The snapshot saves a query and a connection per pass only while every listener poller and
+    /// sweep reads the one registered instance. Each is built the way the host builds it, over the
+    /// snapshot registration the host uses, and asked which snapshot it holds.
     /// </summary>
     [Fact]
-    public void EveryPollerAndSweep_ReadsTheOneRegisteredActiveTenantSnapshot()
+    public void EveryListenerAndSweep_ReadsTheOneRegisteredActiveTenantSnapshot()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -155,6 +157,7 @@ public class ConnectorPollingRegistrationTests
         services.AddTransient<ITenantRepository, TenantRepository>();
         services.AddSingleton(new ConnectorSyncBudget());
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(Mock.Of<IJobLedger>());
         using var provider = services.BuildServiceProvider();
         var registered = provider.GetRequiredService<ActiveTenantSnapshot>();
 
@@ -164,12 +167,21 @@ public class ConnectorPollingRegistrationTests
             typeof(NotificationResolutionService),
         ];
 
-        foreach (var type in ScheduledPollers().Concat(sweeps))
-        {
-            using var instance = (IDisposable)ActivatorUtilities.CreateInstance(provider, type);
+        var listeners = ScheduledPollers().Where(typeof(IConnectorRealtimeListeners).IsAssignableFrom).ToList();
+        listeners.Should().NotBeEmpty();
 
-            SnapshotHeldBy(instance).Should().BeSameAs(
-                registered, "{0} must read the registered ActiveTenantSnapshot", type.Name);
+        foreach (var type in listeners.Concat(sweeps))
+        {
+            var instance = ActivatorUtilities.CreateInstance(provider, type);
+            try
+            {
+                SnapshotHeldBy(instance).Should().BeSameAs(
+                    registered, "{0} must read the registered ActiveTenantSnapshot", type.Name);
+            }
+            finally
+            {
+                (instance as IDisposable)?.Dispose();
+            }
         }
     }
 
@@ -224,7 +236,7 @@ public class ConnectorPollingRegistrationTests
         var config = new PollingTestConfiguration();
         var reporter = Mock.Of<ISyncProgressReporter>();
 
-        var result = await new ExposedPoller(root)
+        var result = await new ExposedPoller()
             .SyncAsync(scope.ServiceProvider, config, CancellationToken.None, reporter);
 
         result.Success.Should().BeTrue();
@@ -255,7 +267,7 @@ public class ConnectorPollingRegistrationTests
             typeof(ConnectorBackgroundService<,>));
 
         return [.. services
-            .Where(descriptor => descriptor.ServiceType == typeof(IHostedService))
+            .Where(descriptor => descriptor.ServiceType == typeof(IScheduledJob))
             .Select(descriptor => descriptor.ImplementationType!)];
     }
 
@@ -334,10 +346,14 @@ public class ConnectorPollingRegistrationTests
     /// The poller pair in miniature. Pointing the scan at this assembly keeps the shape it rejects
     /// out of the API.
     /// </summary>
-    private abstract class FakePollerBase<TConfig> : BackgroundService
+    private abstract class FakePollerBase<TConfig> : IScheduledJob
         where TConfig : BaseConnectorConfiguration
     {
-        protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
+        public string Name => GetType().Name;
+
+        public JobEnrolment Enrolment => JobEnrolment.PerTenant;
+
+        public Task<JobOutcome> RunAsync(JobRun run, CancellationToken ct) => Task.FromResult(JobOutcome.Done);
     }
 
     private sealed class FakePoller<TService, TConfig> : FakePollerBase<TConfig>
@@ -346,11 +362,10 @@ public class ConnectorPollingRegistrationTests
 
     private sealed class OrphanedPoller : FakePollerBase<PollingTestConfiguration>;
 
-    private sealed class ExposedPoller(IServiceProvider serviceProvider)
+    private sealed class ExposedPoller()
         : ConnectorBackgroundService<RecordingConnectorService, PollingTestConfiguration>(
-            serviceProvider,
             new ConnectorSyncBudget(),
-            ActiveTenantSnapshotTestDoubles.Unread(),
+            Mock.Of<IJobLedger>(),
             NullLogger<ConnectorBackgroundService<RecordingConnectorService, PollingTestConfiguration>>.Instance,
             TimeProvider.System)
     {

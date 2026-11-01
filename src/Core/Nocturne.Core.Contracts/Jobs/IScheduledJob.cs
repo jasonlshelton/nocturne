@@ -30,6 +30,18 @@ public interface IScheduledJob
     /// <summary>The longest wait between failed attempts; capped at <see cref="DefaultMaxBackoff"/>.</summary>
     TimeSpan MaxBackoff => DefaultMaxBackoff;
 
+    /// <summary>
+    /// The window a per-tenant job's rows are first due across when they are enrolled, each at its
+    /// <see cref="JobPhase"/>; zero, the default, makes every row due at enrolment.
+    /// </summary>
+    TimeSpan Spread => TimeSpan.Zero;
+
+    /// <summary>
+    /// The most runs of this job one process holds at once, so a job whose runs are all stuck (an
+    /// upstream outage holding each run to its timeout) leaves the other slots to the other jobs.
+    /// </summary>
+    int MaxConcurrency => int.MaxValue;
+
     /// <summary>Runs the job once for its row.</summary>
     Task<JobOutcome> RunAsync(JobRun run, CancellationToken ct);
 }

@@ -110,7 +110,7 @@ public class ConnectorSyncService : IConnectorSyncService
 
         try
         {
-            // Attributed as ConnectorBackgroundService attributes a scheduled sync.
+            // A manual sync is attributed as connector:<id>; a scheduled one runs as job:connector:<id>.
             await using var scope = TenantJobScope.Open(
                 _serviceProvider, _tenantAccessor.Context, $"connector:{ConnectorNames.Canonical(connectorId)}");
 

@@ -1231,7 +1231,8 @@ public static class ServiceRegistrationExtensions
             configuration,
             pollingService: typeof(ConnectorBackgroundService<,>)
         );
-        services.AddSingleton(ConnectorSyncBudget.FromConfiguration(configuration, services));
+        services.AddSingleton(ConnectorSyncBudget.FromConfiguration(configuration));
+        services.AddHostedService<ConnectorRealtimeSupervisor>();
         // IMeterFactory comes from the host; AddMetrics keeps the registration self-sufficient for a
         // host that has not enabled the OpenTelemetry metrics pipeline.
         services.AddMetrics();

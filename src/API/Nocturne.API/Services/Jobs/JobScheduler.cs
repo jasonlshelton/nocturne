@@ -28,8 +28,9 @@ namespace Nocturne.API.Services.Jobs;
 /// <c>job:&lt;name&gt;</c>.
 /// </para>
 /// <para>
-/// A claim that fills every free slot may have left due rows behind, so until a claim comes back
-/// short each finished run claims again at once; an idle ledger is read every <see cref="PollInterval"/>.
+/// A claim that fills every free slot, or all the room a job's <see cref="IScheduledJob.MaxConcurrency"/>
+/// left it, may have left due rows behind, so until a claim comes back short of both each finished run
+/// claims again at once; an idle ledger is read every <see cref="PollInterval"/>.
 /// </para>
 /// </remarks>
 public sealed class JobScheduler : BackgroundService
@@ -49,6 +50,7 @@ public sealed class JobScheduler : BackgroundService
     private readonly JobMetrics _metrics;
     private readonly ILogger<JobScheduler> _logger;
     private readonly ConcurrentDictionary<Task, byte> _inFlight = new();
+    private readonly ConcurrentDictionary<string, int> _runningByJob = new(StringComparer.Ordinal);
     private int _running;
     private bool _backlog;
     private TaskCompletionSource _wake = NewWake();
@@ -148,7 +150,7 @@ public sealed class JobScheduler : BackgroundService
             switch (job.Enrolment)
             {
                 case JobEnrolment.PerTenant:
-                    await _ledger.EnrolPerTenantAsync(job.Name, now, ct);
+                    await _ledger.EnrolPerTenantAsync(job.Name, now, job.Spread, ct);
                     break;
                 case JobEnrolment.Platform:
                     await _ledger.EnrolPlatformAsync(job.Name, now, ct);
@@ -159,7 +161,10 @@ public sealed class JobScheduler : BackgroundService
         _metrics.SetFailing(await _ledger.CountFailingAsync(ct));
     }
 
-    /// <summary>Claims as many due rows as there are free slots and starts a run for each.</summary>
+    /// <summary>
+    /// Claims as many due rows as there are free slots, and no more of one job's rows than its
+    /// <see cref="IScheduledJob.MaxConcurrency"/> leaves room for, and starts a run for each.
+    /// </summary>
     /// <returns>How many runs it started.</returns>
     internal async Task<int> PollAsync(CancellationToken ct)
     {
@@ -167,12 +172,26 @@ public sealed class JobScheduler : BackgroundService
         if (free <= 0)
             return 0;
 
+        var room = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var job in _jobs.Values)
+        {
+            var left = job.MaxConcurrency - _runningByJob.GetValueOrDefault(job.Name);
+            if (left > 0)
+                room[job.Name] = left;
+        }
+
+        if (room.Count == 0)
+            return 0;
+
         var now = _time.GetUtcNow();
-        var leases = await _ledger.ClaimDueAsync(Holder, _jobs.Keys, free, now, now + LeaseLength, ct);
-        Volatile.Write(ref _backlog, leases.Count == free);
+        var leases = await _ledger.ClaimDueAsync(Holder, room, free, now, now + LeaseLength, ct);
+        Volatile.Write(
+            ref _backlog,
+            leases.Count == free || leases.GroupBy(l => l.Job).Any(claimed => claimed.Count() == room[claimed.Key]));
         foreach (var lease in leases)
         {
             Interlocked.Increment(ref _running);
+            _runningByJob.AddOrUpdate(lease.Job, 1, (_, n) => n + 1);
             var run = Task.Run(() => RunAsync(lease, now, ct), CancellationToken.None);
             _inFlight.TryAdd(run, 0);
             _ = run.ContinueWith(t => _inFlight.TryRemove(t, out _), TaskScheduler.Default);
@@ -260,10 +279,11 @@ public sealed class JobScheduler : BackgroundService
         }
         finally
         {
-            _metrics.RecordRun(lease.Job, outcome, _time.GetElapsedTime(started));
+            _runningByJob.AddOrUpdate(lease.Job, 0, (_, n) => n - 1);
             Interlocked.Decrement(ref _running);
             if (Volatile.Read(ref _backlog))
                 Volatile.Read(ref _wake).TrySetResult();
+            _metrics.RecordRun(lease.Job, outcome, _time.GetElapsedTime(started));
         }
     }
 
@@ -316,7 +336,11 @@ public sealed class JobSchedulerOptions
 {
     public const string SectionName = "Jobs";
 
-    public const int DefaultParallelism = 4;
+    /// <summary>
+    /// A connector run holds its slot for its whole sync, up to its per-tenant timeout, so the
+    /// default covers the connectors' concurrency as well as the short jobs.
+    /// </summary>
+    public const int DefaultParallelism = 12;
 
     /// <summary>How many runs one process holds at once.</summary>
     public int Parallelism { get; set; } = DefaultParallelism;

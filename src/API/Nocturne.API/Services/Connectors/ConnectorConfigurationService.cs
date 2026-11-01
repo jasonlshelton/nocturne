@@ -371,7 +371,8 @@ public class ConnectorConfigurationService : IConnectorConfigurationService
 
     /// <summary>
     /// Tells every tenant-keyed cache — auth tokens, sessions, the pollers' schedules — that this
-    /// connector's stored configuration changed, so the next sync reads it afresh and runs now.
+    /// connector's stored configuration changed, so the next sync reads it afresh, a minute after
+    /// the write.
     /// </summary>
     private void InvalidateCaches(ConnectorConfigurationRecord written)
     {

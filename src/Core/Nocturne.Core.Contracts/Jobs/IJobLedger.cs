@@ -23,12 +23,13 @@ namespace Nocturne.Core.Contracts.Jobs;
 public interface IJobLedger
 {
     /// <summary>
-    /// Leases up to <paramref name="limit"/> due rows of <paramref name="jobs"/> until
-    /// <paramref name="leaseUntil"/>, earliest due first, skipping rows another claim has locked. Each
-    /// lease's token is <paramref name="holder"/> and a suffix unique to the claim.
+    /// Leases up to <paramref name="limit"/> due rows of <paramref name="jobs"/>, and no more of one
+    /// job's rows than the number it maps to, until <paramref name="leaseUntil"/>, earliest due first,
+    /// skipping rows another claim has locked. Each lease's token is <paramref name="holder"/> and a
+    /// suffix unique to the claim.
     /// </summary>
     Task<IReadOnlyList<JobLease>> ClaimDueAsync(
-        string holder, IReadOnlyCollection<string> jobs, int limit, DateTimeOffset now, DateTimeOffset leaseUntil, CancellationToken ct);
+        string holder, IReadOnlyDictionary<string, int> jobs, int limit, DateTimeOffset now, DateTimeOffset leaseUntil, CancellationToken ct);
 
     /// <summary>Extends <paramref name="lease"/> while it is still held; false when it is not.</summary>
     Task<bool> ExtendLeaseAsync(JobLease lease, DateTimeOffset leaseUntil, CancellationToken ct);
@@ -36,33 +37,53 @@ public interface IJobLedger
     /// <summary>
     /// Records a successful run of <paramref name="lease"/>: the cursor and next due time (both null
     /// for a finished job), with the failure count cleared and the lease released. A request made while
-    /// the run held the row is kept when it is earlier than <paramref name="nextDueAt"/>.
+    /// the run held the row is kept as <see cref="RequestAsync(string, Guid?, TimeSpan, CancellationToken)"/>
+    /// rules: a deferral always, an immediate request when it is earlier than <paramref name="nextDueAt"/>.
     /// </summary>
     Task CompleteAsync(
         JobLease lease, DateTimeOffset completedAt, JobCursor? cursor, DateTimeOffset? nextDueAt, CancellationToken ct);
 
     /// <summary>
     /// Records a failed run: one more attempt, <paramref name="error"/>, due again at
-    /// <paramref name="retryAt"/> (or sooner, for a request made during the run), cursor kept, lease
-    /// released.
+    /// <paramref name="retryAt"/>, cursor kept, lease released. A request made while the run held the
+    /// row is kept as <see cref="RequestAsync(string, Guid?, TimeSpan, CancellationToken)"/> rules: a
+    /// deferral always, an immediate request when it is earlier than <paramref name="retryAt"/>.
     /// </summary>
     Task FailAsync(JobLease lease, string error, DateTimeOffset retryAt, CancellationToken ct);
 
     /// <summary>Releases the lease and changes nothing else, so the row is claimable at once.</summary>
     Task ReleaseAsync(JobLease lease, CancellationToken ct);
 
-    /// <summary>Adds a row due at <paramref name="dueAt"/> for every tenant that has none for <paramref name="job"/>.</summary>
-    Task EnrolPerTenantAsync(string job, DateTimeOffset dueAt, CancellationToken ct);
+    /// <summary>
+    /// Adds a row for every tenant that has none for <paramref name="job"/>, due at
+    /// <paramref name="dueAt"/> plus the tenant's <see cref="JobPhase"/> within <paramref name="spread"/>.
+    /// </summary>
+    Task EnrolPerTenantAsync(string job, DateTimeOffset dueAt, TimeSpan spread, CancellationToken ct);
 
     /// <summary>Adds the platform row of <paramref name="job"/>, due at <paramref name="dueAt"/>, if it has none.</summary>
     Task EnrolPlatformAsync(string job, DateTimeOffset dueAt, CancellationToken ct);
 
     /// <summary>
     /// Makes the row of <paramref name="job"/> for <paramref name="tenantId"/> (null for the platform
-    /// row) due now, adding it if absent, a finished row included. A request made during a run is
-    /// honoured when the run completes or fails.
+    /// row) due now, adding it if absent, a finished row included; a row due sooner keeps its time.
+    /// A request made during a run is honoured when the run completes or fails.
     /// </summary>
-    Task RequestAsync(string job, Guid? tenantId, CancellationToken ct);
+    Task RequestAsync(string job, Guid? tenantId, CancellationToken ct) => RequestAsync(job, tenantId, TimeSpan.Zero, ct);
+
+    /// <summary>
+    /// With a positive <paramref name="after"/>, defers the row: it is due <paramref name="after"/>
+    /// from now whatever time it held or a run left pending, so it runs no sooner than that after the
+    /// last such request; an immediate request after it brings it forward again. With zero, it is
+    /// <see cref="RequestAsync(string, Guid?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>
+    /// A delayed request overrides even an immediate one pending from earlier in the same run: the
+    /// ledger does not store which kind a pending time came from, and an earlier delayed request whose
+    /// delay passed during a long run looks the same as an immediate one, so keeping it would start
+    /// the sync seconds after the last write. The settled sync picks up the immediate request's data
+    /// a little later, the lesser harm.
+    /// </remarks>
+    Task RequestAsync(string job, Guid? tenantId, TimeSpan after, CancellationToken ct);
 
     /// <summary>Every row, for the platform admin view.</summary>
     Task<IReadOnlyList<JobLedgerEntry>> ListAsync(CancellationToken ct);
