@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Nocturne.API.Services.Entries;
 using Nocturne.Core.Contracts.V4;
@@ -93,6 +94,31 @@ internal class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
                 : treatments.OrderBy(t => t.Mills))
             .Take(limit);
     }
+
+    /// <summary>The records of one table <see cref="GetProjectedTreatmentsAtAsync"/> reads at each instant.</summary>
+    private const int RowsPerInstant = 100;
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<Treatment>> GetProjectedTreatmentsAtAsync(
+        IReadOnlyCollection<long> instants,
+        CancellationToken ct = default
+    )
+    {
+        var at = instants.Distinct().Select(mills => MillsToDateTime(mills)!.Value).ToList();
+        if (at.Count == 0)
+            return [];
+
+        await using var db = await _contexts.CreateAsync(ct);
+        var rows = await FetchAsync(table => table.AtAsync(db, at, RowsPerInstant, ct));
+        return await AssembleAsync(db, rows, ct, pairedWithin: StartOf);
+    }
+
+    private static DateTime StartOf(FetchedRecord row) => row.Record switch
+    {
+        IV4Record record => record.Timestamp,
+        StateSpanEntity span => span.StartTimestamp,
+        _ => throw new UnreachableException(),
+    };
 
     /// <inheritdoc />
     public async Task<Treatment?> GetLatestProjectedTreatmentAsync(
@@ -333,10 +359,14 @@ internal class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
     /// row is stamped above <paramref name="historyCursor"/>, so the client's cursor stays where the
     /// page put it.
     /// </param>
+    /// <param name="pairedWithin">
+    /// When set, a meal pairs only rows that share this key, as separate reads of each key would.
+    /// </param>
     private async Task<List<Treatment>> AssembleAsync(
         NocturneDbContext db,
         IReadOnlyList<FetchedRecord> rows, CancellationToken ct,
-        DateTime? historyCursor = null
+        DateTime? historyCursor = null,
+        Func<FetchedRecord, DateTime>? pairedWithin = null
     )
     {
         var foldedNotes = new HashSet<string>(StringComparer.Ordinal);
@@ -431,7 +461,10 @@ internal class V4ToLegacyProjectionService : IV4ToLegacyProjectionService
             return historyCursor is { } cursor && stamp > cursor ? cursor : stamp;
         }
 
-        var treatments = LegacyTreatmentTables.Assemble(rows, await LoadCarbFoodsAsync(rows, ct), notes);
+        var foods = await LoadCarbFoodsAsync(rows, ct);
+        var treatments = pairedWithin is null
+            ? LegacyTreatmentTables.Assemble(rows, foods, notes)
+            : [.. rows.GroupBy(pairedWithin).SelectMany(group => LegacyTreatmentTables.Assemble([.. group], foods, notes))];
         return foldedNotes.Count == 0
             ? treatments
             : treatments.Select(t => t.Id is { } id && foldedNotes.Contains(id) ? FoldedNoteTombstone(t) : t).ToList();

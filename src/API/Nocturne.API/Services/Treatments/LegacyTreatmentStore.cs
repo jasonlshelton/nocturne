@@ -163,26 +163,65 @@ internal sealed class LegacyTreatmentStore(
     /// can edit and delete by it later; the client's own id stays stored as the records' LegacyId.
     /// A treatment that wrote none of the projected tables keeps the id it was sent with.
     /// </summary>
-    internal async Task<Treatment> ToCreatedAsync(Treatment treatment, DecompositionResult result, CancellationToken ct)
+    internal async Task<StoredTreatment> ToCreatedAsync(Treatment treatment, DecompositionResult result, CancellationToken ct)
     {
         var written = result.CreatedRecords.Concat(result.UpdatedRecords).ToList();
         if (written.OfType<TempBasal>().FirstOrDefault() is { } tempBasal)
-            return TempBasalToTreatmentMapper.ToTreatment(tempBasal);
+            return new StoredTreatment.Served(TempBasalToTreatmentMapper.ToTreatment(tempBasal), tempBasal.Id);
 
         if (written.OfType<StateSpan>().FirstOrDefault(LegacyTreatmentTables.ServesStateSpan) is { OriginalId: { } spanKey })
         {
-            if (await _projection.GetProjectedStateSpanTreatmentAsync(spanKey, ct) is { Id: { } spanId })
-                treatment.Id = spanId;
-            return treatment;
+            if (await _projection.GetProjectedStateSpanTreatmentAsync(spanKey, ct) is not { Id: { } spanId } span)
+                return new StoredTreatment.Unnamed(treatment);
+
+            treatment.Id = spanId;
+            return new StoredTreatment.Named(treatment, span.Mills);
         }
 
         var served = LegacyTreatmentTables.ByServedPrecedence
             .Select(table => written.OfType<IV4Record>().FirstOrDefault(table.Model.IsInstanceOfType))
             .FirstOrDefault(record => record is not null);
-        if (served is not null)
-            treatment.Id = (await ServedAsAsync(served, ct)).Id.ToString();
+        if (served is null)
+            return new StoredTreatment.Unnamed(treatment);
 
-        return treatment;
+        var servedAs = await ServedAsAsync(served, ct);
+        treatment.Id = servedAs.Id.ToString();
+        return new StoredTreatment.Named(treatment, servedAs.Mills);
+    }
+
+    /// <inheritdoc cref="ITreatmentStore.ReadBackAsync"/>
+    internal async Task<IReadOnlyList<Treatment?>> ReadBackAsync(
+        IReadOnlyList<StoredTreatment> stored, CancellationToken ct)
+    {
+        List<Guid> tempBasalIds = [.. stored.OfType<StoredTreatment.Served>().Select(s => s.RecordId).Distinct()];
+        Dictionary<Guid, TempBasal> tempBasals = tempBasalIds.Count == 0
+            ? new()
+            : (await _repositories.TempBasals.GetByIdsAsync(tempBasalIds, ct)).ToDictionary(t => t.Id);
+
+        var named = stored.OfType<StoredTreatment.Named>().ToList();
+        var atInstants = named.Count == 0
+            ? []
+            : await _projection.GetProjectedTreatmentsAtAsync([.. named.Select(n => n.Mills)], ct);
+        var projected = atInstants
+            .Where(t => t.Id is not null)
+            .DistinctBy(t => t.Id)
+            .ToDictionary(t => t.Id!, StringComparer.Ordinal);
+
+        var served = new List<Treatment?>(stored.Count);
+        foreach (var treatment in stored)
+        {
+            served.Add(treatment switch
+            {
+                StoredTreatment.Served s => tempBasals.TryGetValue(s.RecordId, out var tempBasal)
+                    ? TempBasalToTreatmentMapper.ToTreatment(tempBasal)
+                    : null,
+                StoredTreatment.Named { Created.Id: { } id } when projected.TryGetValue(id, out var found) => found,
+                { Created.Id: { } id } => await ReadAsync(id, ct),
+                _ => null,
+            });
+        }
+
+        return served;
     }
 
     private static readonly IReadOnlyList<ILegacyKeyedTreatmentTable> ServingTables =
@@ -296,8 +335,7 @@ internal sealed class LegacyTreatmentStore(
                 : record;
 
     private async Task<Treatment?> FindProjectedAsync(long mills, string treatmentId, CancellationToken ct) =>
-        (await _projection.GetProjectedTreatmentsAsync(mills, mills, 100, ct: ct))
-            .FirstOrDefault(t => t.Id == treatmentId);
+        (await _projection.GetProjectedTreatmentsAtAsync([mills], ct)).FirstOrDefault(t => t.Id == treatmentId);
 
     private async Task<Treatment?> ReadAsync(string id, CancellationToken ct) =>
         await ResolveAsync(id, ct) is { } resolved ? await resolved.ReadAsync(ct) : null;

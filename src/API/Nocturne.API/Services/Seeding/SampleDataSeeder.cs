@@ -892,74 +892,82 @@ public class SampleDataSeeder
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Leaves the newest planted compression low pending, accepts the next and dismisses the one
+    /// after, walking back past the nights the detector did not flag.
+    /// </summary>
+    /// <remarks>
+    /// The detector rejects a drop the insulin and carbs on board explain, and the random overnight
+    /// trace sometimes leaves enough on board, so a planted low is not found on every night. A night
+    /// whose artifact is still ahead of the run, or that already holds an active suggestion from
+    /// another source, yields none either.
+    /// </remarks>
     private async Task SeedCompressionLowReviewsAsync(SeedingClock clock, int days, CancellationToken ct)
     {
         var nights = Enumerable.Range(0, days)
             .Select(offset => DateOnly.FromDateTime(clock.LocalToday.AddDays(-offset)))
-            .Where(DemoCoverageSeeds.IsCompressionNight)
-            .Take(3)
-            .ToList();
-        var pendingByNight = new Dictionary<DateOnly, List<CompressionLowSuggestion>>();
+            .Where(night => DemoCoverageSeeds.CompressionArtifactEndedBy(night, clock.Demo, clock.UtcNow));
+        var planted = new List<CompressionLowSuggestion>();
         foreach (var night in nights)
         {
-            var existing = (await _compressionLowService.GetSuggestionsAsync(null, night, ct))
-                .ToList();
-            var existingDemo = existing
-                .Where(suggestion => suggestion.DataSource == Nocturne.Core.Constants.DataSources.DemoService)
-                .ToList();
-            if (existingDemo.Count > 0)
-            {
-                pendingByNight[night] = existingDemo
-                    .Where(suggestion => suggestion.Status == CompressionLowStatus.Pending)
-                    .OrderBy(suggestion => suggestion.StartMills)
-                    .ToList();
-                continue;
-            }
-
-            var existingIds = existing.Select(suggestion => suggestion.Id).ToHashSet();
-            await _compressionLowDetectionService.DetectForNightAsync(night, ct);
-            var detected = (await _compressionLowService.GetSuggestionsAsync(
-                    CompressionLowStatus.Pending, night, ct))
-                .Where(suggestion => !existingIds.Contains(suggestion.Id))
-                .OrderBy(suggestion => suggestion.StartMills)
-                .ToList();
-            foreach (var suggestion in detected)
-            {
-                var readings = await _entryService.GetEntriesAsync(
-                    find: $"{{\"mills\":{{\"$gte\":{suggestion.StartMills - 900_000},\"$lte\":{suggestion.EndMills + 900_000}}}}}",
-                    count: 1000,
-                    skip: 0,
-                    cancellationToken: ct);
-                var candidateReadings = readings.Where(entry => entry.GlucoseMgdl() > 0).ToList();
-                if (candidateReadings.Count == 0 || candidateReadings.Any(entry =>
-                        entry.DataSource != Nocturne.Core.Constants.DataSources.DemoService))
-                    continue;
-
-                suggestion.DataSource = Nocturne.Core.Constants.DataSources.DemoService;
-                await _compressionLowRepository.UpdateAsync(suggestion, ct);
-            }
-            pendingByNight[night] = detected
-                .Where(suggestion => suggestion.DataSource == Nocturne.Core.Constants.DataSources.DemoService)
-                .ToList();
-        }
-
-        foreach (var (night, index) in nights.Select((night, index) => (night, index)))
-        {
-            if (index == 0)
-                continue;
-
             var nadirMills = DemoCoverageSeeds.CompressionNadirMills(night, clock.Demo);
-            var suggestion = pendingByNight[night].FirstOrDefault(pending =>
-                pending.StartMills <= nadirMills && pending.EndMills >= nadirMills);
+            var suggestion = (await DemoSuggestionsForNightAsync(night, ct)).FirstOrDefault(demo =>
+                demo.StartMills <= nadirMills && demo.EndMills >= nadirMills);
             if (suggestion is null)
                 continue;
 
-            if (index == 1)
-                await _compressionLowService.AcceptSuggestionAsync(
-                    suggestion.Id, suggestion.StartMills, suggestion.EndMills, ct, demoSeed: true);
-            else
-                await _compressionLowService.DismissSuggestionAsync(suggestion.Id, ct);
+            planted.Add(suggestion);
+            if (planted.Count == 3)
+                break;
         }
+
+        if (planted.ElementAtOrDefault(1) is { Status: CompressionLowStatus.Pending } accepted)
+            await _compressionLowService.AcceptSuggestionAsync(
+                accepted.Id, accepted.StartMills, accepted.EndMills, ct, demoSeed: true);
+        if (planted.ElementAtOrDefault(2) is { Status: CompressionLowStatus.Pending } dismissed)
+            await _compressionLowService.DismissSuggestionAsync(dismissed.Id, ct);
+    }
+
+    /// <summary>
+    /// The demo's suggestions for <paramref name="night"/>, detecting it first when a previous seed
+    /// left none there.
+    /// </summary>
+    private async Task<List<CompressionLowSuggestion>> DemoSuggestionsForNightAsync(DateOnly night, CancellationToken ct)
+    {
+        var existing = (await _compressionLowService.GetSuggestionsAsync(null, night, ct))
+            .ToList();
+        var existingDemo = existing
+            .Where(suggestion => suggestion.DataSource == Nocturne.Core.Constants.DataSources.DemoService)
+            .OrderBy(suggestion => suggestion.StartMills)
+            .ToList();
+        if (existingDemo.Count > 0)
+            return existingDemo;
+
+        var existingIds = existing.Select(suggestion => suggestion.Id).ToHashSet();
+        await _compressionLowDetectionService.DetectForNightAsync(night, ct);
+        var detected = (await _compressionLowService.GetSuggestionsAsync(
+                CompressionLowStatus.Pending, night, ct))
+            .Where(suggestion => !existingIds.Contains(suggestion.Id))
+            .OrderBy(suggestion => suggestion.StartMills)
+            .ToList();
+        foreach (var suggestion in detected)
+        {
+            var readings = await _entryService.GetEntriesAsync(
+                find: $"{{\"mills\":{{\"$gte\":{suggestion.StartMills - 900_000},\"$lte\":{suggestion.EndMills + 900_000}}}}}",
+                count: 1000,
+                skip: 0,
+                cancellationToken: ct);
+            var candidateReadings = readings.Where(entry => entry.GlucoseMgdl() > 0).ToList();
+            if (candidateReadings.Count == 0 || candidateReadings.Any(entry =>
+                    entry.DataSource != Nocturne.Core.Constants.DataSources.DemoService))
+                continue;
+
+            suggestion.DataSource = Nocturne.Core.Constants.DataSources.DemoService;
+            await _compressionLowRepository.UpdateAsync(suggestion, ct);
+        }
+        return detected
+            .Where(suggestion => suggestion.DataSource == Nocturne.Core.Constants.DataSources.DemoService)
+            .ToList();
     }
 
     private async Task SeedLabHbA1cAsync(NocturneDbContext db, SeedingClock clock, string dataSource, CancellationToken ct)

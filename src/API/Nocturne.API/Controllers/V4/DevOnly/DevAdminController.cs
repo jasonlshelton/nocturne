@@ -1069,8 +1069,7 @@ public class DevAdminController : ControllerBase
             .Where(r => r.TenantId == tenant.Id && r.IsSystem && r.Slug == RoleSeeds.Owner)
             .FirstAsync(ct);
 
-        await _tenantService.AddMemberAsync(
-            tenant.Id, subjectResult.Subject.Id, [ownerRole.Id], ct: ct);
+        await EnsureMemberAsync(tenant.Id, subjectResult.Subject.Id, [ownerRole.Id], label: null, ct);
 
         // 5. Dev identity fixture subjects as additional owners: their real
         // passkeys (re-seeded from docs/seed/dev-identities.json) can then sign
@@ -1081,8 +1080,7 @@ public class DevAdminController : ControllerBase
         {
             if (fixtureSubjectId == subjectResult.Subject.Id)
                 continue;
-            await _tenantService.AddMemberAsync(
-                tenant.Id, fixtureSubjectId, [ownerRole.Id], label: "dev fixture", ct: ct);
+            await EnsureMemberAsync(tenant.Id, fixtureSubjectId, [ownerRole.Id], "dev fixture", ct);
         }
 
         // 6. Mark onboarding complete. The web layout redirects every page to
@@ -1250,8 +1248,7 @@ public class DevAdminController : ControllerBase
             });
             await db.SaveChangesAsync(ct);
 
-            await _tenantService.AddMemberAsync(
-                tenant.Id, keeper.Subject.Id, [], label: "recovery keeper", ct: ct);
+            await EnsureMemberAsync(tenant.Id, keeper.Subject.Id, [], "recovery keeper", ct);
         }
 
         _logger.LogInformation(
@@ -1267,6 +1264,14 @@ public class DevAdminController : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeding wants the subject to be a member, so one that already is counts as done and the
+    /// result of <see cref="ITenantService.AddMemberAsync"/> is not read.
+    /// </summary>
+    private async Task EnsureMemberAsync(
+        Guid tenantId, Guid subjectId, List<Guid> roleIds, string? label, CancellationToken ct) =>
+        _ = await _tenantService.AddMemberAsync(tenantId, subjectId, roleIds, label: label, ct: ct);
 
     /// <summary>
     /// 400 for a rejected slug, with up to three valid alternatives so callers

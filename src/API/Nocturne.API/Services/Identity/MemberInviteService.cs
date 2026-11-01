@@ -7,6 +7,11 @@ using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
+using Microsoft.EntityFrameworkCore;
+using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Services.Identity;
 
@@ -20,11 +25,17 @@ public class MemberInviteService : IMemberInviteService
     /// <summary>Longest lifetime an invite token may be minted with.</summary>
     private const int MaxExpiresInDays = 90;
 
+    private static readonly AcceptMemberInviteResult Exhausted =
+        new(false, "exhausted", "This invite has reached its maximum uses.");
+
+    private static readonly AcceptMemberInviteResult AlreadyMember =
+        new(false, "already_member", "You are already a member of this tenant.");
+
     private readonly ITenantMembershipRepository _members;
     private readonly IMemberInviteRepository _invites;
     private readonly ISubjectRepository _subjects;
+    private readonly INocturneDbContextFactory _contexts;
     private readonly IJwtService _jwtService;
-    private readonly ITenantService _tenantService;
     private readonly ITenantRoleService _tenantRoleService;
     private readonly BaseDomainOptions _baseDomain;
     private readonly TimeProvider _time;
@@ -33,12 +44,13 @@ public class MemberInviteService : IMemberInviteService
     /// <param name="members">For the roles and memberships an invite names.</param>
     /// <param name="invites">The stored invites.</param>
     /// <param name="subjects">For the name of the member who minted an invite.</param>
+    /// <param name="contexts">For the unit of work an accepted invite commits its use and its membership on.</param>
     public MemberInviteService(
         ITenantMembershipRepository members,
         IMemberInviteRepository invites,
         ISubjectRepository subjects,
+        INocturneDbContextFactory contexts,
         IJwtService jwtService,
-        ITenantService tenantService,
         ITenantRoleService tenantRoleService,
         IOptions<BaseDomainOptions> baseDomainOptions,
         TimeProvider timeProvider,
@@ -47,8 +59,8 @@ public class MemberInviteService : IMemberInviteService
         _members = members ?? throw new ArgumentNullException(nameof(members));
         _invites = invites ?? throw new ArgumentNullException(nameof(invites));
         _subjects = subjects ?? throw new ArgumentNullException(nameof(subjects));
+        _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
         _jwtService = jwtService;
-        _tenantService = tenantService;
         _tenantRoleService = tenantRoleService;
         _baseDomain = baseDomainOptions.Value;
         _time = timeProvider;
@@ -167,10 +179,10 @@ public class MemberInviteService : IMemberInviteService
             return new AcceptMemberInviteResult(false, "revoked", "This invite has been revoked.");
 
         if (invite.IsExhausted)
-            return new AcceptMemberInviteResult(false, "exhausted", "This invite has reached its maximum uses.");
+            return Exhausted;
 
         if (await _members.IsMemberAsync(invite.TenantId, acceptingSubjectId, CancellationToken.None))
-            return new AcceptMemberInviteResult(false, "already_member", "You are already a member of this tenant.");
+            return AlreadyMember;
 
         // Filter out deleted roles from the invite
         var validRoleIds = invite.RoleIds.Count > 0
@@ -183,31 +195,49 @@ public class MemberInviteService : IMemberInviteService
         if (validRoleIds.Count == 0 && (invite.DirectPermissions == null || invite.DirectPermissions.Count == 0))
             return new AcceptMemberInviteResult(false, "no_permissions", "All roles from this invite have been deleted and no direct permissions are assigned.");
 
-        // Claim the use before writing the membership. The IsExhausted check above is a fast path
-        // on a value read earlier in the request; two concurrent accepts of a single-use invite —
-        // the default the UI mints — would both pass it and both join. Only a row that is still
-        // under its cap matches here, so the loser claims nothing and is refused.
-        //
-        // The claim commits on its own and the membership is written on a separate context, so a
-        // failure in between burns the use without joining anyone: a single-use invite then reads
-        // as exhausted and the owner has to mint another. That is the direction to fail in — the
-        // alternative admits the double join this guards against.
-        if (!await _invites.TryClaimUseAsync(invite.Id, CancellationToken.None))
-            return new AcceptMemberInviteResult(false, "exhausted", "This invite has reached its maximum uses.");
+        // The IsExhausted check above is a fast path on a value read earlier in the request; two
+        // concurrent accepts of a single-use invite would both pass it and both join. Only a row
+        // still under its cap matches the claim, so the loser claims nothing and is refused. The
+        // claim shares the membership's transaction, so a membership that fails to save gives the use back.
+        AcceptMemberInviteResult? refusal;
+        await using (var unit = await DbUnitOfWork.OpenForTenantAsync(_contexts, invite.TenantId))
+        {
+            var invites = new MemberInviteRepository(unit);
+            var members = new TenantMembershipRepository(unit);
+            try
+            {
+                refusal = await unit.CommitAsync<AcceptMemberInviteResult?>(async token =>
+                {
+                    if (!await members.AddMemberAsync(
+                            new NewTenantMember(
+                                invite.TenantId,
+                                acceptingSubjectId,
+                                validRoleIds,
+                                invite.DirectPermissions?.ToList(),
+                                invite.Label,
+                                LimitTo24Hours: invite.LimitTo24Hours,
+                                CreatedFromInviteId: invite.Id),
+                            token))
+                        return AlreadyMember;
 
-        // Create the tenant membership via the tenant service
-        await _tenantService.AddMemberAsync(
-            invite.TenantId,
-            acceptingSubjectId,
-            validRoleIds,
-            invite.DirectPermissions?.ToList(),
-            invite.Label,
-            invite.LimitTo24Hours);
+                    if (!await invites.TryClaimUseAsync(invite.Id, token))
+                        return Exhausted;
+
+                    await unit.Context.SaveChangesAsync(token);
+                    return null;
+                });
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+            {
+                return AlreadyMember;
+            }
+        }
+
+        if (refusal is not null)
+            return refusal;
 
         var member = await _members.FindMemberAsync(invite.TenantId, acceptingSubjectId, CancellationToken.None)
             ?? throw new InvalidOperationException($"Subject {acceptingSubjectId} did not become a member of tenant {invite.TenantId}.");
-
-        await _members.SetCreatedFromInviteAsync(invite.TenantId, member.Id, invite.Id, CancellationToken.None);
 
         _logger.LogInformation(
             "MemberInviteAudit: {Event} invite_id={InviteId} tenant_id={TenantId} subject_id={SubjectId} member_id={MemberId}",

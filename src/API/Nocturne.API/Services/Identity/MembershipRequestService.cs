@@ -21,6 +21,9 @@ public class MembershipRequestService : IMembershipRequestService
     private static readonly DecideMembershipRequestResult AlreadyAMember =
         new(false, "The subject is already a member.");
 
+    private static readonly DecideMembershipRequestResult NoLongerPending =
+        new(false, "Request is no longer pending.");
+
     private readonly ITenantRepository _tenants;
     private readonly ITenantMembershipRepository _members;
     private readonly ISubjectRepository _subjects;
@@ -146,30 +149,38 @@ public class MembershipRequestService : IMembershipRequestService
             return new DecideMembershipRequestResult(false, "Request not found.");
 
         if (request.Status != MembershipRequestRecord.Pending)
-            return new DecideMembershipRequestResult(false, "Request is no longer pending.");
+            return NoLongerPending;
 
+        DecideMembershipRequestResult? refusal;
         await using (var unit = await DbUnitOfWork.OpenForTenantAsync(_contexts, tenantId, ct))
         {
             var members = new TenantMembershipRepository(unit);
-            if (!await members.DecideRequestAsync(
-                    tenantId, requestId,
-                    new MembershipRequestDecision(MembershipRequestRecord.Approved, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, roleIds),
-                    ct))
-                return new DecideMembershipRequestResult(false, "Request not found.");
-
-            if (!await members.AddMemberAsync(
-                    new NewTenantMember(tenantId, request.SubjectId, roleIds, LimitTo24Hours: limitTo24Hours), ct))
-                return AlreadyAMember;
-
             try
             {
-                await unit.CommitAsync(token => unit.Context.SaveChangesAsync(token), ct);
+                refusal = await unit.CommitAsync<DecideMembershipRequestResult?>(async token =>
+                {
+                    if (!await members.AddMemberAsync(
+                            new NewTenantMember(tenantId, request.SubjectId, roleIds, LimitTo24Hours: limitTo24Hours), token))
+                        return AlreadyAMember;
+
+                    if (!await members.DecideRequestAsync(
+                            tenantId, requestId,
+                            new MembershipRequestDecision(MembershipRequestRecord.Approved, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, roleIds),
+                            token))
+                        return NoLongerPending;
+
+                    await unit.Context.SaveChangesAsync(token);
+                    return null;
+                }, ct: ct);
             }
             catch (DbUpdateException ex) when (ex.IsUniqueViolation())
             {
                 return AlreadyAMember;
             }
         }
+
+        if (refusal is not null)
+            return refusal;
 
         _logger.LogInformation(
             "MembershipRequestAudit: {Event} request_id={RequestId} tenant_id={TenantId} subject_id={SubjectId} decided_by={DecidedBy}",
@@ -196,12 +207,13 @@ public class MembershipRequestService : IMembershipRequestService
             return new DecideMembershipRequestResult(false, "Request not found.");
 
         if (request.Status != MembershipRequestRecord.Pending)
-            return new DecideMembershipRequestResult(false, "Request is no longer pending.");
+            return NoLongerPending;
 
-        await _members.DecideRequestAsync(
-            tenantId, requestId,
-            new MembershipRequestDecision(MembershipRequestRecord.Denied, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, null),
-            ct);
+        if (!await _members.DecideRequestAsync(
+                tenantId, requestId,
+                new MembershipRequestDecision(MembershipRequestRecord.Denied, decidedBySubjectId, _time.GetUtcNow().UtcDateTime, null),
+                ct))
+            return NoLongerPending;
 
         _logger.LogInformation(
             "MembershipRequestAudit: {Event} request_id={RequestId} tenant_id={TenantId} subject_id={SubjectId} decided_by={DecidedBy}",

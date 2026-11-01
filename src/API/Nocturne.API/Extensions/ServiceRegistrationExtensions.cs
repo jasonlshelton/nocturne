@@ -588,6 +588,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IOAuthDeviceCodeService, OAuthDeviceCodeService>();
         services.AddScoped<IMemberInviteService, MemberInviteService>();
         services.AddScoped<IMembershipRequestService, MembershipRequestService>();
+        services.AddScoped<IAccessRequestService, AccessRequestService>();
         services.AddScoped<IGuestLinkService, GuestLinkService>();
         services.AddSingleton<IOAuthTokenRevocationCache, OAuthTokenRevocationCache>();
         services.AddHostedService<OAuthCodeCleanupService>();

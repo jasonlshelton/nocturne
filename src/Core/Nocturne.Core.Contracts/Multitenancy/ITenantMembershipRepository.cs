@@ -26,7 +26,7 @@ public interface ITenantMembershipRepository
 {
     /// <summary>
     /// Stores a membership with its roles in one save; false when the subject is already a member,
-    /// including when another request made it one in the meantime.
+    /// including when another request made it one in the meantime. Any other failed save throws.
     /// </summary>
     Task<bool> AddMemberAsync(NewTenantMember member, CancellationToken ct);
 
@@ -116,9 +116,6 @@ public interface ITenantMembershipRepository
 
     /// <summary>Sets the membership's per-tenant sign-in name.</summary>
     Task<bool> SetUsernameAsync(Guid tenantId, Guid memberId, string? username, CancellationToken ct);
-
-    /// <summary>Records the invite the membership was accepted through.</summary>
-    Task<bool> SetCreatedFromInviteAsync(Guid tenantId, Guid memberId, Guid inviteId, CancellationToken ct);
 
     /// <summary>
     /// Removes the roles <paramref name="removedRoleIds"/> from the membership, assigns
@@ -235,7 +232,12 @@ public interface ITenantMembershipRepository
     /// <summary>The request <paramref name="requestId"/> of <paramref name="tenantId"/>; null when there is none.</summary>
     Task<MembershipRequestRecord?> GetRequestAsync(Guid tenantId, Guid requestId, CancellationToken ct);
 
-    /// <summary>Writes <paramref name="decision"/> onto the request; false when there is no such request.</summary>
+    /// <summary>
+    /// Writes <paramref name="decision"/> onto the request; false when there is no such request or
+    /// it is no longer pending. The write is one statement whose predicate is the pending status, so
+    /// the row's lock decides between two decisions made at once. On a unit it joins the transaction
+    /// only when called inside the work of <c>DbUnitOfWork.CommitAsync</c>.
+    /// </summary>
     Task<bool> DecideRequestAsync(Guid tenantId, Guid requestId, MembershipRequestDecision decision, CancellationToken ct);
 }
 
