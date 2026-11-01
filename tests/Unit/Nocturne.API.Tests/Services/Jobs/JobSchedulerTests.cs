@@ -23,7 +23,7 @@ public class JobSchedulerTests
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly TenantContext Tenant = new(Guid.CreateVersion7(), "t", "T", true, IsDemo: false);
 
-    private readonly FakeTimeProvider _clock = new(Now);
+    private readonly LoopClock _clock = new(Now);
     private readonly Mock<IJobLedger> _ledger = new();
 
     [Fact]
@@ -64,31 +64,39 @@ public class JobSchedulerTests
         var job = new ProbeJob("probe");
         var scheduler = Scheduler(job);
         var due = 12;
-        var claims = 0;
+        var completed = 0;
         _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IReadOnlyCollection<string> _, int limit, DateTimeOffset _, DateTimeOffset _, CancellationToken _) =>
+            .ReturnsAsync((string _, IReadOnlyCollection<string> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
             {
-                Interlocked.Increment(ref claims);
                 var take = Math.Min(limit, due);
                 due -= take;
+                _clock.Record(new LoopEvent(LoopStep.Claim, now, Short: take < limit));
                 return Enumerable.Range(0, take).Select(_ => Lease("probe")).ToList();
             });
+        _ledger.Setup(l => l.CompleteAsync(It.IsAny<JobLease>(), It.IsAny<DateTimeOffset>(), It.IsAny<JobCursor?>(), It.IsAny<DateTimeOffset?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => Interlocked.Increment(ref completed))
+            .Returns(Task.CompletedTask);
 
         await scheduler.StartAsync(default);
         try
         {
-            await WaitUntilAsync(() => job.Runs.Count == 12);
-            _clock.GetUtcNow().Should().Be(Now, "the backlog ran without waiting for a tick");
+            await WaitUntilAsync(() => Volatile.Read(ref completed) == 12);
+            await scheduler.DrainAsync();
+            await WaitUntilAsync(() => Parked(scheduler));
+            var settled = _clock.Events.Count;
+            _clock.Events.Where(e => e.Step == LoopStep.Claim).Should()
+                .OnlyContain(e => e.At == Now, "the backlog ran without waiting for a tick");
 
-            await Task.Delay(200);
-            var settled = Volatile.Read(ref claims);
             _clock.Advance(JobScheduler.PollInterval - TimeSpan.FromSeconds(1));
-            await Task.Delay(200);
-            Volatile.Read(ref claims).Should().Be(settled, "a short claim ends the refill until the next tick");
             _clock.Advance(TimeSpan.FromSeconds(1));
-            await WaitUntilAsync(() => Volatile.Read(ref claims) == settled + 1);
-            await Task.Delay(200);
-            Volatile.Read(ref claims).Should().Be(settled + 1);
+            await WaitUntilAsync(() => _clock.Events.Count > settled && Parked(scheduler));
+
+            _clock.Events.Skip(settled).Should().Equal(
+                [
+                    new LoopEvent(LoopStep.Claim, Now + JobScheduler.PollInterval, Short: true),
+                    new LoopEvent(LoopStep.Wait, Now + JobScheduler.PollInterval),
+                ],
+                "a short claim ends the refill, and an idle ledger is read once a tick");
         }
         finally
         {
@@ -96,6 +104,53 @@ public class JobSchedulerTests
         }
 
         job.Runs.Should().HaveCount(12);
+    }
+
+    /// <summary>
+    /// A cancellation the ledger raises without shutdown (a command timeout) ends that poll only:
+    /// the loop waits its tick and reads the ledger again.
+    /// </summary>
+    [Fact]
+    public async Task A_ledger_read_cancelled_without_shutdown_does_not_stop_later_polls()
+    {
+        var scheduler = Scheduler(new ProbeJob("probe"));
+        var claims = 0;
+        _ledger.Setup(l => l.ClaimDueAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, IReadOnlyCollection<string> _, int limit, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
+            {
+                _clock.Record(new LoopEvent(LoopStep.Claim, now, Short: true));
+                return Interlocked.Increment(ref claims) == 1
+                    ? Task.FromException<IReadOnlyList<JobLease>>(new OperationCanceledException("timed out"))
+                    : Task.FromResult<IReadOnlyList<JobLease>>([]);
+            });
+
+        await scheduler.StartAsync(default);
+        try
+        {
+            await WaitUntilAsync(() => Parked(scheduler));
+            _clock.Advance(JobScheduler.PollInterval);
+            await WaitUntilAsync(() => Volatile.Read(ref claims) == 2 && Parked(scheduler));
+        }
+        finally
+        {
+            await scheduler.StopAsync(default);
+        }
+
+        _clock.Events.Where(e => e.Step == LoopStep.Claim).Select(e => e.At)
+            .Should().Equal(Now, Now + JobScheduler.PollInterval);
+    }
+
+    /// <summary>
+    /// The loop has claimed, found no backlog and is waiting out its tick: no run can wake it and its
+    /// tick's timer is on the clock, so advancing the clock is what moves it next.
+    /// </summary>
+    private bool Parked(JobScheduler scheduler)
+    {
+        var events = _clock.Events;
+        return events.Count >= 2
+               && events[^1].Step == LoopStep.Wait
+               && events[^2] is { Step: LoopStep.Claim, Short: true }
+               && !scheduler.WakePending;
     }
 
     [Fact]
@@ -114,11 +169,11 @@ public class JobSchedulerTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var deadline = DateTime.UtcNow.AddSeconds(30);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline)
-                throw new TimeoutException("The condition did not hold within 10 seconds.");
+                throw new TimeoutException("The condition did not hold within 30 seconds.");
             await Task.Delay(10);
         }
     }
@@ -338,6 +393,44 @@ public class JobSchedulerTests
             new JobMetrics(provider.GetRequiredService<IMeterFactory>()),
             Options.Create(options),
             NullLogger<JobScheduler>.Instance);
+    }
+
+    private enum LoopStep
+    {
+        Claim,
+        Wait,
+    }
+
+    private sealed record LoopEvent(LoopStep Step, DateTimeOffset At, bool Short = false);
+
+    /// <summary>A fake clock that records each tick the scheduler's loop starts waiting out.</summary>
+    private sealed class LoopClock(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        private readonly Lock _gate = new();
+        private readonly List<LoopEvent> _events = [];
+
+        public IReadOnlyList<LoopEvent> Events
+        {
+            get
+            {
+                lock (_gate)
+                    return [.. _events];
+            }
+        }
+
+        public void Record(LoopEvent loopEvent)
+        {
+            lock (_gate)
+                _events.Add(loopEvent);
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            if (dueTime == JobScheduler.PollInterval)
+                Record(new LoopEvent(LoopStep.Wait, GetUtcNow()));
+            return timer;
+        }
     }
 
     private sealed class ProbeJob(string name) : IScheduledJob

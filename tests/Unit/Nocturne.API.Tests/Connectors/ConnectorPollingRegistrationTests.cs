@@ -161,7 +161,6 @@ public class ConnectorPollingRegistrationTests
         Type[] sweeps =
         [
             typeof(DeduplicationReconciliationBackgroundService),
-            typeof(CompressionLowDetectionService),
             typeof(NotificationResolutionService),
         ];
 

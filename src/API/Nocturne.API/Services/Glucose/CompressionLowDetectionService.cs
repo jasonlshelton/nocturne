@@ -1,8 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Nocturne.API.Multitenancy;
-using Nocturne.API.Services.Glucose;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -17,39 +14,30 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Core.Contracts.Entries;
 
-namespace Nocturne.API.Services.BackgroundServices;
+namespace Nocturne.API.Services.Glucose;
 
 /// <summary>
-/// Background service that detects compression-low artefacts in overnight CGM data.
+/// Detects compression-low artefacts in overnight CGM data.
 /// A compression low is a transient glucose dip caused by sensor compression during sleep,
 /// characterised by a rapid V-shaped drop and recovery that does not reflect true hypoglycaemia.
 /// </summary>
 /// <remarks>
-/// Detection is tenant-aware: each tenant's sleep schedule and timezone are read from
-/// <see cref="IUISettingsService"/> to determine the overnight evaluation window.
-/// Each wake scans, for every tenant, its most recent night that ended at least
-/// <see cref="DetectionDelayMinutes"/> ago and that this process has not scanned for it, so a night
-/// is never scanned before it is over. The loop then sleeps until the earliest next such time.
+/// Each tenant's sleep schedule and timezone are read from <see cref="IUISettingsService"/> to
+/// determine the overnight evaluation window. <see cref="CompressionLowDetectionJob"/> runs it for each
+/// tenant's nights as they end.
 /// </remarks>
 /// <seealso cref="CompressionLowDetection"/>
-public class CompressionLowDetectionService : BackgroundService
+public class CompressionLowDetectionService
 {
     internal const string AuditEndpoint = "service:compression-low-detection";
 
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ActiveTenantSnapshot _activeTenants;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CompressionLowDetectionService> _logger;
-    private readonly Dictionary<Guid, DateOnly> _lastScannedNight = [];
 
     public const string NotificationType = "glucose.compression_low_review";
 
     public static string NotificationSourceId(DateOnly nightOf) => nightOf.ToString("yyyy-MM-dd");
 
-    // Detection configuration - sleep hours are now read from settings
-    internal const int DetectionDelayMinutes = 15;
-    internal static readonly TimeSpan MinSleep = TimeSpan.FromMinutes(1);
-    internal static readonly TimeSpan MaxSleep = TimeSpan.FromHours(1);
     internal const double MinDropRateMgDlPerMin = 2.0;
     internal const int MinDropDurationMinutes = 10;
     internal const double NadirThresholdMgDl = 70.0;
@@ -66,141 +54,12 @@ public class CompressionLowDetectionService : BackgroundService
     internal const double CarbPenaltyFullCobGrams = 30.0;
     private const int StartTrimMinutes = 5;
 
-    /// <summary>
-    /// Initialises a new <see cref="CompressionLowDetectionService"/>.
-    /// </summary>
-    /// <param name="serviceProvider">Root service provider; scoped services are resolved per tenant.</param>
-    /// <param name="activeTenants">The active tenants to schedule and scan.</param>
-    /// <param name="timeProvider">Clock the schedule is computed against.</param>
-    /// <param name="logger">Logger instance.</param>
     public CompressionLowDetectionService(
-        IServiceProvider serviceProvider,
-        ActiveTenantSnapshot activeTenants,
         TimeProvider timeProvider,
         ILogger<CompressionLowDetectionService> logger)
     {
-        _serviceProvider = serviceProvider;
-        _activeTenants = activeTenants;
         _timeProvider = timeProvider;
         _logger = logger;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("Compression Low Detection Service started");
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                var delay = await ScanReadyNightsAsync(stoppingToken);
-                await Task.Delay(delay, _timeProvider, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in compression low detection cycle");
-                await Task.Delay(TimeSpan.FromMinutes(5), _timeProvider, stoppingToken);
-            }
-        }
-
-        _logger.LogInformation("Compression Low Detection Service stopped");
-    }
-
-    /// <summary>
-    /// Scans each active tenant's latest finished night that this process has not scanned for it, and
-    /// returns how long to sleep until the earliest next night finishes, clamped to
-    /// <see cref="MinSleep"/> and <see cref="MaxSleep"/>. A night counts as finished
-    /// <see cref="DetectionDelayMinutes"/> after its window ends. A tenant whose settings cannot be read
-    /// is left out of the schedule, so <see cref="MaxSleep"/> bounds how long it waits for a retry.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    internal async Task<TimeSpan> ScanReadyNightsAsync(CancellationToken cancellationToken)
-    {
-        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
-        DateTime? earliestNextReadyUtc = null;
-
-        var tenants = await _activeTenants.GetAsync(cancellationToken);
-
-        foreach (var tenant in tenants)
-        {
-            try
-            {
-                await using var scope = TenantJobScope.Open(
-                    _serviceProvider,
-                    new TenantContext(tenant.Id, tenant.Slug, tenant.DisplayName, true, IsDemo: false),
-                    AuditEndpoint);
-
-                var settings = await scope.ServiceProvider
-                    .GetRequiredService<IUISettingsService>()
-                    .GetSettingsAsync(cancellationToken);
-                if (settings == null)
-                {
-                    _logger.LogWarning(
-                        "Could not read UI settings for tenant {TenantSlug}; leaving it out of the schedule",
-                        tenant.Slug);
-                    continue;
-                }
-
-                var sleepSchedule = settings.DataQuality.SleepSchedule;
-                var userTimeZone = (await scope.ServiceProvider
-                    .GetRequiredService<ICompressionLowNightWindowResolver>()
-                    .ResolveAsync(DateOnly.FromDateTime(nowUtc.AddDays(-1)), sleepSchedule, cancellationToken))
-                    .TimeZone;
-
-                var night = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(nowUtc, userTimeZone));
-                while (ReadyAtUtc(night, userTimeZone, sleepSchedule) > nowUtc)
-                    night = night.AddDays(-1);
-
-                var nextReadyUtc = ReadyAtUtc(night.AddDays(1), userTimeZone, sleepSchedule);
-                if (earliestNextReadyUtc == null || nextReadyUtc < earliestNextReadyUtc)
-                    earliestNextReadyUtc = nextReadyUtc;
-
-                if (_lastScannedNight.TryGetValue(tenant.Id, out var scanned) && scanned >= night)
-                    continue;
-
-                var repository = scope.ServiceProvider.GetRequiredService<ICompressionLowRepository>();
-                if (!await repository.AnySuggestionExistsForNightAsync(night, cancellationToken))
-                    await DetectForNightAsync(night, scope.ServiceProvider, cancellationToken);
-
-                _lastScannedNight[tenant.Id] = night;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during compression low detection for tenant {TenantSlug}", tenant.Slug);
-            }
-        }
-
-        if (earliestNextReadyUtc == null)
-        {
-            _logger.LogDebug("No active tenants found for scheduling; retrying in {Delay}", MaxSleep);
-            return MaxSleep;
-        }
-
-        var delay = TimeSpan.FromTicks(Math.Clamp(
-            (earliestNextReadyUtc.Value - nowUtc).Ticks,
-            MinSleep.Ticks,
-            MaxSleep.Ticks));
-        _logger.LogDebug(
-            "Next compression low detection wake in {Delay} (earliest night ready {NextReadyUtc:u})",
-            delay, earliestNextReadyUtc.Value);
-
-        return delay;
-    }
-
-    private static DateTime ReadyAtUtc(DateOnly nightOf, TimeZoneInfo userTimeZone, SleepScheduleSettings sleepSchedule)
-    {
-        var (_, windowEnd) = TimeZoneHelper.GetOvernightWindow(
-            nightOf, userTimeZone, sleepSchedule.BedtimeHour, sleepSchedule.WakeTimeHour);
-
-        return DateTimeOffset.FromUnixTimeMilliseconds(windowEnd).UtcDateTime.AddMinutes(DetectionDelayMinutes);
     }
 
     /// <summary>

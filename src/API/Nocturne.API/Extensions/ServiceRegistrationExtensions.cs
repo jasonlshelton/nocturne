@@ -869,7 +869,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IDeviceAgeService, DeviceAgeService>();
         services.AddScoped<ISensorSessionInferenceService, SensorSessionInferenceService>();
         services.AddSingleton<ISensorSessionInferenceRunner, SensorSessionInferenceRunner>();
-        services.AddHostedService<SensorSessionInferenceBackgroundService>();
+        services.AddScheduledJob<SensorSessionInferenceJob>();
 
         // Device resolution
         services.AddScoped<IDeviceService, DeviceService>();
@@ -1002,7 +1002,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ITreatmentDecomposer, TreatmentDecomposer>();
         services.AddScoped<IDeviceStatusDecomposer, DeviceStatusDecomposer>();
         services.AddScheduledJob<ApsSnapshotCurvesJob>();
-        services.AddHostedService<TempBasalOriginCorroborationService>();
+        services.AddScheduledJob<TempBasalOriginCorroborationJob>();
         services.AddScoped<IActivityDecomposer, ActivityDecomposer>();
         services.AddScoped<IProfileDecomposer, ProfileDecomposer>();
 
@@ -1114,7 +1114,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ICompressionLowService, CompressionLowService>();
         services.AddSingleton<CompressionLowDetectionService>();
         services.AddScoped<ICompressionLowDetectionService, CompressionLowDetection>();
-        services.AddHostedService(sp => sp.GetRequiredService<CompressionLowDetectionService>());
+        services.AddScheduledJob<CompressionLowDetectionJob>();
 
         // Webhook infrastructure (reused by new alert engine)
         services.AddScoped<WebhookRequestSender>();
