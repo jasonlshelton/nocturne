@@ -85,15 +85,22 @@ public interface ISubjectRepository
     Task<IReadOnlyList<Guid>> FindCredentiallessSubjectIdsAsync(EnrolmentMatch match, CancellationToken ct);
 
     /// <summary>
-    /// Applies <paramref name="edit"/> to the subject and stamps it updated; false when there is
-    /// no such subject. A null member of the edit leaves its field as it is.
+    /// Applies <paramref name="edit"/> to the subject and stamps it updated. A null member of the
+    /// edit leaves its field as it is.
     /// </summary>
-    Task<bool> UpdateAsync(Guid subjectId, SubjectEdit edit, CancellationToken ct);
+    /// <remarks>
+    /// Deactivating an active subject is refused with <see cref="SubjectChange.LastOwnerOf"/> while it
+    /// is the last owner who can sign in of any tenant, since a deactivated owner no longer counts.
+    /// The check holds the owner lock of each tenant the subject belongs to, in ascending tenant id,
+    /// until the change commits. Over a unit, deactivate inside the unit's commit.
+    /// </remarks>
+    Task<SubjectChange> UpdateAsync(Guid subjectId, SubjectEdit edit, CancellationToken ct);
 
     /// <summary>
     /// Replaces the subject's profile fields, null members included, and returns it as edited with
     /// its roles; null when there is no such subject. Unlike <see cref="UpdateAsync"/> this can
-    /// clear the email and the notes, which an administrator's edit does.
+    /// clear the email and the notes, which an administrator's edit does. It never changes whether
+    /// the subject is active.
     /// </summary>
     Task<SubjectRecord?> UpdateProfileAsync(Guid subjectId, SubjectProfile profile, CancellationToken ct);
 
@@ -108,9 +115,15 @@ public interface ISubjectRepository
     /// They are the actor's, so another subject's on a row about this one are kept.
     /// <c>actor_name</c> stays on <c>mutation_audit_log</c> and <c>read_access_log</c>, so a
     /// tenant's owner can still see who changed or read their data. Rows that reference the subject
-    /// go with it by cascade. False when there is no such subject.
+    /// go with it by cascade.
     /// </summary>
-    Task<bool> DeleteAsync(Guid subjectId, CancellationToken ct);
+    /// <remarks>
+    /// Refused with <see cref="SubjectChange.LastOwnerOf"/> while an active subject is the last owner
+    /// who can sign in of any tenant, whether or not the tenant has other members: the cascade would
+    /// remove its membership. An inactive subject is never refused, since it counts as no owner. The check holds the owner lock of each tenant the subject belongs to, in
+    /// ascending tenant id, until the delete commits.
+    /// </remarks>
+    Task<SubjectChange> DeleteAsync(Guid subjectId, CancellationToken ct);
 
     /// <summary>Whether the subject is a demo tenant's visitor; null when there is no such subject.</summary>
     /// <remarks>

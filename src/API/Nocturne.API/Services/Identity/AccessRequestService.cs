@@ -56,7 +56,7 @@ public class AccessRequestService(
 
         await using (var unit = await DbUnitOfWork.OpenForTenantAsync(contexts, tenant, ct))
         {
-            if (!await new SubjectRepository(unit).UpdateAsync(subjectId, Approval, ct))
+            if (await new SubjectRepository(unit).UpdateAsync(subjectId, Approval, ct) is SubjectChange.NotFound)
                 return new ApproveAccessRequestResult(ApproveAccessRequestOutcome.NotFound);
 
             if (!await new TenantMembershipRepository(unit).AddMemberAsync(

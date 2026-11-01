@@ -7,7 +7,9 @@ using Nocturne.API.Controllers.V4.PlatformAdmin;
 using Nocturne.API.Tests.Infrastructure;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Notifications;
+using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Tests.Shared.Infrastructure;
@@ -29,6 +31,7 @@ public sealed class AccessRequestControllerTests : IDisposable
     private readonly NocturneDbContext _dbContext;
     private readonly Mock<IInAppNotificationService> _notifications = new();
     private readonly Mock<IAccessRequestService> _accessRequests = new();
+    private readonly Mock<ISubjectService> _subjectService = new();
     private readonly AccessRequestController _controller;
 
     private readonly Guid _tenantId = Guid.CreateVersion7();
@@ -41,7 +44,7 @@ public sealed class AccessRequestControllerTests : IDisposable
         _controller = new AccessRequestController(
             new TenantMembershipRepository(_dbContext.AsFactory()),
             new SubjectRepository(_dbContext.AsFactory()),
-            Mock.Of<ISubjectService>(),
+            _subjectService.Object,
             _accessRequests.Object,
             MockTenantAccessor.Create(_tenantId).Object,
             _notifications.Object,
@@ -136,6 +139,21 @@ public sealed class AccessRequestControllerTests : IDisposable
         Assert.IsType<OkResult>(result);
         ArchivedFor(owner, NotificationArchiveReason.Dismissed, Times.Once());
         ArchivedFor(system, NotificationArchiveReason.Dismissed, Times.Never());
+    }
+
+    [Fact]
+    public async Task Deny_isRefusedWithAConflictNamingTheTenantsWhenTheSubjectIsTheirLastOwner()
+    {
+        var requestorId = await SeedPendingRequestAsync();
+        _subjectService
+            .Setup(s => s.DeleteSubjectAsync(requestorId))
+            .ReturnsAsync(new SubjectChange.LastOwnerOf([new LastOwnerTenant(_tenantId, "test"), new LastOwnerTenant(Guid.CreateVersion7(), "other")]));
+
+        var result = await _controller.Deny(requestorId, CancellationToken.None);
+
+        var problem = result.Should().BeOfType<ObjectResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        problem.Value.Should().BeOfType<ProblemDetails>().Which.Detail.Should().Contain("test").And.Contain("other");
     }
 
     private void ArchivedFor(Guid subjectId, NotificationArchiveReason reason, Times times) =>

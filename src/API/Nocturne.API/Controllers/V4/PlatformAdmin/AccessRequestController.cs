@@ -100,12 +100,21 @@ public class AccessRequestController(
     [RemoteCommand(Invalidates = ["GetPendingRequests"])]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> Deny(Guid subjectId, CancellationToken ct)
     {
         var subject = await subjects.GetAsync(subjectId, ct);
 
         if (subject is not { ApprovalStatus: "Pending" })
             return NotFound();
+
+        if (await subjectService.DeleteSubjectAsync(subjectId) is SubjectChange.LastOwnerOf lastOwnerOf)
+        {
+            return Problem(
+                detail: $"The subject is the last owner of: {string.Join(", ", lastOwnerOf.OwnedTenants.Select(t => t.Slug))}.",
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Conflict");
+        }
 
         var denyTenantContext = tenantAccessor.Context;
         if (denyTenantContext != null)
@@ -122,8 +131,6 @@ public class AccessRequestController(
                     ct);
             }
         }
-
-        await subjectService.DeleteSubjectAsync(subjectId);
 
         logger.LogInformation(
             "Access request denied: subject {SubjectId} ({Name}) deleted",

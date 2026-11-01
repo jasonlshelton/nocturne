@@ -281,7 +281,9 @@ public sealed class DemoTenantService
     /// A membership outside the demo tenant is deleted rather than treated as a reason to
     /// keep the subject: an account anyone can obtain a session for has no business holding
     /// one, and leaving it would keep publicly-obtainable credentials alive against that
-    /// tenant across every reset.
+    /// tenant across every reset. That holds for an owner's membership too, so the removal
+    /// does not refuse a last owner. It holds the owner lock of each tenant and names the
+    /// ones it leaves without an owner, which is logged.
     /// </para>
     /// <para>
     /// <c>subjects</c> and <c>tenant_members</c> are not tenant-scoped, so these reads see
@@ -302,8 +304,20 @@ public sealed class DemoTenantService
         }
 
         await _sessions.DeleteAllForSubjectAsync(subjectId.Value, ct);
-        await _members.RemoveMembershipsOfSubjectAsync(subjectId.Value, ct);
-        await _subjects.DeleteAsync(subjectId.Value, ct);
+        var removal = await _members.RemoveMembershipsOfSubjectAsync(subjectId.Value, ct);
+        foreach (var tenant in removal.TenantsLeftWithoutOwner)
+        {
+            _logger.LogWarning(
+                "Retiring demo member {SubjectId} left tenant {Slug} with no owner who can sign in",
+                subjectId, tenant.Slug);
+        }
+
+        if (await _subjects.DeleteAsync(subjectId.Value, ct) is SubjectChange.LastOwnerOf stillOwner)
+        {
+            _logger.LogError(
+                "Demo member {SubjectId} became the last owner of {Slugs} again before its delete, so it was kept",
+                subjectId, string.Join(", ", stillOwner.OwnedTenants.Select(t => t.Slug)));
+        }
     }
 
     /// <summary>

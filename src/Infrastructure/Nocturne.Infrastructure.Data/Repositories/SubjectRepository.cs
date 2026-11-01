@@ -220,13 +220,50 @@ public class SubjectRepository : ISubjectRepository
     }
 
     /// <inheritdoc/>
-    public virtual async Task<bool> UpdateAsync(Guid subjectId, SubjectEdit edit, CancellationToken ct)
+    public virtual async Task<SubjectChange> UpdateAsync(Guid subjectId, SubjectEdit edit, CancellationToken ct)
     {
-        await using var lease = await OpenAsync(ct);
-        var db = lease.Context;
+        if (edit.IsActive is not false)
+        {
+            await using var lease = await OpenAsync(ct);
+            var change = await ApplyEditAsync(lease.Context, subjectId, edit, ct);
+            if (change is SubjectChange.Changed)
+                await SaveAsync(lease.Context, ct);
+            return change;
+        }
+
+        if (_unit is not null)
+            return await ApplyEditAsync(_unit.Context, subjectId, edit, ct);
+
+        await using var db = await Transactional.CreateAsync(ct);
+        return await db.ExecuteInTransactionAsync(
+            async token =>
+            {
+                var change = await ApplyEditAsync(db, subjectId, edit, token);
+                if (change is SubjectChange.Changed)
+                    await db.SaveChangesAsync(token);
+                return change;
+            },
+            ct: ct);
+    }
+
+    /// <summary>
+    /// Stages <paramref name="edit"/> on the subject. Deactivating an active subject takes the owner
+    /// lock of each tenant it belongs to first (<see cref="TenantOwnerLock"/>), so it runs inside a
+    /// transaction.
+    /// </summary>
+    private static async Task<SubjectChange> ApplyEditAsync(
+        NocturneDbContext db, Guid subjectId, SubjectEdit edit, CancellationToken ct)
+    {
         var entity = await db.Subjects.FirstOrDefaultAsync(s => s.Id == subjectId, ct);
         if (entity is null)
-            return false;
+            return new SubjectChange.NotFound();
+
+        if (edit.IsActive is false && entity.IsActive)
+        {
+            var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, ct);
+            if (lastOwnerOf.Count > 0)
+                return new SubjectChange.LastOwnerOf(lastOwnerOf);
+        }
 
         if (edit.Name is not null)
             entity.Name = edit.Name;
@@ -247,8 +284,7 @@ public class SubjectRepository : ISubjectRepository
         if (edit.LastLoginAt is { } lastLogin)
             entity.LastLoginAt = lastLogin;
 
-        await SaveAsync(db, ct);
-        return true;
+        return new SubjectChange.Changed();
     }
 
     /// <inheritdoc/>
@@ -265,7 +301,6 @@ public class SubjectRepository : ISubjectRepository
         entity.Name = profile.Name;
         entity.Email = profile.Email;
         entity.Notes = profile.Notes;
-        entity.IsActive = profile.IsActive;
 
         await SaveAsync(db, ct);
         return ToRecord(entity);
@@ -286,16 +321,23 @@ public class SubjectRepository : ISubjectRepository
     }
 
     /// <inheritdoc/>
-    public virtual async Task<bool> DeleteAsync(Guid subjectId, CancellationToken ct)
+    public virtual async Task<SubjectChange> DeleteAsync(Guid subjectId, CancellationToken ct)
     {
         await using var db = await Transactional.CreateAsync(ct);
         var entity = await db.Subjects.FirstOrDefaultAsync(s => s.Id == subjectId, ct);
         if (entity is null)
-            return false;
+            return new SubjectChange.NotFound();
 
-        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync<SubjectChange>(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            if (entity.IsActive)
+            {
+                var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, ct);
+                if (lastOwnerOf.Count > 0)
+                    return new SubjectChange.LastOwnerOf(lastOwnerOf);
+            }
 
             // One statement per column set: the audit trail of a long-lived subject is every
             // sign-in it ever made, which is not loaded into the tracker to null two columns.
@@ -314,9 +356,8 @@ public class SubjectRepository : ISubjectRepository
             await ScrubTenantAuditTrailsAsync(db, subjectId, ct);
 
             await tx.CommitAsync(ct);
+            return new SubjectChange.Changed();
         });
-
-        return true;
     }
 
     /// <summary>

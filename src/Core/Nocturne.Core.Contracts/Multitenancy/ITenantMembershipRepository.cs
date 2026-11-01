@@ -104,9 +104,18 @@ public interface ITenantMembershipRepository
     /// </remarks>
     Task<OwnerGuardedChange> RemoveMemberUnlessLastOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
-    /// <summary>Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how many.</summary>
-    /// <remarks>On a platform context: the demo reset retires its visitor from every tenant it joined.</remarks>
-    Task<int> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct);
+    /// <summary>
+    /// Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how
+    /// many, with the tenants that are left with no owner who can sign in.
+    /// </summary>
+    /// <remarks>
+    /// On a platform context: the demo reset retires its visitor from every tenant it joined. It does
+    /// not refuse a last owner: anyone can get a session as the demo visitor, so a membership it holds
+    /// must go whatever role it carries. It holds the owner lock of every tenant the subject belongs
+    /// to, in ascending tenant id, until the removal commits, so the tenants it names are the ones
+    /// the commit leaves ownerless. Over a unit, call it inside the unit's commit.
+    /// </remarks>
+    Task<SubjectMembershipsRemoval> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct);
 
     /// <summary>Replaces the membership's direct permissions, null clearing them, and stamps it updated at <paramref name="now"/>.</summary>
     Task<bool> SetDirectPermissionsAsync(Guid tenantId, Guid memberId, IReadOnlyList<string>? permissions, DateTime now, CancellationToken ct);

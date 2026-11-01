@@ -120,6 +120,12 @@ public sealed record PlatformAdminMembership(Guid SubjectId, Guid TenantId, stri
 /// </summary>
 public sealed record PlatformAdminDirectory(IReadOnlyList<PlatformAdminMembership> Memberships, int ActivePlatformAdmins);
 
+/// <summary>
+/// What removing every membership of a subject did: how many it removed, and the tenants that
+/// were left with no owner who can sign in because of it.
+/// </summary>
+public sealed record SubjectMembershipsRemoval(int Removed, IReadOnlyList<LastOwnerTenant> TenantsLeftWithoutOwner);
+
 /// <summary>What a membership change that may not leave the tenant without an owner found.</summary>
 public enum OwnerGuardedChange
 {
