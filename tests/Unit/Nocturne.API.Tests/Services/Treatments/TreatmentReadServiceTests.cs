@@ -231,7 +231,7 @@ public class TreatmentReadServiceTests
 
         _bolusRepo.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(bolus);
         _projection
-            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetProjectedTreatmentsAtAsync(It.Is<IReadOnlyCollection<long>>(at => at.SequenceEqual(new[] { 1000L })), It.IsAny<CancellationToken>()))
             .ReturnsAsync(projected);
 
         var result = await _service.GetByIdAsync(id.ToString());
@@ -250,7 +250,7 @@ public class TreatmentReadServiceTests
 
         _bolusRepo.Setup(r => r.GetByLegacyIdAsync(legacyId, It.IsAny<CancellationToken>())).ReturnsAsync(bolus);
         _projection
-            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetProjectedTreatmentsAtAsync(It.Is<IReadOnlyCollection<long>>(at => at.SequenceEqual(new[] { 1000L })), It.IsAny<CancellationToken>()))
             .ReturnsAsync(projected);
 
         var result = await _service.GetByIdAsync(legacyId);
@@ -400,19 +400,19 @@ public class TreatmentReadServiceTests
             .Setup(d => d.DecomposeAsync(first, It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(written);
         FailOn(bad, new NotSupportedException());
-        var stored = new List<Treatment>();
+        var stored = new List<StoredTreatment>();
 
         var act = () => _service.CreateAsync([first, bad], WriteOrigin.Live, CancellationToken.None, stored);
 
         await act.Should().ThrowAsync<NotSupportedException>();
-        stored.Select(t => t.Id).Should().Equal(note.Id.ToString());
+        stored.Select(t => t.Created.Id).Should().Equal(note.Id.ToString());
     }
 
     [Fact]
     public async Task CreateAsync_DoesNotReportATreatmentTheUserDeletedAsStored()
     {
         DecomposeAll(skippedDeleted: 1);
-        var stored = new List<Treatment>();
+        var stored = new List<StoredTreatment>();
 
         var created = await _service.CreateAsync(
             [new Treatment { Id = "t1", Mills = 1000, EventType = "Note" }], WriteOrigin.Live, CancellationToken.None, stored);
@@ -621,7 +621,7 @@ public class TreatmentReadServiceTests
         };
         _carbIntakeRepo.Setup(r => r.GetByLegacyIdAsync(clientId, It.IsAny<CancellationToken>())).ReturnsAsync(carb);
         _projection
-            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetProjectedTreatmentsAtAsync(It.Is<IReadOnlyCollection<long>>(at => at.SequenceEqual(new[] { 1000L })), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new Treatment { Id = carb.Id.ToString(), Mills = 1000 }]);
 
         var result = await _service.GetByIdAsync(clientId);
@@ -646,7 +646,7 @@ public class TreatmentReadServiceTests
         _deviceEventRepo.Setup(r => r.GetByLegacyIdAsync("site-1", It.IsAny<CancellationToken>())).ReturnsAsync(deviceEvent);
         _noteRepo.Setup(r => r.GetByLegacyIdAsync("site-1", It.IsAny<CancellationToken>())).ReturnsAsync(note);
         _projection
-            .Setup(p => p.GetProjectedTreatmentsAsync(1000, 1000, 100, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetProjectedTreatmentsAtAsync(It.Is<IReadOnlyCollection<long>>(at => at.SequenceEqual(new[] { 1000L })), It.IsAny<CancellationToken>()))
             .ReturnsAsync([
                 new Treatment { Id = note.Id.ToString(), Mills = 1000 },
                 new Treatment { Id = deviceEvent.Id.ToString(), Mills = 1000 },
@@ -768,7 +768,7 @@ public class TreatmentReadServiceTests
 
     private void ProjectAs(Guid recordId) =>
         _projection
-            .Setup(p => p.GetProjectedTreatmentsAsync(It.IsAny<long?>(), It.IsAny<long?>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetProjectedTreatmentsAtAsync(It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new Treatment { Id = recordId.ToString() }]);
 
     private void VerifyOneHashScanPerTable()

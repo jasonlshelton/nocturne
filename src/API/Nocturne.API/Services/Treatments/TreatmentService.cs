@@ -231,7 +231,7 @@ internal class TreatmentService : ITreatmentService
         if (splitPreBolus)
             treatmentList = await SplitPreBolusAsync(treatmentList, cancellationToken);
 
-        var stored = new List<Treatment>();
+        var stored = new List<StoredTreatment>();
         try
         {
             var created = await _store.CreateAsync(treatmentList, origin, cancellationToken, stored);
@@ -258,39 +258,41 @@ internal class TreatmentService : ITreatmentService
     /// reads its record back: a create returns the id of the record it wrote, and a carb intake paired
     /// into a meal is served under its bolus's. Treatments served as one are announced once.
     /// </summary>
-    private async Task AnnounceCreatedAsync(IReadOnlyList<Treatment> stored)
+    private async Task AnnounceCreatedAsync(IReadOnlyList<StoredTreatment> stored)
     {
         if (stored.Count == 0)
             return;
 
+        var readBack = await ReadBackAsync(stored);
         var served = new List<Treatment>(stored.Count);
-        foreach (var treatment in stored)
+        for (var i = 0; i < stored.Count; i++)
         {
-            var announced = await ReadBackAsync(treatment) ?? treatment;
+            var created = stored[i].Created;
+            if (readBack is not null && readBack[i] is null)
+                _logger.LogWarning("Created treatment {Id} did not read back", created.Id);
+
+            var announced = readBack?[i] ?? created;
             // A state span keeps no data source, and the write-back sink tells a connector's own treatments by it.
-            announced.DataSource ??= treatment.DataSource;
+            announced.DataSource ??= created.DataSource;
             served.Add(announced);
         }
 
         await _events.OnCreatedAsync([.. served.DistinctBy(t => t.Id)], CancellationToken.None);
     }
 
-    /// <remarks>The write has committed, so a failed read-back announces the treatment as written.</remarks>
-    private async Task<Treatment?> ReadBackAsync(Treatment created)
+    /// <returns><c>null</c> when the read failed.</returns>
+    /// <remarks>The write has committed, so a failed read-back announces the treatments as written.</remarks>
+    private async Task<IReadOnlyList<Treatment?>?> ReadBackAsync(IReadOnlyList<StoredTreatment> stored)
     {
         try
         {
-            if (created.Id is { } id && await _store.GetByIdAsync(id, CancellationToken.None) is { } served)
-                return served;
-
-            _logger.LogWarning("Created treatment {Id} did not read back", created.Id);
+            return await _store.ReadBackAsync(stored, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Created treatment {Id} could not be read back", created.Id);
+            _logger.LogWarning(ex, "{Count} created treatments could not be read back", stored.Count);
+            return null;
         }
-
-        return null;
     }
 
     /// <summary>

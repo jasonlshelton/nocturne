@@ -83,7 +83,18 @@ internal interface ITreatmentStore
         IReadOnlyList<Treatment> treatments,
         WriteOrigin origin,
         CancellationToken ct = default,
-        ICollection<Treatment>? stored = null);
+        ICollection<StoredTreatment>? stored = null);
+
+    /// <summary>
+    /// What <see cref="GetByIdAsync"/> serves for each of <paramref name="stored"/> once the batch is
+    /// written, in order. Every <see cref="StoredTreatment.Served"/> is found in one read of their
+    /// records, and every <see cref="StoredTreatment.Named"/> in one read of the instants they start
+    /// at, however many there are. A <see cref="StoredTreatment.Unnamed"/>, and a named one that read
+    /// does not serve under its id, is resolved by its id alone, as <see cref="GetByIdAsync"/> resolves it.
+    /// </summary>
+    /// <returns>An entry is <c>null</c> when reads serve nothing for that treatment.</returns>
+    Task<IReadOnlyList<Treatment?>> ReadBackAsync(
+        IReadOnlyList<StoredTreatment> stored, CancellationToken ct = default);
 
     /// <summary>
     /// Updates an existing treatment by ID, propagating changes to V4 tables.
@@ -103,6 +114,30 @@ internal interface ITreatmentStore
     /// </summary>
     /// <param name="find">Optional Nightscout-compatible find query for time range filtering.</param>
     Task<long> CountAsync(string? find = null, CancellationToken ct = default);
+}
+
+/// <summary>
+/// A treatment <see cref="ITreatmentStore.CreateAsync"/> wrote, and what the create knows of how
+/// reads serve it.
+/// </summary>
+/// <param name="Created">The treatment as the create returned it.</param>
+internal abstract record StoredTreatment(Treatment Created)
+{
+    /// <summary>
+    /// A temp basal, mapped from the record <paramref name="RecordId"/> as written. A later write of
+    /// the batch can change that record: a re-send of it, or a Profile Switch that re-resolves its
+    /// rate from the schedule.
+    /// </summary>
+    internal sealed record Served(Treatment Created, Guid RecordId) : StoredTreatment(Created);
+
+    /// <summary>
+    /// <see cref="Treatment.Id"/> of <paramref name="Created"/> is the id reads serve the treatment
+    /// under, and it starts at <paramref name="Mills"/>.
+    /// </summary>
+    internal sealed record Named(Treatment Created, long Mills) : StoredTreatment(Created);
+
+    /// <summary><paramref name="Created"/> keeps the id it was sent with, which a read resolves.</summary>
+    internal sealed record Unnamed(Treatment Created) : StoredTreatment(Created);
 }
 
 /// <param name="Served">
