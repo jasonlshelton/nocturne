@@ -84,6 +84,9 @@ public sealed class JobScheduler : BackgroundService
     /// <summary>This process's name, which prefixes the token of each lease it takes.</summary>
     internal string Holder { get; } = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 
+    /// <summary>Whether a finished run has woken the loop and the loop has not yet started over.</summary>
+    internal bool WakePending => Volatile.Read(ref _wake).Task.IsCompleted;
+
     /// <summary>
     /// How long a job waits after its <paramref name="attempts"/>th failure in a row: one minute,
     /// doubling, up to the lower of <see cref="IScheduledJob.DefaultMaxBackoff"/> and <paramref name="cap"/>.
@@ -116,7 +119,7 @@ public sealed class JobScheduler : BackgroundService
 
                     await PollAsync(stoppingToken);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogError(ex, "The job scheduler could not read the job ledger");
                 }

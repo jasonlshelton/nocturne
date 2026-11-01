@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using FluentAssertions;
-using Nocturne.API.Services.BackgroundServices;
+using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Seeding;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Connectors;

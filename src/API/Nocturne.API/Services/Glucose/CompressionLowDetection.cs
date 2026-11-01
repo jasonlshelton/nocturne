@@ -1,7 +1,7 @@
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Infrastructure.Data.Services;
 
-namespace Nocturne.API.Services.BackgroundServices;
+namespace Nocturne.API.Services.Glucose;
 
 /// <summary>
 /// Runs <see cref="CompressionLowDetectionService.DetectForNightAsync(DateOnly, IServiceProvider, CancellationToken)"/>

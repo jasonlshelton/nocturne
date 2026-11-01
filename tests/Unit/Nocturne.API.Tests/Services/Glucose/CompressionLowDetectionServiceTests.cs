@@ -10,6 +10,7 @@ using Nocturne.API.Services.Profiles;
 using Nocturne.API.Tests.Infrastructure;
 using Nocturne.API.Tests.TestDoubles;
 using Nocturne.Core.Contracts.Glucose;
+using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Contracts.Profiles;
@@ -25,7 +26,7 @@ using Xunit;
 using Nocturne.Core.Contracts.Entries;
 using Nocturne.Infrastructure.Data.Repositories;
 
-namespace Nocturne.API.Tests.Services.BackgroundServices;
+namespace Nocturne.API.Tests.Services.Glucose;
 
 /// <summary>
 /// Detection reads the tenant's enable flag, bedtime and wake time from
@@ -101,12 +102,7 @@ public class CompressionLowDetectionServiceTests
         streams.SelectMany(stream => stream).OrderBy(e => e.Mills).ToList();
 
     private static CompressionLowDetectionService Detector() =>
-        new(
-            Mock.Of<IServiceProvider>(),
-            ActiveTenantSnapshotTestDoubles.Unread(),
-            TimeProvider.System,
-            NullLogger<CompressionLowDetectionService>.Instance
-        );
+        new(TimeProvider.System, NullLogger<CompressionLowDetectionService>.Instance);
 
     [Fact]
     public void DetectVShapeCandidates_recoversOnThePrimarySensorWhenAnotherSensorFillsItsGap()
@@ -463,46 +459,52 @@ public class CompressionLowDetectionServiceTests
     private const string SixHoursWest = "Etc/GMT+6";
 
     [Fact]
-    public async Task ScanReadyNightsAsync_doesNotScanANightWhoseWindowIsStillOpen()
+    public async Task TheJob_doesNotScanANightWhoseWindowIsStillOpen()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursEast);
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
 
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await fixture.RunAsync();
 
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 18));
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_scansTheWholeNightOnceItsWindowHasEnded()
+    public async Task TheJob_scansTheWholeNightOnceItsWindowHasEnded()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursEast);
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
+        await fixture.RunAsync();
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(24));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await fixture.RunAsync();
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 18));
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await fixture.RunAsync();
+        await fixture.RunAsync();
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 18), new DateOnly(2026, 10, 19));
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_scansEachTenantOncePerNightAfterItsOwnWindowEnds()
+    public async Task TheJob_scansEachTenantOncePerNightAfterItsOwnWindowEnds()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursEast, SixHoursWest);
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast, SixHoursWest);
         var east = fixture.TenantIds[0];
         var west = fixture.TenantIds[1];
 
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        async Task RunBothAsync()
+        {
+            await fixture.RunAsync(0);
+            await fixture.RunAsync(1);
+        }
+
+        await RunBothAsync();
         fixture.Clock.Advance(TimeSpan.FromMinutes(25));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await RunBothAsync();
         fixture.Clock.Advance(TimeSpan.FromHours(6));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await RunBothAsync();
         fixture.Clock.Advance(TimeSpan.FromHours(6));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await RunBothAsync();
+        await RunBothAsync();
 
         fixture.TenantScans.Should().BeEquivalentTo(
             [
@@ -515,113 +517,155 @@ public class CompressionLowDetectionServiceTests
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_sleepsUntilTheEarliestNightEndsAcrossTenants()
+    public async Task TheJob_comesDueWhenTheTenantsOwnNextNightIsReady()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursWest, SixHoursEast);
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast, SixHoursWest);
 
-        var untilEast = await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        var east = await fixture.RunAsync(0);
+        var west = await fixture.RunAsync(1);
 
-        untilEast.Should().Be(TimeSpan.FromMinutes(25));
+        east.NextDueAt.Should().Be(BeforeEastWake + TimeSpan.FromMinutes(25));
+        west.NextDueAt.Should().Be(BeforeEastWake + CompressionLowDetectionJob.MaxSleep);
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_boundsTheSleepByTheFloorAndTheCeiling()
+    public async Task TheJob_comesDueWithinTheCeilingWhenItsNextNightIsHoursAway()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursEast);
+        var afterReady = new DateTimeOffset(2026, 10, 20, 11, 15, 0, TimeSpan.Zero);
+        using var fixture = ScheduleFixture.Create(afterReady, "UTC");
+
+        var outcome = await fixture.RunAsync();
+
+        outcome.NextDueAt.Should().Be(afterReady + CompressionLowDetectionJob.MaxSleep, "the next night is ready in 20 hours");
+    }
+
+    [Fact]
+    public async Task TheJob_comesDueNoSoonerThanTheFloorAndNoLaterThanTheCeiling()
+    {
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(24) + TimeSpan.FromSeconds(50));
-        (await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None))
-            .Should().Be(CompressionLowDetectionService.MinSleep);
+        (await fixture.RunAsync()).NextDueAt
+            .Should().Be(fixture.Clock.GetUtcNow() + CompressionLowDetectionJob.MinSleep);
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
-        (await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None))
-            .Should().Be(CompressionLowDetectionService.MaxSleep);
+        (await fixture.RunAsync()).NextDueAt
+            .Should().Be(fixture.Clock.GetUtcNow() + CompressionLowDetectionJob.MaxSleep);
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_scansADaySleepersNightOnceItsOwnWindowHasEnded()
+    public async Task TheJob_scansADaySleepersNightOnceItsOwnWindowHasEnded()
     {
         var beforeWake = new DateTimeOffset(2026, 10, 20, 8, 50, 0, TimeSpan.Zero);
-        using var fixture = await ScheduleFixture.CreateAsync(beforeWake, "UTC", bedtimeHour: 1, wakeTimeHour: 9);
+        using var fixture = ScheduleFixture.Create(beforeWake, "UTC", bedtimeHour: 1, wakeTimeHour: 9);
 
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await fixture.RunAsync();
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 19));
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(36));
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        await fixture.RunAsync();
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 19), new DateOnly(2026, 10, 20));
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_sleepsUntilTheNextDaySleepersWindowEnds()
+    public async Task TheJob_scansADaySleepersEndedNightAndComesDueWithinTheCeiling()
     {
         var afterWake = new DateTimeOffset(2026, 10, 20, 9, 30, 0, TimeSpan.Zero);
-        using var fixture = await ScheduleFixture.CreateAsync(afterWake, "UTC", bedtimeHour: 1, wakeTimeHour: 9);
+        using var fixture = ScheduleFixture.Create(afterWake, "UTC", bedtimeHour: 1, wakeTimeHour: 9);
 
-        var delay = await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        var outcome = await fixture.RunAsync();
 
-        delay.Should().Be(CompressionLowDetectionService.MaxSleep);
+        outcome.NextDueAt.Should().Be(afterWake + CompressionLowDetectionJob.MaxSleep);
         fixture.Scans.Should().Equal(new DateOnly(2026, 10, 20));
     }
 
     [Fact]
-    public async Task ScanReadyNightsAsync_doesNotRescanANightWhoseSuggestionsWereAllDismissed()
+    public async Task TheJob_doesNotRescanANightWhoseSuggestionsWereAllDismissed()
     {
-        using var fixture = await ScheduleFixture.CreateAsync(BeforeEastWake, SixHoursEast);
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
         fixture.NightsWithSuggestions.Add(new DateOnly(2026, 10, 18));
 
-        await fixture.Sut.ScanReadyNightsAsync(CancellationToken.None);
+        var outcome = await fixture.RunAsync();
 
         fixture.Scans.Should().BeEmpty();
+        outcome.Cursor.Should().Be(new JobCursor(At: new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)));
     }
 
+    [Fact]
+    public async Task TheJob_keepsTheLastScannedNightInItsCursorAndDoesNotReadItAgain()
+    {
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
+
+        var outcome = await fixture.RunAsync();
+
+        outcome.Cursor.Should().Be(new JobCursor(At: new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)));
+        fixture.SuggestionChecks.Should().Equal(new DateOnly(2026, 10, 18));
+
+        fixture.Clock.Advance(TimeSpan.FromMinutes(5));
+        (await fixture.RunAsync()).Cursor.Should().Be(outcome.Cursor);
+        fixture.SuggestionChecks.Should().Equal([new DateOnly(2026, 10, 18)], "a scanned night is not read again");
+    }
+
+    [Fact]
+    public async Task TheJob_failsTheRunWhenTheTenantsSettingsCannotBeRead()
+    {
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
+        fixture.SettingsUnreadable = true;
+
+        var run = () => fixture.RunAsync();
+
+        await run.Should().ThrowAsync<InvalidOperationException>();
+        fixture.SuggestionChecks.Should().BeEmpty();
+        ((IScheduledJob)new CompressionLowDetectionJob(Detector())).MaxBackoff
+            .Should().Be(CompressionLowDetectionJob.MaxSleep);
+    }
+
+    [Fact]
+    public async Task TheJob_scansNothingForAnInactiveTenant()
+    {
+        using var fixture = ScheduleFixture.Create(BeforeEastWake, SixHoursEast);
+        fixture.Active = false;
+
+        var outcome = await fixture.RunAsync();
+
+        fixture.SuggestionChecks.Should().BeEmpty();
+        outcome.NextDueAt.Should().Be(BeforeEastWake + CompressionLowDetectionJob.MaxSleep);
+    }
+
+    /// <summary>
+    /// Runs <see cref="CompressionLowDetectionJob"/> for each tenant as the scheduler would, carrying
+    /// each tenant's cursor from one run to the next.
+    /// </summary>
     private sealed class ScheduleFixture : IDisposable
     {
-        private readonly SqliteTestDatabase _database;
         private readonly ServiceProvider _provider;
+        private readonly CompressionLowDetectionJob _job;
+        private readonly Dictionary<Guid, JobCursor?> _cursors = [];
 
         public FakeTimeProvider Clock { get; }
-        public CompressionLowDetectionService Sut { get; }
         public IReadOnlyList<Guid> TenantIds { get; }
-        public HashSet<DateOnly> NightsWithSuggestions { get; }
-        public List<(Guid Tenant, DateOnly Night)> TenantScans { get; }
+        public HashSet<DateOnly> NightsWithSuggestions { get; } = [];
+        public List<(Guid Tenant, DateOnly Night)> TenantScans { get; } = [];
+        public List<DateOnly> SuggestionChecks { get; } = [];
         public List<DateOnly> Scans => TenantScans.Select(s => s.Night).ToList();
+        public bool SettingsUnreadable { get; set; }
+        public bool Active { get; set; } = true;
 
-        private ScheduleFixture(
-            SqliteTestDatabase database,
-            ServiceProvider provider,
-            FakeTimeProvider clock,
-            CompressionLowDetectionService sut,
-            IReadOnlyList<Guid> tenantIds,
-            HashSet<DateOnly> nightsWithSuggestions,
-            List<(Guid Tenant, DateOnly Night)> scans)
-        {
-            _database = database;
-            _provider = provider;
-            Clock = clock;
-            Sut = sut;
-            TenantIds = tenantIds;
-            NightsWithSuggestions = nightsWithSuggestions;
-            TenantScans = scans;
-        }
+        public static ScheduleFixture Create(DateTimeOffset now, params string[] tenantTimezones) =>
+            new(now, tenantTimezones, 23, 7);
 
-        public static Task<ScheduleFixture> CreateAsync(DateTimeOffset now, params string[] tenantTimezones) =>
-            CreateAsync(now, tenantTimezones, 23, 7);
-
-        public static Task<ScheduleFixture> CreateAsync(
+        public static ScheduleFixture Create(
             DateTimeOffset now, string timezone, int bedtimeHour, int wakeTimeHour) =>
-            CreateAsync(now, [timezone], bedtimeHour, wakeTimeHour);
+            new(now, [timezone], bedtimeHour, wakeTimeHour);
 
-        private static Task<ScheduleFixture> CreateAsync(
-            DateTimeOffset now, string[] tenantTimezones, int bedtimeHour, int wakeTimeHour)
+        private ScheduleFixture(DateTimeOffset now, string[] tenantTimezones, int bedtimeHour, int wakeTimeHour)
         {
-            var clock = new FakeTimeProvider(now);
-            var tenantIds = tenantTimezones.Select(_ => Guid.NewGuid()).ToList();
-            var database = TestDbContextFactory.CreateSqlite();
-            for (var i = 0; i < tenantIds.Count; i++)
-                database.SeedTenant(tenantIds[i], $"tenant-{i}");
+            Clock = new FakeTimeProvider(now);
+            TenantIds = tenantTimezones.Select(_ => Guid.NewGuid()).ToList();
+            _job = new CompressionLowDetectionJob(
+                new CompressionLowDetectionService(Clock, NullLogger<CompressionLowDetectionService>.Instance));
 
-            var settingsByTenant = tenantIds
+            var settingsByTenant = TenantIds
                 .Zip(tenantTimezones)
                 .ToDictionary(
                     pair => pair.First,
@@ -637,15 +681,8 @@ public class CompressionLowDetectionServiceTests
                             },
                         },
                     });
-            var nightsWithSuggestions = new HashSet<DateOnly>();
-            var scans = new List<(Guid Tenant, DateOnly Night)>();
 
             var services = new ServiceCollection();
-            database.AddToServices(services);
-            services.AddSingleton(sp => new ActiveTenantSnapshot(
-                new TenantRepository(sp.GetRequiredService<INocturneDbContextFactory>()),
-                clock,
-                NullLogger<ActiveTenantSnapshot>.Instance));
             services.AddScoped<ITenantAccessor, RecordingTenantAccessor>();
             services.AddScoped(sp =>
             {
@@ -653,7 +690,7 @@ public class CompressionLowDetectionServiceTests
                 var settings = new Mock<IUISettingsService>();
                 settings
                     .Setup(s => s.GetSettingsAsync(It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(settingsByTenant[tenantId]);
+                    .ReturnsAsync(() => SettingsUnreadable ? null! : settingsByTenant[tenantId]);
                 return settings.Object;
             });
             services.AddScoped(sp =>
@@ -662,10 +699,11 @@ public class CompressionLowDetectionServiceTests
                 var repository = new Mock<ICompressionLowRepository>();
                 repository
                     .Setup(r => r.AnySuggestionExistsForNightAsync(It.IsAny<DateOnly>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync((DateOnly night, CancellationToken _) => nightsWithSuggestions.Contains(night));
+                    .Callback((DateOnly night, CancellationToken _) => SuggestionChecks.Add(night))
+                    .ReturnsAsync((DateOnly night, CancellationToken _) => NightsWithSuggestions.Contains(night));
                 repository
                     .Setup(r => r.ActiveSuggestionsExistForNightAsync(It.IsAny<DateOnly>(), It.IsAny<CancellationToken>()))
-                    .Callback((DateOnly night, CancellationToken _) => scans.Add((tenantId, night)))
+                    .Callback((DateOnly night, CancellationToken _) => TenantScans.Add((tenantId, night)))
                     .ReturnsAsync(false);
                 return repository.Object;
             });
@@ -684,23 +722,24 @@ public class CompressionLowDetectionServiceTests
             services.AddScoped(_ => Mock.Of<ITherapySettingsResolver>());
             services.AddScoped<ICompressionLowNightWindowResolver, CompressionLowNightWindowResolver>();
             services.AddLogging();
-            var provider = services.BuildServiceProvider();
-
-            var sut = new CompressionLowDetectionService(
-                provider,
-                provider.GetRequiredService<ActiveTenantSnapshot>(),
-                clock,
-                NullLogger<CompressionLowDetectionService>.Instance);
-
-            return Task.FromResult(
-                new ScheduleFixture(database, provider, clock, sut, tenantIds, nightsWithSuggestions, scans));
+            _provider = services.BuildServiceProvider();
         }
 
-        public void Dispose()
+        public async Task<JobOutcome.Resumed> RunAsync(int tenant = 0)
         {
-            _provider.Dispose();
-            _database.Dispose();
+            var tenantId = TenantIds[tenant];
+            await using var scope = _provider.CreateAsyncScope();
+            var context = new TenantContext(tenantId, $"tenant-{tenant}", "T", Active, IsDemo: false);
+            scope.ServiceProvider.GetRequiredService<ITenantAccessor>().SetTenant(context);
+
+            var outcome = (JobOutcome.Resumed)await _job.RunAsync(
+                new JobRun(context, _cursors.GetValueOrDefault(tenantId), 0, scope.ServiceProvider, Clock.GetUtcNow()),
+                CancellationToken.None);
+            _cursors[tenantId] = outcome.Cursor;
+            return outcome;
         }
+
+        public void Dispose() => _provider.Dispose();
     }
 
     private sealed class RecordingTenantAccessor : ITenantAccessor
