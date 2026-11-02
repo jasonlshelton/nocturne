@@ -1678,6 +1678,14 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("prune_cursor_reset_at");
 
+                    b.Property<string>("Run")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("run");
+
+                    b.Property<DateTime?>("RunCancelRequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("run_cancel_requested_at");
+
                     b.HasKey("TenantId");
 
                     b.ToTable("dedup_reconcile_state");
@@ -4624,6 +4632,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("end_timestamp");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("MetadataJson")
                         .HasColumnType("jsonb")
                         .HasColumnName("metadata");
@@ -4686,8 +4699,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "StartTimestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_state_spans_tenant_start_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_state_spans_tenant_visible_start_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex("TenantId", "Category", "UpdatedAt", "Id")
                         .HasDatabaseName("ix_state_spans_tenant_category_updated_at")
@@ -6424,6 +6437,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("glucose_type");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -6496,8 +6514,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_bg_checks_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_bg_checks_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_bg_checks_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_bg_checks_tenant_legacy_id_user_deleted")
@@ -6838,6 +6856,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("double precision")
                         .HasColumnName("insulin_recommendation_for_carbs");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -6904,6 +6927,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "SysUpdatedAt", "Id")
                         .HasDatabaseName("ix_bolus_calculations_tenant_history");
+
+                    b.HasIndex("TenantId", "Timestamp", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_bolus_calculations_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_bolus_calculations_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_bolus_calculations_tenant_legacy_id_user_deleted")
@@ -6999,6 +7027,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
                         .HasColumnName("insulin_type");
+
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
 
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
@@ -7104,8 +7137,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_boluses_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_boluses_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_boluses_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_boluses_tenant_legacy_id_user_deleted")
@@ -7289,6 +7322,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("double precision")
                         .HasColumnName("fat_grams");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -7364,8 +7402,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_carb_intakes_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_carb_intakes_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_carb_intakes_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_carb_intakes_tenant_legacy_id_user_deleted")
@@ -7605,6 +7643,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("event_type");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -7688,8 +7731,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_device_events_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_device_events_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_device_events_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_device_events_tenant_legacy_id_user_deleted")
@@ -7927,6 +7970,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_announcement");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -7999,8 +8047,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_notes_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_notes_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_notes_tenant_legacy_id_any")
                         .HasDatabaseName("ix_notes_tenant_legacy_id_any");
@@ -8861,6 +8909,16 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("glucose_processing");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
+                    b.Property<bool>("IsSecondaryStream")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_secondary_stream");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -8964,8 +9022,8 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Timestamp", "Id")
                         .IsDescending(false, true, true)
-                        .HasDatabaseName("ix_sensor_glucose_tenant_timestamp_id")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_sensor_glucose_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_sensor_glucose_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_sensor_glucose_tenant_legacy_id_user_deleted")
@@ -9150,6 +9208,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("insulin_context");
 
+                    b.Property<bool>("IsDuplicate")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_duplicate");
+
                     b.Property<string>("LegacyId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -9266,6 +9329,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "SysUpdatedAt", "Id")
                         .HasDatabaseName("ix_temp_basals_tenant_history");
+
+                    b.HasIndex("TenantId", "Timestamp", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_temp_basals_tenant_visible_timestamp_id")
+                        .HasFilter("deleted_at IS NULL AND NOT is_duplicate");
 
                     b.HasIndex(new[] { "TenantId", "LegacyId" }, "ix_temp_basals_tenant_legacy_id_user_deleted")
                         .HasDatabaseName("ix_temp_basals_tenant_legacy_id_user_deleted")

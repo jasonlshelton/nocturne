@@ -95,7 +95,7 @@ public class LegacyReadCacheInvalidationTests : IDisposable
         services
             .AddLogging()
             .AddSingleton<INocturneDbContextFactory>(new TestNocturneDbContextFactory(_context))
-            .AddSingleton(Mock.Of<IDeduplicationService>())
+            .AddSingleton(Mock.Of<IDuplicateLinker>())
             .AddSingleton<IAuditContext>(new SystemAuditContext())
             .AddSingleton(cache.Object);
         await using var provider = services.BuildServiceProvider();
@@ -198,7 +198,7 @@ public class LegacyReadCacheInvalidationTests : IDisposable
             StartTimestamp = new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc),
         });
 
-        _written.Models.Should().Equal(typeof(StateSpan));
+        _written.Models.Should().NotBeEmpty().And.OnlyContain(written => written == typeof(StateSpan));
     }
 
     [Fact]
@@ -224,8 +224,9 @@ public class LegacyReadCacheInvalidationTests : IDisposable
             WriteOrigin.Live);
         _written.Models.Clear();
 
-        await repository.SetEndsAsync(
-            new Dictionary<Guid, DateTime?> { [activation.Id] = new DateTime(2026, 5, 1, 13, 0, 0, DateTimeKind.Utc) });
+        await repository.SettleAsync(
+            new Dictionary<Guid, DateTime?> { [activation.Id] = new DateTime(2026, 5, 1, 13, 0, 0, DateTimeKind.Utc) },
+            new Dictionary<Guid, Guid?>());
 
         _written.Models.Should().Equal(typeof(ProfileActivation));
     }
@@ -234,7 +235,7 @@ public class LegacyReadCacheInvalidationTests : IDisposable
         new ServiceCollection()
             .AddLogging()
             .AddSingleton<INocturneDbContextFactory>(new TestNocturneDbContextFactory(_context))
-            .AddSingleton(Mock.Of<IDeduplicationService>())
+            .AddSingleton(Mock.Of<IDuplicateLinker>())
             .AddSingleton<IAuditContext>(new SystemAuditContext())
             .AddSingleton<ILegacyReadCacheInvalidation>(_written)
             .BuildServiceProvider();

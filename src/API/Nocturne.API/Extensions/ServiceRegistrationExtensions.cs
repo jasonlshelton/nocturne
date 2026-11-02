@@ -741,11 +741,6 @@ public static class ServiceRegistrationExtensions
 
         services.AddScoped<IV4ToLegacyProjectionService, V4ToLegacyProjectionService>();
 
-        // Collection effect descriptors (resolved by WriteSideEffectsService)
-        services.AddSingleton<ICollectionEffectDescriptor, ProfileEffectDescriptor>();
-        services.AddSingleton<ICollectionEffectDescriptor, DeviceStatusEffectDescriptor>();
-        services.AddSingleton<ICollectionEffectDescriptor, FoodEffectDescriptor>();
-
         // Core domain services
         services.AddScoped<ITreatmentService, TreatmentService>();
         services.AddScoped<ITreatmentStore, TreatmentReadService>();
@@ -1010,15 +1005,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IActivityDecomposer, ActivityDecomposer>();
         services.AddScoped<IProfileDecomposer, ProfileDecomposer>();
 
-        // Unified generic decomposer registrations
-        services.AddScoped<IDecomposer<Activity>>(sp =>
-            (IDecomposer<Activity>)sp.GetRequiredService<IActivityDecomposer>()
-        );
-        services.AddScoped<IDecomposer<Profile>>(sp =>
-            (IDecomposer<Profile>)sp.GetRequiredService<IProfileDecomposer>()
-        );
-        services.AddScoped<IDecompositionPipeline, DecompositionPipeline>();
-
         return services;
     }
 
@@ -1188,6 +1174,9 @@ public static class ServiceRegistrationExtensions
 
         services.AddScheduledJob<AlertSweepJob>();
         services.AddScheduledJob<DeduplicationReconciliationJob>();
+        services.AddScheduledJob<DuplicateFlagAuditJob>();
+        services.AddScheduledJob<DeduplicationRunJob>();
+        services.AddScheduledJob<GlucoseStreamRecomputeJob>();
 
         return services;
     }
@@ -1202,7 +1191,6 @@ public static class ServiceRegistrationExtensions
     )
     {
         services.AddScoped<IDataSourceService, DataSourceService>();
-        services.AddScoped<IDeduplicationService, DeduplicationService>();
         services.AddSingleton<ISecretEncryptionService, SecretEncryptionService>();
         services.AddScoped<IConnectorConfigurationService, ConnectorConfigurationService>();
         services.AddScoped<IConnectorSyncCursorStore, ConnectorSyncCursorStore>();

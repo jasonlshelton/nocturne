@@ -25,9 +25,6 @@ internal sealed class DeviceStatusService(
 
     private const int BulkDeleteLimit = 10_000;
 
-    /// <summary>The decomposer writes the snapshots itself, so the side effects only broadcast.</summary>
-    private static readonly WriteEffectOptions NoDecompose = new() { DecomposeToV4 = false };
-
     public Task<IReadOnlyList<DeviceStatus>> GetDeviceStatusesAsync(
         FindQuery find, int count, int skip, CancellationToken cancellationToken,
         bool descending = true, ReadSortField sort = ReadSortField.Time) =>
@@ -47,7 +44,7 @@ internal sealed class DeviceStatusService(
 
     /// <remarks>
     /// The announcement runs whatever ends the batch, and not on the request's token: a status that was
-    /// written stays written when the request is cancelled or a later status fails, and a client that
+    /// written stays written when the request is cancelled or the batch fails part-way, and a client that
     /// missed its broadcast, or an upstream that missed its write-back, would never learn of it.
     /// </remarks>
     public async Task<BulkWrite<DeviceStatus>> CreateDeviceStatusesAsync(
@@ -55,30 +52,24 @@ internal sealed class DeviceStatusService(
         CancellationToken cancellationToken = default)
     {
         var announce = origin == WriteOrigin.Live;
-        var decomposed = new List<(DeviceStatus Status, bool Wrote)>(statuses.Count);
+        var result = new DeviceStatusDecomposition();
         IReadOnlyList<DeviceStatus> served = [];
-        var skippedDeleted = 0;
         try
         {
-            foreach (var status in statuses)
-            {
-                var result = await decomposer.DecomposeAsync(status, source, origin, cancellationToken);
-                skippedDeleted += result.SkippedDeleted;
-                decomposed.Add((status, result.CreatedRecords.Count > 0 || result.UpdatedRecords.Count > 0));
-            }
+            await decomposer.DecomposeBatchAsync(statuses, source, origin, cancellationToken, result);
         }
         finally
         {
             if (announce)
-                served = await AnnounceCreatedAsync(decomposed, source);
+                served = await AnnounceCreatedAsync(statuses, result, source);
         }
 
-        return new BulkWrite<DeviceStatus>(announce ? served : [.. decomposed.Select(d => d.Status)], skippedDeleted);
+        return new BulkWrite<DeviceStatus>(announce ? served : statuses, result.SkippedDeleted);
     }
 
-    public Task<DecompositionResult> ImportDeviceStatusesAsync(
+    public async Task<DecompositionResult> ImportDeviceStatusesAsync(
         IReadOnlyList<DeviceStatus> statuses, string? source, CancellationToken cancellationToken = default) =>
-        decomposer.DecomposeBatchAsync(statuses, source, WriteOrigin.Backfill, cancellationToken);
+        await decomposer.DecomposeBatchAsync(statuses, source, WriteOrigin.Backfill, cancellationToken);
 
     /// <remarks>
     /// The id may be only the wire form of the stored one, and the stored snapshots are found by the
@@ -93,7 +84,7 @@ internal sealed class DeviceStatusService(
 
         var updated = await store.GetByIdAsync(status.Id!, cancellationToken) ?? status;
 
-        await sideEffects.OnUpdatedAsync(CollectionName, updated, NoDecompose, cancellationToken);
+        await sideEffects.OnUpdatedAsync(CollectionName, updated, cancellationToken: cancellationToken);
         await events.OnUpdatedAsync(updated, cancellationToken);
 
         return updated;
@@ -109,7 +100,7 @@ internal sealed class DeviceStatusService(
             || await decomposer.DeleteStoredAsync(storedId, WriteOrigin.Live, cancellationToken) == 0)
             return false;
 
-        await sideEffects.OnDeletedAsync(CollectionName, deleted, NoDecompose, cancellationToken);
+        await sideEffects.OnDeletedAsync(CollectionName, deleted, cancellationToken: cancellationToken);
         await events.OnDeletedAsync(deleted, cancellationToken);
 
         return true;
@@ -130,54 +121,67 @@ internal sealed class DeviceStatusService(
                 deletedCount++;
         }
 
-        await sideEffects.OnBulkDeletedAsync(CollectionName, deletedCount, NoDecompose, cancellationToken);
+        await sideEffects.OnBulkDeletedAsync(CollectionName, deletedCount, cancellationToken: cancellationToken);
         await events.OnBulkDeletedAsync(deletedCount, cancellationToken);
 
         return deletedCount;
     }
 
     /// <summary>
-    /// Reads each status back as reads serve it, and announces those that wrote a record. A read carries
-    /// no data source, so each is stamped with <paramref name="source"/> for the write-back to skip on.
+    /// Reads the statuses back as reads serve them, and announces those that wrote a record, which before
+    /// the batch resolved its groups is none. A read carries no data source, so each is stamped with
+    /// <paramref name="source"/> for the write-back to skip on.
     /// </summary>
     /// <returns>Every status, as read back or else as given.</returns>
     private async Task<IReadOnlyList<DeviceStatus>> AnnounceCreatedAsync(
-        IReadOnlyList<(DeviceStatus Status, bool Wrote)> decomposed, string? source)
+        IReadOnlyList<DeviceStatus> statuses, DeviceStatusDecomposition result, string? source)
     {
-        var served = new List<DeviceStatus>(decomposed.Count);
-        var announced = new List<DeviceStatus>(decomposed.Count);
-        foreach (var (status, wrote) in decomposed)
+        var wrote = result.Wrote;
+        var stored = await ReadBackAsync(statuses, result.Groups);
+        var served = new List<DeviceStatus>(statuses.Count);
+        var announced = new List<DeviceStatus>(statuses.Count);
+        for (var i = 0; i < statuses.Count; i++)
         {
-            var read = await ReadBackAsync(status);
+            var read = statuses[i].Id is { } id && stored.TryGetValue(id, out var found) ? found : statuses[i];
             read.DataSource = source;
             served.Add(read);
-            if (wrote)
+            if (wrote.Count == statuses.Count && wrote[i])
                 announced.Add(read);
         }
 
         if (announced.Count > 0)
         {
-            await sideEffects.OnCreatedAsync(CollectionName, announced, NoDecompose, CancellationToken.None);
+            await sideEffects.OnCreatedAsync(CollectionName, announced, cancellationToken: CancellationToken.None);
             await events.OnCreatedAsync(announced, CancellationToken.None);
         }
 
         return served;
     }
 
-    /// <remarks>The write has committed, so a failed read-back serves the status as written.</remarks>
-    private async Task<DeviceStatus> ReadBackAsync(DeviceStatus status)
+    /// <returns>
+    /// The statuses as stored, by id: none for a status with no id, and none at all before the batch
+    /// resolved its groups or when the read fails, as the caller then serves each as given.
+    /// </returns>
+    private async Task<IReadOnlyDictionary<string, DeviceStatus>> ReadBackAsync(
+        IReadOnlyList<DeviceStatus> statuses, IReadOnlyList<Guid> groups)
     {
-        if (string.IsNullOrEmpty(status.Id))
-            return status;
+        var named = groups.Count == statuses.Count
+            ? groups.Where((_, i) => !string.IsNullOrEmpty(statuses[i].Id)).ToList()
+            : [];
+        if (named.Count == 0)
+            return new Dictionary<string, DeviceStatus>();
 
         try
         {
-            return await store.GetByIdAsync(status.Id, CancellationToken.None) ?? status;
+            return (await store.GetByGroupsAsync(named, CancellationToken.None))
+                .Where(status => status.Id is not null)
+                .DistinctBy(status => status.Id)
+                .ToDictionary(status => status.Id!, StringComparer.Ordinal);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Created device status {Id} could not be read back", status.Id);
-            return status;
+            logger.LogWarning(ex, "{Count} created device statuses could not be read back", named.Count);
+            return new Dictionary<string, DeviceStatus>();
         }
     }
 }

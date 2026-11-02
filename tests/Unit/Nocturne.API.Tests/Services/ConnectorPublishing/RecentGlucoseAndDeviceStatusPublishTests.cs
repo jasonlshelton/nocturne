@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.TestDoubles;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -133,7 +134,7 @@ public class RecentGlucoseAndDeviceStatusPublishTests : IDisposable
         var uploader = new Mock<IUploaderSnapshotRepository>();
         var decomposer = new DeviceStatusDecomposer(
             aps.Object, pump.Object, uploader.Object, extras.Object, Mock.Of<IStateSpanService>(),
-            Mock.Of<IDeviceService>(), Mock.Of<IAuditContext>(), Mock.Of<ILoopClosedLoopStamper>(), TimeProvider.System, NullLogger<DeviceStatusDecomposer>.Instance);
+            new UnresolvedDevices(), Mock.Of<IAuditContext>(), Mock.Of<ILoopClosedLoopStamper>(), TimeProvider.System, NullLogger<DeviceStatusDecomposer>.Instance);
         var publisher = DevicePublisher(WritingDeviceStatusService.Over(decomposer), aps.Object, pump.Object, uploader.Object);
 
         var written = await publisher.PublishRecentDeviceStatusAsync(
@@ -164,7 +165,7 @@ public class RecentGlucoseAndDeviceStatusPublishTests : IDisposable
         var ctxFactory = new TestNocturneDbContextFactory(_context);
         var audit = Mock.Of<IAuditContext>();
         var sensorGlucose = new SensorGlucoseRepository(
-            ctxFactory, Mock.Of<IDeduplicationService>(), audit, NullLogger<SensorGlucoseRepository>.Instance);
+            ctxFactory, Mock.Of<IDuplicateLinker>(), audit, NullLogger<SensorGlucoseRepository>.Instance);
         var meterGlucose = new MeterGlucoseRepository(ctxFactory, audit, NullLogger<MeterGlucoseRepository>.Instance);
         var calibration = new CalibrationRepository(ctxFactory, audit, NullLogger<CalibrationRepository>.Instance);
 

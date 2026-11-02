@@ -28,7 +28,7 @@ public class EntryDecomposerTests : IDisposable
     {
         _context = TestDbContextFactory.CreateInMemoryContext();
         _context.TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        var mockDedup = new Mock<IDeduplicationService>();
+        var mockDedup = new Mock<IDuplicateLinker>();
         var ctxFactory = new TestNocturneDbContextFactory(_context);
         var sgRepo = new SensorGlucoseRepository(ctxFactory, mockDedup.Object, new Mock<IAuditContext>().Object, NullLogger<SensorGlucoseRepository>.Instance);
         var mgRepo = new MeterGlucoseRepository(ctxFactory, new Mock<IAuditContext>().Object, NullLogger<MeterGlucoseRepository>.Instance);
@@ -509,7 +509,7 @@ public class EntryDecomposerTests : IDisposable
         // Assert
         result.CreatedRecords.Should().BeEmpty();
         result.UpdatedRecords.Should().BeEmpty();
-        result.CorrelationId.Should().NotBeNull("a correlation ID is always generated");
+        result.CorrelationId.Should().BeNull("nothing was written under one");
         result.SkippedUnsupported.Should().Be(1);
     }
 
