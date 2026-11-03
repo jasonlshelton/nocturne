@@ -118,6 +118,8 @@ internal static class DuplicateGroupPrimaries
         if (canonicals.Length == 0)
             return [];
 
+        // Before the headless test, so it and the repick read one committed state (<see cref="LockGroupsAsync"/>).
+        await LockGroupsAsync(ctx, recordType, canonicals, ct);
         var primaries = await ctx.LinkedRecords.AsNoTracking()
             .Where(lr => lr.RecordType == key && lr.IsPrimary && canonicals.Contains(lr.CanonicalId))
             .Select(lr => new { lr.CanonicalId, lr.RecordId })
@@ -128,7 +130,7 @@ internal static class DuplicateGroupPrimaries
         if (headless.Length == 0)
             return [];
 
-        var promoted = await RepickAsync(ctx, recordType, headless, ct);
+        var promoted = await RepickLockedAsync(ctx, recordType, headless, ct);
         await TouchAsync(ctx, recordType, promoted, touchAt, ct);
         return promoted;
     }
@@ -226,6 +228,15 @@ internal static class DuplicateGroupPrimaries
     /// </summary>
     /// <returns>The ids of the live records made primary.</returns>
     public static async Task<IReadOnlyList<Guid>> RepickAsync(
+        NocturneDbContext ctx, RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
+    {
+        // Before the read, so a copy deleted meanwhile is not promoted (<see cref="LockGroupsAsync"/>).
+        await LockGroupsAsync(ctx, recordType, canonicalIds, ct);
+        return await RepickLockedAsync(ctx, recordType, canonicalIds, ct);
+    }
+
+    /// <summary><see cref="RepickAsync"/> of groups whose links this transaction has locked.</summary>
+    private static async Task<IReadOnlyList<Guid>> RepickLockedAsync(
         NocturneDbContext ctx, RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
     {
         var promotedLive = new List<Guid>();
@@ -384,9 +395,10 @@ internal static class DuplicateGroupPrimaries
     /// <summary>
     /// Locks every link of the groups <paramref name="canonicalIds"/> until the transaction ends, in
     /// record order, after the stream lock for glucose: the order <see cref="SetPrimariesAsync"/> takes
-    /// them in. A merge takes them before it reads the groups, so a primary another transaction moves
-    /// in one of them is committed before the read or waits for the merge, and the merge never leaves
-    /// a group with two primaries or none.
+    /// them in. A merge and a repick take them before they read the groups, so a primary another
+    /// transaction moves in one of them, or a copy a delete takes under <see cref="LockGroupsOfAsync"/>,
+    /// is committed before the read or waits for it: the merge never leaves a group with two primaries
+    /// or none, and the repick never promotes such a copy.
     /// </summary>
     public static async Task LockGroupsAsync(
         NocturneDbContext ctx, RecordType recordType, Guid[] canonicalIds, CancellationToken ct)
@@ -412,14 +424,17 @@ internal static class DuplicateGroupPrimaries
     /// group. The insert-time linker flags the rows it has just linked before its repick locks their
     /// groups' links, so a delete covering both such a copy and a committed member of its group can still
     /// meet it; PostgreSQL breaks that as a deadlock and the aborted transaction retries. Glucose takes
-    /// nothing here: its delete takes the stream lock only after
-    /// its rows are written (<see cref="GlucoseStreamFlags"/> says why), and a link lock ahead of the stream
-    /// lock would invert the order the other glucose writers take them in.
+    /// nothing here unless its stream locks are deferred (<see cref="GlucoseStreamFlags.IsDeferred"/>): its
+    /// delete takes the stream lock only after its rows are written, and a link lock ahead of the stream
+    /// lock would invert the order the other glucose writers take them in (<see cref="GlucoseStreamFlags"/>
+    /// says why, and why a deferred delete locks).
     /// </summary>
     public static async Task LockGroupsOfAsync(
         NocturneDbContext ctx, RecordType recordType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct)
     {
-        if (recordType == RecordType.SensorGlucose || !ctx.Database.IsNpgsql() || recordIds.Count == 0)
+        if (recordType == RecordType.SensorGlucose && !GlucoseStreamFlags.IsDeferred(ctx))
+            return;
+        if (!ctx.Database.IsNpgsql() || recordIds.Count == 0)
             return;
 
         var key = RecordTypeKeys.Key(recordType);
