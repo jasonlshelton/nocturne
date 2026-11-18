@@ -6,6 +6,7 @@ import {
   AlertReplayEventKind,
   type AlertFiringSearchResult,
 } from "#lib/api/generated/nocturne-api-client.js";
+import { ALERT_PRESETS } from "#lib/test-stubs/alert-presets.js";
 import { remoteCommand, remoteQuery } from "#lib/test-stubs/remote-resource.js";
 
 const calls = vi.hoisted(() => ({
@@ -14,10 +15,19 @@ const calls = vi.hoisted(() => ({
   tested: [] as unknown[],
   createError: null as unknown,
   search: null as unknown,
+  trackers: [] as unknown[],
+  opposites: [] as unknown[],
 }));
 
 vi.mock("#lib/api/generated/alertRules.generated.remote.js", () => ({
   getRules: () => remoteQuery(() => []),
+  getPresets: () => remoteQuery(() => ALERT_PRESETS),
+  suggestAutoResolve: remoteCommand((request: unknown) => {
+    calls.opposites.push(Reflect.get(Object(request), "condition"));
+    return Promise.resolve({
+      condition: { type: "threshold", threshold: { direction: "above", value: 70 } },
+    });
+  }),
   createRule: remoteCommand((body: unknown) => {
     calls.created.push(body);
     return calls.createError ? Promise.reject(calls.createError) : Promise.resolve({ id: "new-id" });
@@ -54,7 +64,7 @@ vi.mock("#lib/api/generated/clientDevices.generated.remote.js", () => ({
 }));
 
 vi.mock("#lib/api/generated/trackers.generated.remote.js", () => ({
-  getDefinitions: () => remoteQuery(() => []),
+  getDefinitions: () => remoteQuery(() => calls.trackers),
 }));
 
 // The chart draws the glucose of the time it is given; the wizard is what is under test.
@@ -86,10 +96,64 @@ describe("new alert wizard", () => {
     pageState.data = { effectivePermissions: ["alerts.readwrite"] };
     pageState.state = {};
     calls.created.length = 0;
+    calls.opposites.length = 0;
     calls.searched.length = 0;
     calls.tested.length = 0;
     calls.createError = null;
     calls.search = noFirings;
+    calls.trackers = [];
+  });
+
+  it("builds a sensor alert on the sensor tracker", async () => {
+    calls.trackers = [
+      {
+        id: "11111111-1111-1111-1111-111111111111",
+        name: "Dexcom G7",
+        category: "Sensor",
+        mode: "Duration",
+        lifespanHours: 240,
+      },
+    ];
+    render(NewAlertPage, {});
+
+    await page.getByRole("button", { name: "More alert types" }).click();
+    await page.getByTestId("alert-type-sensor_change_due").click();
+
+    await expect
+      .element(page.getByLabelText("Alert when the sensor is this old, or older"))
+      .toHaveValue(10);
+    await expect
+      .element(page.getByTestId("alert-tracker-source"))
+      .toHaveTextContent("Nocturne reads the age from the tracker Dexcom G7. The tracker lasts 10 days.");
+
+    await page.getByLabelText("Alert when the sensor is this old, or older").fill("9");
+    await next().click();
+    await next().click();
+
+    await expect.poll(() => calls.searched).toHaveLength(1);
+    expect(calls.searched[0]).toMatchObject({
+      rule: {
+        name: "Dexcom G7 change due: 9 days",
+        conditionType: "tracker_age",
+        conditionParams: JSON.stringify({
+          tracker_definition_id: "11111111-1111-1111-1111-111111111111",
+          operator: ">=",
+          minutes: 9 * 24 * 60,
+        }),
+      },
+    });
+  });
+
+  it("says when there is no sensor tracker and uses the uploader's sensor start", async () => {
+    render(NewAlertPage, {});
+
+    await page.getByRole("button", { name: "More alert types" }).click();
+    await page.getByTestId("alert-type-sensor_change_due").click();
+
+    await expect
+      .element(page.getByTestId("alert-no-tracker"))
+      .toHaveTextContent("There is no tracker for the sensor.");
+    await expect.element(page.getByRole("link", { name: "Open Trackers" })).toBeVisible();
   });
 
   it("starts by asking what the alert is for", async () => {
@@ -194,7 +258,23 @@ describe("new alert wizard", () => {
       severity: "warning",
       conditionType: "threshold",
       isEnabled: true,
+      autoResolveEnabled: true,
+      autoResolveParams: { type: "threshold", threshold: { direction: "above", value: 70 } },
     });
+    expect(calls.opposites.at(-1)).toMatchObject({
+      type: "composite",
+      composite: { conditions: [{ type: "threshold", threshold: { direction: "below", value: 70 } }] },
+    });
+  });
+
+  it("says on the last step what closes the alert", async () => {
+    render(NewAlertPage, {});
+
+    await toCheckStep();
+
+    await expect
+      .element(page.getByTestId("alert-auto-resolve"))
+      .toHaveTextContent("The alert closes when this is true: Glucose above 70 mg/dL.");
   });
 
   it("keeps a name the person typed", async () => {

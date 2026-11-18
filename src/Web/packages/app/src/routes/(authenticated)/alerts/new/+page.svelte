@@ -1,20 +1,30 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { expoOut } from "svelte/easing";
+  import { prefersReducedMotion } from "svelte/motion";
+  import { fly } from "svelte/transition";
   import { beforeNavigate, goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
-  import { toast } from "svelte-sonner";
-  import { createRule, getRules } from "#lib/api/generated/alertRules.generated.remote.js";
+  import { toastSaved } from "#lib/forms/index.js";
+  import {
+    createRule,
+    getPresets,
+    getRules,
+  } from "#lib/api/generated/alertRules.generated.remote.js";
+  import { getDefinitions } from "#lib/api/generated/trackers.generated.remote.js";
   import type { ReplayRuleDefinition } from "#lib/api/generated/nocturne-api-client.js";
   import { Button } from "#lib/components/ui/button/index.js";
   import * as Dialog from "#lib/components/ui/dialog/index.js";
   import { conditionIssuesMessage } from "#lib/components/alerts/conditionIssues.svelte.js";
+  import { oppositeCondition } from "#lib/components/alerts/oppositeCondition.js";
   import ReplayPanel from "#lib/components/alerts/ReplayPanel.svelte";
   import {
     buildBody,
     ensureCompositeRoot,
     nodeFromApi,
     parseRule,
+    stripEditorFields,
     validateChannels,
     type ConditionNode,
     type RuleEditorState,
@@ -27,10 +37,12 @@
   import {
     draftCondition,
     draftIssue,
-    getTemplate,
     newDraft,
     suggestName,
     templateLabel,
+    templatesFrom,
+    templateTrackers,
+    trackerLeaf,
     type AlertDraft,
     type TemplateId,
   } from "#lib/components/alerts/wizard/templates.svelte.js";
@@ -64,65 +76,153 @@
   let draft = $state<AlertDraft | null>(null);
   let nameEdited = $state(false);
 
+  const presetsQuery = getPresets();
+  const templates = $derived(templatesFrom(presetsQuery.current ?? []));
+
+  const trackersQuery = getDefinitions({});
+  const trackerDefinitions = $derived(trackersQuery.current ?? []);
+  const trackers = $derived(draft ? templateTrackers(draft.def, trackerDefinitions) : []);
+
+  // A type chosen before the trackers loaded moves to its tracker when they arrive, unless the
+  // person has changed its settings by then: those are theirs to keep.
+  $effect(() => {
+    const tracker = trackers[0];
+    untrack(() => {
+      if (!tracker || !draft?.leaf || draft.leaf.tracker_age) return;
+      const built = draft.def.build();
+      const untouched =
+        built !== null &&
+        JSON.stringify(stripEditorFields(draft.leaf)) === JSON.stringify(stripEditorFields(built));
+      if (!untouched) return;
+      draft.leaf = trackerLeaf(draft.def, tracker);
+    });
+  });
+
   // The furthest step reached. A step past it cannot be opened from the browser's history.
   let reached = $state(TYPE);
   let step = $state(TYPE);
+  // Which way the last move went: a step ahead comes in from the right, a step back from the left.
+  let direction = $state(1);
+
+  // Each step is drawn again, which removes the control that had the focus. The focus goes to the
+  // new step's heading, so a keyboard continues from there and a screen reader says the step.
+  let headingEl = $state<HTMLElement | null>(null);
+  let moved = false;
+
+  $effect(() => {
+    if (headingEl && moved) headingEl.focus({ preventScroll: true });
+  });
+
+  function show(index: number): void {
+    if (index === step) return;
+    direction = index > step ? 1 : -1;
+    step = index;
+    moved = true;
+  }
 
   // Each step is an entry in the browser's history, so Back on a phone goes to the step before.
   $effect(() => {
     const wanted = page.state.alertWizardStep;
     untrack(() => {
-      step = typeof wanted === "number" ? Math.max(TYPE, Math.min(wanted, reached)) : TYPE;
+      show(typeof wanted === "number" ? Math.max(TYPE, Math.min(wanted, reached)) : TYPE);
     });
   });
 
   const condition = $derived<ConditionNode | null>(draft ? draftCondition(draft) : null);
-  const suggestedName = $derived(draft ? suggestName(draft) : "");
+  const suggestedName = $derived(draft ? suggestName(draft, trackerDefinitions) : "");
   const name = $derived(nameEdited ? editor.name.trim() : suggestedName);
 
-  function rule(): RuleEditorState {
-    return { ...editor, name, condition };
+  // A type that closes on the opposite of its condition gets that as its resolve condition. The
+  // API works the opposite out. It is asked when the last step opens: the condition is set on the
+  // steps before it.
+  let autoResolve = $state<ConditionNode | null>(null);
+  let autoResolveAsked: Promise<ConditionNode | null> = Promise.resolve(null);
+  // The history check plays the alert with its closing condition, so it waits for the answer.
+  let autoResolveAnswered = $state(false);
+
+  function askAutoResolve(): Promise<ConditionNode | null> {
+    return draft?.def.autoResolve ? oppositeCondition(condition) : Promise.resolve(null);
+  }
+
+  $effect(() => {
+    if (step !== CHECK) return;
+    untrack(() => {
+      const asked = askAutoResolve();
+      autoResolveAsked = asked;
+      autoResolve = null;
+      autoResolveAnswered = false;
+      asked.then(
+        (closing) => {
+          if (autoResolveAsked !== asked) return;
+          autoResolve = closing;
+          autoResolveAnswered = true;
+        },
+        // The last step shows no closing condition, and Create asks again.
+        () => {
+          if (autoResolveAsked === asked) autoResolveAnswered = true;
+        },
+      );
+    });
+  });
+
+  function rule(closing: ConditionNode | null = autoResolve): RuleEditorState {
+    return {
+      ...editor,
+      name,
+      condition,
+      autoResolveEnabled: closing !== null,
+      autoResolveCondition: closing,
+    };
   }
 
   function open(index: number): void {
+    const from = step;
     reached = Math.max(reached, index);
-    step = index;
+    show(index);
     void goto(resolve("/(authenticated)/alerts/new"), {
-      state: { alertWizardStep: index },
+      state: { alertWizardStep: index, alertWizardFrom: from },
       shallow: true,
     });
     window.scrollTo({ top: 0 });
   }
 
   function back(): void {
-    // The step before is the history entry before, unless this step was not reached through one.
-    if (page.state.alertWizardStep === step) history.back();
-    else step = Math.max(TYPE, step - 1);
+    // The step before is the history entry before only when this step was opened from it. A step
+    // opened from a later one (a jump back in the indicator) has that later step behind it.
+    const before = Math.max(TYPE, step - 1);
+    if (page.state.alertWizardStep === step && page.state.alertWizardFrom === before) history.back();
+    else open(before);
   }
 
   function pickType(id: TemplateId): void {
+    const template = templates.find((t) => t.id === id);
+    if (!template) return;
     if (draft?.template !== id) {
-      draft = newDraft(id);
-      editor.severity = getTemplate(id).severity;
+      draft = newDraft(template, trackerDefinitions);
+      editor.severity = template.severity;
       // The steps after this one were set for a different type.
       reached = TYPE;
     }
     open(SETTINGS);
   }
 
+  function deliveryIssue(): string | null {
+    if (editor.channels.length === 0) return "Add at least one place for the alert to go.";
+    return validateChannels(editor.channels);
+  }
+
   /** Why the current step cannot be left yet, or `null` when it can. */
   const blocked = $derived.by<string | null>(() => {
     if (!draft) return "Choose an alert type.";
     if (step === SETTINGS) return draftIssue(draft);
-    if (step === DELIVERY) {
-      if (editor.channels.length === 0) return "Add at least one place for the alert to go.";
-      return validateChannels(editor.channels);
+    if (step === DELIVERY) return deliveryIssue();
+    // The last step answers for the ones before it: nothing they refuse is created.
+    if (step === CHECK) {
+      return draftIssue(draft) ?? deliveryIssue() ?? (name === "" ? "Enter a name." : null);
     }
-    if (step === CHECK && name === "") return "Enter a name.";
     return null;
   });
 
-  // ---- Create ------------------------------------------------------------
 
   let saving = $state(false);
   let created = $state(false);
@@ -132,9 +232,11 @@
     saving = true;
     error = null;
     try {
-      await createRule(buildBody(rule()));
+      // An alert is not created without the closing condition its type has.
+      const closing = await autoResolveAsked.catch(askAutoResolve);
+      await createRule(buildBody(rule(closing)));
       created = true;
-      toast.success(`${name} is on.`);
+      toastSaved("The alert is on.");
       await goto(resolve("/(authenticated)/alerts"));
     } catch (e) {
       error =
@@ -152,8 +254,6 @@
       navigation.cancel();
     }
   });
-
-  // ---- Full replay -------------------------------------------------------
 
   // An id for the unsaved alert, so the replay can list it beside the saved ones.
   const draftId = newGuid();
@@ -216,7 +316,9 @@
   <title>New alert · Nocturne</title>
 </svelte:head>
 
-<div class="@container mx-auto max-w-2xl p-3 @md:p-6 max-md:pb-28">
+<!-- The steps differ in height, and a scrollbar that comes and goes moves the page sideways, so
+     the document keeps the scrollbar's gutter while this page is on it. -->
+<div class="@container mx-auto max-w-2xl p-3 @md:p-6 max-md:pb-28 [:root:has(&)]:[scrollbar-gutter:stable]">
   <header class="mb-6 flex min-h-12 items-center gap-2">
     <Button
       variant="ghost"
@@ -228,26 +330,59 @@
     </Button>
     <div class="min-w-0">
       <h1 class="truncate text-2xl font-bold">New alert</h1>
-      {#if draft && step > TYPE}
-        <p class="truncate text-sm text-muted-foreground" data-testid="alert-wizard-summary">
-          {templateLabel(draft.template)}
-        </p>
-      {/if}
+      <!-- The line is there on every step, so the type's name arrives without moving the page. -->
+      <p class="min-h-5 truncate text-sm text-muted-foreground" data-testid="alert-wizard-summary">
+        {#if draft && step > TYPE}{templateLabel(draft.template)}{/if}
+      </p>
     </div>
   </header>
 
-  <WizardProgress {steps} current={step} {reached} onJump={open} />
+  <WizardProgress
+    {steps}
+    current={step}
+    {reached}
+    locked={step > TYPE && blocked !== null}
+    onJump={open}
+  />
 
-  <div class="mt-8 space-y-6">
-    <h2 class="text-lg font-semibold leading-tight" data-testid="alert-wizard-heading">
+  {#key step}
+  <div
+    class="mt-8 space-y-6"
+    in:fly={{
+      x: direction * 20,
+      duration: prefersReducedMotion.current ? 0 : 260,
+      easing: expoOut,
+    }}
+  >
+    <h2
+      bind:this={headingEl}
+      tabindex="-1"
+      class="text-lg font-semibold leading-tight outline-none"
+      data-testid="alert-wizard-heading"
+    >
       {heading(step)}
     </h2>
 
+    {#if presetsQuery.error}
+      <p
+        class="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive"
+        role="alert"
+      >
+        Could not load the alert types. Load the page again.
+      </p>
+    {/if}
+
     {#if step === TYPE || !draft}
-      <TypeStep selected={draft?.template ?? null} onPick={pickType} />
+      <TypeStep
+            selected={draft?.template ?? null}
+            onPick={pickType}
+            {templates}
+            loading={presetsQuery.current === undefined && !presetsQuery.error}
+            {trackerDefinitions}
+          />
     {:else if step === SETTINGS}
       {#key draft.template}
-        <SettingsStep bind:draft {availableRules} />
+        <SettingsStep bind:draft {availableRules} {trackers} />
       {/key}
     {:else if step === DELIVERY}
       <DeliveryStep bind:editor />
@@ -256,6 +391,8 @@
         bind:editor
         bind:nameEdited
         {condition}
+        {autoResolve}
+        {autoResolveAnswered}
         {suggestedName}
         rule={replayRule}
         onOpenReplay={openReplay}
@@ -271,6 +408,7 @@
       </p>
     {/if}
   </div>
+  {/key}
 
   <!-- md+: at the end of the step. Below md: pinned to the bottom, under the thumb. -->
   {#if draft}
