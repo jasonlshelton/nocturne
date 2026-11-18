@@ -30,6 +30,7 @@ env:
 
 jobs:
   sync:
+    if: github.repository == 'jasonlshelton/nocturne'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
