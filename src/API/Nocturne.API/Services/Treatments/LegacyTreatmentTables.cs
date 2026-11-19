@@ -781,11 +781,12 @@ internal static class LegacyTreatmentTables
             s => s.LegacyId != null && EF.Functions.JsonContains(s.MetadataJson!, TreatmentsCollectionJson),
             (s, metadata) => new Treatment
             {
-                EventType = "Temporary Override",
+                EventType = TreatmentTypes.TemporaryOverride,
                 RawTimestamp = TreatmentUploadedTimestamp.OfSpan(metadata)
                     ?? JsonSerializer.SerializeToElement(NightscoutKitTimestamp(s.StartTimestamp)),
                 Duration = UploadedDuration(metadata)
                     ?? (metadata.TryReadString("durationType") == "indefinite" ? null : DurationMinutes(s)),
+                DurationIsUploaded = UploadedDuration(metadata) is not null,
                 Reason = metadata.TryReadString("reason"),
                 ReasonDisplay = metadata.TryReadString("reasonDisplay"),
                 TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
@@ -799,9 +800,10 @@ internal static class LegacyTreatmentTables
                 && EF.Functions.JsonExists(s.MetadataJson!, StateSpanMetadataExtensions.UtcOffsetKey),
             (s, metadata) => new Treatment
             {
-                EventType = metadata.TryReadString(UploadedEventTypeKey) ?? "Temporary Target",
+                EventType = metadata.TryReadString(UploadedEventTypeKey) ?? TreatmentTypes.TemporaryTarget,
                 Duration = UploadedDuration(metadata)
                     ?? (s.State == nameof(TemporaryTargetState.Cancelled) ? 0 : DurationMinutes(s)),
+                DurationIsUploaded = UploadedDuration(metadata) is not null,
                 TargetTop = (double?)metadata.TryReadDecimal("targetTop"),
                 TargetBottom = (double?)metadata.TryReadDecimal("targetBottom"),
                 Reason = metadata.TryReadString("reason"),
@@ -1021,6 +1023,7 @@ internal static class LegacyTreatmentTables
             {
                 EventType = TreatmentTypes.ProfileSwitch,
                 Duration = duration,
+                DurationIsUploaded = UploadedDuration(metadata) is not null,
                 DurationInMilliseconds = span.DurationInMilliseconds
                     ?? (duration is { } minutes ? (long)Math.Round(minutes * 60_000) : null),
                 Profile = span.ProfileName,
@@ -1403,7 +1406,7 @@ internal static class LegacyTreatmentTables
             RecordId = note.Id,
             AdditionalProperties = TreatmentClientId.ToTreatment(note.AdditionalProperties),
             RawTimestamp = TreatmentUploadedTimestamp.Of(note.AdditionalProperties),
-            EventType = note.EventType ?? "Note",
+            EventType = note.EventType ?? TreatmentTypes.Note,
             Mills = note.Mills,
             Notes = note.Text,
             IsAnnouncement = note.IsAnnouncement,
