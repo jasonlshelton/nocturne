@@ -2,18 +2,22 @@
 //! do_not_disturb, pump_state, state_span_active, sleep_session_active.
 
 use super::Env;
+use super::elapsed::{ClockLeaf, Elapsed, active_for};
+use crate::clock_anomaly::ClockAnchor;
+use crate::context::SensorContext;
 use crate::enums::AlertStateKind;
 use crate::model::{
     ActiveForPayload, AlertStatePayload, PumpStatePayload, SleepSessionPayload, StateSpanPayload,
 };
+use crate::truth::Truth;
 
 /// Cross-alert state. `firing`: the snapshot's state is "firing" (ASCII case
 /// ignored); `unacknowledged`: firing and not acknowledged; `acknowledged`:
 /// acknowledged whatever the state. `for_minutes` holds from the
 /// acknowledgement for `acknowledged`, from the trigger otherwise.
-pub(super) fn alert_state(p: &AlertStatePayload, env: &Env) -> bool {
-    let Some(snapshot) = env.ctx.active_alerts.get(&p.alert_id) else {
-        return false;
+pub(super) fn alert_state(p: &AlertStatePayload, ctx: &SensorContext) -> ClockLeaf {
+    let Some(snapshot) = ctx.active_alerts.get(&p.alert_id) else {
+        return ClockLeaf::Fixed(Truth::False);
     };
     let firing = snapshot.state.eq_ignore_ascii_case("firing");
     let anchor = match p.state {
@@ -24,45 +28,80 @@ pub(super) fn alert_state(p: &AlertStatePayload, env: &Env) -> bool {
         AlertStateKind::Acknowledged => snapshot.acknowledged_at,
         AlertStateKind::Firing | AlertStateKind::Unacknowledged => None,
     };
-    anchor.is_some_and(|at| p.for_minutes.is_none_or(|m| env.held_for(at, m)))
+    match (anchor, p.for_minutes) {
+        (None, _) => ClockLeaf::Fixed(Truth::False),
+        (Some(_), None) => ClockLeaf::Fixed(Truth::True),
+        (Some(at), Some(m)) => {
+            ClockLeaf::Measured(Elapsed::held_for(at, m, ClockAnchor::ActiveAlerts))
+        }
+    }
 }
 
 /// No `has_ever_*` guard: no override is the legitimate "no override" state.
-pub(super) fn override_active(p: &ActiveForPayload, env: &Env) -> bool {
-    env.active_for(
+pub(super) fn override_active(p: &ActiveForPayload, ctx: &SensorContext) -> ClockLeaf {
+    active_for(
         p.is_active,
         p.for_minutes,
-        env.ctx.active_override.map(|s| s.started_at),
+        ctx.active_override.map(|s| s.started_at),
+        ClockAnchor::ActiveOverride,
     )
 }
 
 /// A null snapshot means DND is off.
-pub(super) fn do_not_disturb(p: &ActiveForPayload, env: &Env) -> bool {
-    env.active_for(
+pub(super) fn do_not_disturb(p: &ActiveForPayload, ctx: &SensorContext) -> ClockLeaf {
+    active_for(
         p.is_active,
         p.for_minutes,
-        env.ctx.active_do_not_disturb.map(|s| s.started_at),
+        ctx.active_do_not_disturb.map(|s| s.started_at),
+        ClockAnchor::ActiveDoNotDisturb,
     )
 }
 
 /// `is_active: false` is true whenever the active mode differs from the
-/// configured one, including when no mode is active.
-pub(super) fn pump_state(p: &PumpStatePayload, env: &Env) -> bool {
-    let in_mode = env.ctx.active_pump_state.filter(|s| s.mode == p.mode);
-    env.active_for(p.is_active, p.for_minutes, in_mode.map(|s| s.started_at))
+/// configured one, including when no mode is active. An active pump in a mode
+/// the crate cannot name may or may not be in the configured one: unknown
+/// wherever the answer depends on it. With `is_active: true` and `for_minutes`
+/// both completions are false until the span has lasted that long.
+pub(super) fn pump_state(p: &PumpStatePayload, ctx: &SensorContext) -> ClockLeaf {
+    let Some(active) = ctx.active_pump_state else {
+        return active_for(
+            p.is_active,
+            p.for_minutes,
+            None,
+            ClockAnchor::ActivePumpState,
+        );
+    };
+    match (active.mode, p.for_minutes) {
+        (Some(mode), _) => active_for(
+            p.is_active,
+            p.for_minutes,
+            (mode == p.mode).then_some(active.started_at),
+            ClockAnchor::ActivePumpState,
+        ),
+        (None, Some(m)) if p.is_active => ClockLeaf::UnknownOnceHeld(Elapsed::held_for(
+            active.started_at,
+            m,
+            ClockAnchor::ActivePumpState,
+        )),
+        (None, _) => ClockLeaf::Fixed(Truth::Unknown),
+    }
 }
 
 /// Generic state-span leaf. The lookup key is the exact `(category, state)`
-/// pair; a null state means "any state of this category".
-pub(super) fn state_span_active(p: &StateSpanPayload, env: &Env) -> bool {
-    let span = env
-        .ctx
-        .active_state_spans
-        .get(&(p.category, p.state.clone()));
-    env.active_for(p.is_active, p.for_minutes, span.map(|s| s.started_at))
+/// pair; a null state means "any state of this category". A span of a
+/// category the crate cannot name is not in the map, and cannot be the
+/// category the leaf names.
+pub(super) fn state_span_active(p: &StateSpanPayload, ctx: &SensorContext) -> ClockLeaf {
+    let span = ctx.active_state_spans.get(&(p.category, p.state.clone()));
+    active_for(
+        p.is_active,
+        p.for_minutes,
+        span.map(|s| s.started_at),
+        ClockAnchor::ActiveStateSpans,
+    )
 }
 
 /// `is_active` true fires while a sleep session is active, false while none is.
-pub(super) fn sleep_session_active(p: &SleepSessionPayload, env: &Env) -> bool {
-    env.ctx.sleep_session_active == p.is_active
+pub(super) fn sleep_session_active(p: &SleepSessionPayload, env: &Env) -> Truth {
+    (env.ctx.sleep_session_active == p.is_active).into()
 }

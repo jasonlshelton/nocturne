@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Nocturne.API.Controllers.V4.Monitoring;
+using Nocturne.API.Models.Requests.V4;
+using Nocturne.API.Models.Responses;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Alerts;
 using Nocturne.Core.Contracts.Alerts;
@@ -47,7 +49,7 @@ public class AlertRulesControllerChannelDestinationTests
 
         var controller = new AlertRulesController(
             new TestNocturneDbContextFactory(ctx),
-            new TenantMembershipRepository(new TestNocturneDbContextFactory(ctx)),
+            new TenantMembershipRepository(new TestNocturneDbContextFactory(ctx), AccountLinkRoutes.Off),
             new AlertRepository(new TestNocturneDbContextFactory(ctx)),
             new AlertRuleRepository(new TestNocturneDbContextFactory(ctx)),
             MockTenantAccessor.Create(ctx.TenantId).Object,
@@ -57,7 +59,7 @@ public class AlertRulesControllerChannelDestinationTests
             new NoConditionIssues(),
             Mock.Of<ISecretEncryptionService>(),
             new AlertRuleRearm(new AlertRuleEvaluationGate()),
-            new AlertRuleRetirement(Mock.Of<IExcursionTracker>(), Mock.Of<IExcursionResolutionHandler>()),
+            new AlertRuleRetirement(Mock.Of<IExcursionTracker>(), Mock.Of<IExcursionResolutionHandler>(), Mock.Of<IUnevaluableRuleNotice>()),
             Mock.Of<ILogger<AlertRulesController>>());
 
         var http = new DefaultHttpContext();

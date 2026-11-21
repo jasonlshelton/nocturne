@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -88,7 +87,7 @@ using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Configuration;
-using Nocturne.Core.Models.Net;
+using Nocturne.Infrastructure.Outbound;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data.Abstractions;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -177,6 +176,13 @@ public static class ServiceRegistrationExtensions
         // one permit, and every code its holder could legitimately present was minted in the last
         // five minutes.
         ("login-handoff", 10, TimeSpan.FromMinutes(1)),
+        // Asking for a recovery link sends mail to someone else's inbox when the address is theirs.
+        // The ceiling bounds one client; LoginCodeService.MayEmailAsync bounds what reaches one
+        // account from every client together.
+        ("recovery-link", 5, TimeSpan.FromMinutes(10)),
+        // A signed-in member asking for their own confirmation link again. Each one is mail, so the
+        // ceiling is as tight as a recovery link's.
+        ("email-confirmation", 5, TimeSpan.FromMinutes(10)),
         // Friction against naive abuse only — this does NOT bound the refresh_tokens table. The
         // real ceiling is DemoSessionLimits.MaxLiveSessions, enforced on the subject id.
         ("demo-session", 10, TimeSpan.FromMinutes(5)),
@@ -528,24 +534,12 @@ public static class ServiceRegistrationExtensions
                     )
             );
 
-            options.OnRejected = async (context, ct) =>
-            {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
-                {
-                    context.HttpContext.Response.Headers.RetryAfter =
-                        ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
-                }
-                await context.HttpContext.Response.WriteAsJsonAsync(
-                    new
-                    {
-                        error = "rate_limit_exceeded",
-                        error_description = "Too many requests. Please try again later.",
-                    },
-                    ct
-                );
-            };
+            options.OnRejected = (context, ct) => new ValueTask(RateLimitRejection.WriteAsync(
+                context.HttpContext,
+                context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter : null,
+                ct));
         });
+        services.AddSingleton<DelegatedConnectorSyncLimiter>();
 
         return services;
     }
@@ -580,6 +574,14 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<ILoginCodeService, LoginCodeService>();
         services.AddScoped<MemberRecoveryEligibility>();
+        services.AddScoped<RecoverySession>();
+        services.AddScoped<AccountLinkService>();
+        services.AddSingleton<RecoveryLinkRequests>();
+        services.AddSingleton<IAccountLinkDelivery, OperatorWebhookLinkDelivery>();
+        services.AddSingleton<IAccountLinkRoute>(sp => sp.GetRequiredService<IAccountLinkDelivery>());
+        services.AddOperatorWebhookClient(OperatorWebhook.AccountLinkClient);
+        services.AddOperatorWebhookClient(OperatorWebhook.SlugValidationClient);
+        services.AddOperatorWebhookClient(OperatorWebhook.UsernameValidationClient);
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddSingleton<IRotationSuccessorCache, RotationSuccessorCache>();
         services.AddScoped<IFirstPartyTokenRepository, EfFirstPartyTokenRepository>();
@@ -605,6 +607,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IOAuthTokenRevocationCache, OAuthTokenRevocationCache>();
         services.AddScheduledJob<OAuthCodeCleanupJob>();
         services.AddScheduledJob<OAuthStepUpTokenCleanupJob>();
+        services.AddScheduledJob<TrustedDeviceCleanupJob>();
 
         services.AddHostedService<AuthorizationSeedService>();
 
@@ -626,6 +629,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IPasskeyService, PasskeyService>();
         services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
         services.AddScoped<ITotpService, TotpService>();
+        services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
         // Derive WebAuthn RP config from the base domain (single source of truth). Blank counts as
         // unset: it is what the shipped .env.example leaves behind, and an origin built from it is
         // one Fido2Configuration refuses to parse.
@@ -667,7 +671,11 @@ public static class ServiceRegistrationExtensions
                 if (config.Support.AccountPortal is { } portal)
                     return !string.IsNullOrWhiteSpace(portal.Url);
                 return true;
-            }, "Operator:Support:AccountPortal:Url is required when AccountPortal is configured");
+            }, "Operator:Support:AccountPortal:Url is required when AccountPortal is configured")
+            .Validate(
+                config => OperatorConfiguration.IsUnsetOrAbsoluteHttpUrl(config.AccountLinkWebhookUrl),
+                "Operator:AccountLinkWebhookUrl must be an absolute http or https URL")
+            .ValidateOnStart();
 
         services.AddScoped<ITenantAccessor, HttpContextTenantAccessor>();
         services.AddScoped<ITenantOwnerResolver, TenantOwnerResolver>();
@@ -748,6 +756,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<CacheFlights>();
         services.AddScoped<ITenantCache, TenantCache>();
         services.AddScoped<ILegacyReadCacheInvalidation, LegacyReadCacheInvalidation>();
+        services.AddScoped<IRecordChangeSubscriber, LegacyReadCacheSubscriber>();
 
         services.AddScoped<IV4ToLegacyProjectionService, V4ToLegacyProjectionService>();
 
@@ -869,16 +878,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IBodyWeightService, BodyWeightService>();
         services.AddScoped<IStepCountService, StepCountService>();
 
-        // Tracker services. The trigger is the IDeviceEventReactor adapter rather than a service any
-        // caller invokes: it runs from the V4 device-event write chokepoint, which is what makes a
-        // connector-ingested site change advance a tracker the same way a hand-entered one does.
-        services.AddScoped<IDeviceEventReactor, TrackerTriggerService>();
-        services.AddScoped<TrackerDeviceEventWriter>();
-        // Tracker notifications ride the alert engine: thresholds are synthesised into
-        // managed tracker_age alert rules, backfilled daily (TrackerAlertRuleBackfillJob).
-        services.AddScoped<ITrackerAlertRuleSyncService, TrackerAlertRuleSyncService>();
-        services.AddScheduledJob<TrackerAlertRuleBackfillJob>();
-        services.AddScoped<ConsumableTrackerWriter>();
         services.AddScoped<ILegacyFallbackService, LegacyFallbackService>();
         services.AddScoped<IDeviceAgeService, DeviceAgeService>();
         services.AddScoped<ISensorSessionInferenceService, SensorSessionInferenceService>();
@@ -890,12 +889,9 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IPatientDeviceStamper, PatientDeviceStamper>();
         services.AddScoped<DeviceDateClockResolver>();
         services.AddScoped<IDeviceReattributionService, DeviceReattributionService>();
-        services.AddScoped<IDeviceTrackerProvisioner, DeviceTrackerProvisioner>();
 
         // Canonical glucose stream (single-stream view for v1/v3, alarms, unfiltered analytics)
         services.AddScoped<ICanonicalGlucoseService, CanonicalGlucoseService>();
-        services.AddScoped<ICanonicalAlertEvaluator, CanonicalAlertEvaluator>();
-        services.AddSingleton<AlertEvaluationWatermark>();
 
         // Coach marks
         services.AddScoped<ICoachMarkService, CoachMarkService>();
@@ -903,8 +899,6 @@ public static class ServiceRegistrationExtensions
         // Setup hub
         services.AddScoped<ISetupHubService, SetupHubService>();
         services.AddScoped<ISetupHubItem, ConnectDataItem>();
-        services.AddScoped<ISetupHubItem, AlertsItem>();
-        services.AddScoped<AlertSetupService>();
         services.AddScoped<ISetupHubItem, DevicesItem>();
         services.AddScoped<DeviceSetupService>();
         services.AddScoped<ISetupHubItem, TherapyItem>();
@@ -1059,10 +1053,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ISignalRBroadcastService, SignalRBroadcastService>();
         services.AddScoped<ISyncProgressReporter, SignalRSyncProgressReporter>();
 
-        // Native V4 record broadcasting (companion + Prelude) over the glucose/care/device/therapy
-        // categories. Open generic so every V4 model type resolves; the repository chokepoint fires it
-        // for live writes only. Additive to the legacy v1 IDataEventSink<T> projections above.
-        services.AddScoped(typeof(IV4RecordBroadcaster<>), typeof(SignalRV4RecordBroadcaster<>));
+        services.AddScoped<IRecordChangeSubscriber, SignalRRecordChangeSubscriber>();
         services.AddScoped<IGlucoseReadingBroadcaster, HomeAssistantGlucoseBroadcaster>();
 
         // Push notifications
@@ -1102,14 +1093,14 @@ public static class ServiceRegistrationExtensions
 
         // Notification action handlers (scoped -- they may depend on scoped services)
         services.AddScoped<INotificationActionHandler, MealMatchActionHandler>();
-        services.AddScoped<INotificationActionHandler, AlertActionHandler>();
 
         return services;
     }
 
     /// <summary>
-    /// Alert engines, device health monitoring, compression low detection,
-    /// and all notifier implementations (SignalR, webhook).
+    /// Every alert and tracker host service: the alert engine and its orchestration, delivery
+    /// providers, trackers, device health monitoring, compression low detection, and the
+    /// notifiers (SignalR, webhook). <c>IAlertRepository</c> is registered by Infrastructure.
     /// </summary>
     public static IServiceCollection AddAlertingAndMonitoring(
         this IServiceCollection services,
@@ -1148,7 +1139,6 @@ public static class ServiceRegistrationExtensions
         services.AddAlertEvaluationEngine();
 
         // Alert engine core
-        services.AddScoped<IAlertRepository, AlertRepository>();
         services.Configure<AlertEvaluationOptions>(
             configuration.GetSection(AlertEvaluationOptions.SectionName));
         services.AddScoped<IReservoirEstimationService, ReservoirEstimationService>();
@@ -1156,6 +1146,9 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<SensorContextEnricherDependencies>();
         services.AddScoped<ISensorContextEnricher, SensorContextEnricher>();
         services.AddScoped<IAlertOrchestrator, AlertOrchestrator>();
+        services.AddScoped<IUnevaluableRuleNotice, UnevaluableRuleNotice>();
+        services.AddScoped<IClockAnomalyNotice, ClockAnomalyNotice>();
+        services.AddSingleton<ClockAnomalyNoticeLog>();
         services.AddScoped<IAlertDeliveryService, AlertDeliveryService>();
         services.AddScoped<IAlertAcknowledgementService, AlertAcknowledgementService>();
         services.AddScoped<AlertReceiptService>();
@@ -1189,6 +1182,26 @@ public static class ServiceRegistrationExtensions
 
         // Bot health tracking
         services.AddSingleton<BotHealthService>();
+
+        // Setup hub and notification wiring for alerts
+        services.AddScoped<ISetupHubItem, AlertsItem>();
+        services.AddScoped<AlertSetupService>();
+        services.AddScoped<INotificationActionHandler, AlertActionHandler>();
+        services.AddScoped<ICanonicalAlertEvaluator, CanonicalAlertEvaluator>();
+        services.AddSingleton<AlertEvaluationWatermark>();
+
+        // Trackers. The trigger is the IDeviceEventReactor adapter rather than a service any
+        // caller invokes: it runs from the V4 device-event write chokepoint, which is what makes a
+        // connector-ingested site change advance a tracker the same way a hand-entered one does.
+        services.AddScoped<IDeviceEventReactor, TrackerTriggerService>();
+        services.AddScoped<TrackerDeviceEventWriter>();
+        services.AddScoped<ITrackerService, TrackerService>();
+        // Tracker notifications ride the alert engine: thresholds are synthesised into
+        // managed tracker_age alert rules, backfilled daily (TrackerAlertRuleBackfillJob).
+        services.AddScoped<ITrackerAlertRuleSyncService, TrackerAlertRuleSyncService>();
+        services.AddScheduledJob<TrackerAlertRuleBackfillJob>();
+        services.AddScoped<ConsumableTrackerWriter>();
+        services.AddScoped<IDeviceTrackerProvisioner, DeviceTrackerProvisioner>();
 
         services.AddScheduledJob<AlertSweepJob>();
         services.AddScheduledJob<DeduplicationReconciliationJob>();

@@ -23,6 +23,12 @@ public record SensorContext
     public required DateTime? LatestTimestamp { get; init; }
 
     /// <summary>
+    /// When the host stored the most recent reading. Its glucose facts' age runs from here
+    /// (docs/alerts/engine-semantics.md §3); null runs it from <see cref="LatestTimestamp"/>.
+    /// </summary>
+    public DateTime? LatestReceivedAt { get; init; }
+
+    /// <summary>
     /// Rate of glucose change in mg/dL per minute. Positive = rising, negative = falling.
     /// </summary>
     [ReplayFact("trend_rate", Scope.GlucoseRead, decimals: 2)]
@@ -636,6 +642,24 @@ public class AlertTrackerState
     /// nothing until an evaluation finds its condition false (docs/alerts/engine-semantics.md §6.3).
     /// </summary>
     public bool AwaitingRearm { get; set; }
+
+    /// <summary>
+    /// The next change (docs/alerts/engine-semantics.md §5.3) the rule's last full evaluation
+    /// reported, null when it reported none. Read only while <see cref="NextChangeKnown"/>.
+    /// </summary>
+    public DateTime? NextChangeAt { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="NextChangeAt"/> was recorded by a full evaluation of the rule as it now
+    /// stands, with nothing but such an evaluation writing the state since.
+    /// </summary>
+    public bool NextChangeKnown { get; set; }
+
+    /// <summary>
+    /// The glucose facts of the context <see cref="NextChangeAt"/> was computed from: it holds
+    /// only while a context carries the same ones.
+    /// </summary>
+    public string? NextChangeGlucose { get; set; }
 }
 
 /// <summary>
@@ -677,6 +701,9 @@ public class AlertRule
     /// <summary>Whether this rule is actively being evaluated.</summary>
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>When the rule was last enabled; null when not recorded.</summary>
+    public DateTime? EnabledAt { get; set; }
+
     /// <summary>Display order among rules.</summary>
     public int SortOrder { get; set; }
 
@@ -685,6 +712,15 @@ public class AlertRule
 
     /// <summary>JSON-serialized auto-resolve parameters (e.g. delay, mode), or null if unused.</summary>
     public string? AutoResolveParams { get; set; }
+
+    /// <summary>What an unknown root means to the tracker: one of <see cref="AlertRuleOnUnknown"/>.</summary>
+    public string OnUnknown { get; set; } = AlertRuleOnUnknown.Hold;
+
+    /// <summary>
+    /// How many minutes old a reading may be before the rule's reading-driven leaves read it
+    /// unknown; null is the engine's default (docs/alerts/engine-semantics.md §3).
+    /// </summary>
+    public int? GlucoseFreshnessMinutes { get; set; }
 
     public DateTime CreatedAt { get; set; }
 
@@ -726,6 +762,16 @@ public class AlertExcursion
 /// <seealso cref="AlertExcursion"/>
 public record AlertPayload
 {
+    /// <summary>
+    /// What the payload tells its recipients, so a webhook or other consumer can tell a notice
+    /// that the rule cannot run from an excursion. Serialised as <c>"excursion"</c> or
+    /// <c>"unevaluable"</c>; an <see cref="Alerts.AlertPayloadKind.Unevaluable"/> payload has no
+    /// <see cref="GlucoseValue"/>, <see cref="Trend"/> or <see cref="TrendRate"/>, and its
+    /// <see cref="ReadingTimestamp"/> is the time of the notice. Documented for webhook receivers
+    /// in the portal's alert rule docs (docs/alerts/building-rules).
+    /// </summary>
+    public Alerts.AlertPayloadKind Kind { get; init; } = Alerts.AlertPayloadKind.Excursion;
+
     public required AlertConditionType AlertType { get; init; }
 
     /// <summary>Human-readable name of the <see cref="AlertRule"/> that fired.</summary>

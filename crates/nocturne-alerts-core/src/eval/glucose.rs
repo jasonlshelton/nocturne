@@ -1,66 +1,147 @@
 //! Glucose-fact leaves: threshold, rate_of_change, trend, predicted,
 //! glucose_bucket, staleness.
 
+use chrono::{DateTime, TimeDelta, Utc};
+
 use super::Env;
+use super::elapsed::{ClockLeaf, Elapsed, Measure, decimal};
+use super::signal::{DataStopped, data_stopped};
+use crate::clock_anomaly::ClockAnchor;
 use crate::compare::Unit;
+use crate::context::SensorContext;
 use crate::enums::{CmpOp, RateDirection, ThresholdDirection, holds};
 use crate::model::{
-    GlucoseBucketPayload, PredictedPayload, RateOfChangePayload, StalenessPayload,
-    ThresholdPayload, TrendPayload,
+    ConditionKind, GlucoseBucketPayload, Payload, PredictedPayload, RateOfChangePayload,
+    StalenessPayload, ThresholdPayload, TrendPayload,
 };
+use crate::truth::Truth;
 
-/// Strict comparison: below `v < value`, above `v > value`; no reading is
-/// false.
-pub(super) fn threshold(p: &ThresholdPayload, env: &Env) -> bool {
-    env.ctx
-        .latest_value
-        .is_some_and(|latest| match p.direction {
-            ThresholdDirection::Below => latest < p.value,
-            ThresholdDirection::Above => latest > p.value,
-        })
+/// How old a reading may be before its glucose facts are unknown, for a rule
+/// without its own bound (engine-semantics.md §3).
+pub const DEFAULT_GLUCOSE_FRESHNESS: TimeDelta = TimeDelta::minutes(11);
+
+/// The most minutes a rule's own bound may be: a day. A longer one would judge a reading
+/// however old, which the bound exists to stop.
+pub const MAX_GLUCOSE_FRESHNESS_MINUTES: i64 = 1440;
+
+/// Whether `kind` reads its glucose fact only while the reading is fresh.
+/// `staleness` and `signal_loss` say that data stopped, so they are not.
+#[must_use]
+pub(crate) fn judges_freshness(kind: ConditionKind) -> bool {
+    matches!(
+        kind,
+        ConditionKind::Threshold
+            | ConditionKind::RateOfChange
+            | ConditionKind::Trend
+            | ConditionKind::GlucoseBucket
+    )
 }
 
-/// Inclusive comparison: falling `rate' <= -rate`, rising `rate' >= rate`.
-pub(super) fn rate_of_change(p: &RateOfChangePayload, env: &Env) -> bool {
-    env.ctx.trend_rate.is_some_and(|rate| match p.direction {
-        RateDirection::Falling => rate <= -p.rate,
-        RateDirection::Rising => rate >= p.rate,
+/// The reading goes stale once more than `bound` has passed since the host
+/// received it, else since its timestamp, so a reading exactly `bound` old is
+/// fresh; without either it never does. The arrival is the host's own
+/// instant, and one after `now` is fresh (§3); a timestamp is the device's.
+fn expiry(ctx: &SensorContext, bound: TimeDelta) -> Option<Elapsed> {
+    let (anchor, source) = match (ctx.latest_received_at, ctx.latest_timestamp) {
+        (Some(arrival), _) => (arrival, None),
+        (None, Some(timestamp)) => (timestamp, Some(ClockAnchor::LatestTimestamp)),
+        (None, None) => return None,
+    };
+    Some(Elapsed {
+        anchor,
+        source,
+        measure: Measure::Over(bound),
     })
 }
 
-pub(super) fn trend(p: &TrendPayload, env: &Env) -> bool {
-    env.ctx
-        .trend_bucket
-        .is_some_and(|bucket| p.bucket == bucket)
+/// `fact` while the reading is known to be fresh at `env.now`, else absent.
+fn fresh<T>(fact: Option<T>, env: &mut Env) -> Option<T> {
+    let stale = expiry(env.ctx, env.glucose_freshness).map_or(Truth::False, |e| env.measure(e));
+    fact.filter(|_| stale.is_false())
+}
+
+/// When a leaf that [`judges_freshness`] can turn unknown with only `now`
+/// advancing: `None` for any other kind, and for a leaf whose fact is absent,
+/// which is unknown already.
+pub(crate) fn freshness_expiry(
+    payload: &Payload,
+    ctx: &SensorContext,
+    bound: TimeDelta,
+) -> Option<Elapsed> {
+    let present = match payload {
+        Payload::Threshold(_) => ctx.latest_value.is_some(),
+        Payload::RateOfChange(_) => ctx.trend_rate.is_some(),
+        Payload::Trend(_) => ctx.trend_bucket.is_some(),
+        Payload::GlucoseBucket(_) => ctx.glucose_bucket.is_some(),
+        _ => false,
+    };
+    present.then(|| expiry(ctx, bound)).flatten()
+}
+
+/// Strict comparison: below `v < value`, above `v > value`; no fresh reading
+/// is unknown.
+pub(super) fn threshold(p: &ThresholdPayload, env: &mut Env) -> Truth {
+    Truth::of(
+        fresh(env.ctx.latest_value, env).map(|latest| match p.direction {
+            ThresholdDirection::Below => latest < p.value,
+            ThresholdDirection::Above => latest > p.value,
+        }),
+    )
+}
+
+/// Inclusive comparison: falling `rate' <= -rate`, rising `rate' >= rate`.
+pub(super) fn rate_of_change(p: &RateOfChangePayload, env: &mut Env) -> Truth {
+    Truth::of(
+        fresh(env.ctx.trend_rate, env).map(|rate| match p.direction {
+            RateDirection::Falling => rate <= -p.rate,
+            RateDirection::Rising => rate >= p.rate,
+        }),
+    )
+}
+
+pub(super) fn trend(p: &TrendPayload, env: &mut Env) -> Truth {
+    Truth::of(fresh(env.ctx.trend_bucket, env).map(|bucket| p.bucket == bucket))
 }
 
 /// True if any prediction with `offset_minutes <= within_minutes` satisfies the
-/// comparison; points beyond the horizon are skipped.
-pub(super) fn predicted(p: &PredictedPayload, env: &Env) -> bool {
-    env.ctx
-        .predictions
-        .iter()
-        .filter(|point| point.offset_minutes <= p.within_minutes.get())
-        .any(|point| holds(p.operator, Some(point.mgdl), p.value))
+/// comparison; points beyond the horizon are skipped. No predictions is
+/// unknown.
+pub(super) fn predicted(p: &PredictedPayload, env: &Env) -> Truth {
+    if env.ctx.predictions.is_empty() {
+        return Truth::Unknown;
+    }
+    Truth::any(
+        env.ctx
+            .predictions
+            .iter()
+            .filter(|point| point.offset_minutes <= p.within_minutes.get())
+            .map(|point| holds(p.operator, Some(point.mgdl), p.value)),
+    )
 }
 
 /// Set membership over the precomputed context bucket.
-pub(super) fn glucose_bucket(p: &GlucoseBucketPayload, env: &Env) -> bool {
-    env.ctx
-        .glucose_bucket
-        .is_some_and(|bucket| p.buckets.contains(&bucket))
+pub(super) fn glucose_bucket(p: &GlucoseBucketPayload, env: &mut Env) -> Truth {
+    Truth::of(fresh(env.ctx.glucose_bucket, env).map(|bucket| p.buckets.contains(&bucket)))
 }
 
-/// Minutes since the last reading vs a threshold. Cold start (both
-/// `last_reading_at` and `latest_timestamp` null) is false, taking precedence
-/// over the infinity convention; `last_reading_at` alone null means elapsed is
-/// +infinity (`>`/`>=` true, others false).
-pub(super) fn staleness(p: &StalenessPayload, env: &Env) -> bool {
-    if env.ctx.last_reading_at.is_none() && env.ctx.latest_timestamp.is_none() {
-        return false;
+/// Minutes since data stopped vs a threshold; infinitely stale is `>`/`>=`
+/// true, others false.
+pub(super) fn staleness(
+    p: &StalenessPayload,
+    ctx: &SensorContext,
+    enabled_at: Option<DateTime<Utc>>,
+) -> ClockLeaf {
+    match data_stopped(ctx, enabled_at) {
+        DataStopped::At(anchor, source) => decimal(
+            anchor,
+            Some(source),
+            Unit::Minutes,
+            p.operator,
+            p.value.get(),
+        ),
+        DataStopped::Forever => {
+            ClockLeaf::Fixed(matches!(p.operator, CmpOp::Gt | CmpOp::Ge).into())
+        }
+        DataStopped::Unknown => ClockLeaf::Fixed(Truth::Unknown),
     }
-    let Some(last_reading_at) = env.ctx.last_reading_at else {
-        return matches!(p.operator, CmpOp::Gt | CmpOp::Ge);
-    };
-    env.compare_elapsed(last_reading_at, Unit::Minutes, p.operator, p.value.get())
 }

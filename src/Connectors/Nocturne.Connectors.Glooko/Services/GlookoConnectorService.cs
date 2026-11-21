@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,8 @@ namespace Nocturne.Connectors.Glooko.Services;
 public class GlookoConnectorService
     : TokenConnectorService<GlookoConnectorConfiguration, GlookoAuthTokenProvider>
 {
+    private static readonly ConnectorLegacyIds LegacyIds = ConnectorLegacyIds.For<GlookoConnectorConfiguration>();
+
     private readonly IMealMatchingService? _mealMatchingService;
     private readonly ITimezoneTimelineService? _timezoneTimelineService;
     private readonly IDeviceClockService? _deviceClockService;
@@ -63,14 +66,14 @@ public class GlookoConnectorService
 
     private const string SyncSucceededMessage = "Sync completed successfully";
 
-    private async Task<bool> AuthenticateWithConfigAsync(GlookoSyncContext context)
-    {
-        var token = await ValidTokenAsync(context.Config, context.CancellationToken);
-        if (token is null)
-            return false;
+    protected override Task PrepareSignInAsync(
+        GlookoConnectorConfiguration config, CancellationToken cancellationToken) =>
+        ReportSyncMessageAsync(SyncMessageType.Authenticating, null, cancellationToken);
 
+    private async Task ApplySessionAsync(GlookoSyncContext context, TokenSession session)
+    {
         // The token IS the session cookie for Glooko
-        context.SessionCookie = token;
+        context.SessionCookie = session.Token;
 
         // Retrieve user data from cache metadata via the token provider's public accessor
         var cached = await TokenProvider.GetCachedSessionAsync();
@@ -80,7 +83,6 @@ public class GlookoConnectorService
         }
 
         TrackSuccessfulRequest();
-        return true;
     }
 
     /// <summary>
@@ -241,10 +243,10 @@ public class GlookoConnectorService
         var maxCount = Math.Max(1, (int)Math.Ceiling((endDate - startDate).TotalMinutes / 5));
 
         return $"{endpoint}?patient={patientCode}"
-             + $"&startDate={startDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
-             + $"&endDate={endDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
+             + $"&startDate={startDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
+             + $"&endDate={endDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
              + $"&lastGuid={GlookoConstants.LegacyLastGuid}"
-             + $"&lastUpdatedAt={startDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
+             + $"&lastUpdatedAt={startDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
              + $"&limit={maxCount}";
     }
 
@@ -261,8 +263,8 @@ public class GlookoConnectorService
         var seriesParams = string.Join("&", series.Select(s => $"series[]={s}"));
 
         return $"{GlookoConstants.V3GraphDataPath}?patient={patientCode}"
-             + $"&startDate={startDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
-             + $"&endDate={endDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
+             + $"&startDate={startDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
+             + $"&endDate={endDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
              + $"&{seriesParams}"
              + "&locale=en&insulinTooltips=false&filterBgReadings=false&splitByDay=false";
     }
@@ -280,8 +282,8 @@ public class GlookoConnectorService
         var seriesParams = string.Join("&", GlookoConstants.V3PumpModeSeries.Select(s => $"series[]={s}"));
 
         return $"{GlookoConstants.V3GraphDataPath}?patient={patientCode}"
-             + $"&startDate={startDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
-             + $"&endDate={endDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
+             + $"&startDate={startDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
+             + $"&endDate={endDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
              + $"&{seriesParams}"
              + "&locale=en&insulinTooltips=false&filterBgReadings=false&splitByDay=false";
     }
@@ -314,9 +316,10 @@ public class GlookoConnectorService
         }
     }
 
-    protected override async Task<SyncResult> PerformSyncInternalAsync(
+    protected override async Task<SyncResult> SyncWithTokenAsync(
         SyncRequest request,
         GlookoConnectorConfiguration config,
+        TokenSession session,
         CancellationToken cancellationToken)
     {
         var result = new SyncResult
@@ -333,10 +336,7 @@ public class GlookoConnectorService
                 CancellationToken = cancellationToken
             };
 
-            await ReportSyncMessageAsync(SyncMessageType.Authenticating, null, cancellationToken);
-
-            if (!await AuthenticateWithConfigAsync(context))
-                return AuthenticationFailedResult();
+            await ApplySessionAsync(context, session);
 
             var activeTypes = ResolveActiveTypes(request, config);
 
@@ -351,7 +351,7 @@ public class GlookoConnectorService
             // the overlap). A range naming no lower bound reaches back the full history floor.
             var now = Clock.GetUtcNow().UtcDateTime;
             var from = context.TimeMapper.ToGlookoTime(
-                request.From ?? now.AddMonths(-GlookoConstants.FullWalkMonths)).AddDays(-1);
+                WindowStart(request, ResumeFamily.Glucose) ?? now.AddMonths(-GlookoConstants.FullWalkMonths)).AddDays(-1);
             var to = context.TimeMapper.ToGlookoTime(request.To ?? now).AddDays(1);
 
             var chunks = DateChunker.Chunk(from, to, GlookoConstants.SyncChunkSize).ToList();
@@ -381,10 +381,9 @@ public class GlookoConnectorService
                         + "Invalidating it and re-authenticating.",
                         ConnectorSource, context.PatientCode);
 
-                    TokenProvider.InvalidateToken();
                     context.ClearSessionAndProfile();
 
-                    if (!await AuthenticateWithConfigAsync(context))
+                    if (!await session.ReauthenticateAsync())
                     {
                         result.Success = false;
                         result.Message = "Re-authentication failed after Glooko denied data access";
@@ -392,6 +391,7 @@ public class GlookoConnectorService
                         break;
                     }
 
+                    await ApplySessionAsync(context, session);
                     await ConfigureTimezoneTimelineAsync(context, cancellationToken);
 
                     // Drop partial results from the aborted pass; the retry re-syncs from scratch
@@ -420,10 +420,21 @@ public class GlookoConnectorService
     }
 
     /// <summary>
-    ///     Entry point for the scheduled sync.
+    ///     What the scheduled run's window reads: SSV2's glucose point, or, without a cursor store,
+    ///     the glucose and treatment points <see cref="RunScheduledAsync"/> starts from. A tiered
+    ///     window and a caller's bound read none.
+    /// </summary>
+    protected override IEnumerable<ResumeKey> ResumesFrom(SyncRequest request, GlookoConnectorConfiguration config) =>
+        !request.Resume.Scheduled ? []
+        : config.UseSsv2Sync ? WindowResumesFrom(request, ResumeFamily.Glucose)
+        : _cursorStore is null ? [ResumeFamily.Glucose, ResumeFamily.Treatments]
+        : [];
+
+    /// <summary>
+    ///     The scheduled sync's window policy.
     /// </summary>
     /// <remarks>
-    ///     The base derives the window from the tenant's newest glucose reading. Most Glooko accounts
+    ///     The base resumes each family from its own newest stored record. Most Glooko accounts
     ///     never store one (CGM backfill is off by default), so that resolves to the six-month
     ///     <see cref="BaseConnectorService{TConfig}.InitialSyncFloor"/> on every run; and where one
     ///     exists it says nothing about what is still to come, because Glooko posts pump data in
@@ -437,29 +448,25 @@ public class GlookoConnectorService
     ///     failing window cannot reinstate the per-cycle cost the schedule exists to remove.
     ///     <para>
     ///     SSV2 resumes every resource from its own cursor and ignores the bound on a scheduled run,
-    ///     and a caller naming its own <paramref name="since"/> has already chosen; both take the base
-    ///     window. A service without a cursor store has nowhere to remember a walk, so it resumes
-    ///     instead, from the oldest of the glucose and treatment resume points: every family is
-    ///     fetched inside the one window, and the base's glucose watermark alone would leave
+    ///     so it takes the base's points. A service without a cursor store has nowhere to remember a
+    ///     walk, so it resumes instead, from the oldest of the glucose and treatment resume points:
+    ///     every family is fetched inside the one window, and the glucose point alone would leave
     ///     treatments that a failed chunk never published below every later run's bound.
     ///     </para>
     /// </remarks>
-    public override async Task<SyncResult> SyncDataAsync(
+    protected override async Task<SyncResult> RunScheduledAsync(
+        ResumePoints resume,
+        Func<ResumePoints, Task<SyncResult>> run,
         GlookoConnectorConfiguration config,
-        CancellationToken cancellationToken = default,
-        DateTime? since = null,
-        ISyncProgressReporter? progressReporter = null)
+        CancellationToken cancellationToken)
     {
-        if (since.HasValue || config.UseSsv2Sync)
-            return await base.SyncDataAsync(config, cancellationToken, since, progressReporter);
+        if (config.UseSsv2Sync)
+            return await run(resume);
 
         if (_cursorStore is null)
-        {
-            var resumeFrom = ResumeFrom(
-                await CalculateSinceTimestampAsync(config),
-                await CalculateTreatmentSinceTimestampAsync(config));
-            return await base.SyncDataAsync(config, cancellationToken, resumeFrom, progressReporter);
-        }
+            return await run(resume.StartingAt(ResumeFrom(
+                resume.Point(ResumeFamily.Glucose),
+                resume.Point(ResumeFamily.Treatments))));
 
         var now = Clock.GetUtcNow().UtcDateTime;
         var tier = await ResolveWindowTierAsync(now, cancellationToken);
@@ -477,7 +484,7 @@ public class GlookoConnectorService
         if (tier == WindowTier.FullWalk)
             await RecordStampAsync(GlookoConstants.FullWalkAttemptCursorResource, now, cancellationToken);
 
-        var result = await base.SyncDataAsync(config, cancellationToken, from, progressReporter);
+        var result = await run(resume.StartingAt(from));
 
         if (result.Success)
         {
@@ -583,8 +590,8 @@ public class GlookoConnectorService
             await ReportSyncMessageAsync(SyncMessageType.FetchingData,
                 new()
                 {
-                    ["from"] = chunkFrom.ToString("MMM dd"),
-                    ["to"] = chunkTo.ToString("MMM dd"),
+                    ["from"] = chunkFrom.ToString("MMM dd", CultureInfo.InvariantCulture),
+                    ["to"] = chunkTo.ToString("MMM dd", CultureInfo.InvariantCulture),
                     ["chunk"] = $"{i + 1}/{chunks.Count}",
                 },
                 cancellationToken);
@@ -703,7 +710,7 @@ public class GlookoConnectorService
         // Food attribution resolves against the carbs published above.
         var foodEntryImports = batchData.Foods is { Length: > 0 }
             ? context.V4TreatmentMapper.MapFoodsToConnectorEntries(batchData) : [];
-        Func<string, string?> foodResolver = externalEntryId => $"glooko_food_{externalEntryId}";
+        Func<string, string?> foodResolver = externalEntryId => LegacyIds.Of("food", externalEntryId);
         landed &= await PublishFoodEntriesAndAttributeAsync(
             foodEntryImports, carbs, foodResolver, config, result, activeTypes, cancellationToken);
 
@@ -818,7 +825,7 @@ public class GlookoConnectorService
 
                 foodResolver = externalEntryId =>
                     foodGuidToMealGuid.TryGetValue(externalEntryId, out var mealGuid)
-                        ? $"glooko_v3meal_{mealGuid}" : null;
+                        ? LegacyIds.Of("v3meal", mealGuid) : null;
             }
 
             await PublishFoodEntriesAndAttributeAsync(
@@ -1693,7 +1700,7 @@ public class GlookoConnectorService
                 + "&sendSoftDeleted=false&allDevicesFlag=true";
 
         if (startDate.HasValue)
-            url += $"&startDate={startDate.Value:yyyy-MM-ddTHH:mm:ss.fffZ}";
+            url += $"&startDate={startDate.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}";
 
         return url;
     }
@@ -1866,7 +1873,7 @@ public class GlookoConnectorService
         return JsonSerializer.Deserialize<T>(result.Value.GetRawText());
     }
 
-    private static string FormatSsv2Cursor(DateTime utc) => utc.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+    private static string FormatSsv2Cursor(DateTime utc) => utc.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>Page budget for the one-time historical scan: 12 × 500 boluses ≈ years of pump use.</summary>
     private const int HistoricalScanMaxPages = 12;
@@ -2013,8 +2020,8 @@ public class GlookoConnectorService
             if (patientCode == null) return null;
 
             var url = $"{GlookoConstants.V3HistoriesPath}?patient={patientCode}"
-                    + $"&startDate={fromDate:yyyy-MM-ddTHH:mm:ss.fffZ}"
-                    + $"&endDate={toDate:yyyy-MM-ddTHH:mm:ss.fffZ}";
+                    + $"&startDate={fromDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}"
+                    + $"&endDate={toDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}";
 
             _logger.LogInformation("[{ConnectorSource}] Fetching v3 histories from {StartDate:yyyy-MM-dd} to {EndDate:yyyy-MM-dd}",
                 ConnectorSource, fromDate, toDate);

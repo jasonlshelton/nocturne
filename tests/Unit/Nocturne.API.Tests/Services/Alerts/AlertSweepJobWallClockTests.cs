@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -15,10 +16,12 @@ using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
+using Nocturne.Infrastructure.Data.Services;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Alerts;
@@ -132,6 +135,38 @@ public class AlertSweepJobWallClockTests
         fixture.InstancesCreated.Should().Be(1, "error readings are not signal: the last usable one is 20 minutes old");
     }
 
+    /// <summary>
+    /// A usable reading dated far ahead, behind a selected reading with no value: the lookback
+    /// reads only up to the selected reading, so signal loss counts from the last real usable
+    /// reading and is not held by the future one.
+    /// </summary>
+    [NativeFact]
+    public async Task The_lookback_behind_an_unusable_reading_skips_a_usable_one_dated_ahead()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, Mgdl = 110 });
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0.AddMinutes(5), Mgdl = 0 });
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0.AddHours(2), Mgdl = 110 });
+
+        await fixture.SweepAt(T0.AddMinutes(20.5));
+
+        fixture.InstancesCreated.Should().Be(1, "the last real usable reading is 20 minutes old");
+    }
+
+    [NativeFact]
+    public async Task A_failing_clock_notice_does_not_stop_the_wall_clock_pass()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, Mgdl = 110 });
+        fixture.ClockNotice
+            .Setup(n => n.ReportReadingAsync(It.IsAny<AlertReadingSelection>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("lock timeout"));
+
+        await fixture.SweepAt(T0.AddMinutes(20));
+
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
     [NativeFact]
     public async Task The_lookback_for_a_usable_reading_runs_once_per_newest_reading()
     {
@@ -187,6 +222,83 @@ public class AlertSweepJobWallClockTests
         fixture.Rules[0] = fixture.Rules[0] with { AutoResolveEnabled = true };
         await fixture.SweepAt(T0.AddMinutes(2));
         fixture.InstancesCreated.Should().Be(1);
+    }
+
+    /// <summary>
+    /// A threshold rule is swept once its <c>on_unknown</c> reads unknown as known, since its leaf
+    /// turns unknown when the reading goes stale (docs/alerts/engine-semantics.md §5.1); the kept
+    /// verdict follows an edit of that word alone.
+    /// </summary>
+    [NativeFact]
+    public async Task An_edit_of_on_unknown_alone_moves_the_rule_onto_the_sweep()
+    {
+        var fixture = new Fixture(AlertConditionType.Threshold, """{"direction": "below", "value": 70}""")
+        {
+            LastReadingAt = T0,
+            LatestMgdl = 50,
+        };
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        fixture.InstancesCreated.Should().Be(0, "under hold a threshold rule is evaluated per reading only");
+
+        await fixture.SetOnUnknown(AlertRuleOnUnknown.NotMet);
+        await fixture.SweepAt(T0.AddMinutes(2));
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    /// <summary>
+    /// A reading's age runs from when it was stored (docs/alerts/engine-semantics.md §3): one
+    /// that arrives 20 minutes after its timestamp is fresh on arrival, and stale one bound later.
+    /// </summary>
+    [NativeFact]
+    public async Task A_late_reading_is_fresh_on_arrival_and_stale_one_bound_later()
+    {
+        const string lowOrLoss = """
+            {"operator": "or", "conditions": [
+              {"type": "threshold", "threshold": {"direction": "below", "value": 70}},
+              {"type": "signal_loss", "signal_loss": {"timeout_minutes": 60}}
+            ]}
+            """;
+        var fixture = new Fixture(AlertConditionType.Composite, lowOrLoss);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, CreatedAt = T0.AddMinutes(20), Mgdl = 60 });
+        fixture.LastReadingAt = T0;
+        await fixture.SetOnUnknown(AlertRuleOnUnknown.NotMet);
+
+        await fixture.SweepAt(T0.AddMinutes(21));
+        fixture.InstancesCreated.Should().Be(1, "the reading arrived a minute ago");
+
+        await fixture.SweepAt(T0.AddMinutes(32));
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!.State.Should().Be("hysteresis");
+    }
+
+    /// <summary>
+    /// Past the freshness bound the sweep's reading-driven leaves read unknown
+    /// (docs/alerts/engine-semantics.md §3): under hold the excursion they opened stays open,
+    /// under not_met it enters hysteresis.
+    /// </summary>
+    [NativeTheory]
+    [InlineData(AlertRuleOnUnknown.Hold, "active")]
+    [InlineData(AlertRuleOnUnknown.NotMet, "hysteresis")]
+    public async Task A_stale_reading_holds_or_releases_the_excursion_it_opened(string onUnknown, string state)
+    {
+        const string lowOrLoss = """
+            {"operator": "or", "conditions": [
+              {"type": "threshold", "threshold": {"direction": "below", "value": 70}},
+              {"type": "signal_loss", "signal_loss": {"timeout_minutes": 60}}
+            ]}
+            """;
+        var fixture = new Fixture(AlertConditionType.Composite, lowOrLoss)
+        {
+            LastReadingAt = T0,
+            LatestMgdl = 60,
+        };
+        await fixture.SetOnUnknown(onUnknown);
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        fixture.InstancesCreated.Should().Be(1);
+
+        await fixture.SweepAt(T0.AddMinutes(20));
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!.State.Should().Be(state);
     }
 
     /// <summary>
@@ -293,8 +405,7 @@ public class AlertSweepJobWallClockTests
         fixture.InstancesCreated.Should().Be(1, "a continuing outage is one excursion");
         fixture.Dispatches.Should().Be(1, "a continuing outage must not re-dispatch every sweep");
 
-        fixture.LastReadingAt = T0.AddMinutes(46);
-        await fixture.SweepAt(T0.AddMinutes(46));
+        await fixture.ReadingAt(T0.AddMinutes(46));
         fixture.Closed.Should().BeEmpty("with hysteresis the first false evaluation only starts the window");
 
         await fixture.SweepAt(T0.AddMinutes(46.5));
@@ -331,10 +442,255 @@ public class AlertSweepJobWallClockTests
         fixture.Dispatches.Should().Be(1, "a continuing outage must not re-dispatch every sweep");
     }
 
+    [NativeFact]
+    public async Task Signal_loss_is_not_evaluated_before_its_next_change_and_is_at_it()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        fixture.Evaluations.Should().Be(1);
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId)).Should().BeEquivalentTo(
+            new { NextChangeKnown = true, NextChangeAt = (DateTime?)T0.AddMinutes(15) });
+
+        await fixture.SweepAt(T0.AddMinutes(5));
+        await fixture.SweepAt(T0.AddMinutes(15).AddTicks(-1));
+        fixture.Evaluations.Should().Be(1, "nothing but the clock moves the rule before its next change");
+
+        await fixture.SweepAt(T0.AddMinutes(15));
+        fixture.Evaluations.Should().Be(2);
+        fixture.InstancesCreated.Should().Be(1);
+
+        await fixture.SweepAt(T0.AddMinutes(30));
+        fixture.Evaluations.Should().Be(2, "a lost signal stays lost until a reading evaluates the rule");
+    }
+
+    [NativeFact]
+    public async Task A_reading_moves_the_next_change()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        await fixture.ReadingAt(T0.AddMinutes(10));
+        fixture.Evaluations.Should().Be(2);
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!.NextChangeAt.Should().Be(T0.AddMinutes(25));
+
+        await fixture.SweepAt(T0.AddMinutes(16));
+        fixture.Evaluations.Should().Be(2);
+        fixture.InstancesCreated.Should().Be(0);
+
+        await fixture.SweepAt(T0.AddMinutes(25));
+        fixture.Evaluations.Should().Be(3);
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Readings at <see cref="T0"/> minus five minutes and at <see cref="T0"/>, the newer one
+    /// evaluated, so its recorded next change is <see cref="T0"/> plus fifteen minutes.
+    /// </summary>
+    private static async Task<Fixture> SignalLossAfterTwoReadingsAsync()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0.AddMinutes(-5), Mgdl = 120 });
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, Mgdl = 120 });
+        await fixture.ReadingAt(T0);
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!.NextChangeAt.Should().Be(T0.AddMinutes(15));
+        await fixture.SweepAt(T0.AddMinutes(5));
+        fixture.Evaluations.Should().Be(1, "the sweep reads the facts the reading's evaluation read");
+        return fixture;
+    }
+
+    /// <summary>A delete evaluates nothing, and the newest reading left is five minutes older.</summary>
+    [NativeFact]
+    public async Task Deleting_the_newest_reading_is_evaluated_when_the_older_one_times_out()
+    {
+        var fixture = await SignalLossAfterTwoReadingsAsync();
+        fixture.Readings.RemoveAll(r => r.Timestamp == T0);
+
+        await fixture.SweepAt(T0.AddMinutes(10));
+
+        fixture.Evaluations.Should().Be(2);
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    /// <summary>A V3 edit of the newest reading evaluates nothing.</summary>
+    [NativeFact]
+    public async Task Editing_the_newest_reading_is_evaluated_against_the_edit()
+    {
+        var fixture = await SignalLossAfterTwoReadingsAsync();
+        fixture.Readings.Single(r => r.Timestamp == T0).Timestamp = T0.AddMinutes(-3);
+
+        await fixture.SweepAt(T0.AddMinutes(12));
+
+        fixture.Evaluations.Should().Be(2);
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    public enum LostEvaluation
+    {
+        /// <summary>The orchestrator logs and swallows the engine's failure.</summary>
+        Failed,
+
+        /// <summary>The writer drops the decision, as when a sweep on another replica landed first.</summary>
+        Dropped,
+    }
+
+    /// <summary>
+    /// A low reading whose evaluation stores nothing leaves the next change of the reading before
+    /// it, when that reading goes stale; the sweep must start the low's window, not wait for it.
+    /// </summary>
+    [NativeTheory]
+    [InlineData(LostEvaluation.Failed)]
+    [InlineData(LostEvaluation.Dropped)]
+    public async Task A_reading_whose_evaluation_stored_nothing_is_evaluated_by_the_sweep(LostEvaluation lost)
+    {
+        var fixture = new Fixture(
+            AlertConditionType.Composite,
+            """
+            {"operator": "or", "conditions": [
+              {"type": "signal_loss", "signal_loss": {"timeout_minutes": 60}},
+              {"type": "sustained", "sustained": {"minutes": 5, "child": {"type": "threshold", "threshold": {"direction": "below", "value": 70}}}}
+            ]}
+            """);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, Mgdl = 120 });
+        await fixture.ReadingAt(T0);
+        (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId)).Should().BeEquivalentTo(
+            new { NextChangeKnown = true, NextChangeAt = (DateTime?)T0.AddMinutes(11) });
+
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0.AddMinutes(5), Mgdl = 60 });
+        fixture.LatestMgdl = 60;
+        fixture.LoseNextEvaluation = lost;
+        await fixture.ReadingAt(T0.AddMinutes(5));
+
+        await fixture.SweepAt(T0.AddMinutes(5.5));
+        fixture.Evaluations.Should().Be(3);
+        await fixture.SweepAt(T0.AddMinutes(10.5));
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Confirmation counts evaluations, so a confirming rule is evaluated by every sweep whatever
+    /// its recorded next change.
+    /// </summary>
+    [NativeFact]
+    public async Task A_confirming_rule_is_evaluated_every_sweep()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+        await fixture.SweepAt(T0.AddMinutes(1));
+        var state = (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!;
+        state.State = "confirming";
+        state.ConfirmationCount = 1;
+
+        await fixture.SweepAt(T0.AddMinutes(2));
+
+        fixture.Evaluations.Should().Be(2);
+    }
+
+    /// <summary>
+    /// Each tree with whether the fixture's context leaves its other leaf unknown, so the rule is
+    /// held and keeps no tracker row (docs/alerts/engine-semantics.md §6.4).
+    /// </summary>
+    public static TheoryData<string, bool> RulesReadingOtherFacts => new()
+    {
+        { Or("""{"type": "pump_suspended", "pump_suspended": {"is_active": true}}"""), true },
+        { Or("""{"type": "loop_stale", "loop_stale": {"operator": ">", "minutes": 30}}"""), true },
+        { Or("""{"type": "override_active", "override_active": {"is_active": true}}"""), false },
+        { Or("""{"type": "predicted", "predicted": {"operator": "<", "value": 55, "within_minutes": 30}}"""), true },
+        { Or("""{"type": "time_of_day", "time_of_day": {"from": "22:00", "to": "06:00", "timezone": null}}"""), false },
+        { Or("""{"type": "day_of_week", "day_of_week": {"days": ["monday"]}}"""), false },
+        { Or("""{"type": "glucose_bucket", "glucose_bucket": {"buckets": ["low"]}}"""), true },
+    };
+
+    private static string Or(string other) =>
+        $$$"""{"operator": "or", "conditions": [{"type": "signal_loss", "signal_loss": {"timeout_minutes": 15}}, {{{other}}}]}""";
+
+    [NativeTheory]
+    [MemberData(nameof(RulesReadingOtherFacts))]
+    public async Task A_rule_reading_a_fact_no_reading_moves_is_evaluated_every_sweep(string tree, bool held)
+    {
+        var fixture = new Fixture(AlertConditionType.Composite, tree) { LastReadingAt = T0 };
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        await fixture.SweepAt(T0.AddMinutes(1.5));
+        await fixture.SweepAt(T0.AddMinutes(2));
+
+        fixture.Evaluations.Should().Be(3);
+        var state = await fixture.TrackerRepo.GetTrackerStateAsync(RuleId);
+        if (held)
+            state.Should().BeNull();
+        else
+            state!.NextChangeKnown.Should().BeFalse();
+    }
+
+    [NativeFact]
+    public async Task A_rule_without_a_recorded_next_change_is_evaluated()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+        await fixture.TrackerRepo.UpsertTrackerStateAsync(new AlertTrackerState
+        {
+            AlertRuleId = RuleId,
+            State = "idle",
+            UpdatedAt = T0,
+            NextChangeAt = T0.AddMinutes(15),
+            NextChangeKnown = false,
+        });
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+
+        fixture.Evaluations.Should().Be(1);
+    }
+
+    /// <summary>The edit as <see cref="AlertRuleRearm"/> saves one: the rule and a dropped next change.</summary>
+    [NativeFact]
+    public async Task A_rule_edit_drops_the_next_change_so_the_sweep_evaluates()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+        await fixture.SweepAt(T0.AddMinutes(1));
+
+        const string edited = """{"timeout_minutes": 5}""";
+        fixture.Rules[0] = fixture.Rules[0] with { ConditionParams = edited };
+        (await fixture.TrackerRepo.GetRuleAsync(RuleId))!.ConditionParams = edited;
+        var state = (await fixture.TrackerRepo.GetTrackerStateAsync(RuleId))!;
+        state.NextChangeKnown = false;
+        state.NextChangeAt = null;
+
+        await fixture.SweepAt(T0.AddMinutes(6));
+
+        fixture.Evaluations.Should().Be(2);
+        fixture.InstancesCreated.Should().Be(1);
+    }
+
+    [NativeFact]
+    public async Task A_new_process_reads_the_next_change_this_one_recorded()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15) { LastReadingAt = T0 };
+        await fixture.SweepAt(T0.AddMinutes(1));
+
+        fixture.Restart();
+        await fixture.SweepAt(T0.AddMinutes(5));
+        fixture.Evaluations.Should().Be(1);
+
+        await fixture.SweepAt(T0.AddMinutes(15));
+        fixture.Evaluations.Should().Be(2);
+    }
+
+    [NativeFact]
+    public async Task Without_a_usable_reading_every_sweep_evaluates()
+    {
+        var fixture = new Fixture(AlertConditionType.SignalLoss, SignalLoss15);
+        fixture.Readings.Add(new SensorGlucose { Timestamp = T0, Mgdl = 0 });
+        fixture.LastReadingAt = T0;
+
+        await fixture.SweepAt(T0.AddMinutes(1));
+        await fixture.SweepAt(T0.AddMinutes(2));
+
+        fixture.Evaluations.Should().Be(2);
+    }
+
     private sealed class Fixture
     {
-        private readonly AlertSweepJob _sweep;
+        private AlertSweepJob _sweep;
         private readonly ServiceProvider _services;
+        private readonly CountingEngine _engine;
 
         public ManualTimeProvider Time { get; } = new();
         public ListLogger<AlertSweepJob> Logger { get; } = new();
@@ -356,10 +712,52 @@ public class AlertSweepJobWallClockTests
 
         public Mock<ICanonicalGlucoseService> Canonical { get; } = new();
 
+        public Mock<IClockAnomalyNotice> ClockNotice { get; } = new();
+
         public Task SweepAt(DateTime at)
         {
             Time.SetUtcNow(at);
             return _sweep.RunAsync(_services, Tenant, Time.GetUtcNow());
+        }
+
+        /// <summary>A usable reading at <paramref name="at"/>, evaluated as the per-reading path does.</summary>
+        public async Task ReadingAt(DateTime at)
+        {
+            Time.SetUtcNow(at);
+            LastReadingAt = at;
+            var context = new TenantContext(Tenant, "slug", "Slug", true, IsDemo: false);
+            await using var scope = TenantJobScope.Open(_services, context, "reading");
+            var reading = new SensorGlucose { Timestamp = at, CreatedAt = at, Mgdl = LatestMgdl ?? 120 };
+            var trend = await ReadingTrend.ForAsync(reading, Canonical.Object, CancellationToken.None);
+            await scope.ServiceProvider.GetRequiredService<IAlertOrchestrator>()
+                .EvaluateAsync(CanonicalAlertEvaluator.ContextFor(reading, trend), CancellationToken.None);
+        }
+
+        /// <summary>A reading as the store returns it: stored at its own time unless a test says otherwise.</summary>
+        private static SensorGlucose Stored(SensorGlucose reading)
+        {
+            if (reading.CreatedAt == default)
+                reading.CreatedAt = reading.Timestamp;
+            return reading;
+        }
+
+        /// <summary>The rule under test's <c>on_unknown</c>, in its snapshot and its stored row.</summary>
+        public async Task SetOnUnknown(string onUnknown)
+        {
+            Rules[0] = Rules[0] with { OnUnknown = onUnknown };
+            (await TrackerRepo.GetRuleAsync(RuleId))!.OnUnknown = onUnknown;
+        }
+
+        /// <summary>The sweep as a new process runs it, with only what is stored.</summary>
+        public void Restart() => _sweep = new AlertSweepJob(Logger);
+
+        /// <summary>Full evaluations of the rule under test, by any path.</summary>
+        public int Evaluations => _engine.Evaluations;
+
+        /// <summary>How the next evaluation of the rule under test stores nothing, if it does.</summary>
+        public LostEvaluation? LoseNextEvaluation
+        {
+            set => _engine.LoseNext = value;
         }
 
         public Fixture(
@@ -393,7 +791,9 @@ public class AlertSweepJobWallClockTests
             services.AddLogging();
             services.AddSingleton<TimeProvider>(Time);
 
-            services.AddSingleton<IAlertEvaluationEngine>(EngineTestHarness.BuildRustEngine(Time, TrackerRepo));
+            _engine = new CountingEngine(EngineTestHarness.BuildRustEngine(Time, TrackerRepo));
+            services.AddSingleton<IAlertEvaluationEngine>(_engine);
+            services.AddSingleton<IAlertTrackerRepository>(TrackerRepo);
 
             var repository = AlertSweepRuns.Repository(Tenant, () => LastReadingAt);
             repository
@@ -417,14 +817,20 @@ public class AlertSweepJobWallClockTests
             canonical
                 .Setup(x => x.GetLatestAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => Readings.Count > 0
-                    ? Readings.MaxBy(r => r.Timestamp)
+                    ? Stored(Readings.MaxBy(r => r.Timestamp)!)
                     : LastReadingAt is { } at
-                        ? new SensorGlucose { Timestamp = at, Mgdl = LatestMgdl ?? 120 }
+                        ? new SensorGlucose { Timestamp = at, CreatedAt = at, Mgdl = LatestMgdl ?? 120 }
+                        : null);
+            canonical
+                .Setup(x => x.GetLatestAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((DateTime notAfter, CancellationToken _) =>
+                    Readings.Where(r => r.Timestamp <= notAfter).MaxBy(r => r.Timestamp) is { } bounded
+                        ? Stored(bounded)
                         : null);
             canonical
                 .Setup(x => x.GetRecentAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((DateTime since, CancellationToken _) =>
-                    Readings.Where(r => r.Timestamp >= since).OrderByDescending(r => r.Timestamp).ToList());
+                    Readings.Where(r => r.Timestamp >= since).OrderByDescending(r => r.Timestamp).Select(Stored).ToList());
             canonical
                 .Setup(x => x.GetStreamPredecessorAsync(It.IsAny<SensorGlucose>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((SensorGlucose reading, DateTime since, CancellationToken _) => Readings
@@ -466,10 +872,49 @@ public class AlertSweepJobWallClockTests
             services.AddSingleton<ConditionVersionLog>();
             services.AddSingleton<IAlertRuleConditionValidator, AlertRuleConditionValidator>();
             services.AddSingleton<ILogger<AlertOrchestrator>>(OrchestratorLogger);
+            services.AddSingleton<ILogger<UnevaluableRuleNotice>>(new ListLogger<UnevaluableRuleNotice>());
+            services.AddScoped<IUnevaluableRuleNotice, UnevaluableRuleNotice>();
+            services.AddSingleton(ClockNotice.Object);
             services.AddScoped<IAlertOrchestrator, AlertOrchestrator>();
 
             _services = services.BuildServiceProvider();
             _sweep = new AlertSweepJob(Logger);
         }
+    }
+
+    /// <summary>Counts full evaluations of <see cref="RuleId"/>.</summary>
+    private sealed class CountingEngine(IAlertEvaluationEngine inner) : IAlertEvaluationEngine
+    {
+        public int Evaluations { get; private set; }
+
+        public LostEvaluation? LoseNext { get; set; }
+
+        public Task<AlertEngineEvaluation> EvaluateRuleAsync(
+            AlertRuleSnapshot rule, SensorContext context, AlertEngineOptions options, CancellationToken ct)
+        {
+            if (rule.Id != RuleId)
+                return inner.EvaluateRuleAsync(rule, context, options, ct);
+
+            Evaluations++;
+            var lost = LoseNext;
+            LoseNext = null;
+            return lost switch
+            {
+                LostEvaluation.Failed => throw new InvalidOperationException("The engine failed"),
+                LostEvaluation.Dropped => Task.FromResult(new AlertEngineEvaluation
+                {
+                    Transition = new ExcursionTransition(ExcursionTransitionType.None),
+                }),
+                _ => inner.EvaluateRuleAsync(rule, context, options, ct),
+            };
+        }
+
+        public Task<bool> EvaluateSnoozeAsync(
+            Guid ruleId, JsonElement conditions, SensorContext context, CancellationToken ct) =>
+            inner.EvaluateSnoozeAsync(ruleId, conditions, context, ct);
+
+        public Task<ExcursionTransition> EvaluateAutoResolveAsync(
+            AlertRuleSnapshot rule, SensorContext context, CancellationToken ct) =>
+            inner.EvaluateAutoResolveAsync(rule, context, ct);
     }
 }

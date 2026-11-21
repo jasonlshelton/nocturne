@@ -43,6 +43,9 @@ public static class ScenarioConversions
             HysteresisMinutes = rule.HysteresisMinutes,
             AutoResolveEnabled = rule.AutoResolveEnabled,
             AutoResolveParams = rule.AutoResolveParams?.GetRawText(),
+            OnUnknown = rule.OnUnknown ?? AlertRuleOnUnknown.Hold,
+            GlucoseFreshnessMinutes = rule.GlucoseFreshnessMinutes,
+            EnabledAt = rule.EnabledAt,
         };
     }
 
@@ -52,6 +55,7 @@ public static class ScenarioConversions
         {
             LatestValue = ctx.LatestValue,
             LatestTimestamp = Utc(ctx.LatestTimestamp),
+            LatestReceivedAt = Utc(ctx.LatestReceivedAt),
             TrendRate = ctx.TrendRate,
             LastReadingAt = Utc(ctx.LastReadingAt),
             TrendBucket = ParseWireEnum<TrendBucket>(ctx.TrendBucket),
@@ -97,9 +101,7 @@ public static class ScenarioConversions
             LastBolusAt = Utc(ctx.LastBolusAt),
             TenantTimeZoneId = ctx.TenantTimeZoneId,
             ActivePumpState = ctx.ActivePumpState is { } pumpState
-                ? new PumpStateSnapshot(
-                    ParseWireEnum<PumpModeState>(pumpState.Mode)!.Value,
-                    Utc(pumpState.StartedAt)!.Value)
+                ? new PumpStateSnapshot(pumpState.Mode, Utc(pumpState.StartedAt)!.Value)
                 : null,
             ActiveStateSpans = ctx.ActiveStateSpans?.ToDictionary(
                     s => (ParseWireEnum<StateSpanCategory>(s.Category)!.Value, s.State),

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Nocturne.API.Attributes;
 using Microsoft.EntityFrameworkCore;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Authorization;
@@ -20,8 +21,9 @@ namespace Nocturne.API.Controllers.V4.Identity;
 /// each such member a single-use code that the member uses to regain access.
 /// </summary>
 /// <remarks>
-/// Allowed during setup because these members are what put the tenant into recovery mode, where
-/// every other tenant endpoint answers 503.
+/// Allowed during setup because a site where these members are stuck and no member administrator
+/// can sign in is in recovery mode, where every other tenant endpoint answers 503. On a site an
+/// administrator can still reach, the same endpoints serve the administrator who recovers them.
 /// The member spends the code at <see cref="PasskeyController.RecoveryModeRedeem"/>.
 /// </remarks>
 [ApiController]
@@ -65,19 +67,14 @@ public class MemberRecoveryController : ControllerBase
     /// The members of this tenant who cannot sign in (<see cref="OrphanedSubjectFilter"/>).
     /// </summary>
     [HttpGet]
+    [RequireScope(Scope.MembersManage)]
     [RemoteQuery]
     [ProducesResponseType(typeof(List<LockedOutMember>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetLockedOutMembers(CancellationToken ct)
     {
-        if (!HttpContext.HasScope(Scope.MembersManage))
-            return Forbid();
-
         await using var db = await _contexts.CreateAsync(ct);
-        var subjects = await db.OrphanedSubjectsOf(_tenantAccessor.TenantId)
-            .OrderBy(s => s.Name)
-            .Select(s => new { s.Id, s.Name, s.Username, s.IsPlatformAdmin })
-            .ToListAsync(ct);
+        var subjects = await _eligibility.ListLockedOutAsync(db, _tenantAccessor.TenantId, ct);
 
         var members = new List<LockedOutMember>(subjects.Count);
         foreach (var s in subjects)
@@ -110,6 +107,7 @@ public class MemberRecoveryController : ControllerBase
     /// </remarks>
     [HttpPost("{subjectId:guid}/code")]
     [RequireInteractiveSession]
+    [RequireScope(Scope.MembersManage)]
     [RemoteCommand(Invalidates = ["GetLockedOutMembers"])]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(LoginCode), StatusCodes.Status200OK)]
@@ -118,9 +116,8 @@ public class MemberRecoveryController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> IssueRecoveryCode(Guid subjectId, CancellationToken ct)
     {
-        var auth = HttpContext.GetAuthContext();
-        if (auth is null || !HttpContext.HasScope(Scope.MembersManage))
-            return Forbid();
+        // [RequireScope] answers 401 to a request with no auth context, as members.manage is not a read scope.
+        var auth = HttpContext.GetAuthContext()!;
 
         var tenantId = _tenantAccessor.TenantId;
         await using var db = await _contexts.CreateAsync(ct);

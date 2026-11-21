@@ -5,32 +5,42 @@
 
 pub(crate) mod clock;
 mod device;
-mod glucose;
+pub(crate) mod elapsed;
+pub(crate) mod glucose;
 mod insulin;
 mod signal;
 mod spans;
 
-use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
+use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
-use crate::compare::{Unit, decimal_from_f64_cs, elapsed};
+use crate::clock_anomaly::ClockAnomalies;
 use crate::context::SensorContext;
-use crate::enums::{CmpOp, CompositeOp, holds};
+use crate::enums::CompositeOp;
 use crate::model::{Node, Payload};
 use crate::paths::node_child_path;
 use crate::sustained::{TimerStore, eval_sustained};
+use crate::truth::Truth;
+use elapsed::Elapsed;
+
+pub use glucose::{DEFAULT_GLUCOSE_FRESHNESS, MAX_GLUCOSE_FRESHNESS_MINUTES};
 
 /// Per-evaluation environment: the clock instant, the rule whose timers are
-/// keyed, the sensor context, and the mutable timer store.
+/// keyed with its glucose freshness bound and when it was enabled, the sensor
+/// context, the mutable timer store, and the anchors read ahead of the clock.
 pub struct Env<'a> {
     pub(crate) now: DateTime<Utc>,
     pub(crate) rule_id: Uuid,
+    pub(crate) glucose_freshness: TimeDelta,
+    pub(crate) enabled_at: Option<DateTime<Utc>>,
     pub(crate) ctx: &'a SensorContext,
     pub(crate) timers: &'a mut TimerStore,
+    clock_anomaly: ClockAnomalies,
 }
 
 impl<'a> Env<'a> {
+    /// With the default glucose freshness bound, [`DEFAULT_GLUCOSE_FRESHNESS`],
+    /// and no enablement instant.
     pub fn new(
         now: DateTime<Utc>,
         rule_id: Uuid,
@@ -40,107 +50,114 @@ impl<'a> Env<'a> {
         Self {
             now,
             rule_id,
+            glucose_freshness: DEFAULT_GLUCOSE_FRESHNESS,
+            enabled_at: None,
             ctx,
             timers,
+            clock_anomaly: ClockAnomalies::default(),
         }
     }
 
-    /// Whether `since` is at least `minutes` ago, in fractional minutes.
-    pub(crate) fn held_for(&self, since: DateTime<Utc>, minutes: i32) -> bool {
-        elapsed(self.now, since, Unit::Minutes).is_some_and(|m| m >= f64::from(minutes))
-    }
-
-    /// The time since `anchor` in `unit`, converted to decimal
-    /// (engine-semantics.md §1.3), compared against `threshold`.
-    fn compare_elapsed(
-        &self,
-        anchor: DateTime<Utc>,
-        unit: Unit,
-        op: CmpOp,
-        threshold: impl Into<Decimal>,
-    ) -> bool {
-        let actual = elapsed(self.now, anchor, unit).and_then(decimal_from_f64_cs);
-        holds(op, actual, threshold.into())
-    }
-
-    /// Whether a span's presence matches `is_active` and, on the active side,
-    /// it has held for `for_minutes` when that is set.
-    fn active_for(
-        &self,
-        is_active: bool,
-        for_minutes: Option<i32>,
-        started_at: Option<DateTime<Utc>>,
-    ) -> bool {
-        match started_at {
-            Some(at) if is_active => for_minutes.is_none_or(|m| self.held_for(at, m)),
-            Some(_) => false,
-            None => !is_active,
+    #[must_use]
+    pub fn with_glucose_freshness(self, glucose_freshness: TimeDelta) -> Self {
+        Self {
+            glucose_freshness,
+            ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_enabled_at(self, enabled_at: Option<DateTime<Utc>>) -> Self {
+        Self { enabled_at, ..self }
+    }
+
+    /// Every anchor the evaluations in this environment read beyond the
+    /// tolerance ahead of `now` (engine-semantics.md §5.4).
+    #[must_use]
+    pub fn clock_anomaly(&self) -> &ClockAnomalies {
+        &self.clock_anomaly
+    }
+
+    pub(crate) fn into_clock_anomaly(self) -> ClockAnomalies {
+        self.clock_anomaly
+    }
+
+    /// `e` at `now`, noting its anchor when it is beyond the tolerance ahead.
+    pub(crate) fn measure(&mut self, e: Elapsed) -> Truth {
+        self.clock_anomaly.note(e.ahead(self.now));
+        e.truth(self.now)
     }
 }
 
 /// Evaluates a condition node at `path`.
-pub fn eval_node(node: &Node, path: &str, env: &mut Env) -> bool {
+pub fn eval_node(node: &Node, path: &str, env: &mut Env) -> Truth {
     eval_payload(node.payload(), path, env)
 }
 
 /// Evaluates a payload as the node at `path`.
-pub fn eval_payload(payload: &Payload, path: &str, env: &mut Env) -> bool {
+pub fn eval_payload(payload: &Payload, path: &str, env: &mut Env) -> Truth {
     match payload {
         Payload::Threshold(p) => glucose::threshold(p, env),
         Payload::RateOfChange(p) => glucose::rate_of_change(p, env),
-        Payload::SignalLoss(p) => signal::signal_loss(p, env),
         Payload::Composite(p) => composite(p, path, env),
         Payload::Not(p) => not(p, path, env),
         Payload::Sustained(p) => eval_sustained(p, path, env),
-        Payload::Staleness(p) => glucose::staleness(p, env),
         Payload::Predicted(p) => glucose::predicted(p, env),
         Payload::Trend(p) => glucose::trend(p, env),
         Payload::TimeOfDay(p) => clock::time_of_day(p, env),
         Payload::Iob(p) => insulin::iob(p, env),
         Payload::Cob(p) => insulin::cob(p, env),
         Payload::Reservoir(p) => insulin::reservoir(p, env),
-        Payload::SiteAge(p) => device::site_age(p, env),
-        Payload::SensorAge(p) => device::sensor_age(p, env),
-        Payload::AlertState(p) => spans::alert_state(p, env),
-        Payload::LoopStale(p) => device::loop_stale(p, env.ctx.last_aps_cycle_at, env),
-        Payload::LoopEnactionStale(p) => device::loop_stale(p, env.ctx.last_aps_enacted_at, env),
-        Payload::PumpSuspended(p) => device::pump_suspended(p, env),
         Payload::PumpBattery(p) => device::pump_battery(p, env),
         Payload::TempBasal(p) => insulin::temp_basal(p, env),
         Payload::UploaderBattery(p) => device::uploader_battery(p, env),
         Payload::TransmitterBattery(p) => device::transmitter_battery(p, env),
-        Payload::OverrideActive(p) => spans::override_active(p, env),
         Payload::SensitivityRatio(p) => device::sensitivity_ratio(p, env),
-        Payload::DoNotDisturb(p) => spans::do_not_disturb(p, env),
         Payload::GlucoseBucket(p) => glucose::glucose_bucket(p, env),
-        Payload::TimeSinceLastCarb(p) => clock::time_since(p, env.ctx.last_carb_at, env),
-        Payload::TimeSinceLastBolus(p) => clock::time_since(p, env.ctx.last_bolus_at, env),
         Payload::DayOfWeek(p) => clock::day_of_week(p, env),
-        Payload::PumpState(p) => spans::pump_state(p, env),
-        Payload::StateSpanActive(p) => spans::state_span_active(p, env),
         Payload::SleepSessionActive(p) => spans::sleep_session_active(p, env),
-        Payload::TrackerAge(p) => device::tracker_age(p, env),
+        Payload::SignalLoss(_)
+        | Payload::Staleness(_)
+        | Payload::SiteAge(_)
+        | Payload::SensorAge(_)
+        | Payload::AlertState(_)
+        | Payload::LoopStale(_)
+        | Payload::LoopEnactionStale(_)
+        | Payload::PumpSuspended(_)
+        | Payload::OverrideActive(_)
+        | Payload::DoNotDisturb(_)
+        | Payload::TimeSinceLastCarb(_)
+        | Payload::TimeSinceLastBolus(_)
+        | Payload::PumpState(_)
+        | Payload::StateSpanActive(_)
+        | Payload::TrackerAge(_) => {
+            elapsed::clock_leaf(payload, env.ctx, env.enabled_at).map_or(Truth::False, |leaf| {
+                if let Some(e) = leaf.elapsed() {
+                    env.measure(e);
+                }
+                leaf.holds(env.now)
+            })
+        }
     }
 }
 
 /// `and` / `or` evaluate every child in document order, whatever an earlier
 /// one returned, so each sustained timer tracks its own condition wherever it
-/// sits.
-fn composite(p: &crate::model::CompositePayload, path: &str, env: &mut Env) -> bool {
-    let results: Vec<bool> = p
+/// sits. They combine in Kleene's logic.
+fn composite(p: &crate::model::CompositePayload, path: &str, env: &mut Env) -> Truth {
+    let results: Vec<Truth> = p
         .conditions
         .iter()
         .enumerate()
         .map(|(i, child)| eval_node(child, &node_child_path(path, i, child), env))
         .collect();
     match p.operator {
-        CompositeOp::And => results.iter().all(|&r| r),
-        CompositeOp::Or => results.iter().any(|&r| r),
+        CompositeOp::And => Truth::all(results),
+        CompositeOp::Or => Truth::any(results),
     }
 }
 
-/// The child inverted.
-fn not(p: &crate::model::NotPayload, path: &str, env: &mut Env) -> bool {
+/// The child inverted; unknown stays unknown.
+fn not(p: &crate::model::NotPayload, path: &str, env: &mut Env) -> Truth {
     !eval_node(&p.child, &node_child_path(path, 0, &p.child), env)
 }

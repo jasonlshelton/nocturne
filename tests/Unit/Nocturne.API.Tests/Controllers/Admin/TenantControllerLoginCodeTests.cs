@@ -130,6 +130,20 @@ public class TenantControllerLoginCodeTests : IDisposable
     }
 
     [Fact]
+    public async Task IssueLoginCode_ForADeactivatedMember_ReturnsNotFoundAndMintsNothing()
+    {
+        await _tenantContext.Subjects.Where(s => s.Id == _memberSubjectId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
+
+        var result = await InvokeAsync(_tenantId, _memberSubjectId);
+
+        result.Should().BeOfType<NotFoundResult>();
+        (await _tenantContext.LoginCodes.AnyAsync()).Should().BeFalse();
+        (await _auditContext.AuthAuditLog.AnyAsync(a => a.EventType == AuthAuditEventType.LoginCodeIssued))
+            .Should().BeFalse();
+    }
+
+    [Fact]
     public async Task IssueLoginCode_OnAnInactiveTenant_IsRefusedAndMintsNothing()
     {
         _tenantService
@@ -199,9 +213,9 @@ public class TenantControllerLoginCodeTests : IDisposable
         var stored = await _tenantContext.LoginCodes.AsNoTracking().SingleAsync();
         stored.Purpose.Should().Be(LoginCodePurpose.OperatorRecovery);
 
-        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, [LoginCodePurpose.Login], null, null))
+        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, [LoginCodePurpose.Login], admits: null, withSpend: null, null, null))
             .Should().BeNull("a recovery code is not a sign-in");
-        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, LoginCodeService.RecoveryPurposes, null, null))
+        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, LoginCodeService.RecoveryPurposes, admits: null, withSpend: null, null, null))
             .Should().Be(new RedeemedLoginCode(_memberSubjectId, LoginCodePurpose.OperatorRecovery));
     }
 
@@ -213,7 +227,7 @@ public class TenantControllerLoginCodeTests : IDisposable
 
         await IssueRecoveryCodeAsync();
 
-        (await _loginCodeService.RedeemAsync(_tenantContext, first.Code, LoginCodeService.RecoveryPurposes, null, null))
+        (await _loginCodeService.RedeemAsync(_tenantContext, first.Code, LoginCodeService.RecoveryPurposes, admits: null, withSpend: null, null, null))
             .Should().BeNull();
     }
 
@@ -233,22 +247,75 @@ public class TenantControllerLoginCodeTests : IDisposable
         (await _tenantContext.LoginCodes.AnyAsync()).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(true, StatusCodes.Status409Conflict)]
+    [InlineData(false, StatusCodes.Status200OK)]
+    public async Task IssueRecoveryCode_ForAMemberWithAConfirmedAddress_IsRefusedOnlyWhileDeliveryIsConfigured(bool delivery, int status)
+    {
+        var member = await _tenantContext.Subjects.FindAsync(_memberSubjectId);
+        member!.SetEmail("owner@example.test");
+        member.ConfirmEmail("owner@example.test", DateTime.UtcNow);
+        await _tenantContext.SaveChangesAsync();
+
+        var result = await IssueRecoveryCodeAsync(AccountLinkRoutes.Of(delivery));
+
+        result.Should().BeAssignableTo<ObjectResult>().Which.StatusCode.Should().Be(status);
+    }
+
+    [Fact]
+    public async Task A_code_its_member_may_not_redeem_is_refused_and_not_spent()
+    {
+        var issued = await IssueAsync(_memberSubjectId);
+        var spentWith = false;
+
+        (await _loginCodeService.RedeemAsync(
+                _tenantContext, issued.Code, [LoginCodePurpose.Login],
+                admits: (_, _) => Task.FromResult(false),
+                withSpend: (_, _) => { spentWith = true; return Task.CompletedTask; },
+                null, null))
+            .Should().BeNull();
+
+        spentWith.Should().BeFalse();
+        (await _tenantContext.LoginCodes.AsNoTracking().SingleAsync()).ConsumedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_code_is_not_spent_when_the_work_that_commits_with_it_fails()
+    {
+        var issued = await IssueAsync(_memberSubjectId);
+
+        var redeeming = () => _loginCodeService.RedeemAsync(
+            _tenantContext, issued.Code, [LoginCodePurpose.Login],
+            admits: null,
+            withSpend: (_, _) => throw new InvalidOperationException("the accompanying write failed"),
+            null, null);
+
+        await redeeming.Should().ThrowAsync<InvalidOperationException>();
+        (await _tenantContext.LoginCodes.AsNoTracking().SingleAsync()).ConsumedAt.Should().BeNull();
+        (await _loginCodeService.RedeemAsync(
+                _tenantContext, issued.Code, [LoginCodePurpose.Login], admits: null, withSpend: null, null, null))
+            .Should().Be(new RedeemedLoginCode(_memberSubjectId, LoginCodePurpose.Login));
+    }
+
     [Fact]
     public async Task A_login_code_does_not_redeem_as_a_recovery_code()
     {
         var issued = await IssueAsync(_memberSubjectId);
 
-        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, LoginCodeService.RecoveryPurposes, null, null))
+        (await _loginCodeService.RedeemAsync(_tenantContext, issued.Code, LoginCodeService.RecoveryPurposes, admits: null, withSpend: null, null, null))
             .Should().BeNull();
         (await _tenantContext.LoginCodes.AsNoTracking().SingleAsync()).ConsumedAt.Should().BeNull();
     }
 
-    private Task<IActionResult> IssueRecoveryCodeAsync()
+    private Task<IActionResult> IssueRecoveryCodeAsync(IAccountLinkRoute? linkRoute = null)
     {
+        linkRoute ??= AccountLinkRoutes.Off;
         var contexts = _db.ContextFactory.AsNocturneFactory();
         return _controller.IssueRecoveryCode(
             _tenantId, _memberSubjectId, contexts, _loginCodeService,
-            new MemberRecoveryEligibility(new TenantMemberService(new TenantMembershipRepository(contexts))), CancellationToken.None);
+            new MemberRecoveryEligibility(
+                new TenantMemberService(new TenantMembershipRepository(contexts, linkRoute)), linkRoute),
+            CancellationToken.None);
     }
 
     private TenantDetailDto TenantDetail(bool isActive) => new(
@@ -261,7 +328,8 @@ public class TenantControllerLoginCodeTests : IDisposable
 
     private async Task<IActionResult> InvokeAsync(Guid tenantId, Guid subjectId) =>
         await _controller.IssueLoginCode(
-            tenantId, subjectId, _db.ContextFactory.AsNocturneFactory(), _loginCodeService, CancellationToken.None);
+            tenantId, subjectId, _db.ContextFactory.AsNocturneFactory(), _loginCodeService,
+            new SubjectRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), CancellationToken.None);
 
     private async Task<LoginCode> IssueAsync(Guid subjectId)
     {

@@ -1,4 +1,3 @@
-using System.Data.Common;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,6 +16,7 @@ using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models.V4;
 using Nocturne.Core.Models.Health;
+using Nocturne.Infrastructure.Data;
 
 namespace Nocturne.API.Services.Health.GoogleHealth;
 
@@ -328,7 +328,7 @@ public sealed class GoogleHealthService(
         {
             await sessions.ReleaseUnstoredAsync(CancellationToken.None);
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (StoreFailure.Is(ex) || ex is InvalidOperationException)
         {
             logger.LogWarning(ex, "Google Health could not release the hold of tenant {TenantId} on an unstored grant", TenantId);
         }
@@ -442,8 +442,8 @@ public sealed class GoogleHealthService(
             throw new GoogleHealthException("already_running", stage: "preview");
         try
         {
-            using var previewCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            previewCancellation.CancelAfter(PreviewTimeout);
+            using var deadline = new CancellationTokenSource(PreviewTimeout, time);
+            using var previewCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
             var previewCt = previewCancellation.Token;
             GoogleHealthConnectorConfiguration configuration;
             try

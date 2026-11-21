@@ -1756,6 +1756,9 @@ public class GoogleHealthTests : IDisposable
     [Fact]
     public async Task Disconnect_interrupts_preview_and_survives_browser_cancellation_before_google_revocation()
     {
+        // Every step waits on a signal; this only fails a hang, and a CI runner collecting coverage across
+        // the unit assemblies at once can stall the thread pool for seconds.
+        var patience = TimeSpan.FromSeconds(30);
         var scanning = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var revoking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRevoke = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1780,10 +1783,10 @@ public class GoogleHealthTests : IDisposable
         var store = new TestConnectorStore();
         var coordinator = InMemoryGoogleHealthCoordinator.Create();
         var tenant = Guid.NewGuid();
-        var service = Service(store, handler, tenant, coordinator);
+        var service = Service(store, handler, tenant, coordinator, revokeTimeout: patience);
         await ConnectAsync(service);
         var preview = service.PreviewAsync(Guid.NewGuid(), default);
-        await scanning.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await scanning.Task.WaitAsync(patience);
         using var browser = new CancellationTokenSource();
         var disconnect = service.DisconnectAsync(Guid.NewGuid(), browser.Token);
         browser.Cancel();
@@ -1791,8 +1794,8 @@ public class GoogleHealthTests : IDisposable
         var requestId = (await coordinator.DisconnectRequestAsync(tenant, default))!.RequestId;
         try
         {
-            await revoking.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await scanCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await revoking.Task.WaitAsync(patience);
+            await scanCancelled.Task.WaitAsync(patience);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => preview);
             var status = await service.StatusAsync(default);
             Assert.False(status.Connected);
@@ -1801,14 +1804,78 @@ public class GoogleHealthTests : IDisposable
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.PreviewAsync(Guid.NewGuid(), default));
         }
         finally { releaseRevoke.TrySetResult(); }
-        await disconnect.WaitAsync(TimeSpan.FromSeconds(5));
-        await recoveredDisconnect.WaitAsync(TimeSpan.FromSeconds(5));
+        await disconnect.WaitAsync(patience);
+        await recoveredDisconnect.WaitAsync(patience);
         Assert.False((await service.StatusAsync(default)).IsDisconnecting);
         Assert.False(store.Secrets.ContainsKey("refreshToken"));
         Assert.True(store.Secrets.ContainsKey("accountKey"));
         await ConnectAsync(service);
         await service.ResumeDisconnectAsync(Guid.NewGuid(), requestId);
         Assert.True((await service.StatusAsync(default)).Connected);
+    }
+
+    [Fact]
+    public async Task A_disconnect_whose_revocation_outlasts_the_timeout_advises_revoking_in_google()
+    {
+        var time = new FakeTimeProvider();
+        var revoking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new AsyncHandler(async (request, ct) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/token": return Json($$"""{"access_token":"access","refresh_token":"refresh","expires_in":3600,"scope":"openid {{GoogleHealthClient.MetricsScope}}"}""");
+                case "/v1/userinfo": return Json("""{"sub":"account"}""");
+                case "/revoke":
+                    revoking.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, ct);
+                    return Json("{}");
+                default: return Json("{}");
+            }
+        });
+        var patience = TimeSpan.FromSeconds(30);
+        var service = Service(new TestConnectorStore(), handler, Guid.NewGuid(), time: time, revokeTimeout: TimeSpan.FromMinutes(5));
+        await ConnectAsync(service);
+
+        var disconnect = service.DisconnectAsync(Guid.NewGuid(), default);
+        await revoking.Task.WaitAsync(patience);
+        Assert.False(disconnect.IsCompleted);
+        time.Advance(TimeSpan.FromMinutes(5));
+        await disconnect.WaitAsync(patience);
+
+        var status = await service.StatusAsync(default);
+        Assert.False(status.Connected);
+        Assert.Equal("revoke_in_google", status.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_preview_that_outlasts_its_timeout_reports_google_unavailable()
+    {
+        var time = new FakeTimeProvider();
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new AsyncHandler(async (request, ct) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/token": return Json($$"""{"access_token":"access","refresh_token":"refresh","expires_in":3600,"scope":"openid {{GoogleHealthClient.MetricsScope}}"}""");
+                case "/v1/userinfo": return Json("""{"sub":"account"}""");
+                default:
+                    reading.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, ct);
+                    return Json("{}");
+            }
+        });
+        var patience = TimeSpan.FromSeconds(30);
+        var service = Service(new TestConnectorStore(), handler, Guid.NewGuid(), time: time);
+        await ConnectAsync(service);
+
+        var preview = service.PreviewAsync(Guid.NewGuid(), default);
+        await reading.Task.WaitAsync(patience);
+        Assert.False(preview.IsCompleted);
+        time.Advance(TimeSpan.FromMinutes(3));
+
+        var error = await Assert.ThrowsAsync<GoogleHealthException>(() => preview.WaitAsync(patience));
+        Assert.Equal("google_unavailable", error.Message);
+        Assert.Equal("preview_timeout", error.Stage);
     }
 
     private sealed class ThrowingTokenCache(Func<Exception> failure) : IConnectorTokenCache
@@ -1836,7 +1903,8 @@ public class GoogleHealthTests : IDisposable
         IGoogleHealthReadingWriter? writer = null,
         Nocturne.Core.Models.V4.BiologicalSex? sex = null,
         IGoogleHealthGrantHolders? holders = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        TimeSpan? revokeTimeout = null)
     {
         var platformOptions = new FixedGoogleHealthPlatformSettings(platform ?? Platform());
         var tenant = new Mock<ITenantAccessor>();
@@ -1861,7 +1929,7 @@ public class GoogleHealthTests : IDisposable
             oauth,
             new GoogleHealthSessionStore(store.Configurations, oauth,
                 holders ?? new InMemoryGoogleHealthGrantHolders(), tenant.Object, platformOptions,
-                NullLogger<GoogleHealthSessionStore>.Instance),
+                NullLogger<GoogleHealthSessionStore>.Instance, time ?? TimeProvider.System, revokeTimeout),
             store.Configurations,
             store.Loader,
             tenant.Object,

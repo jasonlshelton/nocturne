@@ -237,15 +237,10 @@ export const logoutSession = command(z.string().optional(), async (_providerId) 
 // Form Functions
 // ============================================================================
 
-/**
- * Recovery-code sign-in fields. `returnUrl` is a hidden field so a submission
- * without JavaScript lands where the user started; it's reduced to a same-origin
- * path before being used.
- */
+/** Recovery-code sign-in fields. */
 const recoveryCodeSchema = z.object({
   username: z.string().trim().min(1, "Enter your username"),
   code: z.string().trim().min(1, "Enter your code"),
-  returnUrl: z.string().optional(),
 });
 
 /**
@@ -259,6 +254,7 @@ const authenticatorSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{6}$/, "Enter the 6-digit code from your authenticator app"),
+  trustDevice: z.boolean().optional(),
   returnUrl: z.string().optional(),
 });
 
@@ -269,10 +265,9 @@ const authenticatorSchema = z.object({
  * browser posts the form, the handler redirects on success, and a rejected code
  * comes back as a field-level issue on the re-rendered page.
  *
- * A spent code buys a recovery session, which authorizes one passkey enrolment and no
- * session, so the destination is the enrolment page and not the page the visitor asked
- * for — that one needs a session, which their new passkey gets them. `returnUrl` rides
- * along so it still decides where they land at the end.
+ * A spent code buys a recovery session, which authorizes one enrolment and no session, so
+ * the destination is the enrolment page and not the page the visitor asked for: that one
+ * needs a session, which the new sign-in method gets them.
  */
 export const signInWithRecoveryCode = form(
   recoveryCodeSchema,
@@ -297,11 +292,7 @@ export const signInWithRecoveryCode = form(
 
     if (failure) invalid(issue.code(RECOVERY_FAILURE_MESSAGES[failure]()));
 
-    const destination = new URLSearchParams({
-      username: data.username,
-      returnUrl: safeReturnUrl(data.returnUrl),
-    });
-    redirect(303, `/auth/recovery/passkey?${destination}`);
+    redirect(303, `/auth/recovery/passkey?${new URLSearchParams({ username: data.username })}`);
   }
 );
 
@@ -321,6 +312,7 @@ export const signInWithAuthenticator = form(
       const result = await api.totp.login({
         stepUpToken: data.stepUpToken,
         code: data.code,
+        trustDevice: data.trustDevice === true,
       });
       verified = result?.success === true;
     } catch (err) {

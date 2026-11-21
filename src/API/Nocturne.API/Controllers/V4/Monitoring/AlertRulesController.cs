@@ -2,10 +2,11 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Attributes;
 using Nocturne.API.Extensions;
+using Nocturne.API.Models.Requests.V4;
+using Nocturne.API.Models.Responses;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Engines;
 using Nocturne.API.Services.Alerts.Conditions;
@@ -13,6 +14,7 @@ using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.Authorization;
@@ -136,7 +138,7 @@ public class AlertRulesController : ControllerBase
                 Severity = p.Severity,
                 CanWait = p.CanWait,
                 ConditionType = p.ConditionType,
-                ConditionParams = p.ConditionParams is null ? null : DeserializeJson(p.ConditionParams),
+                ConditionParams = p.ConditionParams is null ? null : AlertRuleResponses.Json(p.ConditionParams),
                 AutoResolve = p.AutoResolve,
                 TrackerCategories = [.. p.TrackerCategories],
                 TrackerOnlyAgeHours = p.TrackerOnlyAgeHours,
@@ -159,7 +161,7 @@ public class AlertRulesController : ControllerBase
             : AutoResolveSuggestion.For(JsonSerializer.Serialize(request.Condition));
         return Ok(new AutoResolveSuggestionResponse
         {
-            Condition = suggestion is null ? null : DeserializeJson(suggestion),
+            Condition = suggestion is null ? null : AlertRuleResponses.Json(suggestion),
         });
     }
 
@@ -203,7 +205,7 @@ public class AlertRulesController : ControllerBase
             return badChannel;
 
         var leaves = RuleTrees.Leaves(request.ConditionType, trees.ConditionParams);
-        if (await RejectInvalidTrackerAgeAsync(db, leaves, ct) is { } badTracker)
+        if (await RejectInvalidTrackerAgeAsync(new TrackerRepository(_contextFactory), leaves, ct) is { } badTracker)
             return badTracker;
 
         var conditionParamsJson = trees.ConditionParams;
@@ -222,7 +224,9 @@ public class AlertRulesController : ControllerBase
                     request.AllowThroughDnd,
                     request.AutoResolveEnabled,
                     trees.AutoResolveParams,
-                    trees.ClientConfiguration ?? "{}"),
+                    trees.ClientConfiguration ?? "{}",
+                    OnUnknown: request.OnUnknown ?? AlertRuleOnUnknown.Hold,
+                    GlucoseFreshnessMinutes: request.GlucoseFreshnessMinutes),
                 _channels.ToWrites(request.Channels ?? [])),
             ct);
 
@@ -257,7 +261,7 @@ public class AlertRulesController : ControllerBase
             return badChannel;
 
         var leaves = RuleTrees.Leaves(request.ConditionType, trees.ConditionParams);
-        if (await RejectInvalidTrackerAgeAsync(db, leaves, ct) is { } badTracker)
+        if (await RejectInvalidTrackerAgeAsync(new TrackerRepository(unit), leaves, ct) is { } badTracker)
             return badTracker;
 
         if (await _referenceService.DetectCycleAsync(id, RuleTrees.AlertStateTargets(leaves).ToList(), ct))
@@ -269,9 +273,15 @@ public class AlertRulesController : ControllerBase
 
         var sameBody = ConditionTreeEquality.Same(rule.Rule.ConditionParams, conditionParamsJson);
         var sameAutoResolve = ConditionTreeEquality.Same(rule.Rule.AutoResolveParams, trees.AutoResolveParams);
+        var onUnknown = request.OnUnknown ?? rule.Rule.OnUnknown;
+        var glucoseFreshnessMinutes = request.ClearGlucoseFreshness
+            ? null
+            : request.GlucoseFreshnessMinutes ?? rule.Rule.GlucoseFreshnessMinutes;
         var conditionsChanged = rule.IsEnabled != request.IsEnabled
             || rule.Rule.ConditionType != request.ConditionType
             || !sameBody
+            || rule.Rule.GlucoseFreshnessMinutes != glucoseFreshnessMinutes
+            || !string.Equals(rule.Rule.OnUnknown, onUnknown, StringComparison.Ordinal)
             || rule.Rule.AutoResolveEnabled != request.AutoResolveEnabled
             || !sameAutoResolve;
         var snoozeChanged = !SmartSnoozeConfig.SameConditions(
@@ -292,7 +302,9 @@ public class AlertRulesController : ControllerBase
             request.AllowThroughDnd,
             request.AutoResolveEnabled,
             sameAutoResolve ? rule.Rule.AutoResolveParams : trees.AutoResolveParams,
-            trees.ClientConfiguration ?? "{}");
+            trees.ClientConfiguration ?? "{}",
+            OnUnknown: onUnknown,
+            GlucoseFreshnessMinutes: glucoseFreshnessMinutes);
         if (!await rules.UpdateAsync(id, write, ct))
             return NotFound();
         if (request.Channels is not null)
@@ -395,7 +407,7 @@ public class AlertRulesController : ControllerBase
         var rule = await _alerts.GetRuleAsync(id, ct);
         if (rule is null) return NotFound();
 
-        await _deliveryService.TestFireAsync(id, rule.Channels, BuildTestPayload(rule.Rule, tenantId), ct);
+        await _deliveryService.TestFireAsync(id, rule.Channels, AlertPayloads.Test(rule.Rule.ConditionType, rule.Rule.Name, rule.Rule.Severity, tenantId, DateTime.UtcNow), ct);
         return Accepted();
     }
 
@@ -435,41 +447,11 @@ public class AlertRulesController : ControllerBase
                 c.DestinationLabel, i, AlertRuleChannelWriter.SerializeMetadata(c.Metadata), _channels.EncryptSecret(c.Secret)))
             .ToList();
 
-        var payload = new AlertPayload
-        {
-            AlertType = AlertConditionType.Composite,
-            RuleName = $"[Test] {request.Name}",
-            Severity = request.Severity,
-            TenantId = tenantId,
-            GlucoseValue = null,
-            Trend = null,
-            TrendRate = null,
-            ReadingTimestamp = DateTime.UtcNow,
-            SubjectName = "Test fire",
-            ExcursionId = Guid.Empty,
-            InstanceId = Guid.Empty,
-            ActiveExcursionCount = 0,
-        };
+        var payload = AlertPayloads.Test(AlertConditionType.Composite, request.Name, request.Severity, tenantId, DateTime.UtcNow);
 
         await _deliveryService.TestFireDryRunAsync(channels, payload, ct);
         return Accepted();
     }
-
-    internal static AlertPayload BuildTestPayload(AlertRuleSnapshot rule, Guid tenantId) => new()
-    {
-        AlertType = rule.ConditionType,
-        RuleName = $"[Test] {rule.Name}",
-        Severity = rule.Severity,
-        TenantId = tenantId,
-        GlucoseValue = null,
-        Trend = null,
-        TrendRate = null,
-        ReadingTimestamp = DateTime.UtcNow,
-        SubjectName = "Test fire",
-        ExcursionId = Guid.Empty,
-        InstanceId = Guid.Empty,
-        ActiveExcursionCount = 0,
-    };
 
     #region Helpers
 
@@ -486,7 +468,7 @@ public class AlertRulesController : ControllerBase
             : null;
 
     private async Task<AlertRuleResponse> ToResponseAsync(AlertRuleRecord rule, CancellationToken ct) =>
-        (await ToResponsesAsync([rule], ct))[0];
+        (await ToResponsesAsync([rule], ct, await _alerts.GetRulesAsync(ct)))[0];
 
     /// <summary>The response for a rule this request has just committed.</summary>
     private async Task<AlertRuleResponse> ReadBackAsync(Guid ruleId, CancellationToken ct) =>
@@ -497,9 +479,10 @@ public class AlertRulesController : ControllerBase
 
     /// <summary>
     /// What a save of the stored rule would reject. A rule the engine cannot take at all is logged
-    /// and listed without issues, so one such rule does not fail the whole list.
+    /// and listed without issues, so one such rule does not fail the whole list. The result is null
+    /// then, which tells a rule that could not be checked from one with no issues.
     /// </summary>
-    private IReadOnlyList<RustValidationIssue> StoredIssues(AlertRuleSnapshot rule)
+    private IReadOnlyList<RustValidationIssue>? StoredIssues(AlertRuleSnapshot rule)
     {
         try
         {
@@ -510,7 +493,7 @@ public class AlertRulesController : ControllerBase
         catch (RustAlertEngineException ex)
         {
             _logger.LogError(ex, "The alert engine could not check the conditions of alert rule {AlertRuleId}", rule.Id);
-            return [];
+            return null;
         }
     }
 
@@ -520,9 +503,14 @@ public class AlertRulesController : ControllerBase
     /// This is not a privacy boundary: member names are readable more widely (issue #2359).
     /// </summary>
     private async Task<List<AlertRuleResponse>> ToResponsesAsync(
-        IEnumerable<AlertRuleRecord> rules, CancellationToken ct)
+        IReadOnlyList<AlertRuleRecord> rules, CancellationToken ct,
+        IReadOnlyList<AlertRuleRecord>? tenantRules = null)
     {
-        var responses = rules.Select(rule => MapToResponse(rule, StoredIssues(rule.Rule))).ToList();
+        var issues = (tenantRules ?? rules).ToDictionary(r => r.Rule.Id, r => StoredIssues(r.Rule));
+        var covering = LowCoverage.CoveringRuleIds((tenantRules ?? rules).Select(r => (r, issues[r.Rule.Id])));
+        var responses = rules
+            .Select(r => MapToResponse(r, issues.TryGetValue(r.Rule.Id, out var found) ? found : StoredIssues(r.Rule), covering))
+            .ToList();
         var inApp = responses
             .SelectMany(r => r.Channels)
             .Where(c => c.ChannelType == ChannelType.InApp)
@@ -566,51 +554,37 @@ public class AlertRulesController : ControllerBase
     }
 
     private static AlertRuleResponse MapToResponse(
-        AlertRuleRecord record, IReadOnlyList<RustValidationIssue> conditionIssues) => new()
+        AlertRuleRecord record,
+        IReadOnlyList<RustValidationIssue>? conditionIssues,
+        IReadOnlySet<Guid> lowCoveringRuleIds) => new()
     {
+        CoversLow = lowCoveringRuleIds.Contains(record.Rule.Id),
+        IsLastLowCover = lowCoveringRuleIds.Count == 1 && lowCoveringRuleIds.Contains(record.Rule.Id),
         Id = record.Rule.Id,
         Name = record.Rule.Name,
         Description = record.Description,
         ConditionType = record.Rule.ConditionType,
-        ConditionParams = DeserializeJson(record.Rule.ConditionParams),
+        ConditionParams = AlertRuleResponses.Json(record.Rule.ConditionParams),
         IsEnabled = record.IsEnabled,
+        EnabledAt = record.Rule.EnabledAt,
         SortOrder = record.Rule.SortOrder,
         Severity = record.Rule.Severity,
         AllowThroughDnd = record.Rule.AllowThroughDnd,
         ScopeClass = record.Rule.ScopeClass,
         ManagedBy = record.ManagedBy,
         ReviewReason = record.ReviewReason,
-        ConditionIssues = [.. conditionIssues],
+        ConditionIssues = [.. conditionIssues ?? []],
         AutoResolveEnabled = record.Rule.AutoResolveEnabled,
         AutoResolveParams = record.Rule.AutoResolveParams is null
             ? null
-            : DeserializeJson(record.Rule.AutoResolveParams),
-        ClientConfiguration = DeserializeJson(record.Rule.ClientConfiguration),
+            : AlertRuleResponses.Json(record.Rule.AutoResolveParams),
+        OnUnknown = record.Rule.OnUnknown,
+        GlucoseFreshnessMinutes = record.Rule.GlucoseFreshnessMinutes,
+        ClientConfiguration = AlertRuleResponses.Json(record.Rule.ClientConfiguration),
         Channels = record.Channels
-            .Select(c => new AlertRuleChannelResponse
-            {
-                Id = c.Id,
-                ChannelType = c.ChannelType,
-                Destination = c.Destination,
-                DestinationLabel = c.DestinationLabel,
-                SortOrder = c.SortOrder,
-                Metadata = c.Metadata is null ? null : DeserializeJson(c.Metadata),
-                HasSecret = c.Secret is not null,
-            })
+            .Select(AlertRuleResponses.Channel)
             .ToList(),
     };
-
-    private static object DeserializeJson(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<JsonElement>(json);
-        }
-        catch
-        {
-            return new { };
-        }
-    }
 
     /// <summary>
     /// Returns a <c>400 BadRequest</c> when the rule contains a <c>tracker_age</c> leaf whose
@@ -619,7 +593,7 @@ public class AlertRulesController : ControllerBase
     /// pass, a rule that silently never fires. Returns null when the request is acceptable.
     /// </summary>
     private static async Task<BadRequestObjectResult?> RejectInvalidTrackerAgeAsync(
-        NocturneDbContext db, IReadOnlyList<ConditionLeaf> leaves, CancellationToken ct)
+        ITrackerRepository trackers, IReadOnlyList<ConditionLeaf> leaves, CancellationToken ct)
     {
         var definitionIds = new List<Guid>();
         foreach (var leaf in leaves.Where(leaf => leaf.Kind == AlertConditionType.TrackerAge))
@@ -631,7 +605,7 @@ public class AlertRulesController : ControllerBase
 
         foreach (var definitionId in definitionIds)
         {
-            if (!await db.TrackerDefinitions.AnyAsync(d => d.Id == definitionId, ct))
+            if (await trackers.GetDefinitionByIdAsync(definitionId, ct) is null)
                 return new BadRequestObjectResult($"Unknown tracker definition '{definitionId}'.");
         }
 
@@ -746,6 +720,8 @@ public class AlertRuleResponse
     public AlertConditionType ConditionType { get; set; } = AlertConditionType.Threshold;
     public object ConditionParams { get; set; } = new { };
     public bool IsEnabled { get; set; }
+    /// <summary>When the rule was last enabled; null when not recorded. Read-only.</summary>
+    public DateTime? EnabledAt { get; set; }
     public int SortOrder { get; set; }
     public AlertRuleSeverity Severity { get; set; } = AlertRuleSeverity.Warning;
     /// <summary>When true, this rule still fires while the tenant is in Do not disturb mode.
@@ -768,41 +744,23 @@ public class AlertRuleResponse
     /// evaluated: with one in its body the rule is skipped, in its auto-resolve tree it never
     /// resolves, and in its smart-snooze conditions the snooze clears.</summary>
     public List<RustValidationIssue> ConditionIssues { get; set; } = [];
+    /// <summary>True when this rule alerts for low glucose: it is on, evaluates, is a low or
+    /// composite rule (<see cref="ScopeClass"/>), and has a delivery channel (<see cref="LowCoverage"/>).</summary>
+    public bool CoversLow { get; set; }
+    /// <summary>True when this is the only rule that covers low glucose, so turning it off or
+    /// deleting it leaves the tenant with no low alert.</summary>
+    public bool IsLastLowCover { get; set; }
     public bool AutoResolveEnabled { get; set; }
     public object? AutoResolveParams { get; set; }
+    /// <summary>What an unknown condition means to the rule's alert: <c>hold</c> keeps it as it
+    /// is, <c>met</c> reads it as true, <c>not_met</c> as false (<see cref="AlertRuleOnUnknown"/>).</summary>
+    public string OnUnknown { get; set; } = AlertRuleOnUnknown.Hold;
+    /// <summary>How many minutes old a reading may be before the rule's glucose conditions read it
+    /// unknown; null is the engine's default (docs/alerts/engine-semantics.md §3).</summary>
+    public int? GlucoseFreshnessMinutes { get; set; }
     public object ClientConfiguration { get; set; } = new { };
     /// <summary>Flat list of delivery channels. Dispatched in parallel when the rule fires.</summary>
     public List<AlertRuleChannelResponse> Channels { get; set; } = [];
-}
-
-public class AlertRuleChannelResponse
-{
-    public Guid Id { get; set; }
-    public ChannelType ChannelType { get; set; }
-    public string Destination { get; set; } = string.Empty;
-    public string? DestinationLabel { get; set; }
-    public int SortOrder { get; set; }
-    /// <summary>Channel-specific config (e.g. device_action capabilities). Null when unset.</summary>
-    public object? Metadata { get; set; }
-    /// <summary>Whether a webhook signing secret is stored for this channel. The secret itself is
-    /// never returned.</summary>
-    public bool HasSecret { get; set; }
-    /// <summary>Who an <c>in_app</c> channel is sent to. Set only for in-app channels, and only
-    /// for a caller who may edit alert rules.</summary>
-    public InAppRecipientResponse? Recipient { get; set; }
-}
-
-/// <summary>The recipient of an <c>in_app</c> alert channel.</summary>
-public class InAppRecipientResponse
-{
-    /// <summary>The subject the channel names. Null when it names none.</summary>
-    public Guid? SubjectId { get; set; }
-    /// <summary>The name the site knows the member by. Null when they cannot receive.</summary>
-    public string? Name { get; set; }
-    /// <summary>Whether the channel reaches someone: the subject is a member of the site whose
-    /// roles grant any access. A channel that does not is sent to whoever next saves the
-    /// rule.</summary>
-    public bool CanReceive { get; set; }
 }
 
 public class CreateAlertRuleRequest
@@ -817,6 +775,10 @@ public class CreateAlertRuleRequest
     public bool AllowThroughDnd { get; set; }
     public bool AutoResolveEnabled { get; set; }
     public object? AutoResolveParams { get; set; }
+    /// <summary>One of <see cref="AlertRuleOnUnknown"/>; null is <c>hold</c>.</summary>
+    public string? OnUnknown { get; set; }
+    /// <summary>In <see cref="AlertRuleGlucoseFreshness"/>'s range; null is the engine's default.</summary>
+    public int? GlucoseFreshnessMinutes { get; set; }
     public object? ClientConfiguration { get; set; }
     public List<CreateAlertRuleChannelRequest>? Channels { get; set; }
 }
@@ -833,27 +795,17 @@ public class UpdateAlertRuleRequest
     public bool AllowThroughDnd { get; set; }
     public bool AutoResolveEnabled { get; set; }
     public object? AutoResolveParams { get; set; }
+    /// <summary>One of <see cref="AlertRuleOnUnknown"/>; null keeps the stored value.</summary>
+    public string? OnUnknown { get; set; }
+    /// <summary>
+    /// In <see cref="AlertRuleGlucoseFreshness"/>'s range; null keeps the stored value, so a client
+    /// that does not know the bound leaves it as it is. <see cref="ClearGlucoseFreshness"/> clears it.
+    /// </summary>
+    public int? GlucoseFreshnessMinutes { get; set; }
+    /// <summary>Returns the rule to the engine's default bound; not with <see cref="GlucoseFreshnessMinutes"/>.</summary>
+    public bool ClearGlucoseFreshness { get; set; }
     public object? ClientConfiguration { get; set; }
     public List<CreateAlertRuleChannelRequest>? Channels { get; set; }
-}
-
-public class CreateAlertRuleChannelRequest
-{
-    public ChannelType ChannelType { get; set; }
-    /// <summary>Channel-specific address: webhook URL, chat handle, device kind for device_action, etc. Empty for in-app/web-push.</summary>
-    public string? Destination { get; set; }
-    public string? DestinationLabel { get; set; }
-    /// <summary>Channel-specific config, persisted as JSONB. For device_action: <c>{ "capabilities": ["notify", ...] }</c>.</summary>
-    public object? Metadata { get; set; }
-    /// <summary>
-    /// Write-only HMAC signing secret for a <c>webhook</c> channel; the receiver verifies it
-    /// against the <c>X-Nocturne-Signature</c> header. Omit to keep the secret stored against this
-    /// channel type and destination — changing either is a new channel and carries no secret over.
-    /// Send empty to clear it. At most 256 bytes once UTF-8 encoded. Never returned — the read side
-    /// reports <see cref="AlertRuleChannelResponse.HasSecret"/> instead.
-    /// </summary>
-    [MaxLength(256)]
-    public string? Secret { get; set; }
 }
 
 /// <summary>

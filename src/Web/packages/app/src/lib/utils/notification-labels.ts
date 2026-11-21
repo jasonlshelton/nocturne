@@ -14,6 +14,8 @@ const LABEL_MAP: Record<string, string> = {
   instance_key_changed_platform: "Enter the platform credentials again",
   open_connectors: "Open connectors",
   open_alerts: "Open alerts",
+  alert_unevaluable_subtitle:
+    "This rule cannot run as set, so it sends no alerts. Edit its conditions and save it.",
   open_platform_settings: "Open platform settings",
   release_installed: "Nocturne is updated",
   share_link_rotated: "Your sharing link has been replaced",
@@ -28,6 +30,9 @@ const LABEL_MAP: Record<string, string> = {
   device_clock_deviation: "Device clock deviation corrected",
   device_clock_deviation_subtitle:
     "A connected account's device clock ran at a different offset from its timezone for a while. Affected timestamps are adjusted as that data syncs, so some historical entries may shift.",
+  device_clock_ahead: "A device clock is ahead",
+  device_clock_ahead_subtitle:
+    "A device sent data with a time more than 5 minutes after the current time. Alerts do not use this data until the current time is near that time. Set the clock on the device to the correct time.",
   declared_zone_changed: "Timezone updated from your connected account",
   rejected_uploads: "Some uploads could not be stored",
   rejected_uploads_subtitle:

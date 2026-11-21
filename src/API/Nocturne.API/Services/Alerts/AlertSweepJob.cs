@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Nocturne.API.Services.Alerts.Engines;
+using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Jobs;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
@@ -19,6 +21,8 @@ namespace Nocturne.API.Services.Alerts;
 /// <list type="number">
 ///   <item>Close excursions whose hysteresis window has elapsed.</item>
 ///   <item>Check snoozed instances for smart-snooze extension or re-fire.</item>
+///   <item>Check each enabled rule's condition for a version that cannot be evaluated (<see cref="IUnevaluableRuleNotice"/>).</item>
+///   <item>Archive a clock-anomaly notification once no stored reading is ahead of the clock (<see cref="IClockAnomalyNotice.RefreshAsync"/>).</item>
 ///   <item>Evaluate rules with a wall-clock-sensitive condition (<see cref="RuleTrees.ReferencesWallClock"/>).</item>
 ///   <item>Run periodic auto-resolve for excursions whose conditions don't depend on the latest reading.</item>
 /// </list>
@@ -49,14 +53,20 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     internal static readonly TimeSpan SweepMaxBackoff = Interval;
 
     /// <summary>
-    /// Per tenant, <see cref="RuleTrees.ReferencesWallClock"/> per enabled rule, kept while the rule's
-    /// body and auto-resolve configuration are unchanged, so a rule is asked about, and a failure
-    /// reported, once per version rather than every run.
+    /// Per tenant, <see cref="RuleTrees.ReferencesWallClock"/> and <see cref="RuleTrees.WaitsForNextChange"/>
+    /// per enabled rule, kept while the rule's body and auto-resolve configuration are unchanged, so a
+    /// rule is asked about, and a failure reported, once per version rather than every run.
     /// </summary>
     private readonly ConcurrentDictionary<Guid, IReadOnlyDictionary<Guid, WallClockVerdict>> _wallClock = new();
 
     private sealed record WallClockVerdict(
-        AlertConditionType Type, string Params, bool AutoResolveEnabled, string? AutoResolveParams, bool References);
+        AlertConditionType Type,
+        string Params,
+        bool AutoResolveEnabled,
+        string? AutoResolveParams,
+        string OnUnknown,
+        bool References,
+        bool WaitsForNextChange);
 
     /// <summary>
     /// Per tenant whose newest canonical reading has no glucose value, what
@@ -93,6 +103,8 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
                  {
                      (CloseHysteresisWindowsAsync, "closing hysteresis windows"),
                      (CheckSnoozedInstancesAsync, "checking snoozed instances"),
+                     (CheckRuleConditionsAsync, "checking rule conditions"),
+                     (CheckClockAnomaliesAsync, "checking clock-anomaly notifications"),
                      (EvaluateWallClockRulesAsync, "evaluating wall-clock rules"),
                      (EvaluateAutoResolveAsync, "evaluating auto-resolve"),
                  })
@@ -118,6 +130,7 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     private sealed class Sweep(IServiceProvider services, IAlertRepository repository, Guid tenantId, DateTime now)
     {
         private TenantAlertContext? _tenant;
+        private IReadOnlyList<AlertRuleSnapshot>? _enabledRules;
         private (Guid ReadingId, DateTime At, ReadingTrend Trend)? _trend;
 
         public IServiceProvider Services => services;
@@ -132,6 +145,10 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
         public async Task<TenantAlertContext> TenantAsync(CancellationToken ct) =>
             _tenant ??= await repository.GetTenantAlertContextAsync(tenantId, ct)
                         ?? throw new InvalidOperationException($"Tenant {tenantId} has no alert context.");
+
+        /// <summary>The tenant's enabled rules, read once per run.</summary>
+        public async Task<IReadOnlyList<AlertRuleSnapshot>> EnabledRulesAsync(CancellationToken ct) =>
+            _enabledRules ??= await repository.GetEnabledRulesAsync(ct);
 
         /// <summary>
         /// The trend of <paramref name="reading"/>, read once per run: the snooze and wall-clock
@@ -312,7 +329,10 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
         try
         {
             var canonical = services.GetRequiredService<ICanonicalGlucoseService>();
-            return await canonical.GetRecentAsync(now - SmartSnoozeTrendGate.RequiredHistory, ct);
+            var bound = AlertReadings.Bound(now);
+            return (await canonical.GetRecentAsync(now - SmartSnoozeTrendGate.RequiredHistory, ct))
+                .Where(r => r.Timestamp <= bound)
+                .ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -326,7 +346,7 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     /// glucose facts are taken only when that reading is within
     /// <see cref="SmartSnoozeTrendGate.MaxLatestAge"/>: a stale value would let a
     /// <c>threshold</c> or <c>trend</c> condition hold a snooze on data that no longer describes
-    /// the patient, so it is left null and those conditions read false.
+    /// the patient, so it is left null and those conditions read unknown, which clears the snooze.
     /// </summary>
     private async Task<SensorContext?> BuildSnoozeContextAsync(
         Sweep sweep,
@@ -473,6 +493,20 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     }
 
     /// <summary>
+    /// Hands every enabled rule to <see cref="IUnevaluableRuleNotice"/>, the only sender of the
+    /// notice, so a rule whose condition cannot be evaluated is told within one run of being stored
+    /// rather than at the next reading, and a notice whose dispatch did not finish is sent by the
+    /// next run. It runs with no enabled rule too: that is when every standing notice is one the
+    /// run must resolve, and then it costs one read and no validation.
+    /// </summary>
+    private static async Task CheckRuleConditionsAsync(Sweep sweep, CancellationToken ct) =>
+        await sweep.Services.GetRequiredService<IUnevaluableRuleNotice>()
+            .CheckAsync(await sweep.EnabledRulesAsync(ct), ct);
+
+    private static Task CheckClockAnomaliesAsync(Sweep sweep, CancellationToken ct) =>
+        sweep.Services.GetRequiredService<IClockAnomalyNotice>().RefreshAsync(sweep.Now, ct);
+
+    /// <summary>
     /// Evaluates every enabled rule that <see cref="RuleTrees.ReferencesWallClock"/> selects
     /// through the orchestrator's full pipeline. Those conditions change truth with the clock
     /// alone, so between readings, or with no readings at all, only this pass moves them. The
@@ -483,12 +517,24 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     /// <remarks>
     /// The context is the one the per-reading path builds for <see cref="LastUsableReadingAsync"/>
     /// (<see cref="CanonicalAlertEvaluator.ContextFor"/>), so reading-driven leaves in the same
-    /// tree judge exactly what its last pass judged. A context without the glucose facts would
-    /// read them false and close an excursion they hold open.
+    /// tree judge what its last pass judged until the engine finds that reading stale
+    /// (docs/alerts/engine-semantics.md §3). A context without the glucose facts would read them
+    /// unknown before then, and a rule whose <c>on_unknown</c> is <c>not_met</c> would close an
+    /// excursion they hold open.
+    /// <para>
+    /// A rule that <see cref="RuleTrees.WaitsForNextChange"/> is skipped while the next change its
+    /// last evaluation recorded is still ahead, or it recorded none, and that evaluation read the
+    /// glucose facts this context carries (<see cref="NextChange.GlucoseOf"/>): such a rule reads
+    /// nothing else, so between them only the clock moves it. That holds only while the context
+    /// measures a usable canonical reading, the one the per-reading path measures; with none, its
+    /// reading time moves with writes that evaluate nothing, so every rule is evaluated. A rule
+    /// whose tracker is confirming is never skipped: its next evaluation counts, whatever its
+    /// time (docs/alerts/engine-semantics.md §5.3).
+    /// </para>
     /// </remarks>
     private async Task EvaluateWallClockRulesAsync(Sweep sweep, CancellationToken ct)
     {
-        var enabled = await sweep.Repository.GetEnabledRulesAsync(ct);
+        var enabled = await sweep.EnabledRulesAsync(ct);
         _wallClock.TryGetValue(sweep.TenantId, out var kept);
         var verdicts = new Dictionary<Guid, WallClockVerdict>(enabled.Count);
         var wallClockRules = enabled.Where(rule => ReferencesWallClock(rule, kept, verdicts)).ToList();
@@ -505,10 +551,42 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
                 TrendRate = null,
                 LastReadingAt = last.At,
             };
+        if (last.Reading is not null)
+        {
+            wallClockRules = await NotYetDueAsync(sweep, wallClockRules, verdicts, NextChange.GlucoseOf(context), ct);
+            if (wallClockRules.Count == 0) return;
+        }
 
         var orchestrator = sweep.Services.GetRequiredService<IAlertOrchestrator>();
         await orchestrator.EvaluateRulesAsync(
             wallClockRules, enabled.Select(r => r.Id).ToHashSet(), context, ct);
+    }
+
+    /// <summary>
+    /// <paramref name="rules"/> without each that waits for its next change and whose last
+    /// evaluation, from the <paramref name="glucose"/> facts of the run's context, recorded one
+    /// still ahead of the run, or none.
+    /// </summary>
+    private static async Task<List<AlertRuleSnapshot>> NotYetDueAsync(
+        Sweep sweep,
+        List<AlertRuleSnapshot> rules,
+        Dictionary<Guid, WallClockVerdict> verdicts,
+        string glucose,
+        CancellationToken ct)
+    {
+        var tracker = sweep.Services.GetRequiredService<IAlertTrackerRepository>();
+        var due = new List<AlertRuleSnapshot>(rules.Count);
+        foreach (var rule in rules)
+        {
+            if (verdicts[rule.Id].WaitsForNextChange
+                && await tracker.GetTrackerStateAsync(rule.Id, ct) is { NextChangeKnown: true } state
+                && state.NextChangeGlucose == glucose
+                && state.State != TrackerPostState.Confirming
+                && (state.NextChangeAt is not { } next || next > sweep.Now))
+                continue;
+            due.Add(rule);
+        }
+        return due;
     }
 
     /// <summary>How far before an unusable newest reading the sweep looks for a usable one.</summary>
@@ -516,8 +594,9 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
 
     /// <summary>
     /// The reading every swept context measures <see cref="SensorContext.LastReadingAt"/> from:
-    /// the newest canonical reading with a glucose value, the only kind the per-reading path
-    /// evaluates, so <c>signal_loss</c> counts sensor-error and warm-up readings as no signal.
+    /// the newest canonical reading with a glucose value that <see cref="AlertReadings"/> selects,
+    /// the only kind the per-reading path evaluates, so <c>signal_loss</c> counts sensor-error and
+    /// warm-up readings as no signal.
     /// </summary>
     /// <remarks>
     /// It is looked for at most <see cref="UsableReadingLookback"/> before the newest canonical
@@ -534,7 +613,10 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     private async Task<UsableReading> LastUsableReadingAsync(Sweep sweep, CancellationToken ct)
     {
         var canonical = sweep.Services.GetRequiredService<ICanonicalGlucoseService>();
-        var latest = await canonical.GetLatestAsync(ct);
+        var selection = await AlertReadings.SelectAsync(canonical, sweep.Now, ct);
+        await sweep.Services.GetRequiredService<IClockAnomalyNotice>()
+            .ReportReadingIsolatedAsync(selection, sweep.Now, logger, ct);
+        var latest = selection.Selected;
         if (latest is null || latest.Mgdl > 0)
         {
             _usableLookbacks.TryRemove(sweep.TenantId, out _);
@@ -549,7 +631,9 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             return kept.Found;
         }
 
-        var recent = await canonical.GetRecentAsync(latest.Timestamp - UsableReadingLookback, ct);
+        var recent = (await canonical.GetRecentAsync(latest.Timestamp - UsableReadingLookback, ct))
+            .Where(r => r.Timestamp <= latest.Timestamp)
+            .ToList();
         var found = recent.Where(r => r.Mgdl > 0).MaxBy(r => r.Timestamp) is { } usable
             ? new UsableReading(usable, usable.Timestamp)
             : new UsableReading(null, recent.Count > 0 ? recent.Min(r => r.Timestamp) : latest.Timestamp);
@@ -575,7 +659,8 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             && cached.Type == rule.ConditionType
             && string.Equals(cached.Params, rule.ConditionParams, StringComparison.Ordinal)
             && cached.AutoResolveEnabled == rule.AutoResolveEnabled
-            && string.Equals(cached.AutoResolveParams, rule.AutoResolveParams, StringComparison.Ordinal))
+            && string.Equals(cached.AutoResolveParams, rule.AutoResolveParams, StringComparison.Ordinal)
+            && string.Equals(cached.OnUnknown, rule.OnUnknown, StringComparison.Ordinal))
         {
             verdicts[rule.Id] = cached;
             return cached.References;
@@ -594,8 +679,21 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             references = false;
         }
 
+        var waits = false;
+        try
+        {
+            waits = references && RuleTrees.WaitsForNextChange(rule);
+        }
+        catch (RustAlertEngineException ex)
+        {
+            logger.LogWarning(ex,
+                "The engine could not read the facts rule {AlertRuleId} reads; the sweep evaluates it every run",
+                rule.Id);
+        }
+
         verdicts[rule.Id] = new WallClockVerdict(
-            rule.ConditionType, rule.ConditionParams, rule.AutoResolveEnabled, rule.AutoResolveParams, references);
+            rule.ConditionType, rule.ConditionParams, rule.AutoResolveEnabled, rule.AutoResolveParams, rule.OnUnknown,
+            references, waits);
         return references;
     }
 }

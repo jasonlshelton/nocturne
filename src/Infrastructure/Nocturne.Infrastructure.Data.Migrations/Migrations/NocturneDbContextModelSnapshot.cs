@@ -244,6 +244,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<string>("UnevaluableConditionVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("unevaluable_condition_version");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AlertRuleId", "EndedAt")
@@ -578,6 +583,14 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("description");
 
+                    b.Property<DateTime?>("EnabledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enabled_at");
+
+                    b.Property<int?>("GlucoseFreshnessMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("glucose_freshness_minutes");
+
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -594,6 +607,14 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
                         .HasColumnName("name");
+
+                    b.Property<string>("OnUnknown")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("hold")
+                        .HasColumnName("on_unknown");
 
                     b.Property<string>("PreRepair")
                         .HasColumnType("jsonb")
@@ -671,6 +692,18 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("HysteresisStartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("hysteresis_started_at");
+
+                    b.Property<DateTime?>("NextChangeAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_change_at");
+
+                    b.Property<string>("NextChangeGlucose")
+                        .HasColumnType("text")
+                        .HasColumnName("next_change_glucose");
+
+                    b.Property<bool>("NextChangeKnown")
+                        .HasColumnType("boolean")
+                        .HasColumnName("next_change_known");
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -2673,6 +2706,11 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("email");
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -5028,6 +5066,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("email");
 
+                    b.Property<DateTime?>("EmailConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("email_confirmed_at");
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -6321,6 +6363,52 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.ToTable("treatment_foods");
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TrustedDeviceEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeviceDescription")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("device_description");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.Property<Guid>("SubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_id");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token_hash");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("SubjectId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("trusted_devices");
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.UserFoodFavoriteEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6474,6 +6562,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<string>("LoopJson")
                         .HasColumnType("jsonb")
                         .HasColumnName("loop_json");
+
+                    b.Property<string>("OverrideJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("override_json");
 
                     b.Property<Guid?>("PatientDeviceId")
                         .HasColumnType("uuid")
@@ -11158,6 +11250,17 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Navigation("CarbIntake");
 
                     b.Navigation("Food");
+                });
+
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TrustedDeviceEntity", b =>
+                {
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SubjectEntity", "Subject")
+                        .WithMany()
+                        .HasForeignKey("SubjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Subject");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.UserFoodFavoriteEntity", b =>

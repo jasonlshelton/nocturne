@@ -88,8 +88,8 @@ public class SetupControllerTests : IDisposable
         _platformOptions = new PlatformOptions();
         _platformAdminBootstrap = new PlatformAdminBootstrapService(
             new TenantRepository(_dbFactory.Object.AsNocturneFactory()),
-            new TenantMembershipRepository(_dbFactory.Object.AsNocturneFactory()),
-            new SubjectRepository(_dbFactory.Object.AsNocturneFactory()),
+            new TenantMembershipRepository(_dbFactory.Object.AsNocturneFactory(), AccountLinkRoutes.Off),
+            new SubjectRepository(_dbFactory.Object.AsNocturneFactory(), AccountLinkRoutes.Off),
             Options.Create(_platformOptions),
             NullLogger<PlatformAdminBootstrapService>.Instance);
 
@@ -109,15 +109,15 @@ public class SetupControllerTests : IDisposable
             _recoveryCodeService.Object,
             _sessionService.Object,
             _subjectService.Object,
-            new SubjectRepository(_dbFactory.Object.AsNocturneFactory()),
+            new SubjectRepository(_dbFactory.Object.AsNocturneFactory(), AccountLinkRoutes.Off),
             new TenantRepository(_dbFactory.Object.AsNocturneFactory()),
-            new TenantMembershipRepository(_dbFactory.Object.AsNocturneFactory()),
+            new TenantMembershipRepository(_dbFactory.Object.AsNocturneFactory(), AccountLinkRoutes.Off),
             _oidcOptions,
             _oidcAuthService.Object,
             Options.Create(operatorConfig),
             httpClientFactory,
             _platformAdminBootstrap,
-            new InstanceSetupState(new TenantRepository(_dbFactory.Object.AsNocturneFactory()), new SubjectRepository(_dbFactory.Object.AsNocturneFactory())),
+            new InstanceSetupState(new TenantRepository(_dbFactory.Object.AsNocturneFactory()), new SubjectRepository(_dbFactory.Object.AsNocturneFactory(), AccountLinkRoutes.Off)),
             logger)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
@@ -670,6 +670,57 @@ public class SetupControllerTests : IDisposable
         VerifyOutageReported(logger, Times.Once());
     }
 
+    [Fact]
+    public async Task ValidateUsername_WhenTheWebhookDoesNotAnswerInTime_AdmitsTheName()
+    {
+        var controller = BuildSilentWebhookController(TimeSpan.FromMilliseconds(50));
+        await SeedConfiguredTenantAsync("test", "Test");
+
+        var result = await controller.ValidateUsername("owner-one", CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SlugValidationResult>()
+            .Which.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateUsername_WhenTheCallerCancels_DoesNotTreatItAsAWebhookOutage()
+    {
+        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = BuildSilentWebhookController(TimeSpan.FromSeconds(30), arrived);
+        await SeedConfiguredTenantAsync("test", "Test");
+        using var cts = new CancellationTokenSource();
+
+        var call = controller.ValidateUsername("owner-one", cts.Token);
+        await arrived.Task;
+        await cts.CancelAsync();
+
+        await FluentActions.Awaiting(() => call).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private SetupController BuildSilentWebhookController(TimeSpan timeout, TaskCompletionSource? arrived = null)
+    {
+        var handler = new SilentHandler(arrived);
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient(OperatorWebhook.UsernameValidationClient))
+            .Returns(() => new HttpClient(handler, disposeHandler: false) { Timeout = timeout });
+
+        return BuildController(
+            new OperatorConfiguration { UsernameValidationWebhookUrl = "https://webhook.invalid/validate" },
+            httpClientFactory.Object,
+            new Mock<ILogger<SetupController>>().Object);
+    }
+
+    private sealed class SilentHandler(TaskCompletionSource? arrived) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            arrived?.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
     private SetupController BuildWebhookController(
         Mock<ILogger<SetupController>> logger, params HttpStatusCode[] responses)
     {
@@ -758,6 +809,30 @@ public class SetupControllerTests : IDisposable
 
         var ok = result.Should().BeOfType<OkObjectResult>().Subject;
         ok.Value.Should().BeOfType<SetupOwnerCompleteResponse>().Subject.Success.Should().BeTrue();
+        _subjectService.Verify(s => s.UpdateLastLoginAsync(ownerSubjectId), Times.Once);
+    }
+
+    [Fact]
+    public async Task OwnerComplete_WhenTheSignInTimeCannotBeRecorded_IssuesNoSessionAndSetsNoCookie()
+    {
+        var ownerSubjectId = await SeedOwnerlessTenantWithOwnerSubjectAsync();
+        StubRegistrationChallengeMintedFor(ownerSubjectId);
+        _subjectService.Setup(s => s.UpdateLastLoginAsync(ownerSubjectId))
+            .ThrowsAsync(new DbUpdateException("the update failed"));
+
+        var result = await _controller.OwnerComplete(
+            new SetupOwnerCompleteRequest
+            {
+                AttestationResponseJson = "{}",
+                ChallengeToken = "challenge-for-owner",
+            },
+            CancellationToken.None);
+
+        result.Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(400);
+        _sessionService.Verify(
+            s => s.IssueSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _controller.HttpContext.Response.Headers.SetCookie.Should().BeEmpty();
     }
 
     [Fact]

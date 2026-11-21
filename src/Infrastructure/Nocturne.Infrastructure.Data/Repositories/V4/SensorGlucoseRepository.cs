@@ -38,12 +38,11 @@ public class SensorGlucoseRepository : SyncUpsertRepositoryBase<SensorGlucose, S
         IDuplicateLinker linker,
         IAuditContext auditContext,
         ILogger<SensorGlucoseRepository> logger,
-        IV4RecordBroadcaster<SensorGlucose>? broadcaster = null,
+        IRecordChangePublisher? changes = null,
         IDataEventSink<Entry>? entrySink = null,
-        IGlucoseReadingBroadcaster? readingBroadcaster = null,
-        ILegacyReadCacheInvalidation? legacyReads = null
+        IGlucoseReadingBroadcaster? readingBroadcaster = null
     )
-        : base(contextFactory, auditContext, logger, broadcaster, entrySink, legacyReads, linker)
+        : base(contextFactory, auditContext, logger, changes, entrySink, linker)
     {
         _readingBroadcaster = readingBroadcaster;
     }
@@ -71,17 +70,7 @@ public class SensorGlucoseRepository : SyncUpsertRepositoryBase<SensorGlucose, S
                 .Select(t => t.LastReadingAt)
                 .FirstOrDefaultAsync(ct);
         }
-        catch (DbUpdateException ex)
-        {
-            Logger.LogWarning(ex, "Could not read the tenant's last reading; glucose_reading not relayed");
-            return;
-        }
-        catch (InvalidOperationException ex)
-        {
-            Logger.LogWarning(ex, "Could not read the tenant's last reading; glucose_reading not relayed");
-            return;
-        }
-        catch (TimeoutException ex)
+        catch (Exception ex) when (StoreFailure.Is(ex) || ex is InvalidOperationException or TimeoutException)
         {
             Logger.LogWarning(ex, "Could not read the tenant's last reading; glucose_reading not relayed");
             return;
@@ -170,17 +159,7 @@ public class SensorGlucoseRepository : SyncUpsertRepositoryBase<SensorGlucose, S
             return models.Where(m => shown.Contains(m.Id)).ToList();
         }
         catch (OperationCanceledException) { throw; }
-        catch (DbUpdateException ex)
-        {
-            Logger.LogWarning(ex, "Canonical stream gate failed; broadcasting unfiltered");
-            return models;
-        }
-        catch (InvalidOperationException ex)
-        {
-            Logger.LogWarning(ex, "Canonical stream gate failed; broadcasting unfiltered");
-            return models;
-        }
-        catch (TimeoutException ex)
+        catch (Exception ex) when (StoreFailure.Is(ex) || ex is InvalidOperationException or TimeoutException)
         {
             Logger.LogWarning(ex, "Canonical stream gate failed; broadcasting unfiltered");
             return models;

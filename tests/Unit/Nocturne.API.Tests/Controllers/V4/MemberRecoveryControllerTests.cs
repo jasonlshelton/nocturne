@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using Nocturne.API.Tests.Infrastructure;
 using Nocturne.API.Controllers.V4.Identity;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Identity;
@@ -55,19 +56,24 @@ public sealed class MemberRecoveryControllerTests : IDisposable
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<AuthAuditActor>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LoginCode("issued", DateTime.UtcNow.AddHours(24)));
 
+        _controller = Controller(AccountLinkRoutes.Off, new ControllerContext { HttpContext = new DefaultHttpContext() });
+        SignIn(AuthType.SessionCookie, Scope.MembersManage, Scope.GlucoseRead);
+    }
+
+    private MemberRecoveryController Controller(IAccountLinkRoute linkRoute, ControllerContext context)
+    {
         var contexts = _context.AsFactory();
-        _controller = new MemberRecoveryController(
+        return new MemberRecoveryController(
             contexts,
-            new TenantMembershipRepository(contexts),
+            new TenantMembershipRepository(contexts, linkRoute),
             MockTenantAccessor.Create(_tenantId).Object,
             _roles.Object,
-            new MemberRecoveryEligibility(new TenantMemberService(new TenantMembershipRepository(contexts))),
+            new MemberRecoveryEligibility(new TenantMemberService(new TenantMembershipRepository(contexts, linkRoute)), linkRoute),
             _recoveryCodes.Object,
             _loginCodes.Object)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+            ControllerContext = context,
         };
-        SignIn(AuthType.SessionCookie, Scope.MembersManage, Scope.GlucoseRead);
     }
 
     public void Dispose()
@@ -155,15 +161,17 @@ public sealed class MemberRecoveryControllerTests : IDisposable
         NoCodeIssued();
     }
 
-    [Fact]
-    public async Task A_caller_without_member_management_is_refused()
+    [Theory]
+    [InlineData(nameof(MemberRecoveryController.IssueRecoveryCode))]
+    [InlineData(nameof(MemberRecoveryController.GetLockedOutMembers))]
+    public void A_caller_without_member_management_is_refused(string action)
     {
-        SignIn(AuthType.SessionCookie, Scope.GlucoseRead);
-
-        var result = await _controller.IssueRecoveryCode(_orphanId, CancellationToken.None);
-
-        result.Should().BeOfType<ForbidResult>();
-        NoCodeIssued();
+        ActionGate.Evaluate(
+                typeof(MemberRecoveryController),
+                action,
+                new HashSet<string> { Scope.GlucoseRead },
+                new AuthContext { IsAuthenticated = true, AuthType = AuthType.SessionCookie })
+            .ShouldBeScopeRefusal(Scope.MembersManage);
     }
 
     [Fact]
@@ -176,6 +184,32 @@ public sealed class MemberRecoveryControllerTests : IDisposable
 
         result.Should().BeOfType<ForbidResult>();
         NoCodeIssued();
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task A_member_with_a_confirmed_address_is_left_to_the_emailed_link_only_while_delivery_is_configured(
+        bool delivery, bool lockedOut)
+    {
+        var orphan = await _context.Subjects.FindAsync(_orphanId);
+        orphan!.SetEmail("orphan@example.test");
+        orphan.ConfirmEmail("orphan@example.test", DateTime.UtcNow);
+        await _context.SaveChangesAsync();
+        var controller = Controller(AccountLinkRoutes.Of(delivery), _controller.ControllerContext);
+
+        var listed = await controller.GetLockedOutMembers(CancellationToken.None);
+        var issued = await controller.IssueRecoveryCode(_orphanId, CancellationToken.None);
+
+        listed.Should().BeOfType<OkObjectResult>().Which.Value.As<List<LockedOutMember>>()
+            .Select(m => m.SubjectId).Should().Equal(lockedOut ? [_orphanId] : []);
+        if (lockedOut)
+            issued.Should().BeOfType<OkObjectResult>();
+        else
+        {
+            issued.Should().BeOfType<NotFoundResult>();
+            NoCodeIssued();
+        }
     }
 
     [Fact]

@@ -48,6 +48,8 @@ public class AlertSweepJobAuditAttributionTests
         var services = new ServiceCollection();
         services.AddSingleton(repository.Object);
         services.AddSingleton(Mock.Of<ICanonicalGlucoseService>());
+        services.AddSingleton(Mock.Of<IUnevaluableRuleNotice>());
+        services.AddSingleton(Mock.Of<IClockAnomalyNotice>());
         services.AddScoped<ITenantAccessor>(_ => Mock.Of<ITenantAccessor>());
         services.AddScoped<IAuditContext, AuditContext>();
         services.AddScoped(sp => new TenantReadContext(null, null, sp.GetRequiredService<IAuditContext>()));

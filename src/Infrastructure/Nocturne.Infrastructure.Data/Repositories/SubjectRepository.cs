@@ -4,6 +4,7 @@ using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.Infrastructure.Data.Repositories;
@@ -25,11 +26,16 @@ public class SubjectRepository : ISubjectRepository
     private readonly INocturneDbContextFactory? _contexts;
     private readonly DbUnitOfWork? _unit;
     private readonly TimeProvider _time;
+    private readonly IAccountLinkRoute _linkRoute;
 
     /// <summary>A repository whose calls each open their own context and save what they write.</summary>
-    public SubjectRepository(INocturneDbContextFactory contexts, TimeProvider? time = null)
+    /// <param name="contexts">Opens the context of each call.</param>
+    /// <param name="linkRoute">Decides who cannot sign in (<see cref="OrphanedSubjectFilter"/>).</param>
+    /// <param name="time">The clock; the system clock when null.</param>
+    public SubjectRepository(INocturneDbContextFactory contexts, IAccountLinkRoute linkRoute, TimeProvider? time = null)
     {
         _contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+        _linkRoute = linkRoute ?? throw new ArgumentNullException(nameof(linkRoute));
         _time = time ?? TimeProvider.System;
     }
 
@@ -39,9 +45,13 @@ public class SubjectRepository : ISubjectRepository
     /// transaction with its tenant and membership. A read tracks its rows, so a write on the same
     /// unit edits the rows it read in place.
     /// </summary>
-    public SubjectRepository(DbUnitOfWork unit, TimeProvider? time = null)
+    /// <param name="unit">The caller's unit of work.</param>
+    /// <param name="linkRoute">Decides who cannot sign in (<see cref="OrphanedSubjectFilter"/>).</param>
+    /// <param name="time">The clock; the system clock when null.</param>
+    public SubjectRepository(DbUnitOfWork unit, IAccountLinkRoute linkRoute, TimeProvider? time = null)
     {
         _unit = unit ?? throw new ArgumentNullException(nameof(unit));
+        _linkRoute = linkRoute ?? throw new ArgumentNullException(nameof(linkRoute));
         _time = time ?? TimeProvider.System;
     }
 
@@ -75,7 +85,6 @@ public class SubjectRepository : ISubjectRepository
             Id = subject.Id ?? Guid.CreateVersion7(),
             Name = subject.Name,
             Username = subject.Username,
-            Email = subject.Email,
             Notes = subject.Notes,
             IsActive = subject.IsActive,
             IsSystemSubject = subject.IsSystemSubject,
@@ -83,6 +92,9 @@ public class SubjectRepository : ISubjectRepository
             ApprovalStatus = subject.ApprovalStatus,
             AccessRequestMessage = subject.AccessRequestMessage,
         };
+        entity.SetEmail(subject.Email);
+        if (subject.EmailConfirmedAt is { } confirmedAt)
+            entity.ConfirmEmail(subject.Email, NocturneDbContext.AtStoredPrecision(confirmedAt));
         db.Subjects.Add(entity);
 
         if (subject.RoleNames is { Count: > 0 } names)
@@ -161,12 +173,34 @@ public class SubjectRepository : ISubjectRepository
     }
 
     /// <inheritdoc/>
+    public virtual async Task<IReadOnlyList<SubjectRecord>> FindMembersByConfirmedEmailAsync(
+        Guid tenantId, string email, CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+        var db = lease.Context;
+        // The query only narrows to the tenant's confirmed members; whether an address is the one
+        // named is decided by EmailAddresses.AreSame below, so no SQL comparison restates it.
+        var confirmed = await Subjects(db)
+            .ExcludeDemo()
+            .Where(OrphanedSubjectFilter.HoldsConfirmedEmail)
+            .Where(s => s.IsActive && !s.IsSystemSubject
+                && db.TenantMembers.Any(m => m.TenantId == tenantId && m.SubjectId == s.Id))
+            .ToListAsync(ct);
+        return confirmed
+            .Where(s => EmailAddresses.AreSame(s.Email, email))
+            .Select(s => ToRecord(s)!)
+            .ToList();
+    }
+
+    /// <inheritdoc/>
     public virtual async Task<SubjectRecord?> FindSetupOwnerCandidateAsync(Guid tenantId, CancellationToken ct)
     {
         await using var db = await Pinnable.CreateForTenantAsync(tenantId, ct);
         return ToRecord(await db.Subjects.AsNoTracking()
             .ExcludeDemo()
-            .Where(s => !s.IsSystemSubject && s.IsActive)
+            .Where(s => !s.IsSystemSubject && s.IsActive
+                && !db.PasskeyCredentials.Any(c => c.SubjectId == s.Id)
+                && !db.SubjectOidcIdentities.Any(o => o.SubjectId == s.Id))
             .OrderBy(s => s.Id)
             .FirstOrDefaultAsync(ct));
     }
@@ -210,10 +244,13 @@ public class SubjectRepository : ISubjectRepository
             _ => throw new ArgumentOutOfRangeException(nameof(match)),
         };
 
+        var now = Now;
         return await candidates
             .Where(s => !s.IsSystemSubject
                 && !db.PasskeyCredentials.Any(c => c.SubjectId == s.Id)
-                && !db.WorkingOidcIdentities().Any(o => o.SubjectId == s.Id))
+                && !db.SubjectOidcIdentities.Any(o => o.SubjectId == s.Id)
+                && !db.TotpCredentials.Any(t => t.SubjectId == s.Id)
+                && !db.RefreshTokens.Any(t => t.SubjectId == s.Id && t.ExpiresAt > now))
             .OrderByDescending(s => s.Id)
             .Select(s => s.Id)
             .ToListAsync(ct);
@@ -251,7 +288,7 @@ public class SubjectRepository : ISubjectRepository
     /// lock of each tenant it belongs to first (<see cref="TenantOwnerLock"/>), so it runs inside a
     /// transaction.
     /// </summary>
-    private static async Task<SubjectChange> ApplyEditAsync(
+    private async Task<SubjectChange> ApplyEditAsync(
         NocturneDbContext db, Guid subjectId, SubjectEdit edit, CancellationToken ct)
     {
         var entity = await db.Subjects.FirstOrDefaultAsync(s => s.Id == subjectId, ct);
@@ -260,7 +297,7 @@ public class SubjectRepository : ISubjectRepository
 
         if (edit.IsActive is false && entity.IsActive)
         {
-            var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, ct);
+            var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, _linkRoute, ct);
             if (lastOwnerOf.Count > 0)
                 return new SubjectChange.LastOwnerOf(lastOwnerOf);
         }
@@ -270,7 +307,7 @@ public class SubjectRepository : ISubjectRepository
         if (edit.Username is not null)
             entity.Username = edit.Username;
         if (edit.Email is not null)
-            entity.Email = edit.Email;
+            StageEmail(db, entity, edit.Email, edit.EmailConfirmedAt);
         if (edit.IsActive is { } active)
             entity.IsActive = active;
         if (edit.IsPlatformAdmin is { } platformAdmin)
@@ -299,11 +336,88 @@ public class SubjectRepository : ISubjectRepository
             return null;
 
         entity.Name = profile.Name;
-        entity.Email = profile.Email;
+        StageEmail(db, entity, profile.Email, confirmedAt: null);
         entity.Notes = profile.Notes;
 
         await SaveAsync(db, ct);
         return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Stages <paramref name="email"/> on the subject, confirmed at <paramref name="confirmedAt"/>
+    /// when one is given. A save writes only the columns the tracker saw change, so a changed
+    /// address whose confirmation was already null would write the address alone, and a
+    /// confirmation that committed in between would then outlive it. Both columns are marked
+    /// modified whenever the address changed or a confirmation rides with it, so the row always
+    /// takes the pair this edit holds. See <see cref="SubjectEntity.SetEmail"/> for the rule.
+    /// </summary>
+    private static void StageEmail(NocturneDbContext db, SubjectEntity entity, string? email, DateTime? confirmedAt)
+    {
+        var changed = entity.SetEmail(email);
+        var confirmed = confirmedAt is { } at && entity.ConfirmEmail(email, NocturneDbContext.AtStoredPrecision(at));
+        if (!changed && !confirmed)
+            return;
+
+        var entry = db.Entry(entity);
+        entry.Property(s => s.Email).IsModified = true;
+        entry.Property(s => s.EmailConfirmedAt).IsModified = true;
+    }
+
+    /// <inheritdoc/>
+    public virtual async Task<EmailConfirmation> ConfirmEmailAsync(
+        Guid subjectId, string email, DateTime now, CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+        var db = lease.Context;
+        var at = NocturneDbContext.AtStoredPrecision(now);
+
+        // The rule is decided in .NET on the row just read. The statement is an exact
+        // compare-and-set on that string, so it states no comparison of its own and still
+        // confirms nothing for an address that changed in between. One more attempt covers a
+        // row that changed underneath; a second change is refused.
+        for (var attempt = 0; ; attempt++)
+        {
+            var stored = await db.Subjects.AsNoTracking().FirstOrDefaultAsync(s => s.Id == subjectId, ct);
+            if (stored is null)
+                return new EmailConfirmation.NotFound();
+            if (!EmailAddresses.AreSame(stored.Email, email))
+                return new EmailConfirmation.AddressMismatch();
+            if (stored.EmailConfirmedAt is { } first)
+                return new EmailConfirmation.Confirmed(first);
+            if (attempt == 2)
+                return new EmailConfirmation.AddressMismatch();
+
+            var storedEmail = stored.Email;
+            var updated = await db.Subjects
+                .Where(s => s.Id == subjectId && s.EmailConfirmedAt == null && s.Email == storedEmail)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.EmailConfirmedAt, at)
+                    .SetProperty(x => x.UpdatedAt, NocturneDbContext.UtcNowAtStoredPrecision()), ct);
+            if (updated == 1)
+            {
+                RefreshTrackedConfirmation(db, subjectId, at);
+                return new EmailConfirmation.Confirmed(at);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The confirmation statement bypasses the tracker, so a copy a unit of work holds would
+    /// otherwise be written back stale. A reload would drop the unit's staged edits, so only the
+    /// confirmation is brought up to date, unless the unit stages a pair of its own, which
+    /// overwrites it.
+    /// </summary>
+    private void RefreshTrackedConfirmation(NocturneDbContext db, Guid subjectId, DateTime at)
+    {
+        if (_unit is null
+            || db.ChangeTracker.Entries<SubjectEntity>().FirstOrDefault(e => e.Entity.Id == subjectId) is not { } tracked
+            || tracked.Property(s => s.EmailConfirmedAt).IsModified)
+            return;
+
+        var confirmation = tracked.Property(s => s.EmailConfirmedAt);
+        confirmation.OriginalValue = at;
+        confirmation.CurrentValue = at;
+        confirmation.IsModified = false;
     }
 
     /// <inheritdoc/>
@@ -334,7 +448,7 @@ public class SubjectRepository : ISubjectRepository
 
             if (entity.IsActive)
             {
-                var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, ct);
+                var lastOwnerOf = await db.LockTenantsOfSubjectAsync(subjectId, _linkRoute, ct);
                 if (lastOwnerOf.Count > 0)
                     return new SubjectChange.LastOwnerOf(lastOwnerOf);
             }
@@ -468,7 +582,7 @@ public class SubjectRepository : ISubjectRepository
             .Where(sr => sr.SubjectId == subjectId)
             .Select(sr => sr.Role!)
             .ToListAsync(ct);
-        return roles.Select(ToRole).ToList();
+        return roles.Select(RoleMapper.ToDomainModel).ToList();
     }
 
     /// <inheritdoc/>
@@ -640,16 +754,9 @@ public class SubjectRepository : ISubjectRepository
     {
         await using var lease = await OpenAsync(ct);
         var db = lease.Context;
-        return await db.WorkingOidcIdentities()
-            .Where(i => i.ProviderId == providerId)
-            .Select(i => i.Subject!)
-            .Where(s => s.IsActive
-                && !s.IsSystemSubject
-                && !s.IsDemoSubject
-                && !db.PasskeyCredentials.Any(p => p.SubjectId == s.Id)
-                && !db.WorkingOidcIdentities().Any(o => o.SubjectId == s.Id && o.ProviderId != providerId))
-            .Select(s => s.Id)
-            .Distinct()
+        return await db.Subjects
+            .Where(s => db.WorkingOidcIdentities().Any(i => i.SubjectId == s.Id && i.ProviderId == providerId))
+            .WhoCannotSignIn(db, _linkRoute, withoutProvider: providerId)
             .CountAsync(ct);
     }
 
@@ -665,13 +772,6 @@ public class SubjectRepository : ISubjectRepository
     }
 
     /// <inheritdoc/>
-    public virtual async Task<bool> HasOrphanedMemberAsync(Guid tenantId, CancellationToken ct)
-    {
-        await using var db = await Pinnable.CreateSystemPinnedAsync(tenantId, ct);
-        return await db.OrphanedSubjectsOf(tenantId).AnyAsync(ct);
-    }
-
-    /// <inheritdoc/>
     public virtual async Task<DateTime?> LastModifiedAsync(CancellationToken ct)
     {
         await using var lease = await OpenAsync(ct);
@@ -682,36 +782,9 @@ public class SubjectRepository : ISubjectRepository
     }
 
     private static SubjectRecord? ToRecord(SubjectEntity? subject) =>
-        subject is null ? null : new SubjectRecord(
-            subject.Id,
-            subject.Name,
-            subject.Username,
-            subject.Email,
-            subject.Notes,
-            subject.IsActive,
-            subject.IsSystemSubject,
-            subject.IsDemoSubject,
-            subject.IsPlatformAdmin,
-            subject.ApprovalStatus,
-            subject.AccessRequestMessage,
-            subject.PreferredLanguage,
-            subject.Preferences,
-            subject.AvatarUrl,
-            subject.CreatedAt,
-            subject.UpdatedAt,
-            subject.LastLoginAt,
-            subject.SubjectRoles.Where(sr => sr.Role is not null).Select(sr => ToRole(sr.Role!)).ToList());
-
-    private static Role ToRole(RoleEntity role) => new()
-    {
-        Id = role.Id,
-        Name = role.Name,
-        Description = role.Description,
-        Permissions = role.Permissions is null ? [] : [.. role.Permissions],
-        IsSystemRole = role.IsSystemRole,
-        CreatedAt = role.CreatedAt,
-        UpdatedAt = role.UpdatedAt,
-    };
+        subject is null ? null : SubjectMapper.ToRecord(
+            subject,
+            subject.SubjectRoles.Where(sr => sr.Role is not null).Select(sr => RoleMapper.ToDomainModel(sr.Role!)).ToList());
 
     private static SubjectOidcIdentity ToIdentity(SubjectOidcIdentityEntity identity) => new()
     {

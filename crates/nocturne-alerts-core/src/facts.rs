@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use crate::engine::{WireRule, parse_auto_resolve};
+use crate::engine::{OnUnknown, WireRule, parse_auto_resolve};
 use crate::enums::{WireEnum, wire_enum};
 use crate::leaf_identity::collect_leaves;
 use crate::model::{ConditionKind, Node, parse_payload};
@@ -42,8 +42,8 @@ pub fn reads(kind: ConditionKind) -> &'static [ContextFact] {
         | ConditionKind::RateOfChange
         | ConditionKind::SignalLoss
         | ConditionKind::Staleness
-        | ConditionKind::Trend
-        | ConditionKind::GlucoseBucket => &[F::Glucose],
+        | ConditionKind::Trend => &[F::Glucose],
+        ConditionKind::GlucoseBucket => &[F::Glucose, F::TimeZone],
         ConditionKind::Predicted => &[F::Predictions],
         ConditionKind::Iob | ConditionKind::TempBasal | ConditionKind::TimeSinceLastBolus => {
             &[F::Insulin]
@@ -77,17 +77,21 @@ pub fn reads(kind: ConditionKind) -> &'static [ContextFact] {
 /// resolving as node dispatch resolves them (engine-semantics.md §1.2). The
 /// auto-resolve tree's kinds count whenever `auto_resolve_enabled` and the
 /// tree is present, not `null` and evaluable, even when the body is not and
-/// evaluation would skip the rule.
+/// evaluation would skip the rule. `on_unknown` reads no kind; it decides
+/// whether a rule is wall-clock ([`references_wall_clock`]).
+///
+/// [`references_wall_clock`]: crate::wall_clock::references_wall_clock
 #[derive(Debug, Clone, Copy)]
 pub struct RuleConditions<'a> {
     pub condition_type: &'a str,
     pub condition_params: &'a Value,
     pub auto_resolve_enabled: bool,
     pub auto_resolve_params: Option<&'a Value>,
+    pub on_unknown: OnUnknown,
 }
 
 impl<'a> RuleConditions<'a> {
-    /// A rule with auto-resolve disabled.
+    /// A rule with auto-resolve disabled that holds an unknown root.
     #[must_use]
     pub fn body(condition_type: &'a str, condition_params: &'a Value) -> Self {
         Self {
@@ -95,6 +99,7 @@ impl<'a> RuleConditions<'a> {
             condition_params,
             auto_resolve_enabled: false,
             auto_resolve_params: None,
+            on_unknown: OnUnknown::Hold,
         }
     }
 
@@ -117,6 +122,8 @@ impl<'a> RuleConditions<'a> {
     }
 }
 
+/// An `on_unknown` naming no word reads as `hold`: such a rule cannot be
+/// evaluated ([`Rule`](crate::engine::Rule)).
 impl<'a> From<&'a WireRule> for RuleConditions<'a> {
     fn from(rule: &'a WireRule) -> Self {
         Self {
@@ -124,6 +131,11 @@ impl<'a> From<&'a WireRule> for RuleConditions<'a> {
             condition_params: &rule.condition_params,
             auto_resolve_enabled: rule.auto_resolve_enabled,
             auto_resolve_params: rule.auto_resolve_params.as_ref(),
+            on_unknown: rule
+                .on_unknown
+                .as_deref()
+                .and_then(OnUnknown::from_name)
+                .unwrap_or(OnUnknown::Hold),
         }
     }
 }
@@ -166,10 +178,12 @@ mod tests {
         StateSpanSnapshot, TempBasalSnapshot, TrackerReference,
     };
     use crate::enums::{GlucoseBucket, PumpMode, StateSpanCategory, TrendBucket};
+    use crate::eval::elapsed::clock_leaf;
     use crate::eval::{Env, eval_payload};
     use crate::model::Payload;
     use crate::sustained::TimerStore;
-    use crate::wall_clock::references_wall_clock;
+    use crate::truth::Truth;
+    use crate::wall_clock::{is_wall_clock, references_wall_clock};
     use ContextFact as F;
 
     const ALERT_ID: Uuid = Uuid::from_u128(1);
@@ -190,6 +204,7 @@ mod tests {
             condition_params,
             auto_resolve_enabled,
             auto_resolve_params,
+            on_unknown: OnUnknown::Hold,
         }
     }
 
@@ -213,6 +228,10 @@ mod tests {
         );
         assert_eq!(reads(ConditionKind::LoopEnactionStale), &[F::Aps]);
         assert_eq!(reads(ConditionKind::TimeOfDay), &[F::TimeZone]);
+        assert_eq!(
+            reads(ConditionKind::GlucoseBucket),
+            &[F::Glucose, F::TimeZone]
+        );
         assert!(reads(ConditionKind::Sustained).is_empty());
     }
 
@@ -270,6 +289,22 @@ mod tests {
         assert!(body("RateOfChange", &rate).is_empty());
         assert!(body("1", &rate).is_empty());
         assert!(body("no_such_kind", &json!({})).is_empty());
+    }
+
+    /// A host places the reading in the target-range schedule at the tenant's
+    /// local time, so a time zone or schedule write moves the bucket without a
+    /// reading (engine-semantics.md §5.2).
+    #[test]
+    fn a_glucose_bucket_reads_the_time_zone_too() {
+        let tree = json!({"operator": "or", "conditions": [
+            {"type": "signal_loss", "signal_loss": {"timeout_minutes": 15}},
+            {"type": "glucose_bucket", "glucose_bucket": {"buckets": ["low"]}}
+        ]});
+        assert_eq!(body("composite", &tree), [F::Glucose, F::TimeZone]);
+        assert!(references_any(
+            &RuleConditions::body("composite", &tree),
+            &[F::TimeZone]
+        ));
     }
 
     #[test]
@@ -441,11 +476,14 @@ mod tests {
         );
         SensorContext {
             latest_value: glucose.then(|| Decimal::from(60)),
-            latest_timestamp: glucose.then(|| ago(20)),
+            // Fresh (§3), and older than the staleness samples' bounds.
+            latest_timestamp: glucose.then(|| ago(10)),
+            latest_received_at: glucose.then(|| ago(10)),
             trend_rate: glucose.then(|| Decimal::from(-3)),
-            last_reading_at: glucose.then(|| ago(20)),
+            last_reading_at: glucose.then(|| ago(10)),
             trend_bucket: glucose.then_some(TrendBucket::FallingFast),
-            glucose_bucket: glucose.then_some(GlucoseBucket::Low),
+            // A host derives the bucket from the reading in the tenant zone.
+            glucose_bucket: (glucose && has(F::TimeZone)).then_some(GlucoseBucket::Low),
             predictions: if has(F::Predictions) {
                 vec![PredictedPoint {
                     offset_minutes: 10,
@@ -481,7 +519,7 @@ mod tests {
             active_override: span(F::StateSpans),
             active_pump_suspension: span(F::StateSpans),
             active_pump_state: spans.then(|| PumpStateSnapshot {
-                mode: PumpMode::Exercise,
+                mode: Some(PumpMode::Exercise),
                 started_at: ago(30),
             }),
             active_state_spans: if spans {
@@ -529,8 +567,8 @@ mod tests {
             ConditionKind::Sustained => json!({"minutes": 5, "child": low}),
             ConditionKind::Threshold => json!({"direction": "below", "value": 70}),
             ConditionKind::RateOfChange => json!({"direction": "falling", "rate": 2}),
-            ConditionKind::SignalLoss => json!({"timeout_minutes": 15}),
-            ConditionKind::Staleness => json!({"operator": ">", "value": 10}),
+            ConditionKind::SignalLoss => json!({"timeout_minutes": 5}),
+            ConditionKind::Staleness => json!({"operator": ">", "value": 5}),
             ConditionKind::Predicted => {
                 json!({"operator": "<", "value": 55, "within_minutes": 30})
             }
@@ -570,18 +608,34 @@ mod tests {
         parse_payload(kind, &params).expect("sample payload parses")
     }
 
-    fn evaluate(kind: ConditionKind, on: &[ContextFact]) -> bool {
+    fn evaluate(kind: ConditionKind, on: &[ContextFact]) -> Truth {
         let ctx = context(on);
         let mut timers = TimerStore::default();
         let mut env = Env::new(now(), Uuid::nil(), &ctx, &mut timers);
         eval_payload(&sample(kind), kind.name(), &mut env)
     }
 
+    /// Evaluation and the next-change scan read exactly the §5.1 kinds as
+    /// measured against `now`.
+    #[test]
+    fn the_clock_leaves_are_the_wall_clock_kinds() {
+        for &kind in ConditionKind::ALL {
+            assert_eq!(
+                clock_leaf(&sample(kind), &context(&[]), None).is_some(),
+                is_wall_clock(kind),
+                "{kind:?}"
+            );
+        }
+    }
+
     #[test]
     fn every_leaf_sample_turns_on_its_own_facts() {
         for &kind in ConditionKind::ALL.iter().filter(|&&k| !is_container(k)) {
-            assert!(evaluate(kind, reads(kind)), "{kind:?} with its facts");
-            assert!(!evaluate(kind, &[]), "{kind:?} with no facts");
+            assert!(
+                evaluate(kind, reads(kind)).is_true(),
+                "{kind:?} with its facts"
+            );
+            assert!(!evaluate(kind, &[]).is_true(), "{kind:?} with no facts");
         }
     }
 
@@ -594,7 +648,10 @@ mod tests {
                     .copied()
                     .filter(|&f| f != fact)
                     .collect();
-                assert!(!evaluate(kind, &without), "{kind:?} without {fact:?}");
+                assert!(
+                    !evaluate(kind, &without).is_true(),
+                    "{kind:?} without {fact:?}"
+                );
             }
         }
     }

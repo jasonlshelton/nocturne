@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Nocturne.API.Helpers;
 using Nocturne.API.Services.ProfileActivations;
 using Nocturne.API.Services.Treatments;
-using Nocturne.Connectors.Core.Constants;
 using Nocturne.Core.Contracts.Audit;
 using Nocturne.Core.Contracts.Devices;
 using Nocturne.Core.Contracts.Events;
@@ -925,12 +924,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
 
     /// <summary>An uploaded field the treatment has no property for, when it is a string.</summary>
     private static string? UploadedString(Treatment treatment, string key) =>
-        treatment.AdditionalProperties?.GetValueOrDefault(key) switch
-        {
-            string s => s,
-            JsonElement { ValueKind: JsonValueKind.String } je => je.GetString(),
-            _ => null
-        };
+        KeptField.String(treatment.AdditionalProperties, key);
 
     /// <summary>
     /// Extracts AAPS v4 insulin configuration from the <c>icfg</c> JSON field in

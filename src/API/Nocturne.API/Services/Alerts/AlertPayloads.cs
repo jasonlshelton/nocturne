@@ -1,4 +1,5 @@
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Alerts;
 
 namespace Nocturne.API.Services.Alerts;
 
@@ -23,8 +24,52 @@ internal static class AlertPayloads
         ExcursionId = excursionId,
         InstanceId = instanceId,
         TenantId = tenantId,
-        SubjectName = tenant?.SubjectName ?? tenant?.DisplayName ?? "Unknown",
+        SubjectName = SubjectNameOf(tenant),
         ActiveExcursionCount = activeExcursionCount,
         Severity = rule.Severity,
+    };
+
+    /// <summary>The notice that <paramref name="rule"/> cannot be evaluated: no glucose value or trend.</summary>
+    public static AlertPayload Unevaluable(
+        AlertRuleSnapshot rule,
+        Guid tenantId,
+        Guid excursionId,
+        Guid instanceId,
+        TenantAlertContext? tenant,
+        int activeExcursionCount,
+        DateTime now) => new()
+    {
+        Kind = AlertPayloadKind.Unevaluable,
+        AlertType = rule.ConditionType,
+        RuleName = rule.Name,
+        GlucoseValue = null,
+        Trend = null,
+        TrendRate = null,
+        ReadingTimestamp = now,
+        ExcursionId = excursionId,
+        InstanceId = instanceId,
+        TenantId = tenantId,
+        SubjectName = SubjectNameOf(tenant),
+        ActiveExcursionCount = activeExcursionCount,
+        Severity = rule.Severity,
+    };
+
+    private static string SubjectNameOf(TenantAlertContext? tenant) => tenant?.AlertSubjectName ?? "Unknown";
+
+    public static AlertPayload Test(
+        AlertConditionType type, string ruleName, AlertRuleSeverity severity, Guid tenantId, DateTime now) => new()
+    {
+        AlertType = type,
+        RuleName = $"[Test] {ruleName}",
+        Severity = severity,
+        TenantId = tenantId,
+        GlucoseValue = null,
+        Trend = null,
+        TrendRate = null,
+        ReadingTimestamp = now,
+        SubjectName = "Test fire",
+        ExcursionId = Guid.Empty,
+        InstanceId = Guid.Empty,
+        ActiveExcursionCount = 0,
     };
 }

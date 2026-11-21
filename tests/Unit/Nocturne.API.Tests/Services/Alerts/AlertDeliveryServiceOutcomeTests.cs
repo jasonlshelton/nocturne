@@ -64,7 +64,7 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
 
         return new AlertDeliveryService(
             _factory.AsNocturneFactory(),
-            new TenantMembershipRepository(_factory.AsNocturneFactory()),
+            new TenantMembershipRepository(_factory.AsNocturneFactory(), AccountLinkRoutes.Off),
             Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
             _broadcast.Object,
             Mock.Of<IEngineAlarmRelay>(),
@@ -247,5 +247,35 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
         await CreateService().TestFireAsync(Guid.NewGuid(), [], Payload(Guid.Empty), CancellationToken.None);
 
         (await SingleDeliveryAsync()).Status.Should().NotBe("delivered");
+    }
+
+    [Fact]
+    public async Task A_notice_that_a_rule_cannot_be_evaluated_records_no_device_action_delivery()
+    {
+        var instanceId = await SeedInstanceAsync();
+
+        await CreateService().DispatchAsync(
+            instanceId, [Channel(ChannelType.DeviceAction, "companion")],
+            Payload(instanceId) with { Kind = AlertPayloadKind.Unevaluable, GlucoseValue = null },
+            CancellationToken.None);
+
+        var delivery = await SingleDeliveryAsync();
+        delivery.ChannelType.Should().NotBe(ChannelType.DeviceAction, "an actuation is a glucose alarm on the device");
+        delivery.Status.Should().Be("failed", "the notice reached no one");
+        delivery.LastError.Should().Contain("No channel of the rule carries");
+    }
+
+    [Fact]
+    public async Task A_notice_that_a_rule_cannot_be_evaluated_is_not_broadcast_to_the_alerts_hub()
+    {
+        var instanceId = await SeedInstanceAsync();
+
+        await CreateService().DispatchAsync(
+            instanceId, [Channel(ChannelType.InApp, Member.ToString())],
+            Payload(instanceId) with { Kind = AlertPayloadKind.Unevaluable, GlucoseValue = null },
+            CancellationToken.None);
+
+        _broadcast.Verify(b => b.BroadcastAlertEventAsync("alert_dispatch", It.IsAny<object>()), Times.Never);
+        (await SingleDeliveryAsync()).ChannelType.Should().Be(ChannelType.InApp);
     }
 }

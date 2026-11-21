@@ -73,6 +73,12 @@ public static class AuthAuditEventType
     public const string SubjectUpdated = "subject_updated";
 
     /// <summary>
+    /// Event type when an operator confirms a member's email address through the platform-admin API.
+    /// The details carry no address.
+    /// </summary>
+    public const string EmailConfirmedByOperator = "email_confirmed_by_operator";
+
+    /// <summary>
     /// Event type when a subject is deleted.
     /// </summary>
     public const string SubjectDeleted = "subject_deleted";
@@ -135,4 +141,15 @@ public static class AuthAuditEventType
     /// code did not resolve to one.
     /// </summary>
     public const string LoginHandoffFailed = "login_handoff_failed";
+
+    /// <summary>
+    /// Event type when a subject trusts a device at the authenticator step, so its later sign-ins
+    /// skip the code.
+    /// </summary>
+    public const string DeviceTrustGranted = "trusted_device_added";
+
+    /// <summary>
+    /// Event type when a subject stops trusting one device, or all of them.
+    /// </summary>
+    public const string DeviceTrustRevoked = "trusted_device_revoked";
 }

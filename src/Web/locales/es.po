@@ -96,7 +96,6 @@ msgstr "Nunca"
 
 #: src/lib/components/ConnectionStatus.svelte
 #: src/lib/components/clock/ClockFacePreview.svelte
-#: src/lib/components/tenants/TenantsOverview.svelte
 #: src/routes/(authenticated)/+layout.svelte
 #: src/routes/(authenticated)/clock/+page.svelte
 #: src/routes/(authenticated)/notifications/+page.svelte
@@ -237,6 +236,7 @@ msgstr "Alta urgente"
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 #: src/lib/components/dashboard/glucose-chart/dialogs/GlucoseInspectionDialog.svelte
 #: src/lib/components/food/GiLabel.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/lib/components/reports/sleep/single-night/OvernightLowsCard.svelte
 #: src/lib/components/schedule/ScheduleView.svelte
@@ -258,6 +258,7 @@ msgstr "Bajo"
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 #: src/lib/components/dashboard/glucose-chart/dialogs/GlucoseInspectionDialog.svelte
 #: src/lib/components/food/GiLabel.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/lib/components/schedule/ScheduleView.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
@@ -712,8 +713,10 @@ msgstr "Desactivado"
 
 #: src/lib/components/admin/IdentityProvidersTabContent.svelte
 #: src/lib/components/admin/OidcProvidersTabContent.svelte
+#: src/lib/components/alerts/AlertRuleRow.svelte
 #: src/lib/components/alerts/DndNoticeStrip.svelte
 #: src/lib/components/dashboard/PredictionSettings.svelte
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
 msgid "Disable"
 msgstr "Desactivar"
 
@@ -742,6 +745,7 @@ msgstr "Editar"
 #: src/lib/components/patient/PatientInsulinManager.svelte
 #: src/lib/components/settings/CustomSoundUpload.svelte
 #: src/lib/components/treatments/TreatmentsDataTable.svelte
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
 #: src/routes/(authenticated)/clock/+page.svelte
 #: src/routes/(authenticated)/reports/custom/+page.svelte
 #: src/routes/(authenticated)/reports/custom/[id]/+page.svelte
@@ -1550,6 +1554,7 @@ msgstr "Error de autenticación"
 #: src/lib/components/auth/PasskeyRegistrationForm.svelte
 #: src/lib/components/members/RequestMembershipDialog.svelte
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 #: src/routes/(unauthenticated)/setup/steps/AccountCreation.svelte
 msgid "<0/> Waiting for passkey..."
 msgstr "<0/> Esperando la clave de acceso..."
@@ -1606,6 +1611,8 @@ msgstr "Verificar código de recuperación"
 
 #: src/lib/components/auth/LoginForm.svelte
 #: src/lib/components/auth/LoginForm.svelte
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 msgid "Back to sign in"
 msgstr "Volver al inicio de sesión"
@@ -1820,6 +1827,7 @@ msgstr "TDD media"
 
 #: src/lib/components/calendar/DayGlucoseProfile.svelte
 #: src/lib/components/command-palette/CommandPaletteVitals.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/RetrospectiveStats.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
@@ -1946,6 +1954,7 @@ msgstr "Vista previa"
 #: src/lib/components/alerts/wizard/SettingsStep.svelte
 #: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/clock/ClockFaceRenderer.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/status-pills/TrackerPill.svelte
 #: src/lib/components/trackers/TrackerStartDialog.svelte
 msgid "Tracker"
@@ -2041,12 +2050,14 @@ msgstr "{0} min"
 #. 0: m
 #. 0: bolusCalc.preBolus
 #. 0: minutes
+#. 0: minutes
 #. 0: minutesBefore ?? "–"
 #. 0: Math.round(value)
 #. 0: min
 #. 0: therapy.delay ?? "-"
 #: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
 #: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
@@ -2122,6 +2133,7 @@ msgstr "Altura: {0}px"
 #: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/reports/custom/workspace/GivenChartAdvanced.svelte
 #: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+#: src/lib/components/settings/TrustedDevices.svelte
 msgid "<0/> Remove"
 msgstr "<0/> Eliminar"
 
@@ -2561,6 +2573,7 @@ msgstr "<0/> Descargando..."
 #: src/lib/components/members/RequestMembershipDialog.svelte
 #: src/lib/components/members/RolesSection.svelte
 #: src/lib/components/notifications/ReleaseNotesDialog.svelte
+#: src/lib/components/people/PersonPanel.svelte
 #: src/lib/components/support/IssueCreatorDialog.svelte
 #: src/lib/components/support/IssueCreatorDialog.svelte
 #: src/lib/components/ui/danger-zone-dialog/danger-zone-dialog.svelte
@@ -3294,6 +3307,7 @@ msgid "Insulins"
 msgstr "Insulinas"
 
 #: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/constants/scope-labels.svelte.ts
 #: src/lib/navigation/app-navigation.svelte.ts
@@ -3312,6 +3326,7 @@ msgstr "Alertas"
 #: src/lib/components/meal-matching/MealMatchReviewDialog.svelte
 #: src/lib/components/meals/MealSuggestionRow.svelte
 #: src/lib/components/members/JoinWelcome.svelte
+#: src/routes/(authenticated)/settings/account/+page.svelte
 #: src/routes/(authenticated)/settings/admin/tenants/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/+page.svelte
 msgid "Dismiss"
@@ -3414,12 +3429,14 @@ msgstr "No hay entradas recientes"
 #: src/lib/components/alerts/ReplayPanel.svelte
 #: src/lib/components/alerts/ReplayPanel.svelte
 #: src/lib/components/dashboard/RecentTreatmentsCard.svelte
+#: src/lib/components/people/PersonPanel.svelte
 msgid "Last 24 hours"
 msgstr "Últimas 24 horas"
 
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
+#: src/lib/components/people/PersonEntries.svelte
 #: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/InsulinDonutChart.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
@@ -3438,6 +3455,7 @@ msgstr "Bolo"
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 #: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/meals/MealsTable.svelte
+#: src/lib/components/people/PersonEntries.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
@@ -4403,6 +4421,7 @@ msgstr "Demostración"
 
 #: src/lib/components/layout/UserMenu.svelte
 #: src/routes/(unauthenticated)/auth/bot/authorize/+page.svelte
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
 msgid "Sign in"
 msgstr "Iniciar sesión"
 
@@ -4482,6 +4501,7 @@ msgid "Showing:"
 msgstr "Mostrando:"
 
 #: src/lib/components/meals/MealSuggestionRow.svelte
+#: src/lib/components/people/PeoplePage.svelte
 msgid "Review"
 msgstr "Revisar"
 
@@ -5062,6 +5082,7 @@ msgstr "Eliminar miembro"
 #: src/lib/components/alerts/ChannelsSection.svelte
 #: src/lib/components/members/MemberCard.svelte
 #: src/lib/components/settings/LinkedOidcIdentities.svelte
+#: src/lib/components/settings/TrustedDevices.svelte
 #: src/routes/(authenticated)/meals/+page.svelte
 #: src/routes/(authenticated)/settings/account/+page.svelte
 #: src/routes/(authenticated)/settings/account/+page.svelte
@@ -5550,6 +5571,8 @@ msgstr "Carbohidratos totales:"
 #. 0: cob.toFixed(0)
 #. 0: bolusCalc.carbInput
 #. 0: carbs.toFixed(0)
+#. 0: formatCarbDisplay(entry.grams)
+#. 0: Math.round(therapy.cob ?? 0)
 #. 0: formatCarbDisplay(treatmentSummary?.totals?.food?.carbs)
 #. 0: formatCarbDisplay(treatmentSummary?.totals?.food?.protein)
 #. 0: formatCarbDisplay(treatmentSummary?.totals?.food?.fat)
@@ -5559,6 +5582,8 @@ msgstr "Carbohidratos totales:"
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
+#: src/lib/components/people/PersonEntries.svelte
+#: src/lib/components/people/PersonStatusLine.svelte
 #: src/lib/components/reports/DailyInsulinSummary.svelte
 #: src/lib/components/reports/DailyInsulinSummary.svelte
 #: src/lib/components/reports/DailyInsulinSummary.svelte
@@ -5636,6 +5661,8 @@ msgstr "GRI"
 #. 0: auto.toFixed(1)
 #. 0: bolus.toFixed(1)
 #. 0: basal.toFixed(1)
+#. 0: formatInsulinDisplay(entry.units)
+#. 0: Math.round(reservoirUnits)
 #. 0: d.totalDailyDose.toFixed(1)
 #. 0: insulinStats?.avgBolus?.toFixed(1) ?? "--"
 #: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
@@ -5648,6 +5675,8 @@ msgstr "GRI"
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
+#: src/lib/components/people/PersonEntries.svelte
+#: src/lib/components/people/PersonRow.svelte
 #: src/lib/components/reports/GlycemicRiskIndexChart.svelte
 #: src/routes/(authenticated)/reports/idp/+page.svelte
 #, python-brace-format
@@ -5815,6 +5844,9 @@ msgstr "<0/> Intentar de nuevo"
 
 #: ../portal/src/routes/roadmap/+page.svelte
 #: src/lib/components/alerts/HistoryCheck.svelte
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PersonPanel.svelte
 #: src/lib/components/reports/ResourceGuard.svelte
 #: src/routes/(authenticated)/calendar/+page.svelte
 #: src/routes/(authenticated)/reports/+page.svelte
@@ -6406,9 +6438,7 @@ msgid "Failed to load custom sounds"
 msgstr "No se pudieron cargar los sonidos personalizados"
 
 #. 0: sound.name
-#. 0: editor.name
 #: src/lib/components/settings/CustomSoundUpload.svelte
-#: src/routes/(authenticated)/alerts/[id]/+page.svelte
 #, python-brace-format
 msgid "Delete \"{0}\"? This cannot be undone."
 msgstr "¿Eliminar «{0}»? Esta acción no se puede deshacer."
@@ -6670,6 +6700,7 @@ msgstr "Mostrar valores de glucemia en la pestaña del navegador"
 #: src/lib/components/reports/custom/workspace/GivenBlockView.svelte
 #: src/lib/components/settings/TitleFaviconSettings.svelte
 #: src/lib/components/support/IssueCreatorDialog.svelte
+#: src/lib/components/ui/sheet/SheetHarness.test.svelte
 msgid "Title"
 msgstr "Título"
 
@@ -6988,6 +7019,7 @@ msgstr "Tu tipo de conector"
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
 #: src/lib/components/support/IssueCreatorDialog.svelte
 #: src/lib/components/treatments/TreatmentPortionsForm.svelte
+#: src/lib/components/ui/sheet/SheetHarness.test.svelte
 msgid "Description"
 msgstr "Descripción"
 
@@ -7117,6 +7149,7 @@ msgstr "Cánula"
 
 #: src/lib/components/alerts/factText.svelte.ts
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
+#: src/lib/components/people/PersonStatusLine.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/settings/DashboardRailConfigurator.svelte
 #: src/lib/components/status-pills/ReservoirPill.svelte
@@ -9598,7 +9631,9 @@ msgstr "Recuentos"
 msgid "<0/> Loading {0} data..."
 msgstr "<0/> Cargando datos de {0}..."
 
+#. 0: durationText(reason.minutesSinceReading)
 #. 0: year
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/year-overview/YearHeatmap.svelte
 #, python-brace-format
 msgid "No data for {0}"
@@ -10507,10 +10542,12 @@ msgstr "<0>La zona sombreada más clara</0> (percentiles 10-90) muestra dónde e
 msgid "Target: ≥70%"
 msgstr "Objetivo: ≥70%"
 
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 msgid "GMI"
 msgstr "GMI"
 
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 msgid "CV"
 msgstr "CV"
@@ -11427,6 +11464,7 @@ msgstr "Métricas del sistema automatizado de administración de insulina"
 msgid "CGM"
 msgstr "CGM"
 
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/lib/components/reports/AidSystemUseCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Pump"
@@ -11493,6 +11531,7 @@ msgstr "Patrones de sueño con superposición de glucosa nocturna"
 #~ msgid "sessions"
 #~ msgstr ""
 
+#: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/reports/print/ReportPrintHeader.svelte
 #: src/routes/(authenticated)/reports/steps/+page.svelte
 msgid "Period"
@@ -12111,6 +12150,7 @@ msgstr "Intervalo predeterminado del gráfico"
 msgid "{0} hours"
 msgstr "{0} horas"
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 msgid "6 hours"
 msgstr "6 horas"
@@ -12119,6 +12159,7 @@ msgstr "6 horas"
 msgid "12 hours"
 msgstr "12 horas"
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 msgid "24 hours"
 msgstr "24 horas"
@@ -13332,9 +13373,8 @@ msgstr "¿Problemas para iniciar sesión? <0>Obtener ayuda</0>"
 #~ msgid "Optional. Updates your display name if provided."
 #~ msgstr "Opcional. Actualiza tu nombre visible si lo indicas."
 
-#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
-msgid "<0/> Register passkey"
-msgstr "<0/> Registrar clave de acceso"
+#~ msgid "<0/> Register passkey"
+#~ msgstr "<0/> Registrar clave de acceso"
 
 #~ msgid "Passkey registered successfully."
 #~ msgstr "Clave de acceso registrada correctamente."
@@ -14265,7 +14305,8 @@ msgstr "Gravedad: {0}"
 #~ msgstr "No molestar"
 
 #: src/lib/components/alerts/DndPanel.svelte
-#: src/lib/components/tenants/TenantsOverview.svelte
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PersonPanel.svelte
 #: src/lib/components/therapy-timeline/ChangeDetail.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/+page.svelte
 msgid "Loading…"
@@ -14370,7 +14411,9 @@ msgid "Row actions"
 msgstr "Acciones de fila"
 
 #. 0: rule.name
+#. 0: editor.name
 #: src/lib/components/alerts/AlertRuleRow.svelte
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
 #, python-brace-format
 msgid "Delete \"{0}\"?"
 msgstr "¿Eliminar \"{0}\"?"
@@ -15689,9 +15732,8 @@ msgstr "Escanea el código QR con tu aplicación de autenticación y, después, 
 msgid "Managed by tracker"
 msgstr "Gestionada por seguimiento"
 
-#: src/lib/components/alerts/AlertRuleRow.svelte
-msgid "This rule will stop firing immediately. Existing alert history is preserved. This action cannot be undone."
-msgstr "Esta regla dejará de activarse inmediatamente. El historial de alertas existente se conserva. Esta acción no se puede deshacer."
+#~ msgid "This rule will stop firing immediately. Existing alert history is preserved. This action cannot be undone."
+#~ msgstr "Esta regla dejará de activarse inmediatamente. El historial de alertas existente se conserva. Esta acción no se puede deshacer."
 
 #: src/lib/components/alerts/AlertRuleRow.svelte
 msgid "<0/> Test fire"
@@ -16602,10 +16644,12 @@ msgstr "Cerrar sesión"
 
 #: src/lib/components/patient/PatientDeviceManager.svelte
 #: src/lib/components/settings/ActiveSessions.svelte
+#: src/lib/components/settings/TrustedDevices.svelte
 msgid "Unknown device"
 msgstr "Dispositivo desconocido"
 
 #: src/lib/components/settings/ActiveSessions.svelte
+#: src/lib/components/settings/TrustedDevices.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
 msgid "This device"
@@ -16977,9 +17021,11 @@ msgstr "Ventanas en las que las lecturas oscilan de una forma poco probable desd
 msgid "{0} pp"
 msgstr "{0} pp"
 
+#. 0: hours
 #. 0: minutes / 60
 #. 0: minutesAfter == null ? "–" \\: minutesAfter / 60
 #. 0: e.event.timeToNadirHours.toFixed(1)
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
 #: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
 #: src/lib/components/reports/sensor-integrity/HypoAfterNoiseLog.svelte
@@ -17099,6 +17145,7 @@ msgstr "Más bajo ({0})"
 msgid "This report is for informational purposes. Always consult your healthcare provider for medical decisions."
 msgstr "Este informe es solo informativo. Consulta siempre a tu profesional sanitario antes de tomar decisiones médicas."
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/routes/(authenticated)/reports/steps/+page.svelte
 msgid "steps"
 msgstr "pasos"
@@ -17214,11 +17261,9 @@ msgstr "Esto invalidará todos los códigos de recuperación existentes y genera
 #~ msgid "Save these codes in a safe place. Each code can only be used once. This is the only time they will be shown."
 #~ msgstr ""
 
-#. 0: totpRemoveTarget?.label ?? "Unnamed authenticator"
-#: src/routes/(authenticated)/settings/account/+page.svelte
 #, python-brace-format
-msgid "Are you sure you want to remove \"{0}\"? You will no longer be able to sign in with this authenticator app."
-msgstr "¿Seguro que quieres eliminar \"{0}\"? Ya no podrás iniciar sesión con esta aplicación de autenticación."
+#~ msgid "Are you sure you want to remove \"{0}\"? You will no longer be able to sign in with this authenticator app."
+#~ msgstr "¿Seguro que quieres eliminar \"{0}\"? Ya no podrás iniciar sesión con esta aplicación de autenticación."
 
 #~ msgid "Create an API key below to authenticate uploaders. Each key is scoped to specific permissions and can be revoked independently."
 #~ msgstr "Crea abajo una clave API para autenticar cargadores. Cada clave se limita a permisos específicos y puede revocarse de forma independiente."
@@ -18372,6 +18417,8 @@ msgstr "Todas las funciones"
 
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/components/dashboard/widgets/TirChartWidget.svelte
+#: src/lib/components/people/ReviewRow.svelte
+#: src/lib/components/people/ReviewSummary.svelte
 msgid "in range"
 msgstr "en rango"
 
@@ -19878,6 +19925,8 @@ msgstr "{0} · últimos 14 días"
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/components/dashboard/widgets/TirChartWidget.svelte
+#: src/lib/components/people/PeopleRoster.svelte
+#: src/lib/components/people/ReviewBar.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/utils/insight-messages.svelte.ts
 #: src/routes/(authenticated)/reports/+page.svelte
@@ -20060,6 +20109,7 @@ msgstr "resumen estandarizado para tu equipo sanitario"
 
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/components/people/PersonRow.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/trackers/TrackerCoversField.svelte
 #: src/lib/components/trackers/legacy-kind-label.svelte.ts
@@ -20511,35 +20561,27 @@ msgstr "No se pudieron cargar los nombres de los widgets, por lo que se muestran
 #~ msgid "<0/> Syncing"
 #~ msgstr "<0/> Sincronizando"
 
-#. 0: relativeAge(lastReadingAt)
-#: src/lib/components/tenants/TenantOverviewTile.svelte
 #, python-brace-format
-msgid "Last reading {0}"
-msgstr "Última lectura {0}"
+#~ msgid "Last reading {0}"
+#~ msgstr "Última lectura {0}"
 
-#: src/lib/components/tenants/TenantOverviewTile.svelte
-msgid "No recent data"
-msgstr "No hay datos recientes"
+#~ msgid "No recent data"
+#~ msgstr "No hay datos recientes"
 
-#: src/lib/components/tenants/TenantsOverview.svelte
-msgid "Tenants overview - Nocturne"
-msgstr "Resumen de inquilinos - Nocturne"
+#~ msgid "Tenants overview - Nocturne"
+#~ msgstr "Resumen de inquilinos - Nocturne"
 
-#: src/lib/components/tenants/TenantsOverview.svelte
-msgid "Tenants overview"
-msgstr "Resumen de inquilinos"
+#~ msgid "Tenants overview"
+#~ msgstr "Resumen de inquilinos"
 
-#: src/lib/components/tenants/TenantsOverview.svelte
-msgid "Latest glucose across the tenants you have access to. Refreshes every minute."
-msgstr "Última glucosa de los inquilinos a los que tienes acceso. Se actualiza cada minuto."
+#~ msgid "Latest glucose across the tenants you have access to. Refreshes every minute."
+#~ msgstr "Última glucosa de los inquilinos a los que tienes acceso. Se actualiza cada minuto."
 
-#: src/lib/components/tenants/TenantsOverview.svelte
-msgid "Failed to load the tenants overview."
-msgstr "No se pudo cargar el resumen de inquilinos."
+#~ msgid "Failed to load the tenants overview."
+#~ msgstr "No se pudo cargar el resumen de inquilinos."
 
-#: src/lib/components/tenants/TenantsOverview.svelte
-msgid "No tenants with glucose access."
-msgstr "No hay inquilinos con acceso a la glucosa."
+#~ msgid "No tenants with glucose access."
+#~ msgstr "No hay inquilinos con acceso a la glucosa."
 
 #: src/lib/components/trackers/TrackerCompletionDialog.svelte
 msgid "Failed to complete tracker"
@@ -20885,6 +20927,7 @@ msgstr "Cada noche registrada enlaza con su informe completo."
 #~ msgid "<0/> Sleep Composition"
 #~ msgstr "<0/> Composición del sueño"
 
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/data-quality/+page.svelte
 msgid "Could not save. Check your connection and try again."
@@ -21410,9 +21453,8 @@ msgstr "Tu clave de acceso está lista. Inicia sesión con ella para terminar."
 #~ msgid "Your recovery code was accepted. It lets you set up a passkey for {0} — nothing else — and it expires in ten minutes."
 #~ msgstr "Tu código de recuperación ha sido aceptado. Te permite configurar una clave de acceso para {0}, y nada más, y caduca en diez minutos."
 
-#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
-msgid "Register a passkey"
-msgstr "Registrar una clave de acceso"
+#~ msgid "Register a passkey"
+#~ msgstr "Registrar una clave de acceso"
 
 #: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 msgid "Passkey registered. Your recovery code is now used up."
@@ -21667,6 +21709,7 @@ msgstr "Elevado"
 #: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/routes/(authenticated)/reports/ehba1c/+page.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -22543,6 +22586,7 @@ msgstr "{0} ({1}) frente a {2} ({3})"
 msgid "Metric"
 msgstr "Métrica"
 
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/routes/(authenticated)/reports/comparison/ComparisonReport.svelte
 #: src/routes/(authenticated)/time-spans/+page.svelte
 #: src/routes/(unauthenticated)/setup/hub/HubBasics.svelte
@@ -23670,6 +23714,7 @@ msgstr "No hubo bajadas de 15 minutos o más durante esta sesión"
 #: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/calendar/CalendarHeader.svelte
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
 #: src/lib/components/reports/sleep/single-night/OvernightLowsCard.svelte
 #: src/routes/(authenticated)/reports/glucose-distribution/+page.svelte
@@ -24150,7 +24195,6 @@ msgstr "<0/> Grupo"
 msgid "<0/> Condition"
 msgstr "<0/> Condición"
 
-#: src/lib/navigation/app-navigation.svelte.ts
 #: src/routes/(authenticated)/settings/admin/tenants/+page.svelte
 msgid "Tenants"
 msgstr "Inquilinos"
@@ -26222,13 +26266,11 @@ msgstr "Cambiar…"
 msgid "Too many attempts. Wait a minute, then try again."
 msgstr "Demasiados intentos. Espera un minuto y vuelve a intentarlo."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "That recovery code has expired or was already used. Ask an administrator for a new one."
-msgstr "Ese código de recuperación ha caducado o ya se ha utilizado. Solicita uno nuevo a un administrador."
+#~ msgid "That recovery code has expired or was already used. Ask an administrator for a new one."
+#~ msgstr "Ese código de recuperación ha caducado o ya se ha utilizado. Solicita uno nuevo a un administrador."
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Some accounts here have no way to sign in. If yours is one of them, sign in with one of your own recovery codes, or ask an administrator for a one-time recovery code."
-msgstr "Algunas cuentas no tienen ningún método de acceso. Si es tu caso, inicia sesión con uno de tus códigos de recuperación o pide a un administrador un código de recuperación de un solo uso."
+#~ msgid "Some accounts here have no way to sign in. If yours is one of them, sign in with one of your own recovery codes, or ask an administrator for a one-time recovery code."
+#~ msgstr "Algunas cuentas no tienen ningún método de acceso. Si es tu caso, inicia sesión con uno de tus códigos de recuperación o pide a un administrador un código de recuperación de un solo uso."
 
 #: src/routes/(unauthenticated)/auth/recovery/+page.svelte
 msgid "Recovery code from your administrator"
@@ -26248,28 +26290,28 @@ msgstr "Acceder con uno de tus códigos de recuperación"
 #~ msgid "Members who can't sign in"
 #~ msgstr ""
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Send a member a one-time recovery link so they can register a new passkey. It works once and expires after 24 hours."
 msgstr "Envía a un miembro un enlace de recuperación de un solo uso para que registre una nueva clave de acceso. Solo funciona una vez y caduca a las 24 horas."
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Only the operator can recover this account"
 msgstr "Solo el operador puede recuperar esta cuenta"
 
 #: src/lib/components/members/CreateInviteCard.svelte
 #: src/lib/components/members/GuestLinksSection.svelte
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "<0/> Create link"
 msgstr "<0/> Crear enlace"
 
 #~ msgid "They still have recovery codes of their own. If they've lost them, a link cancels those codes once it is used."
 #~ msgstr ""
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Recovery link"
 msgstr "Enlace de recuperación"
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Copy recovery link"
 msgstr "Copiar enlace de recuperación"
 
@@ -26967,6 +27009,8 @@ msgstr "Tiempo no utilizado: {0}."
 
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 #: src/lib/components/alerts/wizard/templates.svelte.ts
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/loop-analysis/AggregateReadout.svelte
 #: src/lib/components/reports/loop-analysis/DailyProfileBody.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
@@ -29761,10 +29805,8 @@ msgstr "No hemos podido comprobar ese código. Inténtalo de nuevo."
 msgid "Could not sign you in just now. Try again."
 msgstr "No hemos podido iniciar tu sesión en este momento. Inténtalo de nuevo."
 
-#: src/lib/components/auth/LoginForm.svelte
-#: src/lib/components/auth/LoginForm.svelte
-msgid "Could not sign you in. Try again."
-msgstr "No hemos podido iniciar tu sesión. Inténtalo de nuevo."
+#~ msgid "Could not sign you in. Try again."
+#~ msgstr "No hemos podido iniciar tu sesión. Inténtalo de nuevo."
 
 #: src/lib/components/auth/RecoveryCodes.svelte
 msgid "The codes were not copied. Your browser blocked clipboard access. Download them, or write them down and confirm below."
@@ -30069,11 +30111,9 @@ msgstr "No se han podido cargar los datos. Inténtalo de nuevo."
 msgid "This server does not recognize the time zone in the profile settings."
 msgstr "Este servidor no reconoce la zona horaria de los ajustes del perfil."
 
-#. 0: otherSessionCount; 1: otherSessionCount === 1 ? "other session" \\: "other sessions"
-#: src/lib/components/settings/ActiveSessions.svelte
 #, python-brace-format
-msgid "Sign out {0} {1}? This device stays signed in. The other devices will need to sign in again."
-msgstr "¿Cerrar la sesión de {0} {1}? Este dispositivo seguirá conectado. Los demás tendrán que volver a iniciar sesión."
+#~ msgid "Sign out {0} {1}? This device stays signed in. The other devices will need to sign in again."
+#~ msgstr "¿Cerrar la sesión de {0} {1}? Este dispositivo seguirá conectado. Los demás tendrán que volver a iniciar sesión."
 
 #. 0: session.deviceDescription ?? "this device"
 #: src/lib/components/settings/ActiveSessions.svelte
@@ -30369,15 +30409,15 @@ msgstr "Iniciar sesión - Nocturne"
 msgid "Enter the code you were given to view health data. The code works once. This device stays signed in for 48 hours."
 msgstr "Introduce el código que te han facilitado para ver los datos de salud. El código solo funciona una vez. Este dispositivo mantendrá la sesión iniciada durante 48 horas."
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Could not create a recovery link."
 msgstr "No se ha podido crear un enlace de recuperación."
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "Members who cannot sign in"
 msgstr "Miembros que no pueden iniciar sesión"
 
-#: src/routes/(unauthenticated)/auth/recovery/LockedOutMembers.svelte
+#: src/lib/components/members/LockedOutMembers.svelte
 msgid "They still have recovery codes of their own. If they lost them, a link cancels those codes once it is used."
 msgstr "Todavía tienen sus propios códigos de recuperación. Si los han perdido, el uso de un enlace anula esos códigos."
 
@@ -30613,9 +30653,8 @@ msgstr "Una fecha solicita importar una sola vez los datos antiguos compartidos 
 msgid "Draft save failed. Edits retry on next change"
 msgstr "No se ha podido guardar el borrador. Se volverá a intentar al realizar el siguiente cambio"
 
-#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
-msgid "We could not register a passkey. A recovery code is valid for ten minutes only. Sign in with another recovery code to try again."
-msgstr "No se ha podido registrar una clave de acceso. Un código de recuperación solo es válido durante diez minutos. Inicia sesión con otro código de recuperación para volver a intentarlo."
+#~ msgid "We could not register a passkey. A recovery code is valid for ten minutes only. Sign in with another recovery code to try again."
+#~ msgstr "No se ha podido registrar una clave de acceso. Un código de recuperación solo es válido durante diez minutos. Inicia sesión con otro código de recuperación para volver a intentarlo."
 
 #~ msgid "Your recovery code was accepted. It lets you set up a passkey for {0} and nothing else. It expires in ten minutes."
 #~ msgstr ""
@@ -31281,6 +31320,7 @@ msgid "Phone (E.164)"
 msgstr "Teléfono (E.164)"
 
 #: src/lib/components/alerts/channelText.svelte.ts
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
 msgid "Email address"
 msgstr "Dirección de correo electrónico"
 
@@ -36395,6 +36435,7 @@ msgid "Sign-in help - Nocturne"
 msgstr "Ayuda para iniciar sesión - Nocturne"
 
 #: src/routes/(unauthenticated)/auth/help/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
 msgid "Sign-in help"
 msgstr "Ayuda para iniciar sesión"
 
@@ -36410,9 +36451,8 @@ msgstr "Si configuras una, introduce el código de la aplicación en la página 
 msgid "Recovery codes are one-time backup codes you received when you first created your account. Use them if you cannot access your passkey or authenticator app."
 msgstr "Los códigos de recuperación son códigos de respaldo de un solo uso que recibiste al crear tu cuenta. Úsalos si no puedes acceder a tu clave de acceso o a tu aplicación de autenticación."
 
-#: src/routes/(unauthenticated)/auth/help/+page.svelte
-msgid "A code does not sign you in on its own. It gives you ten minutes to create a new passkey, and you sign in with that."
-msgstr "Un código no permite iniciar sesión por sí solo. Te da diez minutos para crear una nueva clave de acceso, con la que podrás iniciar sesión."
+#~ msgid "A code does not sign you in on its own. It gives you ten minutes to create a new passkey, and you sign in with that."
+#~ msgstr "Un código no permite iniciar sesión por sí solo. Te da diez minutos para crear una nueva clave de acceso, con la que podrás iniciar sesión."
 
 #: src/routes/(unauthenticated)/auth/help/+page.svelte
 msgid "External providers"
@@ -36495,13 +36535,11 @@ msgstr "<0/> Volver al inicio"
 msgid "By signing in, you agree to our <0>terms of service</0> and <1>privacy policy</1>"
 msgstr "Al iniciar sesión, aceptas nuestros <0>términos del servicio</0> y nuestra <1>política de privacidad</1>"
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Recovery mode - Nocturne"
-msgstr "Modo de recuperación - Nocturne"
+#~ msgid "Recovery mode - Nocturne"
+#~ msgstr "Modo de recuperación - Nocturne"
 
-#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
-msgid "Recovery mode"
-msgstr "Modo de recuperación"
+#~ msgid "Recovery mode"
+#~ msgstr "Modo de recuperación"
 
 #: src/routes/(unauthenticated)/clock/[id]/+page@.svelte
 msgid "<0/> Back to clock faces"
@@ -37130,15 +37168,12 @@ msgstr "Conectar cuenta de chat"
 msgid "<0/> Packing list"
 msgstr "<0/> Lista de preparación"
 
-#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
-msgid "Register a passkey - Nocturne"
-msgstr "Registrar una clave de acceso - Nocturne"
+#~ msgid "Register a passkey - Nocturne"
+#~ msgstr "Registrar una clave de acceso - Nocturne"
 
-#. 0: username || "your account"
-#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
 #, python-brace-format
-msgid "Your recovery code was accepted. It lets you create a passkey for {0} and nothing else. It expires in ten minutes."
-msgstr "Se ha aceptado tu código de recuperación. Solo permite crear una clave de acceso para {0} y nada más. Caduca en diez minutos."
+#~ msgid "Your recovery code was accepted. It lets you create a passkey for {0} and nothing else. It expires in ten minutes."
+#~ msgstr "Se ha aceptado tu código de recuperación. Solo permite crear una clave de acceso para {0} y nada más. Caduca en diez minutos."
 
 #: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
 msgid "We could not save that. Try again."
@@ -45955,4 +45990,867 @@ msgstr ""
 
 #: src/routes/(authenticated)/reports/custom/[id]/edit/+page.svelte
 msgid "Nocturne discards the changes that are not saved, also in this browser. The report opens as it was saved."
+msgstr ""
+
+#: src/lib/components/auth/LoginForm.svelte
+msgid "Trust this device for 1 day"
+msgstr ""
+
+#. 0: trustDays
+#: src/lib/components/auth/LoginForm.svelte
+msgid "Trust this device for {0} days"
+msgstr ""
+
+#: src/lib/components/auth/LoginForm.svelte
+msgid "You will not need a code on this device during that time. Select this only on a device that only you use."
+msgstr ""
+
+#. 0: otherSessionCount; 1: otherSessionCount === 1 ? "other session" \\: "other sessions"
+#: src/lib/components/settings/ActiveSessions.svelte
+msgid "Sign out {0} {1}? This device stays signed in. The other devices will need to sign in again, and Nocturne stops trusting them."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Device removed."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Could not remove the device. Try again."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "All trusted devices removed."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Could not remove the trusted devices. Try again."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Trusted devices"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Devices that sign in without an authenticator code"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Remove all trusted devices"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Remove all"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "<0/> Remove all"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "The next sign-in on each device will need an authenticator code. The devices stay signed in."
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "No trusted devices"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "To trust a device, select “Trust this device” when you enter your authenticator code."
+msgstr ""
+
+#. 0: formatMediumDate(device.createdAt)
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Trusted {0}"
+msgstr ""
+
+#. 0: formatMediumDate(device.expiresAt)
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "<0/> Expires {0}"
+msgstr ""
+
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "Remove trusted device"
+msgstr ""
+
+#. 0: device.deviceDescription ?? "this device"
+#: src/lib/components/settings/TrustedDevices.svelte
+msgid "The next sign-in on {0} will need an authenticator code. The device stays signed in."
+msgstr ""
+
+#. 0: totpRemoveTarget?.label ?? "Unnamed authenticator"
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "Are you sure you want to remove \"{0}\"? You will no longer be able to sign in with this authenticator app. This also removes your trusted devices."
+msgstr ""
+
+#. 0: rule.name
+#. 0: editor.name
+#: src/lib/components/alerts/AlertRuleRow.svelte
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
+msgid "Disable \"{0}\"?"
+msgstr ""
+
+#: src/lib/components/alerts/AlertRuleRow.svelte
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
+msgid "<0/> This rule will stop firing immediately. Existing alert history is preserved. This action cannot be undone."
+msgstr ""
+
+#: src/routes/(authenticated)/alerts/+page.svelte
+msgid "<0/> Add a low alert"
+msgstr ""
+
+#: src/routes/(authenticated)/alerts/+page.svelte
+msgid "No alert is on for low glucose. Nocturne will not tell you when glucose is low."
+msgstr ""
+
+#: src/lib/forms/submit-messages.svelte.ts
+msgid "You do not have permission to do this."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/appearance/+page.svelte
+msgid "Only members who can manage this site's settings can change glucose processing."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/navigation/app-navigation.svelte.ts
+msgid "People"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "People - Nocturne"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "# person."
+msgid_plural "# people."
+msgstr[0] ""
+msgstr[1] ""
+
+#~ msgid "<0/> Readings refresh every minute."
+#~ msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "The list of people did not load."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "You follow no other people"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "When a person gives you access to their data, they show here."
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Person"
+msgstr ""
+
+#. 0: bgLabel()
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Glucose, {0}"
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Reading age"
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Last 3 hours"
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Flagged"
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Other people"
+msgstr ""
+
+#: src/lib/components/people/PersonAlerts.svelte
+#: src/lib/components/people/PersonAlerts.svelte
+msgid "You do not have access to this person's alerts"
+msgstr ""
+
+#: src/lib/components/people/PersonAlerts.svelte
+msgid "Active alerts:"
+msgstr ""
+
+#: src/lib/components/people/PersonSummary.svelte
+msgid "3 h ago"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PersonPanel.svelte
+#: src/lib/components/people/PersonSummary.svelte
+msgid "Now"
+msgstr ""
+
+#: src/lib/components/people/PersonTrace.svelte
+msgid "Glucose over the last 3 hours"
+msgstr ""
+
+#: src/lib/components/people/ReadingAge.svelte
+msgid "No reading"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very low, rising fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very low, rising"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very low, steady"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very low, falling"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very low, falling fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Low, rising fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Low, rising"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Low, steady"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Low, falling"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Low, falling fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "High, rising fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "High, rising"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "High, steady"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "High, falling"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "High, falling fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very high, rising fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very high, rising"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very high, steady"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very high, falling"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Very high, falling fast"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Out of range"
+msgstr ""
+
+#. 0: name
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "{0} due"
+msgstr ""
+
+#. 0: name
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "{0} overdue"
+msgstr ""
+
+#. 0: name; 1: durationText(Math.max(1, Math.round(hours * 60)))
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "{0} due in {1}"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "Active alert"
+msgstr ""
+
+#: src/lib/components/people/attention-phrases.svelte.ts
+msgid "# active alert"
+msgid_plural "# active alerts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/constants/scope-labels.svelte.ts
+msgid "View which data sources are connected and whether they are syncing"
+msgstr ""
+
+#: src/lib/constants/scope-labels.svelte.ts
+msgid "Connect, change and remove data sources. Data from a connected source is added to your record"
+msgstr ""
+
+#: src/lib/components/people/LimitedData.svelte
+#: src/lib/components/people/LimitedData.svelte
+msgid "Limited data"
+msgstr ""
+
+#: src/lib/components/people/NoFigure.svelte
+#: src/lib/components/people/ReviewSummary.svelte
+#: src/lib/components/people/ReviewSummary.svelte
+#: src/lib/components/people/ReviewSummary.svelte
+msgid "No figure"
+msgstr ""
+
+#. 0: formatMediumDateRange( new Date(reviewData.from), new Date(reviewData.to) )
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Statistics for {0}."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Readings refresh every minute."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "View"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/ReviewNotice.svelte
+msgid "The statistics did not load."
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Distribution"
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+#: src/lib/components/people/ReviewRow.svelte
+msgid "Wear"
+msgstr ""
+
+#: src/lib/components/people/ReviewNotice.svelte
+msgid "Loading statistics"
+msgstr ""
+
+#: src/lib/components/people/ReviewNotice.svelte
+msgid "24 hours only. Statistics for a period are not available."
+msgstr ""
+
+#: src/lib/components/people/ReviewNotice.svelte
+msgid "You do not have access to this person's reports."
+msgstr ""
+
+#: src/lib/components/people/ReviewNotice.svelte
+msgid "No readings in this period."
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Up less than 1 point from the previous {0} days"
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Down less than 1 point from the previous {0} days"
+msgstr ""
+
+#: src/lib/components/people/review-phrases.svelte.ts
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "# point"
+msgid_plural "# points"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: amount; 1: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Up {0} from the previous {1} days"
+msgstr ""
+
+#. 0: amount; 1: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Down {0} from the previous {1} days"
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "No change from the previous {0} days"
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Up less than 1 point from the previous {0} days."
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Down less than 1 point from the previous {0} days."
+msgstr ""
+
+#. 0: amount; 1: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Up {0} from the previous {1} days."
+msgstr ""
+
+#. 0: amount; 1: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "Down {0} from the previous {1} days."
+msgstr ""
+
+#. 0: days
+#: src/lib/components/people/review-phrases.svelte.ts
+msgid "No change from the previous {0} days."
+msgstr ""
+
+#: src/lib/components/people/ReviewSummary.svelte
+msgid "Sensor wear"
+msgstr ""
+
+#: src/lib/components/people/PersonDayTrace.svelte
+msgid "Glucose over the last 24 hours"
+msgstr ""
+
+#: src/lib/components/people/PersonDayTrace.svelte
+msgid "No readings in the last 24 hours."
+msgstr ""
+
+#: src/lib/components/people/PersonEntries.svelte
+msgid "<0/> You do not have access to this person's treatments."
+msgstr ""
+
+#: src/lib/components/people/PersonEntries.svelte
+msgid "No boluses or carbs in the last 24 hours."
+msgstr ""
+
+#. 0: name
+#: src/lib/components/people/PersonPanel.svelte
+msgid "Open {0}'s site <0/>"
+msgstr ""
+
+#: src/lib/components/people/PersonPanel.svelte
+msgid "This person's data did not load."
+msgstr ""
+
+#: src/lib/components/people/PersonPanel.svelte
+msgid "Recent entries"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Readings update as they arrive."
+msgstr ""
+
+#: src/lib/components/account/SecurityCredentialCard.svelte
+#: src/lib/components/settings/LinkedOidcIdentities.svelte
+msgid "Added just now"
+msgstr ""
+
+#: src/lib/components/auth/RecoveryNextStep.svelte
+msgid "<0>Request a new link</0> by email, or ask an administrator for a new code."
+msgstr ""
+
+#: src/lib/components/auth/RecoveryNextStep.svelte
+msgid "Ask an administrator for a new code."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "You are back in your account."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "The passkey you just added is marked \"Added just now\". Remove any older sign-in method you no longer have, such as the passkey on a lost phone. Nothing is removed unless you remove it."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "Check your sign-in methods."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "Remove any sign-in method you no longer have, such as the passkey on a lost phone. Nothing is removed unless you remove it."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "Confirm your email address - Nocturne"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "Checking your link"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "Your email address is confirmed"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "This link does not work"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "This takes a moment."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "You can close this page or carry on below."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "The link has expired or was already used."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/confirm-email/+page.svelte
+msgid "Open Nocturne"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/error/+page.svelte
+msgid "Recovery ended"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/error/+page.svelte
+msgid "The recovery session has ended. Start again with a new link or code."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/error/+page.svelte
+msgid "Back to add a way to sign in"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/login/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "Cannot sign in?"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/help/+page.svelte
+msgid "A code does not sign you in on its own. It gives you ten minutes to add one new way to sign in, and you sign in with that."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "That recovery code or link has expired or was already used."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "Recover your account - Nocturne"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Recover your account"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/+page.svelte
+msgid "Use a recovery code from an administrator, or open the link sent to your email. It lets you add one new way to sign in."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "We could not send a link just now. Try again."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "Recovery by email is not available on this site."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "Enter the email address on your account. If you confirmed it, we send a link that lets you add a new way to sign in."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "If that address is confirmed on an account here, we have sent a link to it. It works for 30 minutes."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "<0/> Sending..."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "<0/> Send link"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/email/+page.svelte
+msgid "An administrator of this site can also issue a recovery code. <0>Enter a recovery code</0>"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "The recovery session has ended."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "We could not register a passkey. Try again. This screen works for ten minutes after the code is accepted."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "We could not link that provider. Try again, or create a passkey."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Add a way to sign in - Nocturne"
+msgstr ""
+
+#. 0: username || "your account"
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Your recovery code was accepted. It lets you add one way to sign in for {0} and nothing else. This screen works for ten minutes."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Your passkey is ready. One more step finishes signing in."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Your passkey is ready. Confirm it to finish signing in."
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Add a way to sign in"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Or create a passkey"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "<0/> Create a passkey"
+msgstr ""
+
+#: src/routes/(unauthenticated)/auth/recovery/passkey/+page.svelte
+msgid "Sign in on the sign-in page"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "rising extremely fast"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "rising very fast"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "rising"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "rising slowly"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "stable"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "falling slowly"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "falling"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "falling very fast"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "falling extremely fast"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "out of range"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "sensor error"
+msgstr ""
+
+#: src/lib/utils/direction-info.svelte.ts
+msgid "unknown"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "meals"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "correction boluses"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "boluses"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "rises with no carbs"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "lows"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "highs"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "carbs taken in a low"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "exercise"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep starts"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "wake-ups"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sensor starts"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "site changes"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "overrides"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "temporary targets"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "6h"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "24h"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "7d"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "7 days"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "14d"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "14 days"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "28d"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "28 days"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "90d"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "90 days"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "1 day"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "treatments.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "treatments"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "food.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "food"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "therapy.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "therapy settings"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "devices.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "devices"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "heartrate.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "heart rate"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "stepcount.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "alerts.read"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "alerts"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "by hour of day"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "by weekday"
 msgstr ""

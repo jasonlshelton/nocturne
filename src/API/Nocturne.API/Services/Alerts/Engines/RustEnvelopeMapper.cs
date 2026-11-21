@@ -64,6 +64,9 @@ internal static class RustEnvelopeMapper
         HysteresisMinutes = rule.HysteresisMinutes,
         AutoResolveEnabled = rule.AutoResolveEnabled,
         AutoResolveParams = rule.AutoResolveEnabled ? RuleTrees.AutoResolve(rule.AutoResolveParams) : null,
+        OnUnknown = rule.OnUnknown,
+        GlucoseFreshnessMinutes = rule.GlucoseFreshnessMinutes,
+        EnabledAt = rule.EnabledAt,
     };
 
     /// <summary>
@@ -155,6 +158,7 @@ internal static class RustEnvelopeMapper
         {
             LatestValue = ctx.LatestValue,
             LatestTimestamp = Utc(ctx.LatestTimestamp),
+            LatestReceivedAt = Utc(ctx.LatestReceivedAt),
             TrendRate = ctx.TrendRate,
             LastReadingAt = Utc(ctx.LastReadingAt),
             TrendBucket = ctx.TrendBucket is { } tb ? WireEnum(tb) : null,
@@ -205,7 +209,7 @@ internal static class RustEnvelopeMapper
                 ? TimeZoneHelper.ToIanaIdIfWindows(tenantZone)
                 : ctx.TenantTimeZoneId,
             ActivePumpState = ctx.ActivePumpState is { } pump
-                ? new WirePumpState(WireEnum(pump.Mode), Utc(pump.StartedAt)!.Value)
+                ? new WirePumpState(pump.Mode, Utc(pump.StartedAt)!.Value)
                 : null,
             // Serialise from the dictionary KEYS (not the snapshot's echoed fields) so the
             // engine reconstructs the exact same (category, state) lookup — including
@@ -290,6 +294,7 @@ internal static class RustEnvelopeMapper
     {
         [JsonPropertyName("latest_value")] public decimal? LatestValue { get; init; }
         [JsonPropertyName("latest_timestamp")] public DateTime? LatestTimestamp { get; init; }
+        [JsonPropertyName("latest_received_at")] public DateTime? LatestReceivedAt { get; init; }
         [JsonPropertyName("trend_rate")] public decimal? TrendRate { get; init; }
         [JsonPropertyName("last_reading_at")] public DateTime? LastReadingAt { get; init; }
         [JsonPropertyName("trend_bucket")] public string? TrendBucket { get; init; }

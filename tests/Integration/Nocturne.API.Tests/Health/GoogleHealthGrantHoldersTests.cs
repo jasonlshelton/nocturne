@@ -1,3 +1,4 @@
+using Nocturne.Tests.Shared.Infrastructure;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -176,7 +177,7 @@ public sealed class GoogleHealthGrantHoldersTests(GoogleHealthPostgresFixture fi
             accessor.Object, platform.Object, NullLogger<GoogleHealthAuthTokenProvider>.Instance,
             Mock.Of<IRetryDelayStrategy>());
         return new GoogleHealthSessionStore(SecretsOf(tenant), oauth, holders, accessor.Object, platform.Object,
-            NullLogger<GoogleHealthSessionStore>.Instance);
+            NullLogger<GoogleHealthSessionStore>.Instance, TimeProvider.System);
     }
 
     private IConnectorConfigurationService SecretsOf(Guid tenant)
@@ -233,6 +234,7 @@ public sealed class GoogleHealthGrantHoldersTests(GoogleHealthPostgresFixture fi
         services.AddDbContextFactory<NocturneDbContext>((provider, options) => options
             .UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()).AddInterceptors(new TenantConnectionInterceptor()));
         services.AddDataServices();
+        services.AddSingleton(AccountLinkRoutes.Off);
         return services;
     }
 

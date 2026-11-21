@@ -1,8 +1,9 @@
 //! `SensorContext` as plain data: pure input to the evaluators, read from the
 //! context wire format (engine-semantics.md §4). An enum name this crate does
 //! not know (a host newer than it) degrades only that fact: an unknown bucket
-//! reads as absent and an unknown pump mode or state-span category drops that
-//! entry, so every other leaf still evaluates.
+//! reads as an absent one, an active pump in an unknown mode keeps its
+//! snapshot with no mode, and a state span of an unknown category is dropped,
+//! so every other leaf still evaluates.
 
 use std::collections::HashMap;
 
@@ -38,7 +39,8 @@ pub struct StartedSpan {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PumpStateSnapshot {
-    pub mode: PumpMode,
+    /// `None`: the pump is in a mode this crate has no name for.
+    pub mode: Option<PumpMode>,
     pub started_at: DateTime<Utc>,
 }
 
@@ -59,6 +61,10 @@ pub struct PredictedPoint {
 pub struct SensorContext {
     pub latest_value: Option<Decimal>,
     pub latest_timestamp: Option<DateTime<Utc>>,
+    /// When the host received the newest reading, which its glucose facts'
+    /// age is measured from (engine-semantics.md §3); absent is
+    /// `latest_timestamp`.
+    pub latest_received_at: Option<DateTime<Utc>>,
     pub trend_rate: Option<Decimal>,
     pub last_reading_at: Option<DateTime<Utc>>,
     pub trend_bucket: Option<TrendBucket>,
@@ -142,6 +148,8 @@ struct WireContext {
     latest_value: Option<Number>,
     #[serde(default)]
     latest_timestamp: Option<DateTime<Utc>>,
+    #[serde(default)]
+    latest_received_at: Option<DateTime<Utc>>,
     #[serde(default)]
     trend_rate: Option<Number>,
     #[serde(default)]
@@ -293,7 +301,10 @@ pub fn check_timestamp(at: DateTime<Utc>, field: &str) -> Result<DateTime<Utc>, 
     }
 }
 
-fn opt_ts(at: Option<DateTime<Utc>>, field: &str) -> Result<Option<DateTime<Utc>>, String> {
+pub(crate) fn opt_ts(
+    at: Option<DateTime<Utc>>,
+    field: &str,
+) -> Result<Option<DateTime<Utc>>, String> {
     at.map(|at| check_timestamp(at, field)).transpose()
 }
 
@@ -374,6 +385,7 @@ impl SensorContext {
         Ok(SensorContext {
             latest_value: opt_dec(w.latest_value.as_ref(), "latest_value")?,
             latest_timestamp: opt_ts(w.latest_timestamp, "latest_timestamp")?,
+            latest_received_at: opt_ts(w.latest_received_at, "latest_received_at")?,
             trend_rate: opt_dec(w.trend_rate.as_ref(), "trend_rate")?,
             last_reading_at: opt_ts(w.last_reading_at, "last_reading_at")?,
             trend_bucket: w.trend_bucket.and_then(|s| TrendBucket::from_name(&s)),
@@ -446,14 +458,12 @@ impl SensorContext {
             active_pump_state: w
                 .active_pump_state
                 .map(|p| {
-                    let started_at = check_timestamp(p.started_at, "active_pump_state.started_at")?;
-                    Ok::<_, String>(
-                        PumpMode::from_name(&p.mode)
-                            .map(|mode| PumpStateSnapshot { mode, started_at }),
-                    )
+                    Ok::<_, String>(PumpStateSnapshot {
+                        mode: PumpMode::from_name(&p.mode),
+                        started_at: check_timestamp(p.started_at, "active_pump_state.started_at")?,
+                    })
                 })
-                .transpose()?
-                .flatten(),
+                .transpose()?,
             active_state_spans,
             active_trackers,
             sleep_session_active: w.sleep_session_active,

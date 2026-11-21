@@ -83,7 +83,10 @@ internal static class EngineTestHarness
             "{}",
             0,
             rule.AutoResolveEnabled,
-            rule.AutoResolveParams?.GetRawText());
+            rule.AutoResolveParams?.GetRawText(),
+            OnUnknown: rule.OnUnknown ?? AlertRuleOnUnknown.Hold,
+            GlucoseFreshnessMinutes: rule.GlucoseFreshnessMinutes,
+            EnabledAt: rule.EnabledAt);
     }
 
     /// <summary>
@@ -107,9 +110,10 @@ internal static class EngineTestHarness
         {
             RuleId = rule.Id,
             Root = evaluation.ConditionMet,
-            Leaves = (evaluation.LeafValues ?? new Dictionary<int, bool>())
+            Unknown = evaluation.ConditionUnknown ? true : null,
+            Leaves = (evaluation.LeafValues ?? new Dictionary<int, bool?>())
                 .OrderBy(kv => kv.Key)
-                .Select(kv => new ExpectedLeaf(kv.Key, kv.Value))
+                .Select(kv => new ExpectedLeaf(kv.Key, kv.Value ?? false, kv.Value is null ? true : null))
                 .ToList(),
             Transition = CorpusWire.TransitionWire(evaluation.Transition.Type),
             CloseReason = evaluation.Transition.CloseReason is { } reason ? CorpusWire.CloseReasonWire(reason) : null,
@@ -125,6 +129,12 @@ internal static class EngineTestHarness
                 },
             AutoResolved = evaluation.AutoResolved ? true : null,
             TimerOps = trackerRepo.Timers.DrainOps() is { Count: > 0 } ops ? ops : null,
+            NextChangeAt = evaluation.NextChangeAt,
+            ClockAnomaly = evaluation.ClockAnomalies.Count > 0
+                ? evaluation.ClockAnomalies
+                    .Select(a => new ExpectedClockAnomaly(a.Fact, (long)a.Ahead.TotalMilliseconds))
+                    .ToList()
+                : null,
         };
     }
 }

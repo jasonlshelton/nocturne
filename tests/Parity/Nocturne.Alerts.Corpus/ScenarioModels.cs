@@ -51,6 +51,19 @@ public static class CorpusJson
             writer.WriteStringValue(value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"));
         }
     }
+
+    /// <summary>
+    /// Writes a UTC instant the engine reports on its 100 ns tick grid, such as a next change,
+    /// with as many fractional digits as it needs.
+    /// </summary>
+    public sealed class TickInstantConverter : JsonConverter<DateTime>
+    {
+        public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.GetDateTime().ToUniversalTime();
+
+        public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +113,18 @@ public sealed record ScenarioRule
     /// <summary>A full ConditionNode object (<c>{"type": …, …}</c>), or null.</summary>
     [JsonPropertyName("auto_resolve_params")]
     public JsonElement? AutoResolveParams { get; init; }
+
+    /// <summary><c>hold</c>, <c>met</c> or <c>not_met</c>; absent is <c>hold</c>.</summary>
+    [JsonPropertyName("on_unknown")]
+    public string? OnUnknown { get; init; }
+
+    /// <summary>A whole number of minutes from 1 to 1440; absent is the engine's default.</summary>
+    [JsonPropertyName("glucose_freshness_minutes")]
+    public int? GlucoseFreshnessMinutes { get; init; }
+
+    /// <summary>When the rule was last enabled; absent is not recorded.</summary>
+    [JsonPropertyName("enabled_at")]
+    public DateTime? EnabledAt { get; init; }
 }
 
 public sealed record ScenarioTick
@@ -119,6 +144,7 @@ public sealed record ScenarioContext
 {
     [JsonPropertyName("latest_value")] public decimal? LatestValue { get; init; }
     [JsonPropertyName("latest_timestamp")] public DateTime? LatestTimestamp { get; init; }
+    [JsonPropertyName("latest_received_at")] public DateTime? LatestReceivedAt { get; init; }
     [JsonPropertyName("trend_rate")] public decimal? TrendRate { get; init; }
     [JsonPropertyName("last_reading_at")] public DateTime? LastReadingAt { get; init; }
     /// <summary>Wire form of TrendBucket (<c>rising_fast</c> … <c>unknown</c>).</summary>
@@ -233,8 +259,11 @@ public sealed record ExpectedRuleResult
     /// </summary>
     public bool? Skipped { get; init; }
 
-    /// <summary>Root condition truth for this tick.</summary>
+    /// <summary>Root condition truth for this tick; false when <see cref="Unknown"/>.</summary>
     public bool? Root { get; init; }
+
+    /// <summary>The root is unknown; carried only when true.</summary>
+    public bool? Unknown { get; init; }
 
     /// <summary>Per-leaf force-eval truths, ordered by leaf id (replay/leaf-log semantics).</summary>
     public List<ExpectedLeaf>? Leaves { get; init; }
@@ -261,11 +290,31 @@ public sealed record ExpectedRuleResult
     /// </summary>
     [JsonPropertyName("timer_ops")]
     public List<ExpectedTimerOp>? TimerOps { get; init; }
+
+    /// <summary>
+    /// When an evaluation from the state this one left can next differ with only the clock
+    /// moving; pinned only by a snapshot that carries it (see the corpus README).
+    /// </summary>
+    [JsonPropertyName("next_change_at"), JsonConverter(typeof(CorpusJson.TickInstantConverter))]
+    public DateTime? NextChangeAt { get; init; }
+
+    /// <summary>
+    /// The anchors read more than 5 minutes ahead of the tick (docs/alerts/engine-semantics.md
+    /// §5.4); carried only when there is one.
+    /// </summary>
+    [JsonPropertyName("clock_anomaly")]
+    public List<ExpectedClockAnomaly>? ClockAnomaly { get; init; }
 }
 
+public sealed record ExpectedClockAnomaly(
+    [property: JsonPropertyName("fact")] string Fact,
+    [property: JsonPropertyName("ahead_ms")] long AheadMs);
+
+/// <summary><see cref="Value"/> is false when <see cref="Unknown"/>, which is carried only when true.</summary>
 public sealed record ExpectedLeaf(
     [property: JsonPropertyName("leaf_id")] int LeafId,
-    [property: JsonPropertyName("value")] bool Value);
+    [property: JsonPropertyName("value")] bool Value,
+    [property: JsonPropertyName("unknown")] bool? Unknown = null);
 
 public sealed record ExpectedTrackerState
 {

@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 using Nocturne.API.Helpers;
+using Nocturne.Connectors.Core.Utilities;
 using Nocturne.API.Multitenancy;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -279,7 +280,8 @@ public class OidcAuthService : IOidcAuthService
         string expectedState,
         string? ipAddress = null,
         string? userAgent = null,
-        Guid? currentTenantId = null
+        Guid? currentTenantId = null,
+        string? trustedDeviceToken = null
     )
     {
         var parsed = await ValidateCallbackAndParseIdTokenAsync(code, state, expectedState);
@@ -289,15 +291,27 @@ public class OidcAuthService : IOidcAuthService
         }
 
         return await CompleteLoginAsync(
-            parsed.StateData!, parsed.Provider!, parsed.Claims!, currentTenantId, ipAddress, userAgent);
+            parsed.StateData!, parsed.Provider!, parsed.Claims!, currentTenantId, ipAddress, userAgent,
+            trustedDeviceToken);
     }
 
     /// <summary>
+    /// Identifies an external identity that has no subject in audit rows and logs. A digest, not
+    /// the sub claim, because a mapped OAuth2 provider can make the sub a login name or an email,
+    /// and a row with no subject is never scrubbed when a person is deleted.
+    /// </summary>
+    internal static string ExternalIdentityDigest(string issuer, string sub) =>
+        HashUtils.Sha256Hex(issuer + "\n" + sub);
+
+    /// <summary>
     /// Completes a login after the OIDC callback has been validated and the ID token parsed:
-    /// resolves the subject from the external identity, enforces tenant membership, and issues
-    /// a session. Because an OIDC identity resolves to a <em>global</em> subject, a valid external
-    /// identity must still be a member of <paramref name="currentTenantId"/> before a session is
-    /// issued — otherwise any external identity could mint a session on any tenant's subdomain.
+    /// looks up the subject the external identity is linked to, refuses it when deactivated,
+    /// enforces tenant membership, and only then records the sign-in on the subject (creating it
+    /// for an identity not seen before) and issues a session. Because an OIDC identity resolves to
+    /// a <em>global</em> subject, a valid external identity must still be a member of
+    /// <paramref name="currentTenantId"/> before a session is issued; otherwise any external
+    /// identity could mint a session on any tenant's subdomain. A refused sign-in writes no
+    /// subject, identity link or profile change.
     /// Extracted from <see cref="HandleCallbackAsync"/> so the membership gate can be unit-tested
     /// without exercising the OIDC code exchange.
     /// </summary>
@@ -307,20 +321,20 @@ public class OidcAuthService : IOidcAuthService
         OidcIdTokenClaims idTokenClaims,
         Guid? currentTenantId,
         string? ipAddress,
-        string? userAgent)
+        string? userAgent,
+        string? trustedDeviceToken = null)
     {
-        // Find or create subject
-        var subject = await _subjectService.FindOrCreateFromOidcAsync(
-            provider.Id,
-            idTokenClaims.Sub,
-            provider.IssuerUrl,
-            idTokenClaims.Email,
-            idTokenClaims.EmailVerified == true,
-            idTokenClaims.Name ?? idTokenClaims.PreferredUsername,
-            provider.DefaultRoles
-        );
+        var existing = await _subjectService.FindFromOidcAsync(idTokenClaims.Sub, provider.IssuerUrl);
 
-        // Cross-tenant guard: deny — without issuing a session — when the authenticated
+        // A failed callback rather than NotAMember, which would offer a deactivated account the
+        // membership request.
+        if (existing is { IsActive: false })
+        {
+            _logger.LogWarning("OIDC login denied: subject {SubjectId} is deactivated", existing.Id);
+            return OidcCallbackResult.Failed("callback_failed", "Authentication failed");
+        }
+
+        // Cross-tenant guard: deny, without issuing a session, when the authenticated
         // identity is not a member of the tenant being logged into, and holds no invite to it.
         // The per-request membership gate in AuthenticationMiddleware would block this subject's
         // data access anyway, but only after a session (and a "logged in" UI) already existed.
@@ -339,15 +353,22 @@ public class OidcAuthService : IOidcAuthService
         var admittedByInvite = false;
         if (currentTenantId is { } tenantId)
         {
-            if (!await _tenantMemberService.IsMemberAsync(subject.Id, tenantId))
+            if (existing is null || !await _tenantMemberService.IsMemberAsync(existing.Id, tenantId))
             {
                 if (!await IsInvitedByReturnUrlAsync(stateData.ReturnUrl, tenantId))
                 {
+                    var digest = existing is null
+                        ? ExternalIdentityDigest(provider.IssuerUrl, idTokenClaims.Sub)
+                        : null;
                     _logger.LogWarning(
-                        "OIDC login denied: subject {SubjectId} is not a member of tenant {TenantId}",
-                        subject.Id,
+                        "OIDC login denied: provider {ProviderId} identity (subject {SubjectId}, "
+                            + "identity digest {IdentityDigest}) is not a member of tenant {TenantId}",
+                        provider.Id,
+                        existing?.Id,
+                        digest,
                         tenantId);
-                    return OidcCallbackResult.NotAMember(subject.Id, stateData.ReturnUrl);
+                    return OidcCallbackResult.NotAMember(
+                        existing?.Id, provider.Id, digest, stateData.ReturnUrl);
                 }
 
                 admittedByInvite = true;
@@ -364,7 +385,19 @@ public class OidcAuthService : IOidcAuthService
                 "The login could not be completed against the tenant it was started from.");
         }
 
-        if (await _totpService.GetCredentialCountAsync(subject.Id) > 0)
+        var subject = await _subjectService.FindOrCreateFromOidcAsync(
+            provider.Id,
+            idTokenClaims.Sub,
+            provider.IssuerUrl,
+            idTokenClaims.Email,
+            idTokenClaims.EmailVerified == true,
+            idTokenClaims.Name ?? idTokenClaims.PreferredUsername,
+            provider.DefaultRoles
+        );
+
+        var secondFactor = await _totpService.GetSecondFactorRequirementAsync(subject.Id, trustedDeviceToken);
+
+        if (secondFactor == SecondFactorRequirement.CodeRequired)
         {
             return OidcCallbackResult.SecondFactorRequired(
                 subject.Id,
@@ -413,13 +446,14 @@ public class OidcAuthService : IOidcAuthService
         };
 
         _logger.LogInformation(
-            "OIDC authentication successful for user {Name} ({Email}) via {Provider}",
-            subject.Name,
-            subject.Email ?? "no email",
-            provider.Name
+            "OIDC authentication successful for subject {SubjectId} via provider {ProviderId}",
+            subject.Id,
+            provider.Id
         );
 
-        return OidcCallbackResult.Succeeded(tokens, userInfo, stateData.ReturnUrl, provider.Id);
+        return OidcCallbackResult.Succeeded(
+            tokens, userInfo, stateData.ReturnUrl, provider.Id,
+            usedTrustedDevice: secondFactor == SecondFactorRequirement.SatisfiedByTrustedDevice);
     }
 
     /// <summary>
@@ -621,8 +655,17 @@ public class OidcAuthService : IOidcAuthService
     }
 
     /// <inheritdoc />
-    public async Task<OidcAuthorizationRequest> GenerateLinkAuthorizationUrlAsync(
-        Guid providerId, Guid subjectId, string? returnUrl = null, string? tenantSlug = null)
+    public Task<OidcAuthorizationRequest> GenerateLinkAuthorizationUrlAsync(
+        Guid providerId, Guid subjectId, string? returnUrl = null, string? tenantSlug = null) =>
+        GenerateLinkAuthorizationUrlAsync(providerId, subjectId, returnUrl, tenantSlug, LinkIntent);
+
+    /// <inheritdoc />
+    public Task<OidcAuthorizationRequest> GenerateRecoveryLinkAuthorizationUrlAsync(
+        Guid providerId, Guid subjectId, string? returnUrl = null, string? tenantSlug = null) =>
+        GenerateLinkAuthorizationUrlAsync(providerId, subjectId, returnUrl, tenantSlug, RecoveryIntent);
+
+    private async Task<OidcAuthorizationRequest> GenerateLinkAuthorizationUrlAsync(
+        Guid providerId, Guid subjectId, string? returnUrl, string? tenantSlug, string intent)
     {
         var provider =
             await _providerService.GetProviderByIdAsync(providerId)
@@ -640,7 +683,7 @@ public class OidcAuthService : IOidcAuthService
             Nonce = GenerateRandomString(32),
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.Add(_options.State.Lifetime),
-            Intent = "link",
+            Intent = intent,
             SubjectId = subjectId,
             TenantSlug = tenantSlug,
         };
@@ -660,11 +703,22 @@ public class OidcAuthService : IOidcAuthService
             return OidcLinkResult.Failed(parsed.Error ?? "callback_failed", parsed.ErrorDescription);
         }
 
-        var stateData = parsed.StateData!;
-        var provider = parsed.Provider!;
-        var claims = parsed.Claims!;
+        return await AttachVerifiedIdentityAsync(
+            parsed.StateData!, parsed.Provider!, parsed.Claims!, authenticatedSubjectId, LinkIntent);
+    }
 
-        return await AttachVerifiedIdentityAsync(stateData, provider, claims, authenticatedSubjectId);
+    /// <inheritdoc />
+    public async Task<OidcLinkResult> HandleRecoveryLinkCallbackAsync(
+        string code, string state, string expectedState, Guid recoverySubjectId)
+    {
+        var parsed = await ValidateCallbackAndParseIdTokenAsync(code, state, expectedState, LinkCallbackPath);
+        if (!parsed.Success)
+        {
+            return OidcLinkResult.Failed(parsed.Error ?? "callback_failed", parsed.ErrorDescription);
+        }
+
+        return await AttachVerifiedIdentityAsync(
+            parsed.StateData!, parsed.Provider!, parsed.Claims!, recoverySubjectId, RecoveryIntent);
     }
 
     /// <inheritdoc />
@@ -720,7 +774,8 @@ public class OidcAuthService : IOidcAuthService
             provider.Id,
             claims.Sub,
             provider.IssuerUrl,
-            claims.Email);
+            claims.Email,
+            claims.EmailVerified == true);
 
         if (outcome == OidcLinkOutcome.AlreadyLinkedToOther)
             return OidcSetupCallbackResult.Failed(
@@ -762,24 +817,29 @@ public class OidcAuthService : IOidcAuthService
     }
 
     /// <summary>
-    /// Attaches a verified OIDC identity to an already-authenticated subject.
+    /// Attaches a verified OIDC identity to the subject the caller proved it is, by a signed-in
+    /// session for <see cref="LinkIntent"/> or a recovery session for <see cref="RecoveryIntent"/>.
+    /// The state must have been issued for that same proof, so neither flow's state completes the
+    /// other, and for that same subject.
     /// Extracted from <see cref="HandleLinkCallbackAsync"/> to enable unit testing
     /// without mocking token exchange and JWKS verification.
     /// </summary>
-    /// <param name="stateData">Decoded state data from the link callback, which must have <c>Intent == "link"</c>.</param>
+    /// <param name="stateData">Decoded state data from the link callback.</param>
     /// <param name="provider">The OIDC provider from which the identity originated.</param>
     /// <param name="claims">Parsed claims from the provider's ID token.</param>
-    /// <param name="authenticatedSubjectId">The currently authenticated subject to link the identity to.</param>
+    /// <param name="authenticatedSubjectId">The subject the caller proved it is, to link the identity to.</param>
+    /// <param name="intent">The intent the caller's proof completes.</param>
     /// <returns>An <see cref="OidcLinkResult"/> describing the outcome of the link operation.</returns>
     internal async Task<OidcLinkResult> AttachVerifiedIdentityAsync(
         OidcStateData stateData,
         OidcProvider provider,
         OidcIdTokenClaims claims,
-        Guid authenticatedSubjectId)
+        Guid authenticatedSubjectId,
+        string intent = LinkIntent)
     {
-        if (stateData.Intent != "link")
+        if (stateData.Intent != intent)
         {
-            return OidcLinkResult.Failed("invalid_intent", "State was not issued for a link flow");
+            return OidcLinkResult.Failed("invalid_intent", "State was not issued for this link flow");
         }
         if (stateData.SubjectId != authenticatedSubjectId)
         {
@@ -791,12 +851,14 @@ public class OidcAuthService : IOidcAuthService
             provider.Id,
             claims.Sub,
             provider.IssuerUrl,
-            claims.Email);
+            claims.Email,
+            claims.EmailVerified == true);
 
         return outcome switch
         {
             OidcLinkOutcome.Created or OidcLinkOutcome.AlreadyLinkedToSelf
-                => OidcLinkResult.Succeeded(identityId!.Value, stateData.ReturnUrl),
+                => OidcLinkResult.Succeeded(
+                    identityId!.Value, stateData.ReturnUrl, provider.Id, added: outcome == OidcLinkOutcome.Created),
             OidcLinkOutcome.AlreadyLinkedToOther
                 => OidcLinkResult.Failed(
                     "identity_already_linked",
@@ -806,6 +868,15 @@ public class OidcAuthService : IOidcAuthService
     }
 
     #region Private Helper Methods
+
+    /// <summary>The state intent of a link a signed-in member starts.</summary>
+    internal const string LinkIntent = "link";
+
+    /// <summary>
+    /// The state intent of a link started under a recovery session. It shares the link callback,
+    /// which every provider already has registered, and completes only with a recovery session.
+    /// </summary>
+    internal const string RecoveryIntent = "recovery";
 
     private const string LoginCallbackPath = "/api/auth/oidc/callback";
     private const string LinkCallbackPath = "/api/auth/oidc/link/callback";
@@ -1191,6 +1262,23 @@ public class OidcAuthService : IOidcAuthService
 
         return JsonSerializer.Deserialize<OidcStateData>(json)
             ?? throw new InvalidOperationException("Invalid state data");
+    }
+
+    /// <inheritdoc />
+    public bool IsRecoveryState(string state)
+    {
+        if (string.IsNullOrEmpty(state))
+            return false;
+
+        try
+        {
+            return DecodeState(state).Intent == RecoveryIntent;
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException or JsonException or InvalidOperationException)
+        {
+            _logger.LogDebug(ex, "Could not read an intent from the OIDC state");
+            return false;
+        }
     }
 
     /// <inheritdoc />

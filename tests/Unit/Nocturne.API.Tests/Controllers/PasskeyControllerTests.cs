@@ -1,3 +1,4 @@
+using Nocturne.API.Tests.TestDoubles;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -47,14 +48,17 @@ public class PasskeyControllerTests : IDisposable
     private readonly NocturneDbContext _dbContext;
     private readonly Mock<IPasskeyService> _passkeyService;
     private readonly Mock<ITotpService> _totpService;
+    private readonly Mock<ITrustedDeviceService> _trustedDevices = new();
     private readonly Mock<IRecoveryCodeService> _recoveryCodeService;
-    private readonly Mock<IJwtService> _jwtService;
+    private readonly LoginCodeService _loginCodes;
+    private readonly RecoverySession _recoverySession;
     private readonly Mock<ISessionService> _sessionService;
     private readonly Mock<ISubjectService> _subjectService;
     private readonly Mock<ITenantAccessor> _tenantAccessor;
     private readonly Mock<ITenantService> _tenantService;
     private readonly Mock<IInAppNotificationService> _notifications = new();
     private readonly Mock<IAuthAuditService> _requestAudit = new();
+    private readonly Mock<IAuthAuditService> _auditService = new();
     private readonly Mock<IPasskeyCredentialRepository> _passkeyCredentials = new();
     private readonly PasskeyController _controller;
 
@@ -69,8 +73,11 @@ public class PasskeyControllerTests : IDisposable
 
         _passkeyService = new Mock<IPasskeyService>();
         _totpService = new Mock<ITotpService>();
+        // An unanswered mock reads as "a code is required"; these members have no authenticator.
+        _totpService
+            .Setup(s => s.GetSecondFactorRequirementAsync(It.IsAny<Guid>(), It.IsAny<string?>()))
+            .ReturnsAsync(SecondFactorRequirement.NotEnrolled);
         _recoveryCodeService = new Mock<IRecoveryCodeService>();
-        _jwtService = new Mock<IJwtService>();
         _sessionService = new Mock<ISessionService>();
         _subjectService = new Mock<ISubjectService>();
         _tenantAccessor = MockTenantAccessor.Create(_tenantId);
@@ -87,26 +94,34 @@ public class PasskeyControllerTests : IDisposable
 
         var logger = new Mock<ILogger<PasskeyController>>();
 
-        var auditService = new Mock<IAuthAuditService>();
+        var jwtService = new Mock<IJwtService>();
+        jwtService.Setup(j => j.GenerateRefreshToken()).Returns(() => Guid.NewGuid().ToString("N"));
+        _loginCodes = new LoginCodeService(jwtService.Object, new Mock<IAuthAuditService>().Object);
+        // Login codes are tenant-scoped, so the session's contexts are on the request's tenant, as
+        // the request pipeline hands them out.
+        _recoverySession = new RecoverySession(
+            new SharedSqliteFactory(_db.Options).AsNocturneFactory(_tenantId), _loginCodes, oidcOptions,
+            NullLogger<RecoverySession>.Instance);
 
         _tenantService = new Mock<ITenantService>();
 
         _controller = new PasskeyController(
             _passkeyService.Object,
             _totpService.Object,
+            _trustedDevices.Object,
             _recoveryCodeService.Object,
-            _jwtService.Object,
+            _recoverySession,
             _sessionService.Object,
             _subjectService.Object,
-            auditService.Object,
+            _auditService.Object,
             _tenantAccessor.Object,
             _tenantService.Object,
             // The real service, not a mock: the enrolment probe's cross-tenant reach is the
             // property under test, and a mock would assert the mock.
-            new TenantMemberService(new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory())),
-            new SubjectRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory()),
+            new TenantMemberService(new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off)),
+            new SubjectRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off),
             new TenantRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory()),
-            new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory()),
+            new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off),
             (new SharedSqliteFactory(_db.Options)).AsNocturneFactory(),
             oidcOptions,
             logger.Object);
@@ -193,28 +208,43 @@ public class PasskeyControllerTests : IDisposable
             TenantId = _tenantId,
         };
 
-    /// <summary>Presents a recovery-session cookie that the JWT service accepts for this subject.</summary>
-    private void GiveRecoverySession(Guid subjectId, params string[] permissions) =>
-        GiveRecoveryCookie(subjectId, ["auth:recovery:enrol"], permissions);
-
-    /// <summary>
-    /// Presents a cookie carrying whatever claim shape the caller names, so a token that is not a
-    /// recovery session can be put where one is expected.
-    /// </summary>
-    private void GiveRecoveryCookie(Guid subjectId, string[] scopes, string[] permissions)
+    /// <summary>Mints a code of <paramref name="purpose"/> for the subject on this tenant.</summary>
+    private async Task<string> IssueCodeAsync(
+        Guid subjectId, LoginCodePurpose purpose, string? email = null, Guid? tenantId = null)
     {
-        const string token = "recovery-token";
-        _controller.ControllerContext.HttpContext.Request.Headers.Cookie =
-            $".Nocturne.RecoverySession={token}";
-        _jwtService
-            .Setup(s => s.ValidateAccessToken(token))
-            .Returns(JwtValidationResult.Success(new JwtClaims
-            {
-                SubjectId = subjectId,
-                Scopes = [.. scopes],
-                Permissions = [.. permissions],
-            }));
+        await using var db = _db.CreateContext(tenantId ?? _tenantId);
+        return await _loginCodes.IssueAnyAsync(db, subjectId, purpose, email ?? LoginCodeIssuing.Address);
     }
+
+    /// <summary>Starts a recovery session for the subject and presents its cookie, as a spent recovery code would.</summary>
+    private async Task<string> GiveRecoverySessionAsync(Guid subjectId)
+    {
+        var code = await IssueCodeAsync(subjectId, LoginCodePurpose.RecoverySession);
+        PresentRecoveryCookie(code);
+        return code;
+    }
+
+    private void PresentRecoveryCookie(string code) =>
+        _controller.ControllerContext.HttpContext.Request.Headers.Cookie = $"{RecoverySession.CookieName}={code}";
+
+    private async Task<bool> IsLiveAsync(string code, LoginCodePurpose purpose)
+    {
+        await using var db = _db.CreateContext(_tenantId);
+        return await _loginCodes.FindLiveAsync(db, code, [purpose]) is not null;
+    }
+
+    private void StubRegistration(Guid subjectId, Guid? credentialId = null) =>
+        _passkeyService
+            .Setup(s => s.CompleteRegistrationAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()))
+            .ReturnsAsync(new PasskeyCredentialResult(credentialId ?? Guid.CreateVersion7(), subjectId));
+
+    private Task<ActionResult<PasskeyRegisterCompleteResponse>> CompleteRegistrationAsync() =>
+        _controller.RegisterComplete(new PasskeyRegisterCompleteRequest
+        {
+            AttestationResponseJson = "{}",
+            ChallengeToken = "token",
+        });
 
     private void StubRegistrationOptions(Guid subjectId, string username) =>
         _passkeyService
@@ -338,7 +368,7 @@ public class PasskeyControllerTests : IDisposable
         // Re-registering after spending a recovery code: the account still holds its old
         // credential, so only the recovery session makes this allowed.
         var subjectId = await SeedMemberAsync("owner", withPasskey: true);
-        GiveRecoverySession(subjectId, "passkey:manage");
+        await GiveRecoverySessionAsync(subjectId);
         StubRegistrationOptions(subjectId, "owner");
 
         var result = await _controller.RegisterOptions(
@@ -350,10 +380,29 @@ public class PasskeyControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task RegisterOptions_WithARecoverySessionLackingPasskeyManage_IsRefused()
+    public async Task RegisterOptions_UnderARecoverySession_DoesNotSpendIt()
     {
         var subjectId = await SeedMemberAsync("owner", withPasskey: true);
-        GiveRecoverySession(subjectId, "glucose.read");
+        var session = await GiveRecoverySessionAsync(subjectId);
+        StubRegistrationOptions(subjectId, "owner");
+
+        await _controller.RegisterOptions(new PasskeyRegisterOptionsRequest { Username = "owner" });
+        await _controller.RegisterOptions(new PasskeyRegisterOptionsRequest { Username = "owner" });
+
+        (await IsLiveAsync(session, LoginCodePurpose.RecoverySession)).Should().BeTrue();
+    }
+
+    public static TheoryData<LoginCodePurpose> OtherPurposes =>
+        [LoginCodePurpose.Login, LoginCodePurpose.Recovery, LoginCodePurpose.OperatorRecovery,
+            LoginCodePurpose.EmailRecovery, LoginCodePurpose.EmailConfirm];
+
+    [Theory]
+    [MemberData(nameof(OtherPurposes))]
+    public async Task RegisterOptions_WithAnotherPurposesCodeAsTheRecoveryCookie_IsRefused(LoginCodePurpose purpose)
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        var email = LoginCodeService.EmailPurposes.Contains(purpose) ? "a@example.test" : null;
+        PresentRecoveryCookie(await IssueCodeAsync(subjectId, purpose, email));
 
         var result = await _controller.RegisterOptions(
             new PasskeyRegisterOptionsRequest { Username = "owner" });
@@ -364,38 +413,34 @@ public class PasskeyControllerTests : IDisposable
             Times.Never);
     }
 
-    [Fact]
-    public async Task RegisterOptions_WithAPasskeyManageTokenThatIsNotARecoverySession_IsRefused()
+    [Theory]
+    [MemberData(nameof(OtherPurposes))]
+    public async Task RegisterComplete_WithAnotherPurposesCodeAsTheRecoveryCookie_StoresNothing(LoginCodePurpose purpose)
     {
-        // Spending a recovery code is what buys an enrolment. A token that merely carries the same
-        // permission — anything a future mint site emits — is not that proof.
         var subjectId = await SeedMemberAsync("owner", withPasskey: true);
-        GiveRecoveryCookie(subjectId, scopes: [], permissions: ["passkey:manage"]);
+        var email = LoginCodeService.EmailPurposes.Contains(purpose) ? "a@example.test" : null;
+        var code = await IssueCodeAsync(subjectId, purpose, email);
+        PresentRecoveryCookie(code);
+        StubRegistration(subjectId);
 
-        var result = await _controller.RegisterOptions(
-            new PasskeyRegisterOptionsRequest { Username = "owner" });
+        var result = await CompleteRegistrationAsync();
 
         Assert.Equal(401, Assert.IsType<ObjectResult>(result.Result).StatusCode);
         _passkeyService.Verify(
-            s => s.GenerateRegistrationOptionsAsync(It.IsAny<Guid>(), It.IsAny<string>()),
+            s => s.CompleteRegistrationAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()),
             Times.Never);
+        (await IsLiveAsync(code, purpose)).Should().BeTrue("a cookie is never where any other code is spent");
     }
 
     [Fact]
     public async Task RegisterComplete_WithARecoverySession_BindsToTheCookieSubject()
     {
         var subjectId = await SeedMemberAsync("owner", withPasskey: true);
-        GiveRecoverySession(subjectId, "passkey:manage");
-        _passkeyService
-            .Setup(s => s.CompleteRegistrationAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()))
-            .ReturnsAsync(new PasskeyCredentialResult(Guid.CreateVersion7(), subjectId));
+        await GiveRecoverySessionAsync(subjectId);
+        StubRegistration(subjectId);
 
-        var result = await _controller.RegisterComplete(new PasskeyRegisterCompleteRequest
-        {
-            AttestationResponseJson = "{}",
-            ChallengeToken = "token",
-        });
+        var result = await CompleteRegistrationAsync();
 
         Assert.IsType<OkObjectResult>(result.Result);
         _passkeyService.Verify(
@@ -405,26 +450,115 @@ public class PasskeyControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task RegisterComplete_WithARecoverySession_SpendsTheCookie()
+    public async Task RegisterComplete_WithARecoverySession_EndsItAndNamesThePasskeyItAdded()
     {
-        // One recovery code buys one enrolment: the credential exists now, so the cookie that
-        // authorized it must not authorize a second.
         var subjectId = await SeedMemberAsync("owner", withPasskey: true);
-        GiveRecoverySession(subjectId, "passkey:manage");
+        var session = await GiveRecoverySessionAsync(subjectId);
+        var credentialId = Guid.CreateVersion7();
+        StubRegistration(subjectId, credentialId);
+
+        var result = await CompleteRegistrationAsync();
+
+        var response = (PasskeyRegisterCompleteResponse)Assert.IsType<OkObjectResult>(result.Result).Value!;
+        response.CredentialId.Should().Be(credentialId);
+        (await IsLiveAsync(session, LoginCodePurpose.RecoverySession)).Should().BeFalse();
+        var setCookie = _controller.ControllerContext.HttpContext.Response.Headers.SetCookie
+            .Single(header => header!.StartsWith($"{RecoverySession.CookieName}=", StringComparison.Ordinal));
+        setCookie.Should().Contain("expires=Thu, 01 Jan 1970");
+    }
+
+    [Fact]
+    public async Task RegisterComplete_WithARecoverySession_IssuesNoSessionAndRecordsNoSignIn()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        await GiveRecoverySessionAsync(subjectId);
+        StubRegistration(subjectId);
+
+        await CompleteRegistrationAsync();
+
+        _sessionService.Verify(
+            s => s.IssueSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionContext>()), Times.Never);
+        _controller.ControllerContext.HttpContext.Response.Headers.SetCookie
+            .Should().NotContain(h => h!.StartsWith(".Nocturne.AccessToken=", StringComparison.Ordinal)
+                || h.StartsWith(".Nocturne.RefreshToken=", StringComparison.Ordinal));
+        _auditService.Verify(a => a.LogAsync(
+            AuthAuditEventType.Login, It.IsAny<Guid?>(), true,
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<Guid?>(), It.IsAny<AuthAuditActor?>(), It.IsAny<Guid?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ASessionWhoseMemberWasDeactivated_CannotEnrolAPasskey()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        var session = await GiveRecoverySessionAsync(subjectId);
+        StubRegistrationOptions(subjectId, "owner");
+        StubRegistration(subjectId);
+        (await _dbContext.Subjects.SingleAsync(s => s.Id == subjectId)).IsActive = false;
+        await _dbContext.SaveChangesAsync();
+
+        var options = await _controller.RegisterOptions(new PasskeyRegisterOptionsRequest { Username = "owner" });
+        PresentRecoveryCookie(session);
+        var complete = await CompleteRegistrationAsync();
+
+        Assert.Equal(401, Assert.IsType<ObjectResult>(options.Result).StatusCode);
+        Assert.Equal(401, Assert.IsType<ObjectResult>(complete.Result).StatusCode);
+        _passkeyService.Verify(
+            s => s.CompleteRegistrationAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RegisterComplete_ASecondEnrolmentOnTheSameSession_IsRefusedEvenWithTheCookieReplayed()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        var session = await GiveRecoverySessionAsync(subjectId);
+        StubRegistration(subjectId);
+        await CompleteRegistrationAsync();
+
+        PresentRecoveryCookie(session);
+        var second = await CompleteRegistrationAsync();
+
+        Assert.Equal(401, Assert.IsType<ObjectResult>(second.Result).StatusCode);
+        _passkeyService.Verify(
+            s => s.CompleteRegistrationAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RegisterComplete_WhenTheAttestationIsRefused_LeavesTheSessionUsable()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        var session = await GiveRecoverySessionAsync(subjectId);
         _passkeyService
-            .Setup(s => s.CompleteRegistrationAsync(
+            .SetupSequence(s => s.CompleteRegistrationAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()))
+            .ThrowsAsync(new Fido2NetLib.Fido2VerificationException("bad attestation"))
             .ReturnsAsync(new PasskeyCredentialResult(Guid.CreateVersion7(), subjectId));
 
-        await _controller.RegisterComplete(new PasskeyRegisterCompleteRequest
-        {
-            AttestationResponseJson = "{}",
-            ChallengeToken = "token",
-        });
+        var refused = await CompleteRegistrationAsync();
+        (await IsLiveAsync(session, LoginCodePurpose.RecoverySession)).Should().BeTrue();
+        var retried = await CompleteRegistrationAsync();
 
-        var setCookie = _controller.ControllerContext.HttpContext.Response.Headers.SetCookie
-            .Single(header => header!.StartsWith(".Nocturne.RecoverySession=", StringComparison.Ordinal));
-        setCookie.Should().Contain("expires=Thu, 01 Jan 1970");
+        Assert.Equal(400, Assert.IsType<ObjectResult>(refused.Result).StatusCode);
+        Assert.IsType<OkObjectResult>(retried.Result);
+    }
+
+    [Fact]
+    public async Task RegisterComplete_WhenSignedIn_KeepsItsResponseAndSpendsNoSessionCode()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        Authenticate(subjectId);
+        var credentialId = Guid.CreateVersion7();
+        StubRegistration(subjectId, credentialId);
+
+        var result = await CompleteRegistrationAsync();
+
+        var response = (PasskeyRegisterCompleteResponse)Assert.IsType<OkObjectResult>(result.Result).Value!;
+        response.CredentialId.Should().Be(credentialId);
+        response.SubjectId.Should().Be(subjectId);
     }
 
     [Fact]
@@ -455,37 +589,48 @@ public class PasskeyControllerTests : IDisposable
         loginCodes
             .Setup(s => s.RedeemAsync(
                 It.IsAny<NocturneDbContext>(), "issued-code",
-                It.Is<IReadOnlyCollection<LoginCodePurpose>>(p => p.SequenceEqual(LoginCodeService.RecoveryPurposes)),
+                It.Is<IReadOnlyCollection<LoginCodePurpose>>(p => p.SequenceEqual(LoginCodeService.SessionStartingPurposes)),
+                It.IsAny<Func<RedeemedLoginCode, CancellationToken, Task<bool>>?>(),
+                It.IsAny<Func<RedeemedLoginCode, CancellationToken, Task>?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(subjectId is { } id ? new RedeemedLoginCode(id, purpose) : null);
+            .Returns(async (
+                NocturneDbContext _, string _, IReadOnlyCollection<LoginCodePurpose> _,
+                Func<RedeemedLoginCode, CancellationToken, Task<bool>>? admits,
+                Func<RedeemedLoginCode, CancellationToken, Task>? withSpend,
+                string? _, string? _, CancellationToken ct) =>
+            {
+                if (subjectId is not { } id)
+                    return null;
+                var code = new RedeemedLoginCode(id, purpose);
+                if (admits is not null && !await admits(code, ct))
+                    return (RedeemedLoginCode?)null;
+                if (withSpend is not null)
+                    await withSpend(code, ct);
+                return code;
+            });
         return loginCodes;
     }
 
     private MemberRecoveryEligibility Eligibility() =>
-        new(new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory())));
+        new(new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off)), Delivery(configured: false));
 
     private Task<ActionResult<RecoveryModeRedeemResponse>> RedeemAsync(
         Mock<ILoginCodeService> loginCodes, string code = "issued-code") =>
         _controller.RecoveryModeRedeem(new RecoveryModeRedeemRequest { Code = code }, loginCodes.Object, Eligibility());
 
-    private void StubRecoveryTokenMinting() =>
-        _jwtService
-            .Setup(s => s.GenerateAccessToken(
-                It.IsAny<SubjectInfo>(), It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>>(),
-                It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<Guid?>(),
-                It.IsAny<TimeSpan?>(), It.IsAny<bool>(), It.IsAny<Guid?>()))
-            .Returns("recovery-token");
-
     private string? RecoveryCookieSet() =>
         _controller.ControllerContext.HttpContext.Response.Headers.SetCookie
-            .SingleOrDefault(h => h!.StartsWith(".Nocturne.RecoverySession=", StringComparison.Ordinal));
+            .SingleOrDefault(h => h!.StartsWith($"{RecoverySession.CookieName}=", StringComparison.Ordinal));
+
+    /// <summary>The session code the response's recovery cookie carries.</summary>
+    private string SessionCodeSet() =>
+        RecoveryCookieSet()!.Split(';')[0][(RecoverySession.CookieName.Length + 1)..];
 
     [Fact]
     public async Task RecoveryModeRedeem_WithAnIssuedCode_StartsARecoverySessionForItsSubject()
     {
         await SeedMemberAsync("rhys", withPasskey: true);
         var orphanId = await SeedMemberAsync("orphan");
-        StubRecoveryTokenMinting();
 
         var result = await RedeemAsync(LoginCodesRedeeming(orphanId));
 
@@ -493,14 +638,11 @@ public class PasskeyControllerTests : IDisposable
         ((RecoveryModeRedeemResponse)ok.Value!).Username.Should().Be("orphan");
         _recoveryCodeService.Verify(r => r.InvalidateAllAsync(orphanId), Times.Once,
             "recovery codes the member may have lost stop working once someone else restores access");
-        RecoveryCookieSet().Should().StartWith(".Nocturne.RecoverySession=recovery-token");
-        _jwtService.Verify(s => s.GenerateAccessToken(
-            It.Is<SubjectInfo>(i => i.Id == orphanId),
-            It.Is<IEnumerable<string>>(p => p.SequenceEqual(new[] { "passkey:manage" })),
-            It.IsAny<IEnumerable<string>>(),
-            It.Is<IEnumerable<string>>(sc => sc.SequenceEqual(new[] { "auth:recovery:enrol" })),
-            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<Guid?>(),
-            It.IsAny<TimeSpan?>(), It.IsAny<bool>(), It.IsAny<Guid?>()), Times.Once);
+        RecoveryCookieSet().Should().Contain("samesite=lax").And.Contain("httponly")
+            .And.NotContain("domain=", "the session is spent on the host it was started from");
+        await using var db = _db.CreateContext(_tenantId);
+        (await _loginCodes.FindLiveAsync(db, SessionCodeSet(), [LoginCodePurpose.RecoverySession]))!
+            .SubjectId.Should().Be(orphanId);
     }
 
     [Fact]
@@ -526,7 +668,6 @@ public class PasskeyControllerTests : IDisposable
             CreatedAt = DateTime.UtcNow,
         });
         await _dbContext.SaveChangesAsync();
-        StubRecoveryTokenMinting();
 
         var result = await RedeemAsync(LoginCodesRedeeming(memberId));
 
@@ -540,7 +681,6 @@ public class PasskeyControllerTests : IDisposable
         await SeedMemberAsync("rhys", withPasskey: true);
         var orphanId = await SeedMemberAsync("orphan");
         await SeedMembershipAsync(orphanId, Guid.CreateVersion7());
-        StubRecoveryTokenMinting();
 
         var result = await RedeemAsync(LoginCodesRedeeming(orphanId, LoginCodePurpose.Recovery));
 
@@ -554,7 +694,6 @@ public class PasskeyControllerTests : IDisposable
         await SeedMemberAsync("rhys", withPasskey: true);
         var orphanId = await SeedMemberAsync("orphan");
         await SeedMembershipAsync(orphanId, Guid.CreateVersion7());
-        StubRecoveryTokenMinting();
 
         var result = await RedeemAsync(LoginCodesRedeeming(orphanId, LoginCodePurpose.OperatorRecovery));
 
@@ -573,9 +712,15 @@ public class PasskeyControllerTests : IDisposable
                 CodeHash = "outstanding", Purpose = LoginCodePurpose.Recovery,
                 ExpiresAt = DateTime.UtcNow.AddHours(1),
             });
+            tenantDb.LoginCodes.Add(new LoginCodeEntity
+            {
+                Id = Guid.CreateVersion7(), TenantId = _tenantId, SubjectId = subjectId,
+                CodeHash = "emailed", Purpose = LoginCodePurpose.EmailRecovery, Email = "a@example.test",
+                ExpiresAt = DateTime.UtcNow.AddHours(1),
+            });
             await tenantDb.SaveChangesAsync();
         }
-        GiveRecoverySession(subjectId, "passkey:manage");
+        await GiveRecoverySessionAsync(subjectId);
         _passkeyService
             .Setup(s => s.CompleteRegistrationAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()))
@@ -585,10 +730,10 @@ public class PasskeyControllerTests : IDisposable
         // request pipeline hands out.
         var tenantContexts = new SharedSqliteFactory(_db.Options).AsNocturneFactory(_tenantId);
         var controller = new PasskeyController(
-            _passkeyService.Object, _totpService.Object, _recoveryCodeService.Object, _jwtService.Object,
+            _passkeyService.Object, _totpService.Object, _trustedDevices.Object, _recoveryCodeService.Object, _recoverySession,
             _sessionService.Object, _subjectService.Object, new Mock<IAuthAuditService>().Object,
-            _tenantAccessor.Object, _tenantService.Object, new TenantMemberService(new TenantMembershipRepository(tenantContexts)),
-            new SubjectRepository(tenantContexts), new TenantRepository(tenantContexts), new TenantMembershipRepository(tenantContexts),
+            _tenantAccessor.Object, _tenantService.Object, new TenantMemberService(new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off)),
+            new SubjectRepository(tenantContexts, AccountLinkRoutes.Off), new TenantRepository(tenantContexts), new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off),
             tenantContexts, Options.Create(new OidcOptions()), new Mock<ILogger<PasskeyController>>().Object)
         {
             ControllerContext = _controller.ControllerContext,
@@ -603,14 +748,15 @@ public class PasskeyControllerTests : IDisposable
         result.Result.Should().BeOfType<OkObjectResult>();
 
         await using var check = _db.CreateContext(_tenantId);
-        (await check.LoginCodes.AsNoTracking().SingleAsync()).ConsumedAt.Should().NotBeNull();
+        (await check.LoginCodes.AsNoTracking().ToListAsync())
+            .Should().OnlyContain(c => c.ConsumedAt != null, "the session and every outstanding recovery code are spent");
     }
 
     [Fact]
     public async Task RegisterComplete_StillSucceedsWhenVoidingRecoveryCodesFails()
     {
         var subjectId = await SeedMemberAsync("orphan");
-        GiveRecoverySession(subjectId, "passkey:manage");
+        Authenticate(subjectId);
         _passkeyService
             .Setup(s => s.CompleteRegistrationAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), subjectId, It.IsAny<string?>()))
@@ -620,10 +766,11 @@ public class PasskeyControllerTests : IDisposable
             .Setup(f => f.CreateAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database unavailable"));
         var controller = new PasskeyController(
-            _passkeyService.Object, _totpService.Object, _recoveryCodeService.Object, _jwtService.Object,
+            _passkeyService.Object, _totpService.Object, _trustedDevices.Object, _recoveryCodeService.Object,
+            new RecoverySession(failingContexts.Object, _loginCodes, Options.Create(new OidcOptions()), NullLogger<RecoverySession>.Instance),
             _sessionService.Object, _subjectService.Object, new Mock<IAuthAuditService>().Object,
-            _tenantAccessor.Object, _tenantService.Object, new TenantMemberService(new TenantMembershipRepository(failingContexts.Object)),
-            new SubjectRepository(failingContexts.Object), new TenantRepository(failingContexts.Object), new TenantMembershipRepository(failingContexts.Object),
+            _tenantAccessor.Object, _tenantService.Object, new TenantMemberService(new TenantMembershipRepository(failingContexts.Object, AccountLinkRoutes.Off)),
+            new SubjectRepository(failingContexts.Object, AccountLinkRoutes.Off), new TenantRepository(failingContexts.Object), new TenantMembershipRepository(failingContexts.Object, AccountLinkRoutes.Off),
             failingContexts.Object, Options.Create(new OidcOptions()), new Mock<ILogger<PasskeyController>>().Object)
         {
             ControllerContext = _controller.ControllerContext,
@@ -761,6 +908,135 @@ public class PasskeyControllerTests : IDisposable
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.IsType<PasskeyRegistrationResponse>(ok.Value).Success.Should().BeTrue();
         inviteService.Verify(s => s.AcceptInviteAsync("invite-token", inviteeId, _tenantId), Times.Once);
+        _subjectService.Verify(s => s.UpdateLastLoginAsync(inviteeId), Times.Once);
+    }
+
+    [Fact]
+    public async Task InviteComplete_WhenTheInviteIsRefused_RemovesThePasskeyAndIssuesNoSession()
+    {
+        var inviteeId = await SeedEnrollingSubjectAsync("invitee");
+        var inviteService = StubValidInvite();
+        inviteService.Setup(s => s.AcceptInviteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .ReturnsAsync(new AcceptMemberInviteResult(false, "invite_exhausted", "This invite has no uses left."));
+        var credentialId = StubRegistrationChallengeMintedFor(inviteeId);
+
+        var result = await _controller.InviteComplete(
+            new InviteCompleteRequest
+            {
+                Token = "invite-token",
+                Username = "invitee",
+                AttestationResponseJson = "{}",
+                ChallengeToken = "challenge-for-invitee",
+            },
+            inviteService.Object);
+
+        Assert.Equal(400, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+        _passkeyService.Verify(
+            s => s.RemoveCredentialAsync(credentialId, inviteeId, _tenantId), Times.Once,
+            "a refused invite joins no one, so the passkey must not outlive it");
+        _sessionService.Verify(
+            s => s.IssueSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task TenantInviteComplete_RecordsTheSignInTime()
+    {
+        var newOwnerId = await SeedEnrollingSubjectAsync("founder");
+        StubRegistrationChallengeMintedFor(newOwnerId);
+        var inviteId = Guid.CreateVersion7();
+        _tenantService.Setup(s => s.ValidateSlugAsync("founder-site", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SlugValidationResult(true));
+        var tenantInvites = new Mock<ITenantCreationInviteService>();
+        tenantInvites.Setup(s => s.ClaimAsync("tenant-invite-token", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantInviteOutcome<Guid>.Ok(inviteId));
+        tenantInvites
+            .Setup(s => s.CreateTenantAsync(
+                inviteId, "founder-site", "Founder", newOwnerId, "founder", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantInviteOutcome<TenantCreationInviteRedeemed>.Ok(
+                new TenantCreationInviteRedeemed(Guid.CreateVersion7(), "founder-site", "Founder", "https://founder-site.example")));
+        _sessionService
+            .Setup(s => s.IssueSessionAsync(newOwnerId, It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionTokenPair("access", "refresh", 900, newOwnerId));
+
+        var result = await _controller.TenantInviteComplete(
+            new TenantInviteCompleteRequest
+            {
+                Token = "tenant-invite-token",
+                Slug = "founder-site",
+                SiteName = "Founder",
+                Username = "founder",
+                AttestationResponseJson = "{}",
+                ChallengeToken = "challenge-for-founder",
+            },
+            tenantInvites.Object);
+
+        result.Should().BeOfType<OkObjectResult>();
+        _subjectService.Verify(s => s.UpdateLastLoginAsync(newOwnerId), Times.Once);
+    }
+
+    [Fact]
+    public async Task InviteComplete_WhenTheSignInTimeCannotBeRecorded_IssuesNoSessionAndSetsNoCookie()
+    {
+        var inviteeId = await SeedEnrollingSubjectAsync("invitee");
+        var inviteService = StubValidInvite();
+        StubRegistrationChallengeMintedFor(inviteeId);
+        _subjectService.Setup(s => s.UpdateLastLoginAsync(inviteeId))
+            .ThrowsAsync(new DbUpdateException("the update failed"));
+
+        var result = await _controller.InviteComplete(
+            new InviteCompleteRequest
+            {
+                Token = "invite-token",
+                Username = "invitee",
+                AttestationResponseJson = "{}",
+                ChallengeToken = "challenge-for-invitee",
+            },
+            inviteService.Object);
+
+        Assert.Equal(400, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+        _sessionService.Verify(
+            s => s.IssueSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _controller.HttpContext.Response.Headers.SetCookie.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TenantInviteComplete_WhenTheSignInTimeCannotBeRecorded_IssuesNoSessionAndSetsNoCookie()
+    {
+        var newOwnerId = await SeedEnrollingSubjectAsync("founder");
+        StubRegistrationChallengeMintedFor(newOwnerId);
+        var inviteId = Guid.CreateVersion7();
+        _tenantService.Setup(s => s.ValidateSlugAsync("founder-site", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SlugValidationResult(true));
+        var tenantInvites = new Mock<ITenantCreationInviteService>();
+        tenantInvites.Setup(s => s.ClaimAsync("tenant-invite-token", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantInviteOutcome<Guid>.Ok(inviteId));
+        tenantInvites
+            .Setup(s => s.CreateTenantAsync(
+                inviteId, "founder-site", "Founder", newOwnerId, "founder", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantInviteOutcome<TenantCreationInviteRedeemed>.Ok(
+                new TenantCreationInviteRedeemed(Guid.CreateVersion7(), "founder-site", "Founder", "https://founder-site.example")));
+        _subjectService.Setup(s => s.UpdateLastLoginAsync(newOwnerId))
+            .ThrowsAsync(new DbUpdateException("the update failed"));
+
+        var complete = () => _controller.TenantInviteComplete(
+            new TenantInviteCompleteRequest
+            {
+                Token = "tenant-invite-token",
+                Slug = "founder-site",
+                SiteName = "Founder",
+                Username = "founder",
+                AttestationResponseJson = "{}",
+                ChallengeToken = "challenge-for-founder",
+            },
+            tenantInvites.Object);
+
+        await complete.Should().ThrowAsync<DbUpdateException>();
+        _sessionService.Verify(
+            s => s.IssueSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _controller.HttpContext.Response.Headers.SetCookie.Should().BeEmpty();
     }
 
     [Fact]
@@ -951,7 +1227,7 @@ public class PasskeyControllerTests : IDisposable
             .Success.Should().BeTrue();
 
         (await _dbContext.Subjects.AsNoTracking().SingleAsync(s => s.Id == requestorId)).IsActive.Should().BeTrue();
-        (await new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory()))
+        (await new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off))
             .IsMemberAsync(requestorId, _tenantId)).Should().BeTrue();
     }
 
@@ -978,7 +1254,7 @@ public class PasskeyControllerTests : IDisposable
         var owner = await SeedOwnerAsync("owner");
         var ownerRole = (await _dbContext.TenantMemberRoles.AsNoTracking().FirstAsync()).TenantRoleId;
         var requestorId = await RequestAccessAsync("Sam Smith", "I am the school nurse");
-        var members = new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory()));
+        var members = new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off));
         (await members.IsMemberAsync(requestorId, _tenantId)).Should().BeFalse();
 
         var request = (await MembershipRequests().GetPendingRequestsAsync(_tenantId)).Should().ContainSingle().Which;
@@ -1255,8 +1531,8 @@ public class PasskeyControllerTests : IDisposable
         (await MembershipRequests().GetPendingRequestsAsync(otherTenant)).Should().BeEmpty();
 
         var adminList = new AccessRequestController(
-            new TenantMembershipRepository(_dbContext.AsFactory()),
-            new SubjectRepository(_dbContext.AsFactory()),
+            new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off),
+            new SubjectRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off),
             _subjectService.Object,
             new Mock<IAccessRequestService>().Object,
             _tenantAccessor.Object,
@@ -1430,14 +1706,14 @@ public class PasskeyControllerTests : IDisposable
         var contexts = new SharedSqliteFactory(_db.Options).AsNocturneFactory();
         return new MembershipRequestService(
             new TenantRepository(contexts),
-            new TenantMembershipRepository(contexts),
-            new SubjectRepository(contexts),
+            new TenantMembershipRepository(contexts, AccountLinkRoutes.Off),
+            new SubjectRepository(contexts, AccountLinkRoutes.Off),
             contexts,
-            new TenantRoleService(new TenantMembershipRepository(contexts), TimeProvider.System),
+            new TenantRoleService(new TenantMembershipRepository(contexts, AccountLinkRoutes.Off), TimeProvider.System),
             _notifications.Object,
             _requestAudit.Object,
             TimeProvider.System,
-            NullLogger<MembershipRequestService>.Instance);
+            NullLogger<MembershipRequestService>.Instance, AccountLinkRoutes.Off);
     }
 
     private sealed class SettableTenantAccessor : ITenantAccessor
@@ -1551,7 +1827,9 @@ public class PasskeyControllerTests : IDisposable
     {
         var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
         StubSuccessfulAssertion(subjectId, "rhys");
-        _totpService.Setup(s => s.GetCredentialCountAsync(subjectId)).ReturnsAsync(1);
+        _totpService
+            .Setup(s => s.GetSecondFactorRequirementAsync(subjectId, It.IsAny<string?>()))
+            .ReturnsAsync(SecondFactorRequirement.CodeRequired);
         _totpService.Setup(s => s.CreateStepUpTokenAsync(subjectId, _tenantId, false)).ReturnsAsync("step-up-token");
 
         var result = await LoginCompleteAsync();
@@ -1576,7 +1854,9 @@ public class PasskeyControllerTests : IDisposable
     {
         var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
         StubSuccessfulAssertion(subjectId, "rhys");
-        _totpService.Setup(s => s.GetCredentialCountAsync(subjectId)).ReturnsAsync(0);
+        _totpService
+            .Setup(s => s.GetSecondFactorRequirementAsync(subjectId, It.IsAny<string?>()))
+            .ReturnsAsync(SecondFactorRequirement.NotEnrolled);
         _sessionService
             .Setup(s => s.IssueSessionAsync(subjectId, It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionTokenPair("access", "refresh", 900, subjectId));
@@ -1593,7 +1873,124 @@ public class PasskeyControllerTests : IDisposable
         _totpService.Verify(s => s.CreateStepUpTokenAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<bool>()), Times.Never);
     }
 
+    [Fact]
+    public async Task LoginComplete_WhenItIssuesTheSession_RecordsTheSignInTime()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        StubSuccessfulAssertion(subjectId, "rhys");
+        _sessionService
+            .Setup(s => s.IssueSessionAsync(subjectId, It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionTokenPair("access", "refresh", 900, subjectId));
+
+        await LoginCompleteAsync();
+
+        _subjectService.Verify(s => s.UpdateLastLoginAsync(subjectId), Times.Once);
+    }
+
+    [Fact]
+    public async Task LoginComplete_WhenACodeIsStillRequired_LeavesTheSignInTimeAlone()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        StubSuccessfulAssertion(subjectId, "rhys");
+        _totpService
+            .Setup(s => s.GetSecondFactorRequirementAsync(subjectId, It.IsAny<string?>()))
+            .ReturnsAsync(SecondFactorRequirement.CodeRequired);
+        _totpService.Setup(s => s.CreateStepUpTokenAsync(subjectId, _tenantId, false)).ReturnsAsync("step-up-token");
+
+        await LoginCompleteAsync();
+
+        _subjectService.Verify(
+            s => s.UpdateLastLoginAsync(It.IsAny<Guid>()), Times.Never,
+            "the sign-in completes at the code step, which records the time itself");
+    }
+
+    [Fact]
+    public async Task LoginComplete_FromATrustedDevice_IssuesTheSessionWithoutACode()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        StubSuccessfulAssertion(subjectId, "rhys");
+        _controller.HttpContext.Request.Headers.Cookie =
+            $"{SessionCookieExtensions.TrustedDeviceCookieName}=device-token";
+        _totpService
+            .Setup(s => s.GetSecondFactorRequirementAsync(subjectId, "device-token"))
+            .ReturnsAsync(SecondFactorRequirement.SatisfiedByTrustedDevice);
+        _sessionService
+            .Setup(s => s.IssueSessionAsync(subjectId, It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionTokenPair("access", "refresh", 900, subjectId));
+
+        var result = await LoginCompleteAsync();
+
+        var response = Assert.IsType<PasskeyLoginCompleteResponse>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        response.TotpRequired.Should().BeFalse();
+        response.AccessToken.Should().Be("access");
+        _totpService.Verify(s => s.CreateStepUpTokenAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LoginComplete_ChecksTheDeviceCookieAgainstTheSubjectThePasskeyNamed()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        StubSuccessfulAssertion(subjectId, "rhys");
+        _controller.HttpContext.Request.Headers.Cookie =
+            $"{SessionCookieExtensions.TrustedDeviceCookieName}=device-token";
+        _sessionService
+            .Setup(s => s.IssueSessionAsync(subjectId, It.IsAny<SessionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionTokenPair("access", "refresh", 900, subjectId));
+
+        await LoginCompleteAsync();
+
+        _totpService.Verify(
+            s => s.GetSecondFactorRequirementAsync(subjectId, "device-token"),
+            Times.Once,
+            "the cookie is checked against the subject the assertion verified, never one the cookie names");
+    }
+
     #endregion
+
+    [Fact]
+    public async Task RecoveryVerify_WithAValidCode_EndsTheTrustOfEveryDevice()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        _recoveryCodeService.Setup(s => s.VerifyAndConsumeAsync(subjectId, "ABCD-1234")).ReturnsAsync(true);
+
+        var result = await _controller.RecoveryVerify(
+            new RecoveryVerifyRequest { Username = "rhys", Code = "ABCD-1234" });
+
+        result.Result.Should().BeOfType<OkObjectResult>();
+        _trustedDevices.Verify(t => t.RevokeAllAsync(subjectId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RecoveryVerify_RecordsAnUnfinishedSignInRatherThanALogin()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        _recoveryCodeService.Setup(s => s.VerifyAndConsumeAsync(subjectId, "ABCD-1234")).ReturnsAsync(true);
+
+        await _controller.RecoveryVerify(new RecoveryVerifyRequest { Username = "rhys", Code = "ABCD-1234" });
+
+        _auditService.Verify(a => a.LogAsync(
+            AuthAuditEventType.Login, subjectId, true,
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<Guid?>(), It.IsAny<AuthAuditActor?>(), It.IsAny<Guid?>()), Times.Never,
+            "the recovery session enrols a passkey and signs no one in");
+        _auditService.Verify(a => a.LogAsync(
+            AuthAuditEventType.Login, subjectId, false,
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.Is<string?>(d => d != null && d.Contains("\"method\":\"recovery_code\"") && d.Contains("\"passkeyEnrolmentPending\":true")),
+            It.IsAny<Guid?>(), It.IsAny<AuthAuditActor?>(), It.IsAny<Guid?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RecoveryVerify_WithARejectedCode_LeavesTrustedDevicesAlone()
+    {
+        var subjectId = await SeedMemberAsync("rhys", withPasskey: true);
+        _recoveryCodeService.Setup(s => s.VerifyAndConsumeAsync(subjectId, "WRONG")).ReturnsAsync(false);
+
+        await _controller.RecoveryVerify(new RecoveryVerifyRequest { Username = "rhys", Code = "WRONG" });
+
+        _trustedDevices.Verify(t => t.RevokeAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 
     [Fact]
     public async Task RecoveryVerify_EmptyFields_ReturnsBadRequest()
@@ -1663,6 +2060,25 @@ public class PasskeyControllerTests : IDisposable
 
     #region Auth Status Endpoints
 
+    private static IAccountLinkDelivery Delivery(bool configured)
+    {
+        var delivery = new Mock<IAccountLinkDelivery>();
+        delivery.SetupGet(d => d.IsConfigured).Returns(configured);
+        return delivery.Object;
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetAuthStatus_OffersRecoveryByEmailExactlyWhenADeliveryRouteIsConfigured(bool configured)
+    {
+        await EnsureTenantAsync(_tenantId);
+
+        var result = await _controller.GetAuthStatus(Delivery(configured));
+
+        ((AuthStatusResponse)Assert.IsType<OkObjectResult>(result).Value!).EmailRecoveryOffered.Should().Be(configured);
+    }
+
     [Fact]
     public async Task GetAuthStatus_NoCredentials_ReturnsSetupRequired()
     {
@@ -1676,7 +2092,7 @@ public class PasskeyControllerTests : IDisposable
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var result = await _controller.GetAuthStatus();
+        var result = await _controller.GetAuthStatus(Delivery(configured: false));
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -1727,12 +2143,46 @@ public class PasskeyControllerTests : IDisposable
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var result = await _controller.GetAuthStatus();
+        var result = await _controller.GetAuthStatus(Delivery(configured: false));
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AuthStatusResponse>(okResult.Value);
         response.SetupRequired.Should().BeTrue();
+    }
+
+    private async Task SeedMemberAsync(string name, bool signsIn, params string[] permissions)
+    {
+        var subjectId = Guid.CreateVersion7();
+        _dbContext.Subjects.Add(new SubjectEntity { Id = subjectId, Name = name, IsActive = true });
+        if (signsIn)
+        {
+            _dbContext.PasskeyCredentials.Add(new PasskeyCredentialEntity
+            {
+                Id = Guid.CreateVersion7(), SubjectId = subjectId, CredentialId = subjectId.ToByteArray(), PublicKey = [1],
+            });
+        }
+        _dbContext.TenantMembers.Add(new TenantMemberEntity
+        {
+            Id = Guid.CreateVersion7(), TenantId = _tenantId, SubjectId = subjectId, DirectPermissions = [.. permissions],
+        });
+        await _dbContext.SaveChangesAsync();
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task GetAuthStatus_ReportsRecoveryModeOnlyWhenNoMemberAdministratorCanSignIn(bool administratorSignsIn, bool recoveryMode)
+    {
+        await EnsureTenantAsync(_tenantId);
+        await SeedMemberAsync("Owner", administratorSignsIn, Scope.FullAccess);
+        await SeedMemberAsync("Follower", !administratorSignsIn, Scope.GlucoseRead);
+
+        var result = await _controller.GetAuthStatus(Delivery(configured: false));
+
+        var response = Assert.IsType<AuthStatusResponse>(Assert.IsType<OkObjectResult>(result).Value);
+        response.SetupRequired.Should().BeFalse();
+        response.RecoveryMode.Should().Be(recoveryMode);
     }
 
     #endregion

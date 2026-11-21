@@ -67,6 +67,64 @@ describe("AlertCard button values", () => {
   });
 });
 
+describe("AlertCard for a rule that cannot run", () => {
+  const notice = {
+    ...payload,
+    kind: "unevaluable",
+    glucoseValue: null,
+    trend: null,
+    trendRate: null,
+    severity: "critical",
+  } as AlertPayload;
+
+  it("names the rule, says it cannot run, and shows no reading or action", () => {
+    const card = AlertCard({ payload: notice });
+
+    expect(cardTitle(card)).toBe("CRITICAL: Urgent low");
+    expect(cardTexts(card)).toEqual([
+      "This rule cannot run as set, so it sends no alerts. Edit its conditions and save it.",
+    ]);
+    expect(cardFields(card)).toHaveLength(0);
+    expect(cardButtons(card)).toHaveLength(0);
+  });
+});
+
+describe("AlertCard with no glucose reading", () => {
+  const signalLoss = {
+    ...payload,
+    alertType: "signal_loss",
+    ruleName: "Signal loss",
+    glucoseValue: null,
+    trend: null,
+    trendRate: null,
+  } as AlertPayload;
+
+  it("says the same for a staleness alert", () => {
+    const card = AlertCard({ payload: { ...signalLoss, alertType: "staleness" } });
+
+    expect(cardTexts(card)).toContain("There is no glucose reading for Alex.");
+  });
+
+  it("does not say there is no reading for another kind that has no value", () => {
+    const card = AlertCard({
+      payload: { ...signalLoss, alertType: "threshold", subjectName: "Test fire" },
+    });
+
+    expect(cardTexts(card).join(" ")).not.toContain("no glucose reading");
+    expect(cardTexts(card)).toContain("Test fire is N/A ");
+    expect(cardFields(card).some((f) => f.startsWith("Time: "))).toBe(true);
+  });
+
+  it("says there is no reading and shows no reading time, and can still be acknowledged", () => {
+    const card = AlertCard({ payload: signalLoss });
+
+    expect(cardTexts(card)).toContain("There is no glucose reading for Alex.");
+    expect(cardTexts(card).join(" ")).not.toMatch(/N\/A|Alex is/);
+    expect(cardFields(card)).toHaveLength(0);
+    expect(cardButtons(card).map((b) => b.id)).toEqual(["ack_alert"]);
+  });
+});
+
 describe("AcknowledgedCard", () => {
   it("states the outcome and offers no action", () => {
     const card = AcknowledgedCard({ detail: "By Sam Tester." });

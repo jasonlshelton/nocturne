@@ -90,6 +90,25 @@ public sealed record RustAlertRule
     /// <summary>A full ConditionNode object (<c>{"type": …, …}</c>), or null.</summary>
     [JsonPropertyName("auto_resolve_params")]
     public JsonElement? AutoResolveParams { get; init; }
+
+    /// <summary>
+    /// What an unknown root means to the tracker: <c>hold</c>, <c>met</c> or <c>not_met</c>
+    /// (docs/alerts/engine-semantics.md §6.4). Any other word is an envelope error.
+    /// </summary>
+    [JsonPropertyName("on_unknown")]
+    public string OnUnknown { get; init; } = "hold";
+
+    /// <summary>
+    /// How many minutes old a reading may be before the rule's reading-driven leaves read it
+    /// unknown (docs/alerts/engine-semantics.md §3); null is the engine's default. A value outside
+    /// 1 to 1440 is an envelope error.
+    /// </summary>
+    [JsonPropertyName("glucose_freshness_minutes")]
+    public int? GlucoseFreshnessMinutes { get; init; }
+
+    /// <summary>When the rule was last enabled (docs/alerts/engine-semantics.md §3).</summary>
+    [JsonPropertyName("enabled_at")]
+    public DateTime? EnabledAt { get; init; }
 }
 
 /// <summary>
@@ -211,8 +230,17 @@ public sealed record RustRuleResult
     /// <summary>The rule was skipped; the wire carries <c>skipped</c> only when true.</summary>
     public bool Skipped { get; init; }
 
-    /// <summary>Root condition truth; present on every result that was not skipped.</summary>
+    /// <summary>
+    /// Root condition truth; present on every result that was not skipped, and false when
+    /// <see cref="Unknown"/>.
+    /// </summary>
     public bool? Root { get; init; }
+
+    /// <summary>
+    /// The root is unknown (docs/alerts/engine-semantics.md §2.4); the wire carries it only when
+    /// true.
+    /// </summary>
+    public bool Unknown { get; init; }
 
     /// <summary>
     /// Per-leaf force-eval truths, ascending by leaf id; present on every result that was not
@@ -234,7 +262,29 @@ public sealed record RustRuleResult
     /// <summary>Sustained-timer mutations performed during the call, in execution order; omitted when none.</summary>
     [JsonPropertyName("timer_ops")]
     public List<RustTimerOp>? TimerOps { get; init; }
+
+    /// <summary>
+    /// When an evaluation from the returned state can next differ with only the clock moving
+    /// (docs/alerts/engine-semantics.md §5.3); omitted when none can.
+    /// </summary>
+    [JsonPropertyName("next_change_at")]
+    public DateTime? NextChangeAt { get; init; }
+
+    /// <summary>
+    /// The anchors the evaluation read more than 5 minutes ahead of <c>now</c>
+    /// (docs/alerts/engine-semantics.md §5.4); omitted when none was.
+    /// </summary>
+    [JsonPropertyName("clock_anomaly")]
+    public List<RustClockAnomaly>? ClockAnomaly { get; init; }
 }
+
+/// <summary>
+/// One anchor read beyond the clock tolerance: the context field or state that held it, and how
+/// far ahead of <c>now</c> it was in whole milliseconds.
+/// </summary>
+public sealed record RustClockAnomaly(
+    [property: JsonPropertyName("fact"), JsonRequired] string Fact,
+    [property: JsonPropertyName("ahead_ms"), JsonRequired] long AheadMs);
 
 /// <summary>Tracker transition wire values in <see cref="RustRuleResult.Transition"/>.</summary>
 [JsonConverter(typeof(StrictStringEnumConverter<RustTransition>))]
@@ -265,10 +315,14 @@ public enum RustCloseReason
 public sealed class StrictStringEnumConverter<TEnum>() : JsonStringEnumConverter<TEnum>(null, allowIntegerValues: false)
     where TEnum : struct, Enum;
 
-/// <summary>One per-leaf force-eval truth in <see cref="RustRuleResult.Leaves"/>.</summary>
+/// <summary>
+/// One per-leaf force-eval truth in <see cref="RustRuleResult.Leaves"/>; <see cref="Value"/> is
+/// false when <see cref="Unknown"/>.
+/// </summary>
 public sealed record RustLeafValue(
     [property: JsonPropertyName("leaf_id")] int LeafId,
-    [property: JsonPropertyName("value")] bool Value);
+    [property: JsonPropertyName("value")] bool Value,
+    [property: JsonPropertyName("unknown")] bool Unknown = false);
 
 /// <summary>One sustained-timer mutation; <see cref="At"/> is present exactly on a <see cref="RustTimerOpKind.Set"/>.</summary>
 public sealed record RustTimerOp(
@@ -322,8 +376,11 @@ public sealed record RustEvaluateNodeResponse : IRustResponseEnvelope
     /// <summary>Error message when <see cref="Ok"/> is false.</summary>
     public string? Error { get; init; }
 
-    /// <summary>The node's truth; present on every successful response.</summary>
+    /// <summary>The node's truth; present on every successful response, and false when <see cref="Unknown"/>.</summary>
     public bool? Value { get; init; }
+
+    /// <summary>The node is unknown; the wire carries it only when true.</summary>
+    public bool Unknown { get; init; }
 
     /// <summary>Post-evaluation timer state to persist for the rule.</summary>
     public Dictionary<string, DateTime>? Timers { get; init; }
@@ -331,6 +388,10 @@ public sealed record RustEvaluateNodeResponse : IRustResponseEnvelope
     /// <summary>Sustained-timer mutations performed during the call, in execution order.</summary>
     [JsonPropertyName("timer_ops")]
     public List<RustTimerOp>? TimerOps { get; init; }
+
+    /// <summary>As <see cref="RustRuleResult.ClockAnomaly"/>; omitted when none.</summary>
+    [JsonPropertyName("clock_anomaly")]
+    public List<RustClockAnomaly>? ClockAnomaly { get; init; }
 }
 
 /// <summary>Response envelope for <c>nocturne_alerts_leaf_paths</c>.</summary>
@@ -484,9 +545,11 @@ public sealed record RustReplayLeaf(
     [property: JsonPropertyName("leaf_id"), JsonRequired] int LeafId,
     [property: JsonPropertyName("points"), JsonRequired] List<RustReplayLeafPoint> Points);
 
+/// <summary>A leaf log point; <see cref="Value"/> is false when <see cref="Unknown"/>.</summary>
 public sealed record RustReplayLeafPoint(
     [property: JsonPropertyName("at_ms"), JsonRequired] long AtMs,
-    [property: JsonPropertyName("value"), JsonRequired] bool Value);
+    [property: JsonPropertyName("value"), JsonRequired] bool Value,
+    [property: JsonPropertyName("unknown")] bool Unknown = false);
 
 public sealed record RustReplayTickOutcome(
     [property: JsonPropertyName("at"), JsonRequired] DateTime At,
@@ -500,14 +563,19 @@ public sealed record RustReplayRuleTick
 
     public bool Skipped { get; init; }
 
+    /// <summary>False when <see cref="Unknown"/>.</summary>
     public bool? Met { get; init; }
+
+    /// <summary>The root is unknown; the wire carries it only when true.</summary>
+    public bool Unknown { get; init; }
 
     public bool? Firing { get; init; }
 }
 
 /// <summary>
-/// Request envelope for <c>nocturne_alerts_references_wall_clock</c>: a stored rule's body and
-/// auto-resolve configuration.
+/// Request envelope for <c>nocturne_alerts_references_wall_clock</c> and
+/// <c>nocturne_alerts_rule_reads</c>: a stored rule's body, auto-resolve configuration and
+/// <c>on_unknown</c>.
 /// </summary>
 public sealed record RustRuleConditionsRequest
 {
@@ -528,6 +596,13 @@ public sealed record RustRuleConditionsRequest
     /// <summary>The auto-resolve tree, a full condition node.</summary>
     [JsonPropertyName("auto_resolve_params")]
     public JsonElement? AutoResolveParams { get; init; }
+
+    /// <summary>
+    /// <c>hold</c>, <c>met</c> or <c>not_met</c>: a rule that reads an unknown root as known is
+    /// wall-clock when its glucose conditions go stale (docs/alerts/engine-semantics.md §5.1).
+    /// </summary>
+    [JsonPropertyName("on_unknown")]
+    public string OnUnknown { get; init; } = "hold";
 }
 
 /// <summary>Response envelope for <c>nocturne_alerts_references_wall_clock</c>.</summary>
@@ -544,6 +619,22 @@ public sealed record RustWallClockResponse : IRustResponseEnvelope
 
     [JsonPropertyName("references_wall_clock")]
     public bool? ReferencesWallClock { get; init; }
+}
+
+/// <summary>Response envelope for <c>nocturne_alerts_rule_reads</c>.</summary>
+public sealed record RustRuleReadsResponse : IRustResponseEnvelope
+{
+    [JsonPropertyName("schema_version"), JsonRequired]
+    public int SchemaVersion { get; init; }
+
+    [JsonRequired]
+    public bool Ok { get; init; }
+
+    /// <summary>Error message when <see cref="Ok"/> is false.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>The context facts the rule reads, by wire name (docs/alerts/engine-semantics.md §5.2).</summary>
+    public List<string>? Reads { get; init; }
 }
 
 /// <summary>Request envelope for <c>nocturne_alerts_describe</c>.</summary>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Nocturne.API.Services.Health;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -1310,7 +1311,8 @@ internal class MigrationJob
         Func<HttpContent, CancellationToken, Task<T>> readBody, CancellationToken ct)
     {
         using var readToken = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        readToken.CancelAfter(httpClient.Timeout); // HttpClient.Timeout stops covering a headers-only send once the headers arrive
+        // Real time on purpose: it carries HttpClient.Timeout past the headers, and HttpClient measures that on the system clock.
+        readToken.CancelAfter(httpClient.Timeout);
         using var response = await SendToSourceAsync(httpClient, url, label, read, readToken.Token, ct);
         try
         {
@@ -1331,7 +1333,7 @@ internal class MigrationJob
         {
             response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, sendToken);
         }
-        catch (Nocturne.Core.Models.Net.OutboundRefusedException ex)
+        catch (Nocturne.Infrastructure.Outbound.OutboundRefusedException ex)
         {
             throw new MigrationSourceException(ex.Message, MigrationFailureCause.Unreachable, ex);
         }
@@ -1385,14 +1387,14 @@ internal class MigrationJob
     /// unreachable host is not tolerated: those defeat every collection, so the run fails here
     /// with the right words.
     /// </remarks>
-    private async Task<long?> FetchCollectionCountAsync(
+    internal async Task<long?> FetchCollectionCountAsync(
         HttpClient httpClient, string collectionName, CancellationToken ct)
     {
         if (!s_countableCollections.TryGetValue(collectionName, out var cursor))
             return 0;
 
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(CountBudget);
+        using var deadline = new CancellationTokenSource(CountBudget, _timeProvider);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
 
         try
         {
@@ -2317,7 +2319,7 @@ internal class MigrationJob
             StartDate = doc.GetValue("startDate", BsonNull.Value) switch
             {
                 { IsString: true } value => value.AsString,
-                { IsValidDateTime: true } value => value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                { IsValidDateTime: true } value => value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture),
                 _ => null,
             },
             Mills = mills,

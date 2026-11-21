@@ -13,12 +13,14 @@ use uuid::Uuid;
 use nocturne_alerts_core::classify::classify;
 use nocturne_alerts_core::context::{SensorContext, check_timestamp};
 use nocturne_alerts_core::engine::{
-    EngineState, Rule, WireRule, evaluate_parsed_rule, format_instant, parse_auto_resolve,
+    EngineState, OnUnknown, Rule, WireRule, evaluate_parsed_rule, format_instant,
+    parse_auto_resolve,
 };
 use nocturne_alerts_core::enums::WireEnum;
 use nocturne_alerts_core::eval::{Env, eval_node};
 use nocturne_alerts_core::excursion::{ExcursionTracker, TrackerState, TrackerStateKind};
 use nocturne_alerts_core::facts::{self, ContextFact, RuleConditions};
+use nocturne_alerts_core::leaf_identity::nodes_with_paths;
 use nocturne_alerts_core::model::{ConditionKind, Container, Node, parse_payload};
 use nocturne_alerts_core::paths::{AUTO_RESOLVE_ROOT, node_child_path};
 use nocturne_alerts_core::sustained::{TimerOp, TimerStore};
@@ -252,12 +254,17 @@ pub(crate) fn evaluate_node(request_json: &str) -> Result<Value, String> {
 
     let mut env = Env::new(req.now, req.rule_id, &req.context, &mut timers);
     let value = eval_node(&node, &root, &mut env);
+    let clock_anomaly = env.clock_anomaly().clone();
     let ops = timers.drain_ops();
-    Ok(ok(json!({
-        "value": value,
-        "timers": timers_json(&timers, req.rule_id),
-        "timer_ops": ops.iter().map(TimerOp::to_json).collect::<Vec<_>>(),
-    })))
+    let mut response = Map::new();
+    value.write(&mut response, "value");
+    clock_anomaly.write(&mut response);
+    response.insert("timers".into(), timers_json(&timers, req.rule_id));
+    response.insert(
+        "timer_ops".into(),
+        ops.iter().map(TimerOp::to_json).collect(),
+    );
+    Ok(ok(Value::Object(response)))
 }
 
 /// A rule body as stored: its root `condition_type` and payload-only
@@ -294,6 +301,9 @@ struct RuleConditionsRequest {
     auto_resolve_enabled: bool,
     #[serde(default)]
     auto_resolve_params: Option<Value>,
+    /// Exactly a word of [`OnUnknown`]; absent is `hold`.
+    #[serde(default)]
+    on_unknown: Option<String>,
 }
 
 impl RuleConditionsRequest {
@@ -301,13 +311,21 @@ impl RuleConditionsRequest {
         read_request(request_json, |r: &Self| r.schema_version)
     }
 
-    fn rule(&self) -> RuleConditions<'_> {
-        RuleConditions {
+    /// # Errors
+    /// `on_unknown` names no word.
+    fn rule(&self) -> Result<RuleConditions<'_>, String> {
+        let on_unknown = match self.on_unknown.as_deref() {
+            None => OnUnknown::Hold,
+            Some(word) => OnUnknown::from_name(word)
+                .ok_or_else(|| format!("unknown on_unknown '{}'", word.escape_default()))?,
+        };
+        Ok(RuleConditions {
             condition_type: &self.condition_type,
             condition_params: &self.condition_params,
             auto_resolve_enabled: self.auto_resolve_enabled,
             auto_resolve_params: self.auto_resolve_params.as_ref(),
-        }
+            on_unknown,
+        })
     }
 }
 
@@ -316,7 +334,7 @@ impl RuleConditionsRequest {
 /// `false`, not an error.
 pub(crate) fn wall_clock(request_json: &str) -> Result<Value, String> {
     let req = RuleConditionsRequest::read(request_json)?;
-    let wall_clock = references_wall_clock(&req.rule());
+    let wall_clock = references_wall_clock(&req.rule()?);
     Ok(ok(json!({ "references_wall_clock": wall_clock })))
 }
 
@@ -324,7 +342,7 @@ pub(crate) fn wall_clock(request_json: &str) -> Result<Value, String> {
 /// An unknown type or unevaluable body reads none, not an error.
 pub(crate) fn rule_reads(request_json: &str) -> Result<Value, String> {
     let req = RuleConditionsRequest::read(request_json)?;
-    let names: Vec<&str> = facts::rule_reads(&req.rule())
+    let names: Vec<&str> = facts::rule_reads(&req.rule()?)
         .into_iter()
         .map(ContextFact::name)
         .collect();
@@ -354,7 +372,7 @@ pub(crate) fn references_any(request_json: &str) -> Result<Value, String> {
                 .ok_or_else(|| format!("unknown fact '{}'", name.escape_default()))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let matched = facts::references_any(&req.rule.rule(), &facts);
+    let matched = facts::references_any(&req.rule.rule()?, &facts);
     Ok(ok(json!({ "references_any": matched })))
 }
 
@@ -381,10 +399,13 @@ pub(crate) fn leaf_paths(input_json: &str) -> Result<Value, String> {
     }
     .map_err(|e| format!("malformed condition node: {e}"))?;
     let root = root_override.unwrap_or_else(|| node.kind().name().to_owned());
-    let mut paths = Vec::new();
-    let mut leaves = Vec::new();
-    walk_paths(&node, root.clone(), &mut paths, &mut leaves);
-    let leaves = leaves.iter().enumerate();
+    let nodes = nodes_with_paths(&node, root.clone());
+    let leaves = nodes
+        .iter()
+        .filter(|(node, _)| node.container().is_none())
+        .map(|(_, path)| path)
+        .enumerate();
+    let paths: Vec<&String> = nodes.iter().map(|(_, path)| path).collect();
     Ok(ok(json!({
         "root": root,
         "paths": paths,
@@ -392,19 +413,6 @@ pub(crate) fn leaf_paths(input_json: &str) -> Result<Value, String> {
             .map(|(leaf_id, path)| json!({ "leaf_id": leaf_id, "path": path }))
             .collect::<Vec<_>>(),
     })))
-}
-
-/// Pre-order; leaves are pushed in leaf-id order.
-fn walk_paths(node: &Node, path: String, paths: &mut Vec<String>, leaves: &mut Vec<String>) {
-    paths.push(path.clone());
-    match node.container() {
-        Some(container) => {
-            for (i, child) in container.children().enumerate() {
-                walk_paths(child, node_child_path(&path, i, child), paths, leaves);
-            }
-        }
-        None => leaves.push(path),
-    }
 }
 
 /// [`RuleBodyRequest`] plus, optionally, an auto-resolve tree to describe.

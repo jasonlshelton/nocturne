@@ -1,13 +1,11 @@
-using System.Data.Common;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Repositories;
@@ -42,6 +40,7 @@ public class MembershipRequestService : IMembershipRequestService
     private readonly IAuthAuditService _audit;
     private readonly TimeProvider _time;
     private readonly ILogger<MembershipRequestService> _logger;
+    private readonly IAccountLinkRoute _linkRoute;
 
     public MembershipRequestService(
         ITenantRepository tenants,
@@ -52,7 +51,8 @@ public class MembershipRequestService : IMembershipRequestService
         IInAppNotificationService notificationService,
         IAuthAuditService audit,
         TimeProvider timeProvider,
-        ILogger<MembershipRequestService> logger)
+        ILogger<MembershipRequestService> logger,
+        IAccountLinkRoute linkRoute)
     {
         _tenants = tenants ?? throw new ArgumentNullException(nameof(tenants));
         _members = members ?? throw new ArgumentNullException(nameof(members));
@@ -63,6 +63,7 @@ public class MembershipRequestService : IMembershipRequestService
         _audit = audit;
         _time = timeProvider;
         _logger = logger;
+        _linkRoute = linkRoute;
     }
 
     /// <inheritdoc />
@@ -153,8 +154,8 @@ public class MembershipRequestService : IMembershipRequestService
         var activated = false;
         await using (var unit = await DbUnitOfWork.OpenForTenantAsync(_contexts, tenantId, ct))
         {
-            var members = new TenantMembershipRepository(unit);
-            var subjects = new SubjectRepository(unit, _time);
+            var members = new TenantMembershipRepository(unit, _linkRoute);
+            var subjects = new SubjectRepository(unit, _linkRoute, _time);
             try
             {
                 refusal = await unit.CommitAsync<DecideMembershipRequestResult?>(async token =>
@@ -233,8 +234,8 @@ public class MembershipRequestService : IMembershipRequestService
         var denied = false;
         await using (var unit = await DbUnitOfWork.OpenForTenantAsync(_contexts, tenantId, ct))
         {
-            var members = new TenantMembershipRepository(unit);
-            var subjects = new SubjectRepository(unit, _time);
+            var members = new TenantMembershipRepository(unit, _linkRoute);
+            var subjects = new SubjectRepository(unit, _linkRoute, _time);
             decided = await unit.CommitAsync(async token =>
             {
                 denied = false;
@@ -319,15 +320,7 @@ public class MembershipRequestService : IMembershipRequestService
                     cancellationToken: CancellationToken.None);
             }
         }
-        catch (DbUpdateException ex)
-        {
-            LogDecidersNotTold(ex, tenantId, requestId);
-        }
-        catch (DbException ex)
-        {
-            LogDecidersNotTold(ex, tenantId, requestId);
-        }
-        catch (RetryLimitExceededException ex)
+        catch (Exception ex) when (StoreFailure.Is(ex))
         {
             LogDecidersNotTold(ex, tenantId, requestId);
         }

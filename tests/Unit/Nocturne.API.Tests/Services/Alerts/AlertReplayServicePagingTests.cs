@@ -90,7 +90,7 @@ public class AlertReplayServicePagingTests
             new Mock<Nocturne.Core.Contracts.Profiles.Resolvers.IProfileActivationResolver>().Object,
             new Mock<Nocturne.Core.Contracts.Profiles.Resolvers.ITherapySettingsResolver>().Object,
             new Mock<Nocturne.Core.Contracts.Sleep.ISleepService>().Object,
-            new Mock<Nocturne.Infrastructure.Data.Abstractions.ITrackerRepository>().Object,
+            new Mock<Nocturne.Core.Contracts.Repositories.ITrackerRepository>().Object,
             _reservoirEstimation.Object,
             Options.Create(new AlertEvaluationOptions()));
         var enricher = new SensorContextEnricher(
@@ -180,6 +180,7 @@ public class AlertReplayServicePagingTests
             Id = new Guid((uint)Interlocked.Increment(ref _idCounter), 0, 0,
                 0, 0, 0, 0, 0, 0, 0, 0),
             Timestamp = at,
+            CreatedAt = at,
             Mgdl = mgdl,
             PatientDeviceId = patientDeviceId,
             DataSource = dataSource,

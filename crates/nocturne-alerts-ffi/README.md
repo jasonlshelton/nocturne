@@ -5,7 +5,8 @@ alert evaluation engine exposed as JSON-in/JSON-out functions for non-Rust
 hosts. The .NET bindings live in `src/Core/Nocturne.Core.Alerts.Native/`
 (`AlertsInterop` + `RustAlertEngine`); the Kotlin bindings (Prelude, Android)
 are generated with UniFFI behind the optional `uniffi` cargo feature (see
-["Kotlin (UniFFI)"](#kotlin-uniffi)) and consume the same contract.
+["Kotlin (UniFFI)"](#kotlin-uniffi)), as are the Swift bindings for iOS hosts
+(see ["Swift (UniFFI)"](#swift-uniffi)); all consume the same contract.
 
 ```bash
 # from crates/
@@ -21,6 +22,7 @@ The crate builds a `cdylib` and a `staticlib`, library name `nocturne_alerts`.
 ```c
 char* nocturne_alerts_version(void);
 char* nocturne_alerts_tzdb_version(void);
+int64_t nocturne_alerts_clock_tolerance_ms(void);
 char* nocturne_alerts_evaluate(const char* request_json);
 char* nocturne_alerts_evaluate_node(const char* request_json);
 char* nocturne_alerts_leaf_paths(const char* condition_node_json);
@@ -42,8 +44,11 @@ void  nocturne_alerts_free_string(char* ptr);
   once (null is a no-op).
 - `nocturne_alerts_version` returns the crate version (e.g. `0.1.0`) and
   `nocturne_alerts_tzdb_version` the IANA time zone database release compiled
-  in (e.g. `2025b`), both plain strings, not JSON. Everything else returns a
-  JSON envelope.
+  in (e.g. `2025b`), both plain strings, not JSON.
+  `nocturne_alerts_clock_tolerance_ms` returns how far ahead of `now` an anchor
+  may be and still read as `now` (`docs/alerts/engine-semantics.md` §5.4), a
+  plain integer that is not freed. A host selects the newest reading for an
+  alert context by it. Everything else returns a JSON envelope.
 - The library never panics across the boundary and never crashes on bad
   input: panics, null pointers, invalid UTF-8 and malformed JSON all come
   back as the error envelope:
@@ -82,7 +87,9 @@ preserves sub-second precision when present.
     "confirmation_readings": 1,             // default 1
     "hysteresis_minutes": 0,                // default 0
     "auto_resolve_enabled": false,          // default false
-    "auto_resolve_params": { "type": "…" }  // full ConditionNode or null
+    "auto_resolve_params": { "type": "…" }, // full ConditionNode or null
+    "on_unknown": "hold",                   // hold|met|not_met; default hold; any other word is an envelope error
+    "glucose_freshness_minutes": 11         // a whole number from 1 to 1440; absent or null is 11 (semantics §3); any other value is an envelope error
   },
   "context": { /* ScenarioContext corpus shape */ },
   "now": "2026-01-05T12:00:00Z",            // the evaluation instant
@@ -117,10 +124,12 @@ Unknown fields (e.g. the scenario `name`) are ignored, so a corpus
   "schema_version": 1,
   "ok": true,
   "result": { /* ExpectedRuleResult corpus shape:
-                 rule_id, skipped?, root, leaves[], transition, close_reason?,
+                 rule_id, skipped?, root, unknown?, leaves[{leaf_id, value,
+                 unknown?}], transition, close_reason?,
                  tracker {state, confirmation_count, excursion?,
                           hysteresis_started_at?, awaiting_rearm?},
-                 auto_resolved?, timer_ops[] */ },
+                 auto_resolved?, timer_ops[], next_change_at?,
+                 clock_anomaly? */ },
   "timers": { "sustained": "2026-01-05T12:00:00Z" },  // full post-state; persist verbatim
   "tracker": {                                        // full post-state; persist verbatim
     "state": "active",
@@ -134,8 +143,17 @@ Unknown fields (e.g. the scenario `name`) are ignored, so a corpus
 }
 ```
 
+A root or leaf that is unknown (`docs/alerts/engine-semantics.md` §2.4) reads
+`false` with `"unknown": true` beside it; the flag is absent otherwise, so a
+reader that ignores it sees a two-valued result. The rule's `on_unknown` decides
+what an unknown root does to the tracker (§6.4): under `hold` the tracker is not
+advanced, `transition` is `none` unless a hysteresis window has elapsed, and the
+returned `tracker` is the one sent (with no per-rule state for a rule never
+evaluated before).
+
 Envelope-level errors (`ok: false`) are reserved for unusable requests: malformed JSON, wrong
-`schema_version`, unknown root `condition_type`, a tracker `state` without
+`schema_version`, unknown root `condition_type`, an `on_unknown` naming no choice, a
+`glucose_freshness_minutes` that is not a whole number from 1 to 1440, a tracker `state` without
 `updated_at`, an instant (`now`, a timer, a tracker or context timestamp)
 before 0001-01-01 or from 10000-01-01 UTC on, and a rule body that cannot be evaluated — malformed anywhere in the tree, or one of the shapes in
 `docs/alerts/engine-semantics.md` §1.4. That last error reads
@@ -145,6 +163,48 @@ tree that cannot be evaluated never resolves and is not an error.
 
 `result.skipped` belongs to the corpus shape; since a body that cannot be
 evaluated is an error envelope, this envelope never sets it.
+
+### Next change
+
+`result.next_change_at` (RFC 3339, on the 100 ns tick grid) is the earliest
+instant strictly after `now` at which an evaluation from the returned `timers`
+and `tracker` can do anything other than repeat this result's `root` and
+`leaves` with no transition but `continues` and no auto-resolve, if the context
+stays as sent and only `now` advances (`docs/alerts/engine-semantics.md` §5.3).
+It is absent when no such instant exists, or when it would fall after
+9999-12-31T23:59:59.9999999Z. It is a lower bound: re-evaluating at
+it may find nothing changed, and a host then reads the next one from that
+evaluation. A host may evaluate a wall-clock rule at this instant in place of a
+periodic timer only while nothing but `now` moves the facts the rule reads
+(§5.1); a write that moves one must evaluate the rule. Additive, so
+`schema_version` stays 1. The tracker entry points do not report it: a rule's
+next change needs its full evaluation.
+
+### Clock anomaly
+
+`result.clock_anomaly` lists every anchor or state instant the evaluation read
+more than 5 minutes ahead of `now`, which the engine reads as not known
+(`docs/alerts/engine-semantics.md` §5.4). It is absent when there is none.
+
+```jsonc
+"clock_anomaly": [
+  { "fact": "last_reading_at", "ahead_ms": 3600000 }  // ClockAnchor order, once each
+]
+```
+
+`fact` is the context field the instant came from (`last_reading_at`,
+`latest_timestamp`, `last_aps_cycle_at`, `last_aps_enacted_at`,
+`last_site_change_at`, `last_sensor_start_at`, `last_carb_at`, `last_bolus_at`,
+`active_alerts`, `active_pump_suspension`, `active_override`,
+`active_do_not_disturb`, `active_pump_state`, `active_state_spans`,
+`active_trackers`), the rule's `enabled_at`, or the evaluation state that held
+it (`sustained` for a timer, `hysteresis_started_at` for the tracker).
+`ahead_ms` is how far ahead of `now` it was, in whole milliseconds, the furthest
+when two instants share a name. Under `hold` such a rule is held, so a host
+tells someone a device clock is ahead while it is reported. A host also selects
+the newest reading for an alert context by the tolerance, so a reading dated
+beyond it never becomes `last_reading_at` (engine-semantics.md §4). Additive,
+so `schema_version` stays 1.
 
 ### State threading
 
@@ -200,13 +260,19 @@ auto-resolve (`root: "auto_resolve"`).
 {
   "schema_version": 1,
   "ok": true,
-  "value": true,                            // the node's truth
+  "value": true,                            // the node's truth; false when unknown
+  "unknown": true,                          // present only when the node is unknown
   "timers": { "snooze": "2026-01-05T12:00:00Z" },  // full post-state; persist verbatim
   "timer_ops": [                            // observable mutations, execution order
     { "op": "set", "path": "snooze", "at": "2026-01-05T12:00:00Z" }
+  ],
+  "clock_anomaly": [                        // present only when an instant was read too far ahead
+    { "fact": "last_reading_at", "ahead_ms": 3600000 }
   ]
 }
 ```
+
+`clock_anomaly` is as in `evaluate` (see Clock anomaly above).
 
 A `node` that cannot be evaluated (`docs/alerts/engine-semantics.md` §1.4,
 with paths under `root`) is an envelope error (`ok: false`) naming every
@@ -293,8 +359,11 @@ Whether a rule must be evaluated on a timer as well as per reading: one of its
 kinds measures elapsed time against an anchor a reading does not move
 (`docs/alerts/engine-semantics.md` §5.1). A host that evaluates only when a
 reading arrives never fires such a rule while readings stop, so it schedules
-these rules on its sweep. The request is the rule body, as for `classify`, plus
-the rule's auto-resolve configuration, both fields optional:
+these rules on its sweep. A rule whose `on_unknown` is `met` or `not_met` is
+wall-clock too when it has a `threshold`, `rate_of_change`, `trend` or
+`glucose_bucket` kind: that leaf turns unknown when its reading goes stale
+(semantics §3). The request is the rule body, as for `classify`, plus the rule's
+auto-resolve configuration and `on_unknown`, all optional:
 
 ```jsonc
 {
@@ -302,7 +371,8 @@ the rule's auto-resolve configuration, both fields optional:
   "condition_type": "composite",
   "condition_params": { "operator": "and", "conditions": [ /* … */ ] },
   "auto_resolve_enabled": true,                     // default false
-  "auto_resolve_params": { "type": "staleness", … } // a full node; default null
+  "auto_resolve_params": { "type": "staleness", … }, // a full node; default null
+  "on_unknown": "hold"                               // hold|met|not_met; default hold
 }
 ```
 
@@ -323,7 +393,8 @@ A rule's kinds are read as evaluation reads them:
 - The auto-resolve tree's kinds count only while `auto_resolve_enabled`, and
   only when the tree is present, not `null` and evaluable.
 
-Only a malformed envelope is the error envelope.
+Only a malformed envelope, or an `on_unknown` naming no choice, is the error
+envelope.
 
 ## Rule reads (`nocturne_alerts_rule_reads`)
 
@@ -510,9 +581,12 @@ the rule has never been evaluated):
   "config": { "hysteresis_minutes": 30 } }
 ```
 
-`auto_resolve_met` is the rule's auto-resolve tree this evaluation, and is read
-only while the tracker awaits re-arm (§6.3): the rule then stays held off when
-both it and `condition_met` are true, and otherwise re-arms and goes on through
+`condition_met` is a known truth: an evaluation whose root the rule holds
+(`on_unknown` `hold`, §6.4) makes no `process` call, only
+`close_elapsed_hysteresis`. `auto_resolve_met` is the rule's auto-resolve tree
+this evaluation, true unless the tree is known false (an unknown tree keeps the
+hold), and is read only while the tracker awaits re-arm (§6.3): the rule then
+stays held off when both it and `condition_met` are true, and otherwise re-arms and goes on through
 the state machine in the same call, so a `condition_met` of true opens (or
 starts confirming) at once. Evaluate the tree at the `auto_resolve` root with
 `nocturne_alerts_evaluate_node` before this call when the stored tracker has
@@ -577,6 +651,9 @@ Request:
 - **Suppression.** `suppressed_rule_ids` names the rules a fire opening on
   that tick is recorded for as `suppressed_by_dnd` instead of `fired` (the
   host resolves Do Not Disturb). The rule fires either way.
+- **Unknown.** A rule's `on_unknown` reads an unknown `met` (§8): under
+  `hold` the rule stays firing or not as it was and keeps its timers; `met`
+  and `not_met` read it as true or false.
 - A rule whose body cannot be evaluated (§1.4), or whose `condition_params`
   is neither an object nor null, is skipped on every tick, not an error.
 
@@ -592,11 +669,11 @@ Response:
   ],
   "leaf_transitions": [                     // evaluation order; absent for a rule never evaluated
     { "rule_id": "…", "leaves": [
-        { "leaf_id": 0, "points": [ { "at_ms": 1767614400000, "value": true } ] } ] }
+        { "leaf_id": 0, "points": [ { "at_ms": 1767614400000, "value": true } ] } ] }  // a point's "unknown": true beside a false value marks an unknown leaf
   ],
   "ticks": [                                // only with include_ticks
     { "at": "2026-01-05T12:00:00Z", "rules": [
-        { "rule_id": "…", "met": true, "firing": true },
+        { "rule_id": "…", "met": true, "firing": true },  // "unknown": true beside a false met marks an unknown root
         { "rule_id": "…", "skipped": true } ] }
   ]
 }
@@ -688,6 +765,82 @@ cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o jniLibs build --release \
 CI must generate the Kotlin bindings from the **same build** (same crate
 revision, same uniffi version) as the `.so` files it packages — the bindings
 checksum the API at load time and refuse a mismatched library.
+
+## Swift (UniFFI)
+
+The same `uniffi` surface generates Swift bindings, so an iOS host (Trio, Loop)
+consumes the engine as a Swift package with the envelope contract of the Kotlin
+section. The functions keep their Kotlin names and shapes, as Swift free
+functions with labelled arguments:
+
+```swift
+func evaluate(requestJson: String) -> String
+func evaluateNode(requestJson: String) -> String
+func replay(requestJson: String) -> String
+func version() -> String
+// ... one per Kotlin function above; the module is `NocturneAlerts`
+```
+
+Thread `timers` and `tracker` from each response into the next request as
+described in "State threading". The package test replays a corpus scenario that
+way.
+
+### Building the package
+
+macOS only (it needs `xcodebuild`, `lipo` and the Apple SDKs). From the repository root:
+
+```bash
+crates/nocturne-alerts-ffi/scripts/build-xcframework.sh
+(cd crates/nocturne-alerts-ffi/swift && swift test)
+```
+
+The script adds the Rust targets, builds the static library with
+`--features uniffi` for iOS (device, and simulator on arm64 and x86_64), macOS
+(arm64 and x86_64), generates the Swift source with the in-crate
+`uniffi-bindgen` in library mode from the macOS arm64 library (the bindings
+depend on the crate revision and features, which every slice shares), and
+assembles `crates/target/swift/NocturneAlertsFFI.xcframework` with
+`xcodebuild -create-xcframework`. It then copies the xcframework and the
+generated `nocturne_alerts.swift` into `swift/`, the package that
+`swift test` builds.
+
+The static library is built with `cargo rustc --crate-type staticlib` for the
+iOS targets, so the cdylib the .NET build packs is not built for
+them. The crate already lists `staticlib` in `crate-type`; the macOS targets use
+a plain `cargo build`, which also yields the `.dylib` the bindings are read from.
+
+The xcframework and the generated Swift are build outputs and are not
+committed. The job `alerts-swift` in `.github/workflows/tests.yml` runs
+the script and `swift test` on macOS when `crates/`, the corpus or the workflow
+changes. It also links the test bundle against the iOS Simulator slice, and
+compiles the package against the iOS device slice without linking it. Nothing
+runs the XCTest in a simulator.
+
+### Adding the package to a host
+
+CI or the host's build runs the script, then depends on the package by path:
+
+```swift
+.package(path: "path/to/crates/nocturne-alerts-ffi/swift")
+```
+
+and adds the `NocturneAlerts` product to its target. The bindings checksum the
+API at load time and refuse a mismatched library, so the Swift source and the
+xcframework must come from the same crate revision and the same uniffi version
+(pinned exactly in this crate's `Cargo.toml`). Do not mix the output of two builds.
+
+### Not supported
+
+- Publishing: there is no released xcframework or hosted Swift package; a host
+  builds it from a checkout.
+- Supported slices: iOS device (arm64), iOS Simulator (arm64 and x86_64) and
+  macOS (arm64 and x86_64). The package declares iOS 15 and macOS 13.
+- watchOS: not built. The pinned toolchain ships a prebuilt standard library
+  for `aarch64-apple-watchos` only, and Apple Watch models before Series 9 and
+  Ultra 2 need `arm64_32-apple-watchos`, which has none (it needs nightly
+  `-Zbuild-std`). A half-supported watch slice is left out.
+- tvOS, visionOS and Mac Catalyst.
+- Linux Swift: the package links the Apple xcframework only.
 
 ## Browser (WebAssembly)
 

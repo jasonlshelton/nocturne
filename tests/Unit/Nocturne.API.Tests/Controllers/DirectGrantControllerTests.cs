@@ -76,7 +76,7 @@ public class DirectGrantControllerTests : IDisposable
                 new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
             new Mock<ILogger<DirectGrantService>>().Object);
 
-        _controller = new DirectGrantController(new SubjectRepository(_dbContext.AsFactory()), directGrantService);
+        _controller = new DirectGrantController(new SubjectRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), directGrantService);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = httpContext,
@@ -252,6 +252,22 @@ public class DirectGrantControllerTests : IDisposable
         });
 
         Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Create_ByATenantSettingsHolder_StoresTheConnectorScopes()
+    {
+        _controller.HttpContext.Items["GrantedScopes"] = new HashSet<string> { Scope.TenantSettings };
+
+        var result = await _controller.Create(new CreateDirectGrantRequest
+        {
+            Label = "Connector repair",
+            Scopes = [Scope.ConnectorsReadWrite, Scope.ConnectorsRead],
+        });
+
+        var response = Assert.IsType<CreateDirectGrantResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var grant = await _dbContext.OAuthGrants.AsNoTracking().SingleAsync(g => g.Id == response.Id);
+        Assert.Equal([Scope.ConnectorsRead, Scope.ConnectorsReadWrite], grant.Scopes.Order(StringComparer.Ordinal));
     }
 
     [Fact]

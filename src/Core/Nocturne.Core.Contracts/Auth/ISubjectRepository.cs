@@ -41,16 +41,30 @@ public interface ISubjectRepository
     Task<SubjectRecord?> FindMemberByUsernameAsync(Guid tenantId, string username, bool activeOnly, CancellationToken ct);
 
     /// <summary>
+    /// The active members of <paramref name="tenantId"/>, neither system nor demo subjects, whose
+    /// confirmed address is <paramref name="email"/> by <see cref="EmailAddresses.AreSame"/>,
+    /// roles not read. One address can sit on several accounts, so there may be more than one.
+    /// </summary>
+    Task<IReadOnlyList<SubjectRecord>> FindMembersByConfirmedEmailAsync(Guid tenantId, string email, CancellationToken ct);
+
+    /// <summary>
     /// The first-run owner candidate: the earliest active subject that is neither a system subject
-    /// nor the demo visitor, roles not read. Setup only runs while no member of the tenant holds a
-    /// credential, so this is the account the owner options step created or reused, and the
-    /// ordering is what lets the options and complete steps resolve the same row.
+    /// nor the demo visitor and holds no passkey and no identity-provider link, roles not read.
+    /// That is normally the account an earlier owner options step created and whose ceremony was abandoned,
+    /// and the ordering is what lets the options and complete steps resolve the same row.
     /// </summary>
     /// <remarks>
     /// Pinned to <paramref name="tenantId"/>: setup runs on the apex host, where the scope has no
     /// tenant, and the flow pins the one it is setting up. <c>subjects</c> is not tenant-scoped, so
     /// the read sees every subject on the instance, the demo visitor included, which is why the
     /// demo exclusion is part of the predicate.
+    /// <para>
+    /// A subject that holds a sign-in factor is someone who can already sign in, and setup makes
+    /// owner only the subject that completes it. An identity-provider sign-in creates a subject for
+    /// a first-time identity whether or not setup is complete, and the factor test keeps that
+    /// subject out. Any link counts, not only one to an enabled provider: a provider enabled again
+    /// signs that identity in again.
+    /// </para>
     /// </remarks>
     Task<SubjectRecord?> FindSetupOwnerCandidateAsync(Guid tenantId, CancellationToken ct);
 
@@ -78,7 +92,11 @@ public interface ISubjectRepository
 
     /// <summary>
     /// The subjects part-way through an anonymous enrolment that <paramref name="match"/> names:
-    /// not a system subject, holding no passkey and no working OIDC identity. Newest first, by id,
+    /// not a system subject, and holding no way to sign in: no passkey, no identity-provider link,
+    /// no authenticator and no unexpired session. An enrolment gives the subject to whoever names
+    /// it, and an invite enrolment signs them in without asking for a code, so a subject holding
+    /// any of these is an account, not an enrolment. Any provider link counts, not only one to an enabled provider,
+    /// for the reason <see cref="FindSetupOwnerCandidateAsync"/> gives. Newest first, by id,
     /// which for UUID v7 ids is creation order. Membership is not consulted here; the caller asks
     /// it per candidate under that subject's own pin.
     /// </summary>
@@ -90,7 +108,7 @@ public interface ISubjectRepository
     /// </summary>
     /// <remarks>
     /// Deactivating an active subject is refused with <see cref="SubjectChange.LastOwnerOf"/> while it
-    /// is the last owner who can sign in of any tenant, since a deactivated owner no longer counts.
+    /// is the last owner of any tenant by <c>TenantOwnerFilter.IsLastOwnerAsync</c>, since a deactivated owner no longer counts.
     /// The check holds the owner lock of each tenant the subject belongs to, in ascending tenant id,
     /// until the change commits. Over a unit, deactivate inside the unit's commit.
     /// </remarks>
@@ -103,6 +121,17 @@ public interface ISubjectRepository
     /// the subject is active.
     /// </summary>
     Task<SubjectRecord?> UpdateProfileAsync(Guid subjectId, SubjectProfile profile, CancellationToken ct);
+
+    /// <summary>
+    /// Confirms the subject's address at <paramref name="now"/> when <paramref name="email"/> is the
+    /// address it holds, compared trimmed and without regard to case. The address the proof was for
+    /// is named, so a proof for an address the account has since left confirms nothing, including
+    /// when the change commits while this call runs: it is one statement conditional on the stored
+    /// address. An address already confirmed keeps its first time. Besides a provider's verified
+    /// assertion at creation or sign-in (<see cref="NewSubject.EmailConfirmedAt"/>,
+    /// <see cref="SubjectEdit.EmailConfirmedAt"/>), this is the only way an address becomes confirmed.
+    /// </summary>
+    Task<EmailConfirmation> ConfirmEmailAsync(Guid subjectId, string email, DateTime now, CancellationToken ct);
 
     /// <summary>Sets, or with null clears, the message a subject submitted with its access request.</summary>
     Task<bool> SetAccessRequestMessageAsync(Guid subjectId, string? message, CancellationToken ct);
@@ -119,9 +148,10 @@ public interface ISubjectRepository
     /// </summary>
     /// <remarks>
     /// Refused with <see cref="SubjectChange.LastOwnerOf"/> while an active subject is the last owner
-    /// who can sign in of any tenant, whether or not the tenant has other members: the cascade would
-    /// remove its membership. An inactive subject is never refused, since it counts as no owner. The check holds the owner lock of each tenant the subject belongs to, in
-    /// ascending tenant id, until the delete commits.
+    /// of any tenant by <c>TenantOwnerFilter.IsLastOwnerAsync</c>, whether or not the tenant has other members: the cascade would remove
+    /// its membership. An inactive subject is never refused, since it counts as no owner. The check
+    /// holds the owner lock of each tenant the subject belongs to, in ascending tenant id, until the
+    /// delete commits.
     /// </remarks>
     Task<SubjectChange> DeleteAsync(Guid subjectId, CancellationToken ct);
 
@@ -206,9 +236,8 @@ public interface ISubjectRepository
     Task<FactorRemovalResult> TryRemoveFactorAsync(Guid subjectId, SignInFactor factor, CancellationToken ct);
 
     /// <summary>
-    /// How many subjects would be left with no sign-in method if provider
-    /// <paramref name="providerId"/> went away: active, non-system, non-demo subjects whose only
-    /// working factor is an identity at that provider.
+    /// How many subjects holding a working identity at <paramref name="providerId"/>, on any tenant,
+    /// would be unable to sign in if that provider went away (<c>OrphanedSubjectFilter</c>).
     /// </summary>
     Task<int> CountStrandedByProviderAsync(Guid providerId, CancellationToken ct);
 
@@ -222,13 +251,6 @@ public interface ISubjectRepository
     /// pinned by <c>SystemPinnedAllowlistTests</c>.
     /// </remarks>
     Task<bool> TenantHasCredentialedMemberAsync(Guid tenantId, CancellationToken ct);
-
-    /// <summary>
-    /// Whether <paramref name="tenantId"/> has an active, non-system, non-demo member with no
-    /// passkey and no working OIDC identity: an account that cannot sign in at all.
-    /// </summary>
-    /// <remarks>System-pinned, as <see cref="TenantHasCredentialedMemberAsync"/> is.</remarks>
-    Task<bool> HasOrphanedMemberAsync(Guid tenantId, CancellationToken ct);
 
     /// <summary>When any subject was last updated, read as the scope's reader; null when there is none.</summary>
     Task<DateTime?> LastModifiedAsync(CancellationToken ct);
