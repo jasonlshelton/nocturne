@@ -14,6 +14,7 @@
   import Globe from "@lucide/svelte/icons/globe";
   import Lock from "@lucide/svelte/icons/lock";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
+  import History from "@lucide/svelte/icons/history";
   import { EmptyState } from "#lib/components/shared/index.js";
   import { getRoles } from "#lib/api/generated/roles.generated.remote.js";
   import { getShareLink } from "#lib/api/generated/shareLinks.generated.remote.js";
@@ -25,6 +26,7 @@
     setMemberRoles,
     setMemberPermissions,
     setMemberLimitTo24Hours,
+    setMemberAccessEnd,
   } from "#lib/api/generated/memberInvites.generated.remote.js";
   import {
     getPendingRequests,
@@ -41,10 +43,12 @@
   import RolesSection from "#lib/components/members/RolesSection.svelte";
   import LockedOutMembers from "#lib/components/members/LockedOutMembers.svelte";
   import SettingsLinkCard from "#lib/components/settings/SettingsLinkCard.svelte";
+  import SignInGate from "#lib/components/auth/SignInGate.svelte";
   import { retainQuery } from "#lib/api/retain-query.svelte.js";
 
   const granted = $derived(page.data.effectivePermissions ?? []);
   const canInvite = $derived(satisfiesScope(granted, "members.invite"));
+  const handedOff = $derived(page.data.isHandedOffSession === true);
   const canManageMembers = $derived(
     satisfiesScope(granted, "members.manage") ||
       satisfiesScope(granted, "sharing.manage"),
@@ -63,6 +67,7 @@
   );
   const canManageRoles = $derived(satisfiesScope(granted, "roles.manage"));
   const canViewAudit = $derived(satisfiesScope(granted, "audit.read"));
+  const canViewMemberHistory = $derived(satisfiesScope(granted, "members.manage"));
   // GuestLinksSection self-gates on this; mirror it so the access-denied card isn't shown to a
   // guest-link-only user who can still use the guest-links section.
   const canCreateGuestLinks = $derived(
@@ -89,6 +94,10 @@
   const allRoles = $derived(rolesQuery?.current ?? []);
   const pendingRequests = $derived(pendingRequestsQuery?.current ?? []);
   const share = $derived(shareQuery?.current ?? null);
+
+  const callerAccessEndsAt = $derived(
+    allMembers.find((m) => m.subjectId === page.data.user?.subjectId)?.accessEndsAt,
+  );
 
   // Header status chips
   const memberCount = $derived(allMembers.filter((m) => !m.isSystemSubject).length);
@@ -136,8 +145,11 @@
   async function saveMemberChanges(memberId: string, changes: MemberChanges) {
     isSavingMember = true;
     memberSaveError = null;
-    const { access, limitTo24Hours } = changes;
+    const { access, limitTo24Hours, accessEndsAt } = changes;
     try {
+      if (accessEndsAt === null) {
+        await setMemberAccessEnd({ id: memberId, request: { accessEndsAt } });
+      }
       await Promise.all([
         ...(access
           ? [
@@ -152,6 +164,9 @@
           ? [setMemberLimitTo24Hours({ id: memberId, request: { limitTo24Hours } })]
           : []),
       ]);
+      if (typeof accessEndsAt === "string") {
+        await setMemberAccessEnd({ id: memberId, request: { accessEndsAt } });
+      }
       successMessage = { text: "Member updated successfully.", wash: true };
       expandedMember = null;
       clearMessages();
@@ -162,10 +177,10 @@
     }
   }
 
-  async function handleApproveRequest(requestId: string, roleIds: string[]) {
+  async function handleApproveRequest(requestId: string, roleIds: string[], accessEndsAt?: string) {
     errorMessage = null;
     try {
-      await approveRequest({ id: requestId, request: { roleIds } });
+      await approveRequest({ id: requestId, request: { roleIds, accessEndsAt } });
       successMessage = { text: "Membership request approved.", wash: true };
       clearMessages();
     } catch (err) {
@@ -236,8 +251,7 @@
     <SuccessBanner wash={successMessage.wash}>{successMessage.text}</SuccessBanner>
   {/if}
 
-  <!-- Public access -->
-  <PublicAccessCard />
+  <PublicAccessCard signInRequired={handedOff} />
 
   <!-- Membership requests (independent of public access) -->
   <MembershipRequestsCard />
@@ -251,7 +265,7 @@
       </h2>
 
       {#if canEditMemberRoles}
-        <LockedOutMembers />
+        <LockedOutMembers signInRequired={handedOff} />
       {/if}
 
       {#if canManageMembers}
@@ -260,6 +274,7 @@
         <PendingRequestsList
           requests={pendingRequests}
           roles={allRoles}
+          {callerAccessEndsAt}
           onApprove={handleApproveRequest}
           onDeny={handleDenyRequest}
         />
@@ -280,7 +295,10 @@
               roles={allRoles}
               canEditRoles={canEditMemberRoles}
               canManage={true}
+              canViewHistory={canViewMemberHistory}
+              canSeeRecoveryEmail={canEditMemberRoles}
               currentSubjectId={page.data.user?.subjectId}
+              {callerAccessEndsAt}
               isExpanded={expandedMember === member.subjectId}
               isSaving={isSavingMember}
               saveError={expandedMember === member.subjectId ? memberSaveError : null}
@@ -305,10 +323,13 @@
       {/if}
 
       <!-- Create Invite Link (inline card) -->
-      {#if canInvite}
+      {#if canInvite && handedOff}
+        <SignInGate reason="Sign in again to make an invite link." />
+      {:else if canInvite}
         {#if showCreateInvite}
           <CreateInviteCard
             roles={allRoles}
+            {callerAccessEndsAt}
             onCancel={() => (showCreateInvite = false)}
           />
         {:else}
@@ -353,11 +374,22 @@
   {/if}
 
   <!-- Temporary Guest Links (self-gates on sharing.guest) -->
-  <GuestLinksSection />
+  <GuestLinksSection signInRequired={handedOff} />
 
   <!-- Roles & permissions -->
   {#if canManageRoles}
     <RolesSection />
+  {/if}
+
+  {#if canViewMemberHistory}
+    <SettingsLinkCard
+      link={{
+        title: "Member history",
+        description: "Review who gave or took access to your data, and when.",
+        href: "/settings/members/history",
+        icon: History,
+      }}
+    />
   {/if}
 
   <!-- Lives here because who reached the data, and when, is the question this page answers. -->

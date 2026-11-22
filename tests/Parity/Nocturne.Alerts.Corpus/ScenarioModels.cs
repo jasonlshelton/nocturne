@@ -101,9 +101,6 @@ public sealed record ScenarioRule
     [JsonPropertyName("condition_params")]
     public required JsonElement ConditionParams { get; init; }
 
-    [JsonPropertyName("confirmation_readings")]
-    public int ConfirmationReadings { get; init; } = 1;
-
     [JsonPropertyName("hysteresis_minutes")]
     public int HysteresisMinutes { get; init; }
 
@@ -179,7 +176,7 @@ public sealed record ScenarioContext
     [JsonPropertyName("last_carb_at")] public DateTime? LastCarbAt { get; init; }
     [JsonPropertyName("last_bolus_at")] public DateTime? LastBolusAt { get; init; }
     [JsonPropertyName("tenant_time_zone_id")] public string? TenantTimeZoneId { get; init; }
-    [JsonPropertyName("active_pump_state")] public ScenarioPumpState? ActivePumpState { get; init; }
+    [JsonPropertyName("active_pump_modes")] public List<ScenarioPumpMode>? ActivePumpModes { get; init; }
     [JsonPropertyName("active_state_spans")] public List<ScenarioStateSpan>? ActiveStateSpans { get; init; }
     [JsonPropertyName("active_trackers")] public List<ScenarioTrackerReference>? ActiveTrackers { get; init; }
     [JsonPropertyName("sleep_session_active")] public bool SleepSessionActive { get; init; }
@@ -208,7 +205,7 @@ public sealed record ScenarioDoNotDisturb(
     [property: JsonPropertyName("source")] string Source);
 
 /// <summary>Mode uses the PascalCase wire form of PumpModeState (<c>"Automatic"</c>, <c>"EaseOff"</c>, …).</summary>
-public sealed record ScenarioPumpState(
+public sealed record ScenarioPumpMode(
     [property: JsonPropertyName("mode")] string Mode,
     [property: JsonPropertyName("started_at")] DateTime StartedAt);
 
@@ -265,6 +262,13 @@ public sealed record ExpectedRuleResult
     /// <summary>The root is unknown; carried only when true.</summary>
     public bool? Unknown { get; init; }
 
+    /// <summary>
+    /// The facts whose unknown reached the root, each with its reason; carried exactly when
+    /// <see cref="Unknown"/> (docs/alerts/engine-semantics.md §2.4).
+    /// </summary>
+    [JsonPropertyName("unknown_facts")]
+    public List<ExpectedUnknownFact>? UnknownFacts { get; init; }
+
     /// <summary>Per-leaf force-eval truths, ordered by leaf id (replay/leaf-log semantics).</summary>
     public List<ExpectedLeaf>? Leaves { get; init; }
 
@@ -277,6 +281,10 @@ public sealed record ExpectedRuleResult
     /// <summary>Close reason wire form (<c>hysteresis | auto | manual | …</c>) when transition is closed.</summary>
     [JsonPropertyName("close_reason")]
     public string? CloseReason { get; init; }
+
+    /// <summary>The evaluation's hold reached the engine's bound (§6.4); carried only when true.</summary>
+    [JsonPropertyName("held_too_long")]
+    public bool? HeldTooLong { get; init; }
 
     public ExpectedTrackerState? Tracker { get; init; }
 
@@ -310,6 +318,10 @@ public sealed record ExpectedClockAnomaly(
     [property: JsonPropertyName("fact")] string Fact,
     [property: JsonPropertyName("ahead_ms")] long AheadMs);
 
+public sealed record ExpectedUnknownFact(
+    [property: JsonPropertyName("fact")] string Fact,
+    [property: JsonPropertyName("reason")] string Reason);
+
 /// <summary><see cref="Value"/> is false when <see cref="Unknown"/>, which is carried only when true.</summary>
 public sealed record ExpectedLeaf(
     [property: JsonPropertyName("leaf_id")] int LeafId,
@@ -319,9 +331,6 @@ public sealed record ExpectedLeaf(
 public sealed record ExpectedTrackerState
 {
     public required string State { get; init; }
-
-    [JsonPropertyName("confirmation_count")]
-    public required int ConfirmationCount { get; init; }
 
     /// <summary>
     /// Stable ordinal of the active excursion within the scenario (1-based, in creation
@@ -337,9 +346,13 @@ public sealed record ExpectedTrackerState
     /// <summary>Present, as true, only while an auto-resolved rule awaits a false evaluation.</summary>
     [JsonPropertyName("awaiting_rearm")]
     public bool? AwaitingRearm { get; init; }
+
+    /// <summary>When the rule's current hold began; present only while it is held (§6.4).</summary>
+    [JsonPropertyName("held_since")]
+    public DateTime? HeldSince { get; init; }
 }
 
 public sealed record ExpectedTimerOp(
     [property: JsonPropertyName("op")] string Op,
     [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("at")] DateTime? At);
+    [property: JsonPropertyName("at"), JsonRequired] DateTime At);

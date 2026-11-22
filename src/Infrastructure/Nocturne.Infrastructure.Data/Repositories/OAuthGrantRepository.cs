@@ -4,6 +4,7 @@ using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.Infrastructure.Data.Repositories;
@@ -59,8 +60,8 @@ public class OAuthGrantRepository : IOAuthGrantRepository
         Guid tenantId, DirectGrantLookup lookup, DateTime now, CancellationToken ct)
     {
         await using var db = await OpenForTenantAsync(tenantId, ct);
-        var grants = Match(PinnedGrants(db, tenantId).Where(IsLiveDirectGrant(now)), lookup);
-        var row = await WithMembership(grants, db, tenantId).FirstOrDefaultAsync(ct);
+        var grants = Match(PinnedGrants(db, tenantId).Where(IsLiveDirectGrant(now)).Where(g => g.Subject!.IsActive), lookup);
+        var row = await WithMembership(grants, db, tenantId, now).FirstOrDefaultAsync(ct);
         return row is null ? null : new AuthenticatedDirectGrant(row.Grant, row.Membership());
     }
 
@@ -70,7 +71,7 @@ public class OAuthGrantRepository : IOAuthGrantRepository
         await using var db = await OpenForTenantAsync(tenantId, ct);
         return await PinnedGrants(db, tenantId)
             .Where(g => g.Id == grantId)
-            .Select(g => new OAuthGrantState(g.RevokedAt, g.ExpiresAt, g.Scopes, g.LimitTo24Hours))
+            .Select(g => new OAuthGrantState(g.RevokedAt, g.ExpiresAt, g.Scopes, g.LimitTo24Hours, g.CreatedBySubjectId))
             .FirstOrDefaultAsync(ct);
     }
 
@@ -173,13 +174,15 @@ public class OAuthGrantRepository : IOAuthGrantRepository
     }
 
     /// <inheritdoc/>
-    public virtual async Task<bool> HasUnrevokedLegacySecretAsync(string legacySecretHash, CancellationToken ct)
+    public virtual async Task<OAuthGrantRecord?> FindLiveLegacySecretAsync(
+        string legacySecretHash, DateTime now, CancellationToken ct)
     {
         await using var lease = await OpenAsync(ct);
-        return await lease.Context.OAuthGrants.AnyAsync(
-            g => g.LegacySecretHash == legacySecretHash
-                 && g.GrantType == OAuthGrantTypes.Direct
-                 && g.RevokedAt == null, ct);
+        return ToRecord(await Grants(lease.Context)
+            .Where(IsLiveDirectGrant(now))
+            .Where(g => g.LegacySecretHash == legacySecretHash)
+            .OrderBy(g => g.CreatedAt)
+            .FirstOrDefaultAsync(ct));
     }
 
     /// <inheritdoc/>
@@ -204,6 +207,88 @@ public class OAuthGrantRepository : IOAuthGrantRepository
 
         return ToRecords(await query.OrderByDescending(g => g.CreatedAt).ToListAsync(ct));
     }
+
+    /// <inheritdoc/>
+    public virtual async Task<IReadOnlyList<OAuthGrantRecord>> GetLiveGuestLinksCreatedByAsync(
+        Guid createdBySubjectId, DateTime now, CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+        return ToRecords(await LiveGuestLinksCreatedBy(Grants(lease.Context), createdBySubjectId, now)
+            .OrderBy(g => g.CreatedAt)
+            .ToListAsync(ct));
+    }
+
+    /// <inheritdoc/>
+    public virtual async Task<IReadOnlyList<OAuthGrantRecord>> CapGrantsCreatedByAsync(
+        Guid createdBySubjectId, DateTime notAfter, DateTime now, CancellationToken ct)
+    {
+        var unit = _unit ?? throw new InvalidOperationException(
+            "Capping the grants a member made stages audit rows with the change, so it needs the caller's unit of work.");
+        var db = unit.Context;
+        var made = await LiveGrantsCreatedBy(db.OAuthGrants, createdBySubjectId, now)
+            .Where(g => g.ExpiresAt == null || g.ExpiresAt > notAfter)
+            .OrderBy(g => g.CreatedAt)
+            .ToListAsync(ct);
+        // A revocation staged earlier on the unit is not saved yet, so the store still reads its grant as live.
+        var capped = made.Where(g => g.RevokedAt == null).ToList();
+        foreach (var grant in capped)
+        {
+            grant.ExpiresAt = notAfter;
+            MemberAccessAudit.StageGrantCapped(db, grant.GrantType, grant.TenantId, createdBySubjectId, grant.Id, notAfter);
+        }
+
+        return ToRecords(capped);
+    }
+
+    /// <inheritdoc/>
+    public virtual async Task<bool> KeepDeviceCredentialAsync(Guid grantId, CancellationToken ct)
+    {
+        await using var lease = await OpenAsync(ct);
+        var db = lease.Context;
+        if (await db.FindDeviceSubjectOf(db.TenantId, ct) is not { } deviceSubjectId)
+            return false;
+
+        var grant = await db.OAuthGrants.FirstOrDefaultAsync(
+            g => g.Id == grantId
+                 && g.SubjectId == deviceSubjectId
+                 && g.GrantType == OAuthGrantTypes.Direct
+                 && g.RevokedAt == null
+                 && g.CreatedBySubjectId != null
+                 && g.CreatedBySubjectId != g.SubjectId, ct);
+        if (grant is null)
+            return false;
+
+        MemberAccessAudit.StageDeviceCredentialKept(db, grant.TenantId, grant.CreatedBySubjectId, grant.Id);
+        grant.ExpiresAt = null;
+        // With no maker, no later change to that member's access can cap the credential again.
+        grant.CreatedBySubjectId = null;
+        await SaveAsync(db, ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public virtual void StageMemberRemovalGuestLinkAudit(IEnumerable<OAuthGrantRecord> links, Guid memberSubjectId)
+    {
+        var unit = _unit ?? throw new InvalidOperationException(
+            "Auditing revoked guest links stages rows with the revocation, so it needs the caller's unit of work.");
+        foreach (var link in links)
+            MemberAccessAudit.StageGuestLinkRevoked(unit.Context, link.TenantId, memberSubjectId, link.Id);
+    }
+
+    private static IQueryable<OAuthGrantEntity> LiveGuestLinksCreatedBy(
+        IQueryable<OAuthGrantEntity> grants, Guid createdBySubjectId, DateTime now) =>
+        LiveGrantsCreatedBy(grants, createdBySubjectId, now).Where(g => g.GrantType == OAuthGrantTypes.Guest);
+
+    /// <summary>
+    /// The guest links and device credentials <paramref name="createdBySubjectId"/> made that are
+    /// unrevoked and unexpired at <paramref name="now"/>.
+    /// </summary>
+    private static IQueryable<OAuthGrantEntity> LiveGrantsCreatedBy(
+        IQueryable<OAuthGrantEntity> grants, Guid createdBySubjectId, DateTime now) =>
+        grants.Where(g => (g.GrantType == OAuthGrantTypes.Guest || g.GrantType == OAuthGrantTypes.Direct)
+                          && g.CreatedBySubjectId == createdBySubjectId
+                          && g.RevokedAt == null
+                          && (g.ExpiresAt == null || g.ExpiresAt > now));
 
     /// <inheritdoc/>
     public virtual async Task<int> CountLiveGuestLinksAsync(Guid dataOwnerSubjectId, DateTime now, CancellationToken ct)
@@ -288,7 +373,9 @@ public class OAuthGrantRepository : IOAuthGrantRepository
             credential.Scopes,
             credential.TokenHash,
             credential.LegacySecretHash,
-            credential.LegacyTokenDigest);
+            credential.LegacyTokenDigest,
+            credential.CreatedBySubjectId,
+            credential.ExpiresAt);
         db.OAuthGrants.Add(entity);
         await SaveAsync(db, ct);
         return entity.Id;
@@ -380,10 +467,16 @@ public class OAuthGrantRepository : IOAuthGrantRepository
         db.OAuthGrants.AsNoTracking().Where(g => g.TenantId == tenantId);
 
     /// <summary>
-    /// What makes a direct grant usable at <paramref name="now"/>. Every read that authenticates or
-    /// exchanges one goes through it, and <see cref="OAuthGrantRecord.IsLiveDirectGrantAt"/> is the
-    /// same rule for a record already read, so none can accept a grant another refuses.
+    /// What makes a direct grant itself usable at <paramref name="now"/>, apart from its subject.
+    /// Every read of live direct grants goes through it, and
+    /// <see cref="OAuthGrantRecord.IsLiveDirectGrantAt"/> is the same rule for a record already read.
     /// </summary>
+    /// <remarks>
+    /// A grant also authenticates only while its subject is active, a test each authenticating read
+    /// adds itself: the pinned read joins it, and the V2 exchange reads the subject. It stays out of
+    /// this rule because a record carries no subject state, and because the "secret already in use"
+    /// read must still see an inactive subject's grant, or a second grant would take the same secret.
+    /// </remarks>
     private static Expression<Func<OAuthGrantEntity, bool>> IsLiveDirectGrant(DateTime now) =>
         g => g.GrantType == OAuthGrantTypes.Direct
              && g.RevokedAt == null
@@ -430,13 +523,14 @@ public class OAuthGrantRepository : IOAuthGrantRepository
     /// <summary>
     /// Pairs each grant with its subject's membership of <paramref name="tenantId"/> as a left join,
     /// so an authenticating request reads both in one statement, as the host's
-    /// <c>RequestMembership</c> does for a subject.
+    /// <c>RequestMembership</c> does for a subject. A membership that has ended at
+    /// <paramref name="now"/> joins as none.
     /// </summary>
     private static IQueryable<AuthenticatedRow> WithMembership(
-        IQueryable<OAuthGrantEntity> grants, NocturneDbContext db, Guid tenantId) =>
+        IQueryable<OAuthGrantEntity> grants, NocturneDbContext db, Guid tenantId, DateTime now) =>
         grants
             .GroupJoin(
-                db.TenantMembers.AsNoTracking().Where(m => m.TenantId == tenantId),
+                db.TenantMembers.AsNoTracking().LiveAt(now).Where(m => m.TenantId == tenantId),
                 g => g.SubjectId,
                 m => m.SubjectId,
                 (g, members) => new { g, members })
@@ -458,6 +552,7 @@ public class OAuthGrantRepository : IOAuthGrantRepository
                     DirectPermissions = m.DirectPermissions,
                     RolePermissions = m.MemberRoles.Select(mr => mr.TenantRole.Permissions).ToList(),
                     MemberLimitTo24Hours = (bool?)m.LimitTo24Hours,
+                    MemberAccessEndsAt = m.AccessEndsAt,
                     MemberLastUsedAt = m.LastUsedAt,
                 });
 
@@ -474,6 +569,8 @@ public class OAuthGrantRepository : IOAuthGrantRepository
 
         public bool? MemberLimitTo24Hours { get; init; }
 
+        public DateTime? MemberAccessEndsAt { get; init; }
+
         public DateTime? MemberLastUsedAt { get; init; }
 
         public DirectGrantMembership? Membership() => MemberId is { } id
@@ -481,7 +578,8 @@ public class OAuthGrantRepository : IOAuthGrantRepository
                 id,
                 new TenantMemberAccess(
                     MemberPermissions.Effective(RolePermissions, DirectPermissions).ToHashSet(),
-                    MemberLimitTo24Hours == true),
+                    MemberLimitTo24Hours == true,
+                    MemberAccessEndsAt),
                 MemberLastUsedAt)
             : null;
     }

@@ -281,6 +281,12 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<PlatformPolicyEntity> PlatformPolicy { get; set; } = null!;
 
+    public DbSet<TeamEntity> Teams { get; set; } = null!;
+
+    public DbSet<TeamMemberEntity> TeamMembers { get; set; } = null!;
+
+    public DbSet<TeamInviteEntity> TeamInvites { get; set; } = null!;
+
     public DbSet<MembershipRequestEntity> MembershipRequests { get; set; } = null!;
 
     public DbSet<CompressionLowSuggestionEntity> CompressionLowSuggestions { get; set; }
@@ -375,11 +381,17 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<TenantMemberRoleEntity> TenantMemberRoles { get; set; } = null!;
 
+    public DbSet<TenantMemberReasonEntity> TenantMemberReasons { get; set; } = null!;
+
+    public DbSet<TenantMemberReasonRoleEntity> TenantMemberReasonRoles { get; set; } = null!;
+
     // Alert Engine entities
 
     public DbSet<AlertRuleEntity> AlertRules { get; set; }
 
     public DbSet<AlertConditionTimerEntity> AlertConditionTimers { get; set; }
+
+    public DbSet<AlertConditionNotTrueEntity> AlertConditionNotTrue { get; set; }
 
     public DbSet<AlertTrackerStateEntity> AlertTrackerState { get; set; }
 

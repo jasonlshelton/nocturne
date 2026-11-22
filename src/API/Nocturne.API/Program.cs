@@ -127,6 +127,11 @@ else
 
 builder.Services.AddDiscrepancyAnalysisRepository();
 builder.Services.AddAlertRepositories();
+builder.Services.AddV4Repositories();
+builder.Services.AddHealthRepositories();
+builder.Services.AddFoodRepositories();
+builder.Services.AddNotificationAndEventRepositories();
+builder.Services.AddAuditRepositories();
 
 builder.Services.AddDataProtection()
     // Never change this string. It is part of the root purpose for every payload, and TOTP secrets
@@ -635,6 +640,8 @@ if (!isNSwagGeneration && !app.Environment.IsEnvironment("Testing"))
 
         // Apply the tenant-table storage parameters; see TenantTableStorageParameters for why.
         await DatabaseInitializationExtensions.ReconcileTenantTableStorageParametersAsync(migratorConnectionString, logger);
+
+        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migratorConnectionString, logger);
 
         // Background job records left Pending/Running by a previous process are orphans —
         // the detached tasks died with it. Mark them Interrupted so polls report the truth.

@@ -2,7 +2,7 @@ import { render } from "vitest-browser-svelte";
 import { page } from "vitest/browser";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { error } from "@sveltejs/kit";
-import type { LockedOutMember } from "#lib/api/generated/nocturne-api-client.js";
+import type { LockedOutMember } from "@nocturne/api-client";
 import { remoteQuery } from "#lib/test-stubs/remote-resource.js";
 
 let members: LockedOutMember[];
@@ -87,5 +87,22 @@ describe("LockedOutMembers", () => {
     render(LockedOutMembers);
 
     expect(page.getByText("Members who cannot sign in").elements()).toHaveLength(0);
+  });
+
+  it("lists the members but gives the link to a sign-in on a handed-off session", async () => {
+    render(LockedOutMembers, { signInRequired: true });
+
+    await expect.element(page.getByText("Alex", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("Sign in again to make a recovery link.")).toBeVisible();
+    expect(page.getByRole("button", { name: "Create link" }).elements()).toHaveLength(0);
+  });
+
+  it("offers no Create link and says why for a member who outlasts the caller", async () => {
+    members = [{ ...orphan, outlastsCaller: true }];
+
+    render(LockedOutMembers);
+
+    await expect.element(page.getByText("This member's access lasts longer than yours.")).toBeVisible();
+    expect(page.getByRole("button", { name: "Create link" }).elements()).toHaveLength(0);
   });
 });

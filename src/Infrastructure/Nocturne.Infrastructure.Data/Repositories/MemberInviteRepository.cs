@@ -51,6 +51,7 @@ public class MemberInviteRepository : IMemberInviteRepository
             DirectPermissions = invite.DirectPermissions?.ToList(),
             Label = invite.Label,
             LimitTo24Hours = invite.LimitTo24Hours,
+            AccessEndsAt = invite.AccessEndsAt,
             ExpiresAt = invite.ExpiresAt,
             MaxUses = invite.MaxUses,
             UseCount = 0,
@@ -64,7 +65,7 @@ public class MemberInviteRepository : IMemberInviteRepository
     /// <inheritdoc/>
     public virtual async Task<MemberInviteRecord?> FindByTokenHashAsync(string tokenHash, Guid tenantId, CancellationToken ct)
     {
-        await using var db = await Standalone.CreateAsync(ct);
+        await using var db = await Standalone.CreateForTenantAsync(tenantId, ct);
         var entity = await db.MemberInvites
             .AsNoTracking()
             .Include(i => i.Tenant)
@@ -148,5 +149,6 @@ public class MemberInviteRepository : IMemberInviteRepository
                 ? invite.CreatedMembers
                     .Select(m => new MemberInviteUse(m.SubjectId, m.Subject?.Name, m.SysCreatedAt))
                     .ToList()
-                : []);
+                : [],
+            invite.AccessEndsAt);
 }

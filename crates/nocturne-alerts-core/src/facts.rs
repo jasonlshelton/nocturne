@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use crate::engine::{OnUnknown, WireRule, parse_auto_resolve};
+use crate::engine::{OnUnknown, Rule, WireRule, parse_auto_resolve};
 use crate::enums::{WireEnum, wire_enum};
 use crate::leaf_identity::collect_leaves;
 use crate::model::{ConditionKind, Node, parse_payload};
@@ -140,6 +140,18 @@ impl<'a> From<&'a WireRule> for RuleConditions<'a> {
     }
 }
 
+impl<'a> From<&'a Rule> for RuleConditions<'a> {
+    fn from(rule: &'a Rule) -> Self {
+        Self {
+            condition_type: rule.condition_type.name(),
+            condition_params: &rule.condition_params,
+            auto_resolve_enabled: rule.auto_resolve_enabled,
+            auto_resolve_params: rule.auto_resolve_params.as_ref(),
+            on_unknown: rule.on_unknown,
+        }
+    }
+}
+
 fn leaf_kinds(tree: &Node) -> Vec<ConditionKind> {
     collect_leaves(tree).into_iter().map(Node::kind).collect()
 }
@@ -174,7 +186,7 @@ mod tests {
 
     use super::*;
     use crate::context::{
-        ActiveAlertSnapshot, PredictedPoint, PumpStateSnapshot, SensorContext, StartedSpan,
+        ActiveAlertSnapshot, PredictedPoint, PumpModeSnapshot, SensorContext, StartedSpan,
         StateSpanSnapshot, TempBasalSnapshot, TrackerReference,
     };
     use crate::enums::{GlucoseBucket, PumpMode, StateSpanCategory, TrendBucket};
@@ -518,10 +530,14 @@ mod tests {
             transmitter_days: has(F::Transmitter).then(|| Decimal::from(100)),
             active_override: span(F::StateSpans),
             active_pump_suspension: span(F::StateSpans),
-            active_pump_state: spans.then(|| PumpStateSnapshot {
-                mode: Some(PumpMode::Exercise),
-                started_at: ago(30),
-            }),
+            active_pump_modes: if spans {
+                vec![PumpModeSnapshot {
+                    mode: Some(PumpMode::Exercise),
+                    started_at: ago(30),
+                }]
+            } else {
+                Vec::new()
+            },
             active_state_spans: if spans {
                 HashMap::from([(
                     (StateSpanCategory::Illness, None),

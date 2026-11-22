@@ -157,7 +157,7 @@ public partial class SetupController : ControllerBase
 
     /// <summary>
     /// Generate passkey registration options for the first owner account.
-    /// Guard: exactly one tenant must exist with zero non-system members.
+    /// Guard: <see cref="GetSoleTenantWithoutOwnerAsync"/>.
     /// </summary>
     [HttpPost("owner/options")]
     [EnableRateLimiting("setup")]
@@ -182,8 +182,9 @@ public partial class SetupController : ControllerBase
         if (UsernameRules.Refusal(normalizedUsername) is { } usernameRefusal)
             return Problem(detail: usernameRefusal, statusCode: 400, title: "Bad Request");
 
-        var subjectId = await EnsureOwnerSubjectAsync(
-            tenant!, request.DisplayName.Trim(), normalizedUsername, ct);
+        if (await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct)
+            is not { } subjectId)
+            return UsernameTaken();
 
         var result = await _passkeyService.GenerateRegistrationOptionsAsync(
             subjectId, normalizedUsername);
@@ -229,7 +230,7 @@ public partial class SetupController : ControllerBase
                 request.AttestationResponseJson, request.ChallengeToken, tenant!.Id,
                 expectedSubjectId: ownerSubjectId.Value);
 
-            await GrantFirstOwnerPlatformAdminAsync(credResult.SubjectId);
+            await CompleteAsOwnerAsync(credResult.SubjectId);
 
             await _subjectService.UpdateLastLoginAsync(credResult.SubjectId);
 
@@ -292,8 +293,9 @@ public partial class SetupController : ControllerBase
         if (request.ProviderId == Guid.Empty)
             return Problem(detail: "Provider ID is required", statusCode: 400, title: "Bad Request");
 
-        var subjectId = await EnsureOwnerSubjectAsync(
-            tenant!, request.DisplayName.Trim(), normalizedUsername, ct);
+        if (await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct)
+            is not { } subjectId)
+            return UsernameTaken();
 
         try
         {
@@ -375,7 +377,7 @@ public partial class SetupController : ControllerBase
         }
 
         if (result.SubjectId is { } oidcOwnerSubjectId)
-            await GrantFirstOwnerPlatformAdminAsync(oidcOwnerSubjectId);
+            await CompleteAsOwnerAsync(oidcOwnerSubjectId);
 
         // Temporary bridge: construct SessionTokenPair from OidcTokenResponse until
         // OidcAuthService is migrated to ISessionService.
@@ -435,7 +437,8 @@ public partial class SetupController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the sole tenant if exactly one exists and it has no non-system members,
+    /// Returns the sole non-demo tenant if exactly one exists and no member of it holds a passkey
+    /// or a working provider identity (<see cref="IInstanceSetupState.TenantHasCredentialedMemberAsync"/>),
     /// or an error result if the preconditions are not met.
     /// </summary>
     /// <remarks>
@@ -456,9 +459,6 @@ public partial class SetupController : ControllerBase
 
         var tenant = tenants[0];
 
-        // A credential-less member is a half-finished setup left behind by an abandoned or failed
-        // WebAuthn/OIDC ceremony — EnsureOwnerSubjectAsync reuses that subject idempotently, so
-        // let the flow resume instead of dead-ending on owner_already_exists.
         var hasOwnerWithCredentials = await _setupState.TenantHasCredentialedMemberAsync(tenant.Id, ct);
 
         if (hasOwnerWithCredentials)
@@ -479,11 +479,18 @@ public partial class SetupController : ControllerBase
     /// Find (<see cref="ISubjectRepository.FindSetupOwnerCandidateAsync"/>) or create the owner
     /// subject, ensure it is a member of the given tenant with the owner role, and assign the
     /// global admin role. Idempotent: safe to call on retries after a failed WebAuthn/OIDC ceremony.
+    /// Null, with nothing written, when another member of the tenant holds <paramref name="username"/>:
+    /// setup reopens while former members still hold their usernames.
     /// </summary>
-    private async Task<Guid> EnsureOwnerSubjectAsync(
+    private async Task<Guid?> EnsureOwnerSubjectAsync(
         TenantRecord tenant, string displayName, string username, CancellationToken ct)
     {
         var existingSubject = await _subjects.FindSetupOwnerCandidateAsync(tenant.Id, ct);
+
+        if (await _members.UsernameExistsAsync(tenant.Id, username, ct)
+            && (existingSubject is null
+                || (await _members.FindMemberAsync(tenant.Id, existingSubject.Id, ct))?.Username != username))
+            return null;
 
         Guid subjectId;
         if (existingSubject != null)
@@ -493,51 +500,63 @@ public partial class SetupController : ControllerBase
         }
         else
         {
-            subjectId = await _subjects.CreateAsync(new NewSubject(displayName, Username: username), ct);
+            subjectId = await _subjects.CreateSetupOwnerAsync(
+                tenant.Id, new NewSubject(displayName, Username: username), ct);
 
             _logger.LogInformation(
                 "Setup: created owner {SubjectId} ({Username}) for tenant {TenantId}",
                 subjectId, username, tenant.Id);
         }
 
-        // Ensure tenant membership with owner role — required when reusing a
-        // subject from a previously deleted tenant.
         var ownerRoleId = await _members.FindRoleIdBySlugAsync(tenant.Id, RoleSeeds.Owner, ct);
         if (ownerRoleId is { } roleId)
         {
             // Setup retries, so a subject that is already a member is the state it wants, and the
             // result of the add is not read.
             _ = await _members.AddMemberAsync(
-                new NewTenantMember(tenant.Id, subjectId, [roleId], MadeBy: MembershipMadeBy.Member), ct);
+                new NewTenantMember(
+                    tenant.Id, subjectId, [roleId], MadeBy: MembershipMadeBy.Member) { How = MembershipJoinHow.Setup, By = null },
+                ct);
         }
 
         // Set per-tenant username on the membership
         if (await _members.FindMemberAsync(tenant.Id, subjectId, ct) is { } membership)
             await _members.SetUsernameAsync(tenant.Id, membership.Id, username, ct);
 
-        await _subjectService.AssignRoleAsync(subjectId, "admin");
+        await _subjectService.AssignRoleAsync(subjectId, GlobalRoles.Admin);
 
         return subjectId;
     }
 
     /// <summary>
-    /// Grants the new owner platform admin now that it holds a credential. The startup
-    /// bootstrap pass ran against an empty database on a fresh install, so without this
+    /// Ends the setup owner record (<see cref="ISubjectRepository.ClearSetupOwnerAsync"/>) and
+    /// grants the new owner platform admin now that it holds a credential. The startup
+    /// bootstrap pass ran against an empty database on a fresh install, so without the grant
     /// the owner cannot reach /settings/admin until the API restarts.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The record is cleared first: the credential is already stored, so a grant that throws
+    /// must not leave the record naming a subject that is now the owner.
+    /// </para>
+    /// <para>
     /// Deliberately called from the completion paths rather than
     /// <see cref="EnsureOwnerSubjectAsync"/>: an abandoned WebAuthn ceremony would
     /// otherwise leave a credential-less subject holding the flag, which then suppresses
     /// every later grant — including the startup pass — and locks the instance out for good.
+    /// </para>
     /// </remarks>
-    private async Task GrantFirstOwnerPlatformAdminAsync(Guid subjectId)
+    private async Task CompleteAsOwnerAsync(Guid subjectId)
     {
         // Not the request token: a client that disconnects mid-response would otherwise
-        // abort the grant and leave the owner locked out of the admin UI.
+        // abort the clear or the grant and leave the owner locked out of the admin UI.
+        await _subjects.ClearSetupOwnerAsync(subjectId, CancellationToken.None);
         await _platformAdminBootstrap.EnsureFirstOwnerIsPlatformAdminAsync(
             subjectId, CancellationToken.None);
     }
+
+    private ObjectResult UsernameTaken() =>
+        Problem(detail: "This username is already taken", statusCode: 400, title: "Bad Request");
 
     // Through the shared writer: the setup flow reuses the login flow's state-cookie name, so a
     // scope of its own would leave two same-named cookies the callback cannot tell apart.

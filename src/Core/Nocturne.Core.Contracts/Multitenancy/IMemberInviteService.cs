@@ -46,6 +46,7 @@ public interface IMemberInviteService
         Guid createdBySubjectId,
         IEnumerable<string> granterPermissions,
         List<Guid> roleIds,
+        DateTime? accessEndsAt,
         List<string>? directPermissions = null,
         string? label = null,
         int expiresInDays = 7,
@@ -106,6 +107,11 @@ public record MemberInviteResult(
 /// What accepting the invite grants: the permissions of <paramref name="RoleNames"/> unioned with
 /// the direct permissions, as a member's effective permissions are.
 /// </param>
+/// <param name="AccessEndsAt">When the membership the invite creates ends, in UTC; null when it does not.</param>
+/// <param name="OutlastsCaller">
+/// Whether the caller the invite was read for has an end date and the access the invite gives
+/// outlasts it, so the caller may not revoke it. Always false when read for no caller.
+/// </param>
 public record MemberInviteInfo(
     Guid Id,
     Guid TenantId,
@@ -124,7 +130,9 @@ public record MemberInviteInfo(
     DateTime CreatedAt,
     List<InviteUsageInfo> UsedBy,
     List<string> RoleNames,
-    List<string> Permissions);
+    List<string> Permissions,
+    DateTime? AccessEndsAt,
+    bool OutlastsCaller = false);
 
 /// <summary>
 /// What the holder of an invite link is shown before joining. Anonymous, so it carries only what
@@ -143,6 +151,7 @@ public record MemberInviteInfo(
 /// See <see cref="Nocturne.Core.Models.Authorization.Scope.IsViewOnlyForRecordsAndAccess"/>.
 /// </param>
 /// <param name="Viewer">Where the caller stands relative to the invite.</param>
+/// <param name="AccessEndsAt">When the membership the invite creates ends, in UTC; null when it does not.</param>
 public record JoinInviteInfo(
     string TenantName,
     string CreatedByName,
@@ -152,7 +161,8 @@ public record JoinInviteInfo(
     DateTime ExpiresAt,
     bool GrantsAccess,
     bool IsViewOnlyForRecordsAndAccess,
-    InviteViewer? Viewer);
+    InviteViewer? Viewer,
+    DateTime? AccessEndsAt);
 
 /// <summary>
 /// Where the caller of the join page's invite lookup stands relative to the invite.

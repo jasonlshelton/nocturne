@@ -39,7 +39,6 @@ public static class ScenarioConversions
             Name = rule.Name,
             ConditionType = conditionType,
             ConditionParams = rule.ConditionParams.GetRawText(),
-            ConfirmationReadings = rule.ConfirmationReadings,
             HysteresisMinutes = rule.HysteresisMinutes,
             AutoResolveEnabled = rule.AutoResolveEnabled,
             AutoResolveParams = rule.AutoResolveParams?.GetRawText(),
@@ -100,9 +99,10 @@ public static class ScenarioConversions
             LastCarbAt = Utc(ctx.LastCarbAt),
             LastBolusAt = Utc(ctx.LastBolusAt),
             TenantTimeZoneId = ctx.TenantTimeZoneId,
-            ActivePumpState = ctx.ActivePumpState is { } pumpState
-                ? new PumpStateSnapshot(pumpState.Mode, Utc(pumpState.StartedAt)!.Value)
-                : null,
+            ActivePumpModes = ctx.ActivePumpModes?
+                    .Select(m => new PumpModeSnapshot(m.Mode, Utc(m.StartedAt)!.Value))
+                    .ToList()
+                ?? [],
             ActiveStateSpans = ctx.ActiveStateSpans?.ToDictionary(
                     s => (ParseWireEnum<StateSpanCategory>(s.Category)!.Value, s.State),
                     s => new StateSpanSnapshot(

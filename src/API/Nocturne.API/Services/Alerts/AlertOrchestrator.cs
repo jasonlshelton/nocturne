@@ -8,16 +8,16 @@ using Nocturne.Core.Alerts.Native;
 namespace Nocturne.API.Services.Alerts;
 
 /// <summary>
-/// Wires <see cref="IAlertEvaluationEngine"/> and <see cref="IAlertDeliveryService"/>
-/// together into a per-reading alert evaluation pass.
-/// Called on every new glucose reading to evaluate all enabled alert rules for the current tenant.
+/// Wires <see cref="IAlertEvaluationEngine"/> and the transition handlers
+/// (<see cref="IExcursionOpenedHandler"/>, <see cref="IExcursionResolutionHandler"/>) together
+/// into an alert evaluation pass over a set of the current tenant's enabled rules.
 /// </summary>
 /// <remarks>
 /// For each enabled rule, the orchestrator asks the engine seam for the rule's evaluation
-/// (root condition truth, excursion transition, auto-resolve) and applies the side effects:
-/// instance creation, engine-level DND suppression, delivery dispatch to the rule's flat
-/// channel list, info auto-ack, and close handling. The engine owns evaluation-state
-/// persistence (sustained timers, tracker state, excursion rows).
+/// (root condition truth, excursion transition, auto-resolve) and hands each opening and close to
+/// its handler. The engine owns evaluation-state persistence (sustained timers, tracker state,
+/// excursion rows), and records with an opening or close the work it owes, so a handler that
+/// does not finish is run again by <see cref="AlertSweepJob"/>.
 /// Errors from individual rule evaluations are caught and logged without aborting the rest of
 /// the evaluation pass. A rule whose stored condition tree cannot be evaluated is logged once
 /// per version through <see cref="IUnevaluableRuleNotice.Report"/>; the sweep sends the notice,
@@ -27,34 +27,24 @@ namespace Nocturne.API.Services.Alerts;
 /// </remarks>
 /// <seealso cref="IAlertOrchestrator"/>
 /// <seealso cref="IAlertEvaluationEngine"/>
-/// <seealso cref="IAlertDeliveryService"/>
 internal sealed class AlertOrchestrator(
     IAlertEvaluationEngine evaluationEngine,
-    IAlertRepository repository,
-    IAlertRuleRepository ruleRepository,
+    AlertRuleEvaluationGate gate,
+    AlertRuleDecisions decisions,
     ITenantAccessor tenantAccessor,
-    IAlertDeliveryService deliveryService,
     ISensorContextEnricher contextEnricher,
-    IAlertAcknowledgementService acknowledgementService,
+    IExcursionOpenedHandler openedHandler,
     IExcursionResolutionHandler resolutionHandler,
     IUnevaluableRuleNotice unevaluableNotice,
     IClockAnomalyNotice clockAnomalyNotice,
-    TimeProvider timeProvider,
     ILogger<AlertOrchestrator> logger)
     : IAlertOrchestrator
 {
-    public async Task EvaluateAsync(SensorContext context, CancellationToken ct)
-    {
-        if (tenantAccessor.TenantId == Guid.Empty) return;
-
-        var rules = await repository.GetEnabledRulesAsync(ct);
-        await EvaluateRulesAsync(rules, rules.Select(r => r.Id).ToHashSet(), context, ct);
-    }
-
     public async Task EvaluateRulesAsync(
         IReadOnlyList<AlertRuleSnapshot> rules,
         IReadOnlySet<Guid> enabledRuleIds,
         SensorContext context,
+        long? readAt,
         CancellationToken ct)
     {
         var tenantId = tenantAccessor.TenantId;
@@ -71,13 +61,14 @@ internal sealed class AlertOrchestrator(
         // One enrichment pass for the whole batch — RuleDataNeeds only fetches what any rule
         // in the surviving set will consult (IOB/COB/predictions/active-alerts/etc.).
         var enriched = await contextEnricher.EnrichAsync(context, evaluable, ct);
+        var stamp = readAt is { } read ? AlertRuleDecisions.StampOf(enriched, read) : null;
 
         var anomalies = new Dictionary<string, ClockAnomaly>(StringComparer.Ordinal);
         foreach (var rule in evaluable)
         {
             try
             {
-                foreach (var anomaly in await EvaluateRuleAsync(rule, enriched, tenantId, ct))
+                foreach (var anomaly in await EvaluateRuleAsync(rule, enriched, tenantId, stamp, ct))
                 {
                     if (!anomalies.TryGetValue(anomaly.Fact, out var seen) || seen.Ahead < anomaly.Ahead)
                         anomalies[anomaly.Fact] = anomaly;
@@ -97,22 +88,47 @@ internal sealed class AlertOrchestrator(
         await clockAnomalyNotice.ReportIsolatedAsync(enriched, anomalies.Values, logger, ct);
     }
 
+    /// <remarks>
+    /// The check against <see cref="AlertRuleDecisions"/>, the engine's evaluation and its record are
+    /// one section of the rule's lock, which every pass over the rule takes, so no other decision
+    /// lands between them. A rule a newer context decided is skipped with nothing recorded; an
+    /// evaluation that throws records nothing. Delivery runs after the section.
+    /// </remarks>
     private async Task<IReadOnlyList<ClockAnomaly>> EvaluateRuleAsync(
         AlertRuleSnapshot rule,
         SensorContext context,
         Guid tenantId,
+        ContextStamp? stamp,
         CancellationToken ct)
     {
         // The engine runs the full per-rule driver sequence (root eval → tracker →
         // unconditional auto-resolve under the auto_resolve path root) and persists all
         // evaluation state; this method applies the side effects its transitions call for.
-        var evaluation = await evaluationEngine.EvaluateRuleAsync(rule, context, AlertEngineOptions.Default, ct);
+        var evaluation = await gate.RunExclusiveAsync<AlertEngineEvaluation?>(
+            rule.Id,
+            async () =>
+            {
+                if (stamp is { } checking && decisions.DecidedByNewer(rule.Id, checking))
+                    return null;
+                var evaluated = await evaluationEngine.EvaluateRuleAsync(rule, context, AlertEngineOptions.Default, ct);
+                if (stamp is { } deciding)
+                    decisions.Decided(rule.Id, deciding);
+                return evaluated;
+            },
+            ct);
+        if (evaluation is null)
+        {
+            logger.LogDebug(
+                "Alert rule {AlertRuleId} of tenant {TenantId} was decided by a newer reading; this pass skips it",
+                rule.Id, tenantId);
+            return [];
+        }
         if (evaluation.Skipped) return [];
 
         switch (evaluation.Transition.Type)
         {
-            case ExcursionTransitionType.ExcursionOpened:
-                await HandleExcursionOpened(rule, evaluation.Transition, context, tenantId, ct);
+            case ExcursionTransitionType.ExcursionOpened when evaluation.Transition.ExcursionId is { } opened:
+                await openedHandler.HandleOpenedAsync(rule, opened, context, tenantId, late: false, ct);
                 break;
 
             case ExcursionTransitionType.ExcursionClosed:
@@ -134,60 +150,6 @@ internal sealed class AlertOrchestrator(
         }
 
         return evaluation.ClockAnomalies;
-    }
-
-    private async Task HandleExcursionOpened(
-        AlertRuleSnapshot rule,
-        ExcursionTransition transition,
-        SensorContext context,
-        Guid tenantId,
-        CancellationToken ct)
-    {
-        if (!transition.ExcursionId.HasValue) return;
-
-        var excursionId = transition.ExcursionId.Value;
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-
-        // Create alert instance with the simplified, schedule-free shape.
-        var request = new CreateAlertInstanceRequest(
-            ExcursionId: excursionId,
-            Status: "triggered",
-            TriggeredAt: now);
-
-        var instance = await repository.CreateInstanceAsync(request, ct);
-
-        // Look up the rule's flat channel list; an empty list is allowed (the user explicitly
-        // chose "no delivery channels" — alert still tracked, just not pushed anywhere).
-        var channels = (await ruleRepository.GetChannelsAsync([rule.Id], ct)).GetValueOrDefault(rule.Id) ?? [];
-
-        // Active excursion count + tenant subject for payload.
-        var activeExcursionCount = await repository.CountActiveExcursionsAsync(ct);
-        var tenant = await repository.GetTenantAlertContextAsync(tenantId, ct);
-
-        var payload = AlertPayloads.Build(
-            rule, context, tenantId, excursionId, instance.Id, tenant, activeExcursionCount, now);
-
-        var suppressingScope = await DndGatedDispatch.DispatchAsync(
-            rule, context.ActiveDndScopes, instance.Id, channels, payload, repository, deliveryService, logger, ct);
-
-        logger.LogInformation(
-            "Alert instance {InstanceId} created for excursion {ExcursionId}, rule {RuleName}",
-            instance.Id, excursionId, rule.Name);
-
-        // Info severity is fire-and-forget: deliver once, then auto-acknowledge so the alert
-        // renders as acknowledged in the UI. broadcast=false avoids racing the
-        // alert_acknowledged event against the alert_dispatch we just emitted for an excursion
-        // the FE has not yet finished rendering.
-        //
-        // Skipped when the instance was suppressed by DND: there was no dispatch, so there is
-        // no alert_dispatch event to "follow up" with an ack, and emitting an alert_acknowledged
-        // for a suppressed alert would race the suppression history row.
-        if (rule.Severity == AlertRuleSeverity.Info && suppressingScope is null)
-        {
-            await acknowledgementService.AcknowledgeExcursionAsync(
-                tenantId, excursionId, "system:auto-ack-on-trigger", AlertAcknowledgementAuthority.System,
-                broadcast: false, ct);
-        }
     }
 
     private Task HandleExcursionClosed(

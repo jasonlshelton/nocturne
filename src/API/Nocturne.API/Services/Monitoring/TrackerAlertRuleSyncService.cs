@@ -116,7 +116,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
             && !(definition.LowReservoirUnits is not null && TrackerCoverage.HoldsInsulin(definition)))
             return;
 
-        var recipient = await InAppRecipientOfAsync(new TenantMembershipRepository(unit, _linkRoute), tenantId, definition, ct);
+        var recipient = await InAppRecipientOfAsync(new TenantMembershipRepository(unit, _linkRoute), tenantId, definition, _time.GetUtcNow().UtcDateTime, ct);
 
         // The rule each threshold is delivered by, staged on the unit as it is decided.
         var ruleOf = definition.NotificationThresholds.ToDictionary(t => t.Id, t => t.AlertRuleId);
@@ -369,7 +369,7 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
             name, description, conditionType, conditionParams, scopeClass, severity,
             IsEnabled: true, SortOrder: 0, AllowThroughDnd: false,
             AutoResolveEnabled: false, AutoResolveParams: null, ClientConfiguration: "{}"),
-        [new AlertRuleChannelWrite(ChannelType.InApp, recipient)],
+        [new AlertRuleChannelWrite(ChannelType.InApp, recipient, AddedBySubjectId: null, StopsAt: null, RecipientSubjectId: null)],
         ManagedBy: tag);
 
     /// <summary>
@@ -379,9 +379,9 @@ public sealed class TrackerAlertRuleSyncService : ITrackerAlertRuleSyncService
     /// the tenant has neither, which delivery records as failed.
     /// </summary>
     private static async Task<string> InAppRecipientOfAsync(
-        ITenantMembershipRepository members, Guid tenantId, TrackerDefinition definition, CancellationToken ct)
+        ITenantMembershipRepository members, Guid tenantId, TrackerDefinition definition, DateTime now, CancellationToken ct)
     {
-        var recipient = await InAppRecipients.ResolveAsync(members, tenantId, definition.CreatedBy, ct)
+        var recipient = await InAppRecipients.ResolveAsync(members, tenantId, definition.CreatedBy, now, ct)
             ?? await InAppRecipients.EarliestOwnerAsync(members, tenantId, ct);
         return recipient?.ToString() ?? string.Empty;
     }

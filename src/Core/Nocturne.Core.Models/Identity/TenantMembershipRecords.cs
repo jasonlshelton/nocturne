@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Nocturne.Core.Models.Authorization;
 
 namespace Nocturne.Core.Models.Identity;
@@ -15,11 +16,13 @@ public sealed record TenantMemberRecord(
     bool IsSystemSubject,
     bool IsDemoSubject,
     bool IsPlatformAdmin,
+    bool HasConfirmedEmail,
     IReadOnlyList<TenantMemberRoleRecord> Roles,
     IReadOnlyList<string>? DirectPermissions,
     string? Label,
     string? Username,
     bool LimitTo24Hours,
+    DateTime? AccessEndsAt,
     DateTime? LastUsedAt,
     Guid? CreatedFromInviteId,
     DateTime SysCreatedAt)
@@ -43,6 +46,7 @@ public sealed record TenantMemberRoleRecord(Guid RoleId, string Name, string Slu
 
 /// <summary>A membership to store, with the roles it is assigned at once.</summary>
 /// <param name="MadeBy">Who the membership's audit rows name as the actor.</param>
+/// <param name="AccessEndsAt">When the membership ends, in UTC; null when it does not.</param>
 public sealed record NewTenantMember(
     Guid TenantId,
     Guid SubjectId,
@@ -52,7 +56,61 @@ public sealed record NewTenantMember(
     string? Username = null,
     bool LimitTo24Hours = false,
     Guid? CreatedFromInviteId = null,
-    MembershipMadeBy MadeBy = MembershipMadeBy.Caller);
+    MembershipMadeBy MadeBy = MembershipMadeBy.Caller,
+    DateTime? AccessEndsAt = null)
+{
+    /// <summary>
+    /// How the subject came to be a member, as its joined row records it. Required, so a caller cannot
+    /// record a join it did not make.
+    /// </summary>
+    public required MembershipJoinHow How { get; init; }
+
+    /// <summary>The subject who let them in: the invite's maker, or the approver of a request; null otherwise.</summary>
+    public required Guid? By { get; init; }
+}
+
+/// <summary>How a subject became a member of a tenant.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<MembershipJoinHow>))]
+public enum MembershipJoinHow
+{
+    /// <summary>They accepted an invite.</summary>
+    Invite,
+
+    /// <summary>Their membership request or access request was approved.</summary>
+    Request,
+
+    /// <summary>A manager or a platform administrator added them, with no invite or request.</summary>
+    Direct,
+
+    /// <summary>They are the owner the tenant was created or set up with.</summary>
+    Setup,
+
+    /// <summary>The platform added them: the Public and device subjects, the demo member, a dev restore.</summary>
+    System,
+}
+
+/// <summary>How a subject stopped being a member of a tenant.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<MembershipEndHow>))]
+public enum MembershipEndHow
+{
+    /// <summary>Someone else removed them.</summary>
+    Removed,
+
+    /// <summary>They removed themselves.</summary>
+    Left,
+
+    /// <summary>Their account was deleted.</summary>
+    AccountDeleted,
+
+    /// <summary>The membership had ended and was replaced when they joined again.</summary>
+    Replaced,
+
+    /// <summary>
+    /// The platform removed them: the demo reset, a dev snapshot import, or setup adoption passing their
+    /// membership to another subject.
+    /// </summary>
+    System,
+}
 
 /// <summary>Who made a membership, as its audit rows record it.</summary>
 public enum MembershipMadeBy
@@ -156,4 +214,10 @@ public enum OwnerGuardedChange
     Changed,
     NotFound,
     LastOwner,
+
+    /// <summary>
+    /// The change would leave an owner's membership with an end date: an end date set on an owner,
+    /// or the owner role given to a membership that has one.
+    /// </summary>
+    OwnerAccessEnds,
 }

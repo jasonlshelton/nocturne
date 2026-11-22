@@ -44,7 +44,7 @@ public class SubjectOwnerGuardTests : IDisposable
     private async Task JoinAsync(Guid tenant, Guid subject, bool owner, bool signsIn = true)
     {
         (await Members().AddMemberAsync(
-            new NewTenantMember(tenant, subject, [owner ? _ownerRoles[tenant] : _caretakerRoles[tenant]]), CancellationToken.None))
+            new NewTenantMember(tenant, subject, [owner ? _ownerRoles[tenant] : _caretakerRoles[tenant]]) { How = MembershipJoinHow.Direct, By = null }, CancellationToken.None))
             .Should().BeTrue();
         using var db = _db.CreateContext();
         if (signsIn && !db.PasskeyCredentials.Any(p => p.SubjectId == subject))
@@ -75,7 +75,7 @@ public class SubjectOwnerGuardTests : IDisposable
 
         refused.Should().Equal(new LastOwnerTenant(_home, "home"));
         (await ExistsAsync(owner)).Should().BeTrue();
-        (await Members().IsMemberAsync(_home, owner, CancellationToken.None)).Should().BeTrue();
+        (await Members().IsMemberAsync(_home, owner, DateTime.UtcNow, CancellationToken.None)).Should().BeTrue();
     }
 
     [Fact]

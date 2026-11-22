@@ -148,6 +148,8 @@ you what the message is:
 |--------|---------|
 | `excursion` | The rule's condition became true. `GlucoseValue`, `Trend` and `TrendRate` hold the reading. |
 | `unevaluable` | The rule cannot run until it is edited. `GlucoseValue`, `Trend` and `TrendRate` are null, and `ReadingTimestamp` is the time of the notice. |
+| `held` | The rule has waited 24 hours for missing data. As for `unevaluable`, and `HeldFacts` lists each missing data source as `Fact` and `Reason`. |
+| `held_closed` | As `held`, for a rule with an open alert, which Nocturne closes because its data has been missing for 24 hours. |
 
 The other fields are the same for both kinds: `RuleName`, `Severity`,
 `AlertType`, `ExcursionId`, `InstanceId`, `TenantId`, `SubjectName` and
@@ -182,6 +184,118 @@ is "I have treated this low; stay quiet while glucose is climbing back".
 
 Details, including the limit on how many times a snooze can be extended, are on
 [When an alert fires](/docs/alerts/when-an-alert-fires#snoozing).
+
+## Advanced
+
+The **Advanced** section is closed until you open it. It holds two settings
+for what a rule does when its data is missing. When a rule has a setting that is
+not the default, the closed section shows it.
+
+### When data is missing
+
+These choices apply only when missing data stops the rule from knowing whether
+its full condition is true. If the other parts of the condition give a result,
+the rule uses that result.
+
+- **Wait** (the default). The rule does not change the alert. It opens no alert,
+  and it does not close an open alert, until it knows again. A true auto-resolve
+  condition can still close the alert. The waiting has a limit of 24 hours (see
+  [While a rule waits](#while-a-rule-waits)).
+- **Count the condition as true.** The rule counts its full condition as true. It
+  can open an alert because data is missing. A "for N minutes" part does not delay
+  this alert.
+- **Count the condition as false.** The rule counts its full condition as false.
+  An open alert closes as it does when the condition stops being true. A condition
+  that uses "not" also counts as false when data is missing.
+
+<Callout type="warning" title="A slow data source needs its own bound">
+
+  If your data source sends readings less often than every 5 minutes, set a bound
+  for this rule. Make it at least the time between two readings plus the time a
+  reading can be late. If you do not: with **Count the condition as true**, the
+  rule can open an alert between two readings that arrive on time. With **Count
+  the condition as false**, it can close an open alert between them.
+
+</Callout>
+
+### While a rule waits
+
+When a rule with **Wait** cannot know its condition, the rules list and the rule
+page show **Waiting** and the time the wait started. They also show each missing
+data source and the cause. The cause is one of these: missing, too old, has a time
+in the future, has a value that Nocturne does not know, or not exact (for example
+a pump that reports "50+" units). An open alert that waits shows the same in the
+alert banner.
+
+The waiting has a limit of 24 hours, and you cannot change it:
+
+- When a rule has waited for 24 hours, Nocturne sends one message through the
+  rule's channels. The message gives the name of the rule and the missing data. It
+  has no glucose value and nothing to acknowledge. The rule continues to wait and
+  shows **Waiting** until the data comes back. If the data stops again later,
+  Nocturne sends a new message after 24 more hours.
+- When an open alert has waited for 24 hours, Nocturne closes the alert, and the
+  message says so. The alert closes even if its condition can still be true. The
+  alert history shows that it closed because its data was missing for 24 hours.
+  The rule opens a new alert only when the data comes back and the condition is
+  true.
+
+A rule that you disable while it waits sends no message.
+
+### Minutes until a glucose reading counts as missing
+
+The rule counts a glucose reading as missing when Nocturne received it more than this
+number of minutes ago. This applies to conditions on the glucose value, rate of
+change, trend and glucose range. It does not apply to signal loss, data age,
+predicted glucose or Smart snooze conditions.
+
+The bound is a number of minutes. When you leave the field empty, the rule uses
+the default that the setting shows. **Use the default** clears the bound you set.
+
+This section explains what each setting does. It does not say which setting is
+right for you.
+
+### Clear margin
+
+A clear margin changes the value at which an open alert ends. It does not change
+the value at which the alert starts. You set it on one condition: open the
+condition's actions menu and select **Add a clear margin**. A condition can have
+a margin when it compares a value with a number. These are glucose, rate of
+change, predicted glucose, insulin on board, carbs on board and reservoir. Pump
+battery, uploader battery, transmitter, temp basal and sensitivity can also have
+one. Conditions about time, such as signal loss or site age, cannot have one.
+
+For example, a condition "glucose below 70 mg/dL" with a clear margin of 5 mg/dL:
+
+- The alert starts when glucose goes below 70 mg/dL, as without a margin.
+- While the alert is open, the condition stays true until glucose is 75 mg/dL or
+  more. A glucose value that goes from 69 to 72 and back to 69 stays one alert.
+  Without the margin, each crossing of 70 can end the alert and start a new one.
+- After the alert ends, the condition is true again only below 70 mg/dL.
+
+Inside "not", the margin moves the other way. It also keeps the open alert true
+for longer. For example, "not glucose below 70 mg/dL" with a clear margin of 5
+stays true until glucose goes below 65 mg/dL.
+
+A "for at least" setting is different. With it, the condition must be true for
+that time before the alert starts. A clear margin has no effect until the alert is
+open, and it does not delay the start.
+
+A condition cannot have both. "For at least" also stops a value that crosses the
+line back and forth from starting many alerts. It measures one time for each
+condition, and that time cannot be correct for two lines at once. When you add "for
+at least" to a condition, the editor removes its clear margin. A rule that has a
+margin inside "for at least" cannot run until you remove the margin.
+
+The margin has no effect in auto-resolve and Smart snooze conditions, so the
+editor does not show it there. A margin of 0 is the same as no margin. A margin
+cannot be less than 0, and a condition that checks for an exact value cannot have
+one. On a rate of change, the margin cannot be more than the rate. With a margin
+equal to the rate, a "falling" alert stays open until glucose starts to rise. The rule summary shows the margin, for example "Glucose below 70 mg/dL, clear
+margin 5 mg/dL".
+
+This section explains what the clear margin does. It does not say if a margin is
+right for you, or which margin to use.
 
 ## Testing a rule
 

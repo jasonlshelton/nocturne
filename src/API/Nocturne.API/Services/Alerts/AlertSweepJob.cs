@@ -19,14 +19,16 @@ namespace Nocturne.API.Services.Alerts;
 /// </summary>
 /// <remarks>
 /// <list type="number">
+///   <item>Finish the work an excursion's opening or close still owes (<see cref="ActOnOwedTransitionsAsync"/>).</item>
 ///   <item>Close excursions whose hysteresis window has elapsed.</item>
 ///   <item>Check snoozed instances for smart-snooze extension or re-fire.</item>
 ///   <item>Check each enabled rule's condition for a version that cannot be evaluated (<see cref="IUnevaluableRuleNotice"/>).</item>
+///   <item>Tell the owners of each channel of an enabled rule that does not send (<see cref="IAlertChannelNotice"/>).</item>
 ///   <item>Archive a clock-anomaly notification once no stored reading is ahead of the clock (<see cref="IClockAnomalyNotice.RefreshAsync"/>).</item>
 ///   <item>Evaluate rules with a wall-clock-sensitive condition (<see cref="RuleTrees.ReferencesWallClock"/>).</item>
 ///   <item>Run periodic auto-resolve for excursions whose conditions don't depend on the latest reading.</item>
 /// </list>
-/// The wall-clock pass evaluates every such rule of the tenant, so it runs after the two cheap,
+/// The wall-clock pass evaluates every such rule of the tenant, so it runs after the cheap,
 /// time-critical passes rather than delaying them. A pass that throws does not stop the passes
 /// after it; the run then fails with the first error, and is retried after <see cref="SweepMaxBackoff"/>.
 /// An inactive tenant's row is parked for <see cref="IScheduledJob.InactiveTenantRecheck"/>.
@@ -101,11 +103,14 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
         Exception? failed = null;
         foreach (var (pass, what) in new (Func<Sweep, CancellationToken, Task>, string)[]
                  {
+                     (ActOnOwedTransitionsAsync, "finishing owed transitions"),
                      (CloseHysteresisWindowsAsync, "closing hysteresis windows"),
                      (CheckSnoozedInstancesAsync, "checking snoozed instances"),
                      (CheckRuleConditionsAsync, "checking rule conditions"),
+                     (CheckAlertChannelsAsync, "checking alert channels"),
                      (CheckClockAnomaliesAsync, "checking clock-anomaly notifications"),
                      (EvaluateWallClockRulesAsync, "evaluating wall-clock rules"),
+                     (CheckHeldRulesAsync, "checking held rules"),
                      (EvaluateAutoResolveAsync, "evaluating auto-resolve"),
                  })
         {
@@ -130,7 +135,7 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     private sealed class Sweep(IServiceProvider services, IAlertRepository repository, Guid tenantId, DateTime now)
     {
         private TenantAlertContext? _tenant;
-        private IReadOnlyList<AlertRuleSnapshot>? _enabledRules;
+        private EnabledAlertRules? _enabledRules;
         private (Guid ReadingId, DateTime At, ReadingTrend Trend)? _trend;
 
         public IServiceProvider Services => services;
@@ -146,9 +151,13 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             _tenant ??= await repository.GetTenantAlertContextAsync(tenantId, ct)
                         ?? throw new InvalidOperationException($"Tenant {tenantId} has no alert context.");
 
-        /// <summary>The tenant's enabled rules, read once per run.</summary>
+        /// <summary>The tenant's enabled rules and those it cannot read, read once per run.</summary>
+        public async Task<EnabledAlertRules> ReadEnabledRulesAsync(CancellationToken ct) =>
+            _enabledRules ??= await repository.ReadEnabledRulesAsync(ct);
+
+        /// <summary>The tenant's enabled rules that can be read, read once per run.</summary>
         public async Task<IReadOnlyList<AlertRuleSnapshot>> EnabledRulesAsync(CancellationToken ct) =>
-            _enabledRules ??= await repository.GetEnabledRulesAsync(ct);
+            (await ReadEnabledRulesAsync(ct)).Rules;
 
         /// <summary>
         /// The trend of <paramref name="reading"/>, read once per run: the snooze and wall-clock
@@ -163,6 +172,117 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             _trend = (reading.Id, reading.Timestamp, trend);
             return trend;
         }
+    }
+
+    /// <summary>
+    /// How long after the work of an opening or close was last taken up the sweep takes it up
+    /// again. The evaluation that made the transition takes it up as it commits it and normally
+    /// settles it within seconds, so only work whose taker died, or failed, is this old.
+    /// </summary>
+    internal static readonly TimeSpan OwedTransitionLease = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Finishes the work each opening or close still owes once its <see cref="OwedTransitionLease"/>
+    /// has run out: a process that died, or a handler that threw, after the transition committed
+    /// (docs/alerts/engine-semantics.md §7). The first run after a start is the start's pass, since
+    /// the ledger finds the tenant's run overdue. Each is taken up first
+    /// (<see cref="IAlertRepository.TakeUpOwedTransitionAsync"/>), so of two sweeps one acts, and a
+    /// handler still running past the lease can be overlapped: its pending sends may then go twice.
+    /// </summary>
+    /// <remarks>
+    /// An opening is dispatched while its excursion is open, acknowledged or not: an acknowledgement
+    /// can be an acknowledge-all made for another alarm, and must not consume an alert nobody
+    /// received. Exactly two cutoffs settle it without a send, since an alert for a condition that
+    /// has ended misleads: the excursion has closed (checked again under the instance lock,
+    /// <see cref="IAlertRepository.EnsureInstanceAsync"/>), or the rule is disabled or deleted. An
+    /// enabled rule whose stored row cannot be read keeps its opening owed, taken up again each
+    /// lease, until one of the two applies. A close is finished whatever its age. A handler that
+    /// throws leaves its work owed and stops the pass; the work it took up waits out a new lease,
+    /// so the next run goes on with the rest.
+    /// </remarks>
+    private async Task ActOnOwedTransitionsAsync(Sweep sweep, CancellationToken ct)
+    {
+        var owed = await sweep.Repository.GetOwedTransitionsAsync(sweep.Now - OwedTransitionLease, ct);
+        if (owed.Count == 0) return;
+
+        var resolutionHandler = sweep.Services.GetRequiredService<IExcursionResolutionHandler>();
+        var openedHandler = sweep.Services.GetRequiredService<IExcursionOpenedHandler>();
+        var enabled = await sweep.ReadEnabledRulesAsync(ct);
+        var rules = enabled.Rules.ToDictionary(r => r.Id);
+        var unreadable = enabled.Unreadable.Select(r => r.Id).ToHashSet();
+        SensorContext? context = null;
+
+        foreach (var transition in owed)
+        {
+            if (!await sweep.Repository.TakeUpOwedTransitionAsync(
+                    transition.ExcursionId, transition.Kind, transition.TakenUpAt, sweep.Now, ct))
+                continue;
+
+            if (transition.Kind == ExcursionTransitionType.ExcursionClosed)
+            {
+                logger.LogWarning(
+                    "Finishing the close of excursion {ExcursionId}, which its evaluation left unfinished",
+                    transition.ExcursionId);
+                await resolutionHandler.HandleClosedAsync(
+                    new ExcursionTransition(ExcursionTransitionType.ExcursionClosed, transition.ExcursionId),
+                    sweep.TenantId, ct);
+                continue;
+            }
+
+            if (transition.EndedAt is null && unreadable.Contains(transition.AlertRuleId))
+            {
+                logger.LogWarning(
+                    "Excursion {ExcursionId} opened without being dispatched, and its rule {AlertRuleId} cannot be read; it stays owed",
+                    transition.ExcursionId, transition.AlertRuleId);
+                continue;
+            }
+
+            if (transition.EndedAt is not null || !rules.TryGetValue(transition.AlertRuleId, out var rule))
+            {
+                logger.LogWarning(
+                    "Excursion {ExcursionId} opened without being dispatched and has since closed or lost its rule; it is not sent",
+                    transition.ExcursionId);
+                await sweep.Repository.SettleTransitionAsync(transition.ExcursionId, transition.Kind, ct);
+                continue;
+            }
+
+            logger.LogWarning(
+                "Dispatching excursion {ExcursionId} of rule {AlertRuleId}, which its evaluation opened without finishing its dispatch",
+                transition.ExcursionId, rule.Id);
+            context ??= await OwedDispatchContextAsync(sweep, owed, rules, ct);
+            await openedHandler.HandleOpenedAsync(rule, transition.ExcursionId, context, sweep.TenantId, late: true, ct);
+        }
+    }
+
+    /// <summary>
+    /// The context a late dispatch is built from: the last usable reading when it is at most
+    /// <see cref="SmartSnoozeTrendGate.MaxLatestAge"/> old, the bar a snooze's re-notification
+    /// sets, and otherwise no glucose value with the last reading's time, so the payload never
+    /// presents an old value or the dispatch time as a current reading. Enriched for the owed
+    /// rules, which gives the Do Not Disturb scopes active now.
+    /// </summary>
+    private async Task<SensorContext> OwedDispatchContextAsync(
+        Sweep sweep,
+        IReadOnlyList<OwedTransition> owed,
+        IReadOnlyDictionary<Guid, AlertRuleSnapshot> rules,
+        CancellationToken ct)
+    {
+        var last = await LastUsableReadingAsync(sweep, ct);
+        var context = last.Reading is { } usable && sweep.Now - usable.Timestamp <= SmartSnoozeTrendGate.MaxLatestAge
+            ? CanonicalAlertEvaluator.ContextFor(usable, await sweep.TrendOfAsync(usable, ct))
+            : new SensorContext
+            {
+                LatestValue = null,
+                LatestTimestamp = last.At,
+                TrendRate = null,
+                LastReadingAt = last.At,
+            };
+        var owedRules = owed
+            .Select(t => rules.GetValueOrDefault(t.AlertRuleId))
+            .OfType<AlertRuleSnapshot>()
+            .DistinctBy(r => r.Id)
+            .ToList();
+        return await sweep.Services.GetRequiredService<ISensorContextEnricher>().EnrichAsync(context, owedRules, ct);
     }
 
     /// <summary>
@@ -501,10 +621,22 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     /// </summary>
     private static async Task CheckRuleConditionsAsync(Sweep sweep, CancellationToken ct) =>
         await sweep.Services.GetRequiredService<IUnevaluableRuleNotice>()
-            .CheckAsync(await sweep.EnabledRulesAsync(ct), ct);
+            .CheckAsync(await sweep.ReadEnabledRulesAsync(ct), ct);
+
+    private static async Task CheckAlertChannelsAsync(Sweep sweep, CancellationToken ct) =>
+        await sweep.Services.GetRequiredService<IAlertChannelNotice>()
+            .CheckAsync(await sweep.EnabledRulesAsync(ct), sweep.Now, ct);
 
     private static Task CheckClockAnomaliesAsync(Sweep sweep, CancellationToken ct) =>
         sweep.Services.GetRequiredService<IClockAnomalyNotice>().RefreshAsync(sweep.Now, ct);
+
+    /// <summary>
+    /// Hands every enabled rule to <see cref="IHeldRuleNotice"/>, after the evaluation pass has
+    /// evaluated each hold that reached its bound, so a reported hold is told within the run.
+    /// </summary>
+    private static async Task CheckHeldRulesAsync(Sweep sweep, CancellationToken ct) =>
+        await sweep.Services.GetRequiredService<IHeldRuleNotice>()
+            .CheckAsync(await sweep.EnabledRulesAsync(ct), ct);
 
     /// <summary>
     /// Evaluates every enabled rule that <see cref="RuleTrees.ReferencesWallClock"/> selects
@@ -524,12 +656,16 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
     /// <para>
     /// A rule that <see cref="RuleTrees.WaitsForNextChange"/> is skipped while the next change its
     /// last evaluation recorded is still ahead, or it recorded none, and that evaluation read the
-    /// glucose facts this context carries (<see cref="NextChange.GlucoseOf"/>): such a rule reads
-    /// nothing else, so between them only the clock moves it. That holds only while the context
-    /// measures a usable canonical reading, the one the per-reading path measures; with none, its
-    /// reading time moves with writes that evaluate nothing, so every rule is evaluated. A rule
-    /// whose tracker is confirming is never skipped: its next evaluation counts, whatever its
-    /// time (docs/alerts/engine-semantics.md §5.3).
+    /// glucose facts this context carries (<see cref="NextChange.GlucoseOf"/>): every write that moves
+    /// a fact such a rule reads evaluates it (<see cref="ContextFactWrites"/>), so between them only
+    /// the clock moves it. That holds only while the newest canonical reading is usable, the one a
+    /// write's evaluation measures (<see cref="CanonicalAlertEvaluator"/>); with none, or with one
+    /// found only by looking back, a write evaluates nothing, so every rule is evaluated.
+    /// </para>
+    /// <para>
+    /// Every enabled rule whose hold has reached the engine's bound unreported is evaluated as well
+    /// (<see cref="IHeldRuleNotice.DueAsync"/>), wall-clock or not and whatever its next change, so
+    /// the bound is reached with no reading (docs/alerts/engine-semantics.md §6.4).
     /// </para>
     /// </remarks>
     private async Task EvaluateWallClockRulesAsync(Sweep sweep, CancellationToken ct)
@@ -539,7 +675,8 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
         var verdicts = new Dictionary<Guid, WallClockVerdict>(enabled.Count);
         var wallClockRules = enabled.Where(rule => ReferencesWallClock(rule, kept, verdicts)).ToList();
         _wallClock[sweep.TenantId] = verdicts;
-        if (wallClockRules.Count == 0) return;
+        var heldDue = await sweep.Services.GetRequiredService<IHeldRuleNotice>().DueAsync(enabled, sweep.Now, ct);
+        if (wallClockRules.Count == 0 && heldDue.Count == 0) return;
 
         var last = await LastUsableReadingAsync(sweep, ct);
         var context = last.Reading is { } usable
@@ -551,11 +688,10 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
                 TrendRate = null,
                 LastReadingAt = last.At,
             };
-        if (last.Reading is not null)
-        {
+        if (last.Newest)
             wallClockRules = await NotYetDueAsync(sweep, wallClockRules, verdicts, NextChange.GlucoseOf(context), ct);
-            if (wallClockRules.Count == 0) return;
-        }
+        wallClockRules.AddRange(heldDue.Where(rule => wallClockRules.All(r => r.Id != rule.Id)));
+        if (wallClockRules.Count == 0) return;
 
         var orchestrator = sweep.Services.GetRequiredService<IAlertOrchestrator>();
         await orchestrator.EvaluateRulesAsync(
@@ -581,7 +717,6 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             if (verdicts[rule.Id].WaitsForNextChange
                 && await tracker.GetTrackerStateAsync(rule.Id, ct) is { NextChangeKnown: true } state
                 && state.NextChangeGlucose == glucose
-                && state.State != TrackerPostState.Confirming
                 && (state.NextChangeAt is not { } next || next > sweep.Now))
                 continue;
             due.Add(rule);
@@ -622,7 +757,7 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
             _usableLookbacks.TryRemove(sweep.TenantId, out _);
             return latest is null
                 ? new UsableReading(null, (await sweep.TenantAsync(ct)).LastReadingAt)
-                : new UsableReading(latest, latest.Timestamp);
+                : new UsableReading(latest, latest.Timestamp, Newest: true);
         }
 
         if (_usableLookbacks.TryGetValue(sweep.TenantId, out var kept)
@@ -643,7 +778,8 @@ public sealed class AlertSweepJob(ILogger<AlertSweepJob> logger) : IScheduledJob
 
     /// <param name="Reading">The last usable reading, or null when none was found.</param>
     /// <param name="At">What <see cref="SensorContext.LastReadingAt"/> is.</param>
-    private sealed record UsableReading(SensorGlucose? Reading, DateTime? At);
+    /// <param name="Newest">Whether <paramref name="Reading"/> is the newest canonical reading selected, not one looked back for.</param>
+    private sealed record UsableReading(SensorGlucose? Reading, DateTime? At, bool Newest = false);
 
     /// <summary>
     /// Whether <paramref name="rule"/> references the wall clock, reusing its verdict in

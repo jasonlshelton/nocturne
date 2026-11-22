@@ -82,6 +82,7 @@ public class PasskeyController : ControllerBase
     private readonly INocturneDbContextFactory _dbContextFactory;
     private readonly OidcOptions _oidcOptions;
     private readonly ILogger<PasskeyController> _logger;
+    private readonly TimeProvider _time;
 
     /// <param name="passkeyService">Generates each ceremony's options, verifies its response, lists a subject's passkeys, and removes the passkey of a refused invite.</param>
     /// <param name="totpService">Tells whether a login needs a second factor, and issues the step-up token when it does.</param>
@@ -100,6 +101,7 @@ public class PasskeyController : ControllerBase
     /// <param name="dbContextFactory">For the login codes the ceremonies read beside the subjects.</param>
     /// <param name="oidcOptions">For the cookie settings the session and recovery cookies are written with.</param>
     /// <param name="logger">Logs failed ceremonies and invite enrolments.</param>
+    /// <param name="timeProvider">The clock a member's end date is judged by.</param>
     public PasskeyController(
         IPasskeyService passkeyService,
         ITotpService totpService,
@@ -117,8 +119,10 @@ public class PasskeyController : ControllerBase
         ITenantMembershipRepository members,
         INocturneDbContextFactory dbContextFactory,
         IOptions<OidcOptions> oidcOptions,
-        ILogger<PasskeyController> logger)
+        ILogger<PasskeyController> logger,
+        TimeProvider timeProvider)
     {
+        _time = timeProvider;
         _passkeyService = passkeyService;
         _totpService = totpService;
         _trustedDevices = trustedDevices;
@@ -336,7 +340,8 @@ public class PasskeyController : ControllerBase
     /// (<see cref="V4.PlatformAdmin.TenantController.IssueRecoveryCode"/>), which is how a tenant
     /// whose only owner is locked out gets back in. It is a bearer link that outlives the moment it
     /// was minted, so the member must still be one its issuer may recover
-    /// (<see cref="MemberRecoveryEligibility.AllowsRedemption"/>). An emailed link
+    /// (<see cref="MemberRecoveryEligibility.AllowsRedemption"/> for an administrator's code,
+    /// <see cref="MemberRecoveryEligibility.AdmitsOperatorRecoveryAsync"/> for the operator's). An emailed link
     /// (<see cref="Nocturne.Infrastructure.Data.Entities.LoginCodePurpose.EmailRecovery"/>) proves
     /// only control of an address, so it admits a member who can still sign in, but only while the
     /// member still holds that address, confirmed
@@ -367,12 +372,18 @@ public class PasskeyController : ControllerBase
             db, request.Code.Trim(), LoginCodeService.SessionStartingPurposes,
             admits: async (code, ct) =>
             {
-                var admitted = code.Purpose == Nocturne.Infrastructure.Data.Entities.LoginCodePurpose.EmailRecovery
-                    ? code.Email is { } email
-                        && (await _subjects.FindMembersByConfirmedEmailAsync(tenantId, email, ct)).Any(m => m.Id == code.SubjectId)
-                    : MemberRecoveryEligibility.AllowsRedemption(
-                        await eligibility.CheckAsync(db, tenantId, code.SubjectId, ct), code.Purpose);
-                subject = admitted ? await _subjects.GetAsync(code.SubjectId, ct) : null;
+                var member = await _subjects.GetAsync(code.SubjectId, ct);
+                var admitted = code.Purpose switch
+                {
+                    Nocturne.Infrastructure.Data.Entities.LoginCodePurpose.EmailRecovery =>
+                        code.Email is { } email
+                        && (await _subjects.FindMembersByConfirmedEmailAsync(tenantId, email, _time.GetUtcNow().UtcDateTime, ct)).Any(m => m.Id == code.SubjectId),
+                    Nocturne.Infrastructure.Data.Entities.LoginCodePurpose.OperatorRecovery =>
+                        await eligibility.AdmitsOperatorRecoveryAsync(tenantId, member, ct),
+                    _ => MemberRecoveryEligibility.AllowsRedemption(
+                        await eligibility.CheckAsync(db, tenantId, code.SubjectId, ct)),
+                };
+                subject = admitted ? member : null;
                 return subject is not null;
             },
             // The session is started inside the claim, so a session that cannot start leaves the code
@@ -556,6 +567,7 @@ public class PasskeyController : ControllerBase
                     UserAgent: Request.Headers.UserAgent.ToString()));
 
             Response.SetSessionCookies(session, _oidcOptions);
+            await HttpContext.EndReplacedHandedOffSessionAsync(_oidcOptions);
             Response.SetLastSignInCookie(
                 SessionCookieExtensions.SignInMethods.Passkey, providerId: null, _oidcOptions);
 
@@ -615,7 +627,7 @@ public class PasskeyController : ControllerBase
         // A deactivated member is looked up as no member, so it is refused as an unknown username
         // is and its code is not spent.
         var subject = await _subjects.FindMemberByUsernameAsync(
-            tenantId, request.Username, activeOnly: true, HttpContext.RequestAborted);
+            tenantId, request.Username, activeOnly: true, _time.GetUtcNow().UtcDateTime, HttpContext.RequestAborted);
 
         // Unknown usernames go through the same verification; see IRecoveryCodeService.VerifyAndConsumeAsync.
         var verified = await _recoveryCodeService.VerifyAndConsumeAsync(subject?.Id, request.Code);
@@ -784,7 +796,7 @@ public class PasskeyController : ControllerBase
         var tenantId = _tenantAccessor.TenantId;
 
         // System-pinned read: this action is anonymous and reachable on a share host.
-        var gate = await _members.ReadSetupGateAsync(tenantId, HttpContext.RequestAborted);
+        var gate = await _members.ReadSetupGateAsync(tenantId, _time.GetUtcNow().UtcDateTime, HttpContext.RequestAborted);
 
         var tenant = await _tenants.GetAsync(tenantId, HttpContext.RequestAborted);
 

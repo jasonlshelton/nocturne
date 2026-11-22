@@ -139,8 +139,8 @@ public static class ServiceRegistrationExtensions
         // stateless Data Protection token, so what these bound is the work each attempt costs —
         // the credential lookup, the audit row a failure writes, and the crypto the completion
         // step runs. Two things set the ceilings well above that work: a ceremony spends two
-        // permits (options then complete), and a household or clinic behind one NAT is a single
-        // partition, so the whole family signs in from one bucket.
+        // permits (options then complete), and a household or clinic behind one NAT or on one IPv6
+        // network is a single partition, so the whole family signs in from one bucket.
         ("passkey-login", 30, TimeSpan.FromMinutes(1)),
         ("passkey-register", 20, TimeSpan.FromMinutes(1)),
         // A recovery code is a one-time human-typed secret and the last way back into an account,
@@ -167,8 +167,9 @@ public static class ServiceRegistrationExtensions
         // The anonymous invite lookups, member and alert. Their tokens are long random strings, so
         // grinding one is infeasible at any rate; what the ceiling bounds is the database query
         // each anonymous request costs. An invite page reads once per visit, which leaves the
-        // ceiling room for reloads and for a clinic behind one NAT.
+        // ceiling room for reloads and for a clinic behind one NAT or on one IPv6 network.
         ("invite-lookup", 30, TimeSpan.FromMinutes(1)),
+        // One address. GuestActivationLimiter bounds every address at one tenant together.
         ("guest-activate", 5, TimeSpan.FromMinutes(10)),
         // Redeeming a login code. The code is a random string of refresh-token length, so grinding
         // one is infeasible at any rate; the ceiling bounds what an anonymous attempt costs, which
@@ -183,6 +184,9 @@ public static class ServiceRegistrationExtensions
         // A signed-in member asking for their own confirmation link again. Each one is mail, so the
         // ceiling is as tight as a recovery link's.
         ("email-confirmation", 5, TimeSpan.FromMinutes(10)),
+        // Setting a recovery email sends a confirmation link to the address given, which may not
+        // be the member's own, so each write is mail to a stranger's inbox as well.
+        ("recovery-email", 5, TimeSpan.FromMinutes(10)),
         // Friction against naive abuse only — this does NOT bound the refresh_tokens table. The
         // real ceiling is DemoSessionLimits.MaxLiveSessions, enforced on the subject id.
         ("demo-session", 10, TimeSpan.FromMinutes(5)),
@@ -540,6 +544,8 @@ public static class ServiceRegistrationExtensions
                 ct));
         });
         services.AddSingleton<DelegatedConnectorSyncLimiter>();
+        services.AddSingleton<GuestActivationLimiter>();
+        services.AddSingleton<TeamCreationLimiter>();
 
         return services;
     }
@@ -584,7 +590,6 @@ public static class ServiceRegistrationExtensions
         services.AddOperatorWebhookClient(OperatorWebhook.UsernameValidationClient);
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddSingleton<IRotationSuccessorCache, RotationSuccessorCache>();
-        services.AddScoped<IFirstPartyTokenRepository, EfFirstPartyTokenRepository>();
         services.AddScoped<ISubjectService, SubjectService>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IRoleService, RoleService>();
@@ -629,6 +634,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IPasskeyService, PasskeyService>();
         services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
         services.AddScoped<ITotpService, TotpService>();
+        services.AddSingleton<StepUpCodeAttempts>();
         services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
         // Derive WebAuthn RP config from the base domain (single source of truth). Blank counts as
         // unset: it is what the shipped .env.example leaves behind, and an origin built from it is
@@ -701,10 +707,9 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IAuthHandler, GuestSessionHandler>(); // Priority 52
         services.AddSingleton<GuestSessionHandler>(); // For direct cookie-setting use
         services.AddSingleton<IAuthHandler, InstanceKeyHandler>(); // Priority 55
-        services.AddSingleton<IAuthHandler, OidcTokenHandler>(); // Priority 100
         services.AddSingleton<IAuthHandler, OAuthAccessTokenHandler>(); // Priority 150
         services.AddSingleton<IAuthHandler, DirectGrantTokenHandler>(); // Priority 150
-        services.AddSingleton<IAuthHandler, LegacyJwtHandler>(); // Priority 200
+        services.AddSingleton<IAuthHandler, SessionBearerHandler>(); // Priority 200
         services.AddSingleton<IAuthHandler, ApiKeyHandler>(); // Priority 400
 
         // OIDC provider discovery HTTP client. The issuer URL is tenant configuration, and the
@@ -757,15 +762,13 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ITenantCache, TenantCache>();
         services.AddScoped<ILegacyReadCacheInvalidation, LegacyReadCacheInvalidation>();
         services.AddScoped<IRecordChangeSubscriber, LegacyReadCacheSubscriber>();
+        services.AddScoped<IRecordChangeSubscriber, GlucoseFirstArrivalsInvalidation>();
 
         services.AddScoped<IV4ToLegacyProjectionService, V4ToLegacyProjectionService>();
 
         // Core domain services
         services.AddScoped<ITreatmentService, TreatmentService>();
         services.AddScoped<ITreatmentStore, TreatmentReadService>();
-        services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadStore, Nocturne.Infrastructure.Data.Repositories.RejectedUploadRepository>();
-        services.AddScoped<Nocturne.Core.Contracts.Audit.IAuditLogReader, Nocturne.Infrastructure.Data.Repositories.AuditLogReader>();
-        services.AddScoped<Nocturne.Core.Contracts.Audit.IAuditConfigStore, Nocturne.Infrastructure.Data.Repositories.AuditConfigRepository>();
         services.AddScoped<Nocturne.Core.Contracts.Uploads.IRejectedUploadRecorder, Nocturne.API.Services.Uploads.RejectedUploadRecorder>();
         services.AddScoped<ITreatmentCache, TreatmentCacheAdapter>();
         services.AddScoped<SignalRTreatmentEventSink>();
@@ -859,7 +862,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IConnectorFoodEntryService, ConnectorFoodEntryService>();
         services.AddScoped<ITreatmentFoodService, TreatmentFoodService>();
         services.AddScoped<IUserFoodFavoriteService, UserFoodFavoriteService>();
-        services.AddScoped<IConnectorFoodEntryRepository, ConnectorFoodEntryRepository>();
         services.AddScoped<IMealMatchingService, MealMatchingService>();
         services.AddScoped<IMealReadService, MealReadService>();
 
@@ -947,50 +949,11 @@ public static class ServiceRegistrationExtensions
     }
 
     /// <summary>
-    /// V4 repositories, snapshot repositories, profile repositories,
-    /// patient record repositories, AID detection, and decomposition pipeline.
+    /// Glucose processing, AID detection and the decomposition pipeline. Infrastructure registers
+    /// the V4 repositories.
     /// </summary>
     public static IServiceCollection AddV4Infrastructure(this IServiceCollection services)
     {
-        // V4 Repositories
-        services.AddScoped<ISensorGlucoseRepository, SensorGlucoseRepository>();
-        services.AddScoped<IMeterGlucoseRepository, MeterGlucoseRepository>();
-        services.AddScoped<ICalibrationRepository, CalibrationRepository>();
-        services.AddScoped<IBolusRepository, BolusRepository>();
-        services.AddScoped<IBasalInjectionRepository, BasalInjectionRepository>();
-        services.AddScoped<ITempBasalRepository, TempBasalRepository>();
-        services.AddScoped<IProfileActivationRepository, ProfileActivationRepository>();
-        services.AddScoped<ICarbIntakeRepository, CarbIntakeRepository>();
-        services.AddScoped<IBGCheckRepository, BGCheckRepository>();
-        services.AddScoped<INoteRepository, NoteRepository>();
-        services.AddScoped<IDeviceEventRepository, DeviceEventRepository>();
-        services.AddScoped<IBolusCalculationRepository, BolusCalculationRepository>();
-        services.AddScoped<IDecomposedTreatmentKeys, DecomposedTreatmentKeys>();
-        services.AddScoped<IDeviceRepository, DeviceRepository>();
-
-        // Manually-entered lab results (outside the V4 sync/dedup family)
-        services.AddScoped<ILabHbA1cResultRepository, LabHbA1cResultRepository>();
-        services.AddScoped<IReportSpecRepository, ReportSpecRepository>();
-
-        // V4 Snapshot Repositories
-        services.AddScoped<IApsSnapshotRepository, ApsSnapshotRepository>();
-        services.AddScoped<IPumpSnapshotRepository, PumpSnapshotRepository>();
-        services.AddScoped<IUploaderSnapshotRepository, UploaderSnapshotRepository>();
-        services.AddScoped<IDeviceStatusExtrasRepository, DeviceStatusExtrasRepository>();
-        services.AddScoped<IDeviceStatusGroupRepository, DeviceStatusGroupRepository>();
-
-        // V4 Profile Repositories
-        services.AddScoped<ITherapySettingsRepository, TherapySettingsRepository>();
-        services.AddScoped<IBasalScheduleRepository, BasalScheduleRepository>();
-        services.AddScoped<ICarbRatioScheduleRepository, CarbRatioScheduleRepository>();
-        services.AddScoped<ISensitivityScheduleRepository, SensitivityScheduleRepository>();
-        services.AddScoped<ITargetRangeScheduleRepository, TargetRangeScheduleRepository>();
-
-        // V4 Patient Record Repositories
-        services.AddScoped<IPatientRecordRepository, PatientRecordRepository>();
-        services.AddScoped<IPatientDeviceRepository, PatientDeviceRepository>();
-        services.AddScoped<IPatientInsulinRepository, PatientInsulinRepository>();
-
         // Glucose processing
         services.AddScoped<IGlucoseProcessingConfigProvider, GlucoseProcessingConfigProvider>();
         services.AddScoped<IGlucoseProcessingResolver, GlucoseProcessingResolver>();
@@ -1077,7 +1040,6 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IOpenApsService, OpenApsService>();
 
         // In-app notifications
-        services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
         services.AddScoped<IInAppNotificationService, InAppNotificationService>();
         services.AddScheduledJob<NotificationResolutionJob>();
         services.AddScheduledJob<NotificationCleanupJob>();
@@ -1108,7 +1070,6 @@ public static class ServiceRegistrationExtensions
     )
     {
         // Compression low detection
-        services.AddScoped<ICompressionLowRepository, CompressionLowRepository>();
         services.AddScoped<ICompressionLowNightWindowResolver, CompressionLowNightWindowResolver>();
         services.AddScoped<ICompressionLowService, CompressionLowService>();
         services.AddSingleton<CompressionLowDetectionService>();
@@ -1147,17 +1108,22 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ISensorContextEnricher, SensorContextEnricher>();
         services.AddScoped<IAlertOrchestrator, AlertOrchestrator>();
         services.AddScoped<IUnevaluableRuleNotice, UnevaluableRuleNotice>();
+        services.AddScoped<IHeldRuleNotice, HeldRuleNotice>();
         services.AddScoped<IClockAnomalyNotice, ClockAnomalyNotice>();
         services.AddSingleton<ClockAnomalyNoticeLog>();
+        services.AddScoped<IAlertChannelNotice, AlertChannelNotice>();
+        services.AddSingleton<AlertChannelNoticeLog>();
         services.AddScoped<IAlertDeliveryService, AlertDeliveryService>();
         services.AddScoped<IAlertAcknowledgementService, AlertAcknowledgementService>();
         services.AddScoped<AlertReceiptService>();
         services.AddScoped<IAlertSnoozeService, AlertSnoozeService>();
         services.AddScoped<IExcursionResolutionHandler, ExcursionResolutionHandler>();
+        services.AddScoped<IExcursionOpenedHandler, ExcursionOpenedHandler>();
         services.AddScoped<IEngineAlarmRelay, EngineAlarmRelay>();
         services.AddScoped<IAlarmAckHandler, AlarmAckHandler>();
         services.AddScoped<IAlertReferenceService, AlertReferenceService>();
         services.AddScoped<IAlertReplayService, AlertReplayService>();
+        services.AddScoped<ImportedHistory>();
         // Scope-class classification (scoped Do Not Disturb, ADR 0004): stateless over
         // the static native engine, so a singleton. Backfilled once per tenant.
         services.AddSingleton<IRuleScopeClassifier, RuleScopeClassifier>();
@@ -1189,6 +1155,10 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<INotificationActionHandler, AlertActionHandler>();
         services.AddScoped<ICanonicalAlertEvaluator, CanonicalAlertEvaluator>();
         services.AddSingleton<AlertEvaluationWatermark>();
+        services.AddSingleton<AlertRuleDecisions>();
+        services.AddSingleton<AlertFactEvaluationScheduler>();
+        services.AddHostedService(sp => sp.GetRequiredService<AlertFactEvaluationScheduler>());
+        services.AddScoped<IRecordChangeSubscriber, AlertFactsChangedSubscriber>();
 
         // Trackers. The trigger is the IDeviceEventReactor adapter rather than a service any
         // caller invokes: it runs from the V4 device-event write chokepoint, which is what makes a
@@ -1286,6 +1256,7 @@ public static class ServiceRegistrationExtensions
         services.AddMetrics();
         services.AddSingleton<Nocturne.API.Services.Alerts.Engines.AlertEngineErrors>();
         services.AddSingleton<Nocturne.API.Services.Alerts.Engines.ConditionVersionLog>();
+        services.AddSingleton<Nocturne.API.Services.Alerts.Engines.NotTrueRecordingFloor>();
         services.ConfigureOpenTelemetryMeterProvider(metrics =>
             metrics.AddMeter(Nocturne.API.Services.Alerts.Engines.AlertEngineErrors.MeterName));
         services.AddHealthChecks()
@@ -1316,12 +1287,11 @@ public static class ServiceRegistrationExtensions
     /// </summary>
     public static IServiceCollection AddMigrationServices(this IServiceCollection services)
     {
-        // Shared with the connector gate so both are the one instance the process holds.
-        services.TryAddSingleton<TenantRunGuard>();
         services.AddSingleton<
             Nocturne.API.Services.Migration.IMigrationJobService,
             Nocturne.API.Services.Migration.MigrationJobService
         >();
+        services.AddScheduledJob<Nocturne.API.Services.Migration.MigrationRunJob>();
         services.AddHostedService<Nocturne.API.Services.Migration.MigrationStartupService>();
 
         // The Nightscout to migrate from is a tenant-admin-supplied URL, the same shape as a

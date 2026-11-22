@@ -2,19 +2,22 @@
 //! glucose_bucket, staleness.
 
 use chrono::{DateTime, TimeDelta, Utc};
+use rust_decimal::Decimal;
 
-use super::Env;
 use super::elapsed::{ClockLeaf, Elapsed, Measure, decimal};
 use super::signal::{DataStopped, data_stopped};
+use super::{Env, Held};
 use crate::clock_anomaly::ClockAnchor;
 use crate::compare::Unit;
 use crate::context::SensorContext;
-use crate::enums::{CmpOp, RateDirection, ThresholdDirection, holds};
+use crate::enums::{CmpOp, holds};
+use crate::facts::ContextFact;
 use crate::model::{
-    ConditionKind, GlucoseBucketPayload, Payload, PredictedPayload, RateOfChangePayload,
+    ConditionKind, GlucoseBucketPayload, Margined, Payload, PredictedPayload, RateOfChangePayload,
     StalenessPayload, ThresholdPayload, TrendPayload,
 };
 use crate::truth::Truth;
+use crate::unknown::UnknownReason;
 
 /// How old a reading may be before its glucose facts are unknown, for a rule
 /// without its own bound (engine-semantics.md §3).
@@ -54,10 +57,28 @@ fn expiry(ctx: &SensorContext, bound: TimeDelta) -> Option<Elapsed> {
     })
 }
 
-/// `fact` while the reading is known to be fresh at `env.now`, else absent.
-fn fresh<T>(fact: Option<T>, env: &mut Env) -> Option<T> {
+/// `fact` while the reading is known to be fresh at `env.now`, else why it is
+/// not read: absent, stale, or of an age that a timestamp ahead of the clock
+/// leaves unknown.
+fn fresh<T>(fact: Option<T>, env: &mut Env) -> Result<T, UnknownReason> {
     let stale = expiry(env.ctx, env.glucose_freshness).map_or(Truth::False, |e| env.measure(e));
-    fact.filter(|_| stale.is_false())
+    let fact = fact.ok_or(UnknownReason::Absent)?;
+    match stale {
+        Truth::False => Ok(fact),
+        Truth::True => Err(UnknownReason::Stale),
+        Truth::Unknown => Err(UnknownReason::AheadOfClock),
+    }
+}
+
+/// A judged glucose leaf: `test` of the fresh fact, holding since the newest
+/// reading's timestamp, the instant the context says it held at
+/// (engine-semantics.md §3). A timestamp after `now` is no earlier start than
+/// `now`, which the `sustained` clamp reads.
+fn judged<T>(fact: Option<T>, env: &mut Env, test: impl FnOnce(T) -> bool) -> Held {
+    match fresh(fact, env) {
+        Ok(value) => reading(test(value).into(), env.ctx),
+        Err(reason) => Held::unknown(ContextFact::Glucose, reason),
+    }
 }
 
 /// When a leaf that [`judges_freshness`] can turn unknown with only `now`
@@ -78,50 +99,59 @@ pub(crate) fn freshness_expiry(
     present.then(|| expiry(ctx, bound)).flatten()
 }
 
+/// A glucose leaf's truth with the newest reading's timestamp.
+fn reading(truth: Truth, ctx: &SensorContext) -> Held {
+    Held::since(truth, ctx.latest_timestamp)
+}
+
 /// Strict comparison: below `v < value`, above `v > value`; no fresh reading
 /// is unknown.
-pub(super) fn threshold(p: &ThresholdPayload, env: &mut Env) -> Truth {
-    Truth::of(
-        fresh(env.ctx.latest_value, env).map(|latest| match p.direction {
-            ThresholdDirection::Below => latest < p.value,
-            ThresholdDirection::Above => latest > p.value,
-        }),
-    )
+pub(super) fn threshold(p: &ThresholdPayload, env: &mut Env) -> Held {
+    compared(p, env.ctx.latest_value, env)
 }
 
 /// Inclusive comparison: falling `rate' <= -rate`, rising `rate' >= rate`.
-pub(super) fn rate_of_change(p: &RateOfChangePayload, env: &mut Env) -> Truth {
-    Truth::of(
-        fresh(env.ctx.trend_rate, env).map(|rate| match p.direction {
-            RateDirection::Falling => rate <= -p.rate,
-            RateDirection::Rising => rate >= p.rate,
-        }),
-    )
+pub(super) fn rate_of_change(p: &RateOfChangePayload, env: &mut Env) -> Held {
+    compared(p, env.ctx.trend_rate, env)
 }
 
-pub(super) fn trend(p: &TrendPayload, env: &mut Env) -> Truth {
-    Truth::of(fresh(env.ctx.trend_bucket, env).map(|bucket| p.bucket == bucket))
+/// A judged glucose leaf's comparison of `fact` with its limit.
+fn compared(p: &impl Margined, fact: Option<Decimal>, env: &mut Env) -> Held {
+    let (op, _) = p.comparison();
+    let limit = env.limit(p);
+    judged(fact, env, |actual| op.apply(actual, limit))
+}
+
+/// A bucket name the crate cannot name reads as an absent bucket (§4).
+pub(super) fn trend(p: &TrendPayload, env: &mut Env) -> Held {
+    judged(env.ctx.trend_bucket, env, |bucket| p.bucket == bucket)
 }
 
 /// True if any prediction with `offset_minutes <= within_minutes` satisfies the
 /// comparison; points beyond the horizon are skipped. No predictions is
-/// unknown.
-pub(super) fn predicted(p: &PredictedPayload, env: &Env) -> Truth {
+/// unknown. Not judged: its points are not facts of the reading.
+pub(super) fn predicted(p: &PredictedPayload, env: &Env) -> Held {
     if env.ctx.predictions.is_empty() {
-        return Truth::Unknown;
+        return Held::unknown(ContextFact::Predictions, UnknownReason::Absent);
     }
-    Truth::any(
-        env.ctx
-            .predictions
-            .iter()
-            .filter(|point| point.offset_minutes <= p.within_minutes.get())
-            .map(|point| holds(p.operator, Some(point.mgdl), p.value)),
+    let limit = env.limit(p);
+    reading(
+        Truth::any(
+            env.ctx
+                .predictions
+                .iter()
+                .filter(|point| point.offset_minutes <= p.within_minutes.get())
+                .map(|point| holds(p.operator, Some(point.mgdl), limit)),
+        ),
+        env.ctx,
     )
 }
 
 /// Set membership over the precomputed context bucket.
-pub(super) fn glucose_bucket(p: &GlucoseBucketPayload, env: &mut Env) -> Truth {
-    Truth::of(fresh(env.ctx.glucose_bucket, env).map(|bucket| p.buckets.contains(&bucket)))
+pub(super) fn glucose_bucket(p: &GlucoseBucketPayload, env: &mut Env) -> Held {
+    judged(env.ctx.glucose_bucket, env, |bucket| {
+        p.buckets.contains(&bucket)
+    })
 }
 
 /// Minutes since data stopped vs a threshold; infinitely stale is `>`/`>=`
@@ -142,6 +172,6 @@ pub(super) fn staleness(
         DataStopped::Forever => {
             ClockLeaf::Fixed(matches!(p.operator, CmpOp::Gt | CmpOp::Ge).into())
         }
-        DataStopped::Unknown => ClockLeaf::Fixed(Truth::Unknown),
+        DataStopped::Unknown => ClockLeaf::Unknown(ContextFact::Glucose, UnknownReason::Absent),
     }
 }

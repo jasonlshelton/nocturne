@@ -49,16 +49,21 @@ internal static class EngineTestHarness
         new(trackerRepo, gate ?? new AlertRuleEvaluationGate(), time, NullLogger<ExcursionTracker>.Instance,
             new RustExcursionDecider(new AlertEngineErrors(new TestMeterFactory(), time)));
 
-    /// <summary>Builds a <see cref="RustBackedAlertEngine"/> over the corpus's in-memory fakes.</summary>
+    /// <summary>
+    /// Builds a <see cref="RustBackedAlertEngine"/> over the corpus's in-memory fakes. Its
+    /// <see cref="NotTrueRecordingFloor"/> starts at <paramref name="time"/>'s instant now, unless one is given.
+    /// </summary>
     public static RustBackedAlertEngine BuildRustEngine(
         ManualTimeProvider time,
-        IAlertTrackerRepository trackerRepo)
+        IAlertTrackerRepository trackerRepo,
+        NotTrueRecordingFloor? notTrueFloor = null)
     {
         return new RustBackedAlertEngine(
             trackerRepo,
             new AlertRuleEvaluationGate(),
             new AlertEngineErrors(new TestMeterFactory(), time),
             new ConditionVersionLog(),
+            notTrueFloor ?? new NotTrueRecordingFloor(time),
             time,
             NullLogger<RustBackedAlertEngine>.Instance);
     }
@@ -111,6 +116,10 @@ internal static class EngineTestHarness
             RuleId = rule.Id,
             Root = evaluation.ConditionMet,
             Unknown = evaluation.ConditionUnknown ? true : null,
+            UnknownFacts = evaluation.ConditionUnknown
+                ? evaluation.UnknownFacts.Select(f => new ExpectedUnknownFact(f.Fact, f.Reason)).ToList()
+                : null,
+            HeldTooLong = evaluation.HeldTooLong ? true : null,
             Leaves = (evaluation.LeafValues ?? new Dictionary<int, bool?>())
                 .OrderBy(kv => kv.Key)
                 .Select(kv => new ExpectedLeaf(kv.Key, kv.Value ?? false, kv.Value is null ? true : null))
@@ -122,10 +131,10 @@ internal static class EngineTestHarness
                 : new ExpectedTrackerState
                 {
                     State = state.State,
-                    ConfirmationCount = state.ConfirmationCount,
                     Excursion = trackerRepo.OrdinalOf(state.ActiveExcursionId),
                     HysteresisStartedAt = state.HysteresisStartedAt,
                     AwaitingRearm = state.AwaitingRearm ? true : null,
+                    HeldSince = state.HeldSince,
                 },
             AutoResolved = evaluation.AutoResolved ? true : null,
             TimerOps = trackerRepo.Timers.DrainOps() is { Count: > 0 } ops ? ops : null,

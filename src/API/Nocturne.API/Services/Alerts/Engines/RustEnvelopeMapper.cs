@@ -27,9 +27,10 @@ namespace Nocturne.API.Services.Alerts.Engines;
 internal static class RustEnvelopeMapper
 {
     /// <summary>
-    /// Sentinel ordinal sent for "this rule has an active excursion". The actual value is
-    /// irrelevant to the engine's semantics (it only checks presence and echoes it back);
-    /// the next-ordinal is set above it so a same-call open never collides.
+    /// The ordinal sent for "this rule has an active excursion". The engine only checks that one is
+    /// present and echoes it back. The host identifies an excursion by its row id, which the
+    /// transition writer maps from the transition, so it stores no engine ordinal and sends no
+    /// last ordinal: the engine reads the active one as the last, so an open never reuses it.
     /// </summary>
     private const int ActiveExcursionSentinel = 1;
 
@@ -60,7 +61,6 @@ internal static class RustEnvelopeMapper
         Id = rule.Id,
         ConditionType = AlertConditionTypeNames.ToWireString(rule.ConditionType),
         ConditionParams = ParseJson(rule.ConditionParams),
-        ConfirmationReadings = rule.ConfirmationReadings,
         HysteresisMinutes = rule.HysteresisMinutes,
         AutoResolveEnabled = rule.AutoResolveEnabled,
         AutoResolveParams = rule.AutoResolveEnabled ? RuleTrees.AutoResolve(rule.AutoResolveParams) : null,
@@ -80,12 +80,11 @@ internal static class RustEnvelopeMapper
             : new RustTrackerState
             {
                 State = state.State,
-                ConfirmationCount = state.ConfirmationCount,
                 ActiveExcursionOrdinal = state.ActiveExcursionId is null ? null : ActiveExcursionSentinel,
                 UpdatedAt = DateTime.SpecifyKind(state.UpdatedAt, DateTimeKind.Utc),
                 HysteresisStartedAt = Utc(state.HysteresisStartedAt),
                 AwaitingRearm = state.AwaitingRearm,
-                NextExcursionOrdinal = ActiveExcursionSentinel + 1,
+                HeldSince = Utc(state.HeldSince),
             };
 
     public static JsonElement ParseJson(string json)
@@ -125,7 +124,7 @@ internal static class RustEnvelopeMapper
     private static readonly ConditionalWeakTable<SensorContext, object> ContextElementCache = new();
 
     /// <summary>
-    /// Copies persisted sustained timers into the envelope with every instant pinned to
+    /// Copies one map of persisted sustained state into the envelope with every instant pinned to
     /// <see cref="DateTimeKind.Utc"/>.
     /// </summary>
     /// <remarks>
@@ -208,9 +207,11 @@ internal static class RustEnvelopeMapper
             TenantTimeZoneId = ctx.TenantTimeZoneId is { Length: > 0 } tenantZone
                 ? TimeZoneHelper.ToIanaIdIfWindows(tenantZone)
                 : ctx.TenantTimeZoneId,
-            ActivePumpState = ctx.ActivePumpState is { } pump
-                ? new WirePumpState(pump.Mode, Utc(pump.StartedAt)!.Value)
-                : null,
+            ActivePumpModes = ctx.ActivePumpModes.Count == 0
+                ? null
+                : ctx.ActivePumpModes
+                    .Select(m => new WirePumpMode(m.Mode, Utc(m.StartedAt)!.Value))
+                    .ToList(),
             // Serialise from the dictionary KEYS (not the snapshot's echoed fields) so the
             // engine reconstructs the exact same (category, state) lookup — including
             // null-state "any of category" keys.
@@ -253,6 +254,7 @@ internal static class RustEnvelopeMapper
         RustCloseReason.Auto => ExcursionCloseReason.AutoResolve,
         RustCloseReason.Manual => ExcursionCloseReason.Manual,
         RustCloseReason.RuleDisabled => ExcursionCloseReason.RuleDisabled,
+        RustCloseReason.HoldBound => ExcursionCloseReason.HoldBound,
         _ => throw new ArgumentOutOfRangeException(nameof(wire), wire, null),
     };
 
@@ -262,23 +264,25 @@ internal static class RustEnvelopeMapper
         ExcursionCloseReason.AutoResolve => RustCloseReason.Auto,
         ExcursionCloseReason.Manual => RustCloseReason.Manual,
         ExcursionCloseReason.RuleDisabled => RustCloseReason.RuleDisabled,
+        ExcursionCloseReason.HoldBound => RustCloseReason.HoldBound,
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
     };
 
     /// <summary>
     /// The engine's post-state as a <see cref="TrackerPostState"/>, or <see langword="null"/> when
-    /// it holds no per-rule state.
+    /// it holds no per-rule state. <paramref name="heldFacts"/> are kept only while it is held.
     /// </summary>
-    public static TrackerPostState? PostStateFromWire(RustTrackerState tracker) =>
+    public static TrackerPostState? PostStateFromWire(RustTrackerState tracker, string? heldFacts) =>
         tracker.State is null
             ? null
             : new TrackerPostState(
                 tracker.State,
-                tracker.ConfirmationCount,
                 tracker.ActiveExcursionOrdinal is not null,
                 tracker.UpdatedAt!.Value,
                 tracker.HysteresisStartedAt,
-                tracker.AwaitingRearm);
+                tracker.AwaitingRearm,
+                Utc(tracker.HeldSince),
+                tracker.HeldSince is null ? null : heldFacts);
 
     private static DateTime? Utc(DateTime? value) =>
         value is { } v ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : null;
@@ -327,7 +331,7 @@ internal static class RustEnvelopeMapper
         [JsonPropertyName("last_carb_at")] public DateTime? LastCarbAt { get; init; }
         [JsonPropertyName("last_bolus_at")] public DateTime? LastBolusAt { get; init; }
         [JsonPropertyName("tenant_time_zone_id")] public string? TenantTimeZoneId { get; init; }
-        [JsonPropertyName("active_pump_state")] public WirePumpState? ActivePumpState { get; init; }
+        [JsonPropertyName("active_pump_modes")] public List<WirePumpMode>? ActivePumpModes { get; init; }
         [JsonPropertyName("active_state_spans")] public List<WireStateSpan>? ActiveStateSpans { get; init; }
         [JsonPropertyName("active_trackers")] public List<WireTrackerReference>? ActiveTrackers { get; init; }
         [JsonPropertyName("sleep_session_active")] public bool SleepSessionActive { get; init; }
@@ -355,7 +359,7 @@ internal static class RustEnvelopeMapper
         [property: JsonPropertyName("started_at")] DateTime StartedAt,
         [property: JsonPropertyName("source")] string Source);
 
-    private sealed record WirePumpState(
+    private sealed record WirePumpMode(
         [property: JsonPropertyName("mode")] string Mode,
         [property: JsonPropertyName("started_at")] DateTime StartedAt);
 

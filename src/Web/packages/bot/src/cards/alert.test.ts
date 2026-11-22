@@ -8,7 +8,8 @@ import {
   cardTitle,
 } from "./card.test-utils.js";
 import { decodeActionValue, encodeTenantKey } from "../lib/action-value.js";
-import type { ActiveExcursion, AlertPayload } from "../types.js";
+import type { ActiveExcursionResponse } from "@nocturne/api-client";
+import type { AlertPayload } from "../types.js";
 
 const TENANT = "018f2a1b-3c4d-7000-8000-a1b2c3d4e5f6";
 const EXCURSION = "33333333-3333-3333-3333-333333333333";
@@ -87,6 +88,54 @@ describe("AlertCard for a rule that cannot run", () => {
     expect(cardFields(card)).toHaveLength(0);
     expect(cardButtons(card)).toHaveLength(0);
   });
+
+  it("renders the notice for a rule whose condition type the engine does not know", () => {
+    const card = AlertCard({ payload: { ...notice, alertType: null } });
+
+    expect(cardTitle(card)).toBe("CRITICAL: Urgent low");
+    expect(cardButtons(card)).toHaveLength(0);
+  });
+});
+
+describe("AlertCard for a rule held for 24 hours", () => {
+  const held = {
+    ...payload,
+    kind: "held",
+    glucoseValue: null,
+    trend: null,
+    trendRate: null,
+    severity: "warning",
+    heldFacts: [
+      { fact: "glucose", reason: "stale" },
+      { fact: "pump", reason: "absent" },
+    ],
+  } as AlertPayload;
+
+  it("names the rule, says it waits for data, lists each fact, and offers no action", () => {
+    const card = AlertCard({ payload: held });
+
+    expect(cardTitle(card)).toBe("Warning: Urgent low");
+    expect(cardTexts(card)).toEqual([
+      "This rule has waited 24 hours for data, so it cannot send alerts until the data comes back.",
+    ]);
+    expect(cardFields(card)).toEqual(["Glucose readings: Too old", "Pump data: Missing"]);
+    expect(cardButtons(card)).toHaveLength(0);
+  });
+
+  it("says the alert is closed when the hold closed one", () => {
+    const card = AlertCard({ payload: { ...held, kind: "held_closed" } });
+
+    expect(cardTexts(card)).toEqual([
+      "The data for this alert has been missing for 24 hours, so Nocturne closes the alert. The rule cannot send alerts until the data comes back.",
+    ]);
+    expect(cardButtons(card)).toHaveLength(0);
+  });
+
+  it("shows a fact or reason this build does not know as it was sent", () => {
+    const card = AlertCard({ payload: { ...held, heldFacts: [{ fact: "warp_core", reason: "melted" }] } });
+
+    expect(cardFields(card)).toEqual(["warp_core: melted"]);
+  });
 });
 
 describe("AlertCard with no glucose reading", () => {
@@ -139,8 +188,8 @@ describe("ActiveAlertsCard", () => {
   const excursion = (
     id: string,
     ruleName: string,
-    over: Partial<ActiveExcursion> = {},
-  ): ActiveExcursion => ({
+    over: Partial<ActiveExcursionResponse> = {},
+  ): ActiveExcursionResponse => ({
     id,
     ruleName,
     startedAt: new Date(Date.now() - 12 * 60_000).toISOString(),

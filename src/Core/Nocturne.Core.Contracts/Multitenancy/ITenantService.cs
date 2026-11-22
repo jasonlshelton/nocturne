@@ -1,3 +1,4 @@
+using Nocturne.Core.Models.Identity;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.Core.Contracts.Multitenancy;
@@ -95,6 +96,17 @@ public interface ITenantService
     Task<MemberRemovalResult> RemoveMemberAsync(Guid tenantId, Guid subjectId, CancellationToken ct = default);
 
     /// <summary>
+    /// Sets when a member's access ends, or clears it with null, as
+    /// <see cref="ITenantMembershipRepository.SetAccessEndUnlessOwnerAsync"/> does. When a date is set,
+    /// every live guest link and device credential the member made in the tenant that would outlive
+    /// it has its expiry lowered to it, in the same transaction. An expiry only ever shrinks: a later
+    /// date lengthens none, and clearing the date changes none.
+    /// </summary>
+    /// <param name="now">The instant the change is made at, which decides which grants are live.</param>
+    Task<OwnerGuardedChange> SetMemberAccessEndAsync(
+        Guid tenantId, Guid memberId, DateTime? accessEndsAt, DateTime now, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns all tenants that the specified subject is a member of: tenants the subject owns
     /// first, then oldest membership, ties on slug. Callers read the first entry as a tenant
     /// that person owns.
@@ -146,6 +158,18 @@ public record TenantDetailDto(Guid Id, string Slug, string DisplayName, bool IsA
 /// <summary>
 /// Projection of a tenant member, including their assigned roles and direct permissions.
 /// </summary>
+/// <param name="AccessEndsAt">When the membership ends, in UTC; null when it does not.</param>
+/// <param name="HasEnded">Whether the membership has ended, so it grants nothing until the date is moved later.</param>
+/// <param name="OutlastsCaller">
+/// Whether the caller the member was read for has an end date and this member's access outlasts it,
+/// so the caller may not change or remove the member. Always false when read for no caller.
+/// </param>
+/// <param name="HasConfirmedRecoveryEmail">
+/// Whether the member holds a recovery email they confirmed. Null for a system or demo subject,
+/// which has no one to recover, and for every member where this site cannot send the confirming
+/// email (<c>IAccountLinkRoute.IsConfigured</c>), so a reader shows nothing for null. Only the
+/// boolean is carried, never the address.
+/// </param>
 public record TenantMemberDto(
     Guid Id,
     Guid SubjectId,
@@ -157,7 +181,11 @@ public record TenantMemberDto(
     bool LimitTo24Hours,
     DateTime? LastUsedAt,
     DateTime SysCreatedAt,
-    bool IsPlatformAdmin);
+    bool IsPlatformAdmin,
+    DateTime? AccessEndsAt,
+    bool HasEnded,
+    bool? HasConfirmedRecoveryEmail,
+    bool OutlastsCaller = false);
 
 /// <summary>
 /// A role a <see cref="TenantMemberDto"/> holds, with the permissions it confers.

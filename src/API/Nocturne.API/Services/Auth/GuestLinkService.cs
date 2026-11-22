@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Infrastructure.Data;
@@ -78,6 +77,7 @@ public class GuestLinkService : IGuestLinkService
         string label,
         string baseUrl,
         IReadOnlySet<string> creatorScopes,
+        DateTime? expiresNoLaterThan,
         IEnumerable<string>? scopes = null,
         bool limitTo24Hours = false,
         CancellationToken ct = default)
@@ -96,6 +96,7 @@ public class GuestLinkService : IGuestLinkService
         var code = GenerateCode();
         var hash = CredentialHash.GuestCode(code);
         var now = DateTime.UtcNow;
+        var expiresAt = expiresNoLaterThan is { } cap && cap < now + LinkLifetime ? cap : now + LinkLifetime;
 
         var grantId = await _grants.CreateAsync(
             new NewOAuthGrant(
@@ -106,7 +107,7 @@ public class GuestLinkService : IGuestLinkService
                 label,
                 TokenHash: hash,
                 LegacySecretHash: null,
-                ExpiresAt: now + LinkLifetime,
+                ExpiresAt: expiresAt,
                 limitTo24Hours,
                 CreatedBySubjectId: createdBySubjectId),
             ct);
@@ -276,19 +277,7 @@ public class GuestLinkService : IGuestLinkService
         return grant is { GrantType: OAuthGrantTypes.Guest } ? grant : null;
     }
 
-    private static string GenerateCode()
-    {
-        Span<byte> bytes = stackalloc byte[CodeLength];
-        RandomNumberGenerator.Fill(bytes);
-
-        var sb = new StringBuilder(CodeLength);
-        for (var i = 0; i < CodeLength; i++)
-        {
-            sb.Append(CodeAlphabet[bytes[i] % CodeAlphabet.Length]);
-        }
-
-        return sb.ToString();
-    }
+    private static string GenerateCode() => RandomNumberGenerator.GetString(CodeAlphabet, CodeLength);
 
     private static string FormatCode(string code)
     {

@@ -237,7 +237,7 @@ public class OAuthTokenService : IOAuthTokenService
         }
 
         // Verify grant is still active
-        if (oauthToken.Grant == null || oauthToken.Grant.IsRevoked)
+        if (oauthToken.Grant == null || oauthToken.Grant.IsRevoked || oauthToken.Grant.ExpiresAt <= UtcNow)
         {
             return RevokedGrantFailure();
         }
@@ -298,6 +298,20 @@ public class OAuthTokenService : IOAuthTokenService
         // Update grant last used
         await _grantService.UpdateLastUsedAsync(oauthToken.GrantId, null, null, ct);
 
+        var lifetime = GrantTokenLifetime.Of(_jwtService.GetAccessTokenLifetime(), grant.ExpiresAt, _timeProvider.GetUtcNow());
+        var accessToken = await GenerateAccessTokenAsync(
+            grant.Id, grant.TenantId, grant.Scopes, grant.ClientId, grant.LimitTo24Hours, subject, lifetime);
+
+        var expiresIn = (int)lifetime.TotalSeconds;
+        var scopeStr = string.Join(" ", grant.Scopes);
+
+        return OAuthTokenResult.Ok(accessToken, newRefreshToken, expiresIn, scopeStr);
+    }
+
+    private async Task<string> GenerateAccessTokenAsync(
+        Guid grantId, Guid tenantId, IReadOnlyList<string> scopes, string? clientId, bool limitTo24Hours, Subject subject,
+        TimeSpan lifetime)
+    {
         var subjectInfo = new SubjectInfo
         {
             Id = subject.Id,
@@ -306,23 +320,19 @@ public class OAuthTokenService : IOAuthTokenService
         };
 
         var roles = await _subjectService.GetSubjectRolesAsync(subject.Id);
-        var permissions = ScopeTranslator.ToPermissions(grant.Scopes).ToList();
+        var permissions = ScopeTranslator.ToPermissions(scopes).ToList();
 
-        var accessToken = _jwtService.GenerateAccessToken(
+        return _jwtService.GenerateAccessToken(
             subjectInfo,
             permissions,
             roles,
-            grant.Scopes,
-            grant.ClientId,
-            limitTo24Hours: grant.LimitTo24Hours,
-            tenantId: grant.TenantId,
-            grantId: grant.Id
+            scopes,
+            clientId,
+            limitTo24Hours: limitTo24Hours,
+            tenantId: tenantId,
+            lifetime: lifetime,
+            grantId: grantId
         );
-
-        var expiresIn = (int)_jwtService.GetAccessTokenLifetime().TotalSeconds;
-        var scopeStr = string.Join(" ", grant.Scopes);
-
-        return OAuthTokenResult.Ok(accessToken, newRefreshToken, expiresIn, scopeStr);
     }
 
     private static OAuthTokenResult RevokedTokenFailure() =>
@@ -559,19 +569,20 @@ public class OAuthTokenService : IOAuthTokenService
                 "Device code exchange failed: grant {GrantId} not found or revoked",
                 entity.GrantId
             );
-            return OAuthTokenResult.Fail("server_error", "Grant not found.");
+            return await RefuseApprovedDeviceCodeAsync(
+                entity.Id, OAuthTokenResult.Fail("server_error", "Grant not found."), ct);
         }
 
         var subject = await _subjectService.GetSubjectByIdAsync(grantInfo.SubjectId);
         if (subject == null)
         {
-            return SubjectNotFoundFailure();
+            return await RefuseApprovedDeviceCodeAsync(entity.Id, SubjectNotFoundFailure(), ct);
         }
 
         if (!subject.IsActive)
         {
             _logger.LogWarning("Device code exchange failed: subject is not active");
-            return InvalidDeviceCodeFailure();
+            return await RefuseApprovedDeviceCodeAsync(entity.Id, InvalidDeviceCodeFailure(), ct);
         }
 
         if (!await _tokens.TryRedeemDeviceCodeAsync(entity.Id, UtcNow, ct))
@@ -590,6 +601,19 @@ public class OAuthTokenService : IOAuthTokenService
         );
 
         return result;
+    }
+
+    /// <summary>
+    /// Ends an approved device code that cannot be exchanged, so every later poll with it is
+    /// answered as one with an unknown code. Deleted rather than redeemed: a redeemed code presented
+    /// again revokes its grant as a replay, and the approval may have reused a grant the subject
+    /// already holds for the client.
+    /// </summary>
+    private async Task<OAuthTokenResult> RefuseApprovedDeviceCodeAsync(
+        Guid deviceCodeId, OAuthTokenResult failure, CancellationToken ct)
+    {
+        await _tokens.DeleteDeviceCodeAsync(deviceCodeId, ct);
+        return failure;
     }
 
     /// <summary>
@@ -622,26 +646,9 @@ public class OAuthTokenService : IOAuthTokenService
     private async Task<OAuthTokenResult> MintTokenPairAsync(
         OAuthGrantInfo grant, Subject subject, CancellationToken ct)
     {
-        var subjectInfo = new SubjectInfo
-        {
-            Id = subject.Id,
-            Name = subject.Name,
-            Email = subject.Email,
-        };
-
-        var roles = await _subjectService.GetSubjectRolesAsync(subject.Id);
-        var permissions = ScopeTranslator.ToPermissions(grant.Scopes).ToList();
-
-        var accessToken = _jwtService.GenerateAccessToken(
-            subjectInfo,
-            permissions,
-            roles,
-            grant.Scopes,
-            grant.ClientId,
-            limitTo24Hours: grant.LimitTo24Hours,
-            tenantId: grant.TenantId,
-            grantId: grant.Id
-        );
+        var lifetime = GrantTokenLifetime.Of(_jwtService.GetAccessTokenLifetime(), grant.ExpiresAt, _timeProvider.GetUtcNow());
+        var accessToken = await GenerateAccessTokenAsync(
+            grant.Id, grant.TenantId, grant.Scopes, grant.ClientId, grant.LimitTo24Hours, subject, lifetime);
 
         // Generate and store refresh token
         var refreshToken = _jwtService.GenerateRefreshToken();
@@ -657,7 +664,7 @@ public class OAuthTokenService : IOAuthTokenService
             "OAuthAudit: {Event} grant_id={GrantId} client_id={ClientId} subject_id={SubjectId} scopes={Scopes}",
             "token_issued", grant.Id, grant.ClientId, grant.SubjectId, string.Join(" ", grant.Scopes));
 
-        var expiresIn = (int)_jwtService.GetAccessTokenLifetime().TotalSeconds;
+        var expiresIn = (int)lifetime.TotalSeconds;
         var scope = string.Join(" ", grant.Scopes);
 
         return OAuthTokenResult.Ok(accessToken, refreshToken, expiresIn, scope);

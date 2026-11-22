@@ -279,13 +279,14 @@ public class TenantController : ControllerBase
     /// <summary>
     /// Mints a single-use code that signs a member in on the tenant's own host, for a caller that
     /// has already established which browser the member is at.
-    /// The code is redeemed at <c>POST /api/auth/handoff</c> on the tenant's host and grants no more than a direct grant for the same member. The audit trail names the calling platform admin, not the member.
     /// </summary>
     /// <remarks>
-    /// The code is redeemed at <c>POST /api/auth/handoff</c> on that host. It grants no more than
-    /// the direct grant <see cref="TenantDirectGrantController"/> already mints for the same
-    /// member, and like that one it names the platform-admin caller as the actor in the audit
-    /// trail rather than the member.
+    /// The code is redeemed at <c>POST /api/auth/handoff</c> on that host for a session that reads
+    /// and writes the member's data, without their second factor. The session is not the member's
+    /// own sign-in, so it cannot manage their sign-in factors or issue credentials
+    /// (<see cref="RequireInteractiveSessionAttribute"/>) and carries no platform-admin standing
+    /// until the member signs in on it. The issue row of the audit trail names the platform-admin
+    /// caller as the actor, and it and the redeem row both name the code.
     /// </remarks>
     [HttpPost("{id:guid}/members/{subjectId:guid}/login-code")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
@@ -299,18 +300,21 @@ public class TenantController : ControllerBase
         [FromServices] ILoginCodeService loginCodeService,
         [FromServices] ISubjectRepository subjects,
         CancellationToken ct) =>
-        IssueCodeAsync(id, subjectId, LoginCodePurpose.Login, dbContextFactory, loginCodeService, null, subjects, ct);
+        IssueCodeAsync(
+            id, subjectId, LoginCodePurpose.Login, dbContextFactory, loginCodeService,
+            async token => await subjects.GetSignInStateAsync(subjectId, token) is { IsActive: true }, ct);
 
     /// <summary>
     /// Mints a single-use recovery code that lets a member enrol a passkey at
     /// <c>POST /api/auth/passkey/recovery-mode/redeem</c> on the tenant's host.
-    /// Returns 404 when the subject is not a member of the tenant, and 409 when the tenant is
-    /// inactive or the member can still sign in.
+    /// Returns 404 when the subject is not an active, non-system, non-demo member of the tenant, and
+    /// 409 when the tenant is inactive.
     /// </summary>
     /// <remarks>
-    /// The operator's way to recover a member nobody on the tenant may recover: the only owner, a
-    /// platform admin, or a member of another tenant
-    /// (<see cref="Identity.MemberRecoveryController.IssueRecoveryCode"/>).
+    /// The operator's way to recover any member, including one a member administrator may not
+    /// recover (<see cref="Identity.MemberRecoveryController.IssueRecoveryCode"/>) and one who still
+    /// holds a sign-in method on a device they have lost
+    /// (<see cref="MemberRecoveryEligibility.AdmitsOperatorRecoveryAsync"/>).
     /// </remarks>
     [HttpPost("{id:guid}/members/{subjectId:guid}/recovery-code")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
@@ -322,10 +326,14 @@ public class TenantController : ControllerBase
         Guid id, Guid subjectId,
         [FromServices] INocturneDbContextFactory dbContextFactory,
         [FromServices] ILoginCodeService loginCodeService,
+        [FromServices] ISubjectRepository subjects,
         [FromServices] MemberRecoveryEligibility eligibility,
         CancellationToken ct) =>
         IssueCodeAsync(
-            id, subjectId, LoginCodePurpose.OperatorRecovery, dbContextFactory, loginCodeService, eligibility, null, ct);
+            id, subjectId, LoginCodePurpose.OperatorRecovery, dbContextFactory, loginCodeService,
+            async token => await eligibility.AdmitsOperatorRecoveryAsync(
+                id, await subjects.GetAsync(subjectId, token), token),
+            ct);
 
     /// <summary>
     /// Marks the address a member holds as confirmed. For an operator that has its own evidence the
@@ -386,15 +394,13 @@ public class TenantController : ControllerBase
     /// <param name="purpose">What the code may be redeemed for.</param>
     /// <param name="dbContextFactory">Opens the context pinned to the tenant that the code is written through.</param>
     /// <param name="loginCodeService">Issues the code.</param>
-    /// <param name="eligibility">For a recovery code: refuses a member who can still sign in.</param>
-    /// <param name="activeSubjects">For a login code: refuses a member who is not active, as it refuses a non-member.</param>
+    /// <param name="mayIssueFor">Whether the member qualifies for a code of <paramref name="purpose"/>; when not, it is refused as a non-member is.</param>
     /// <param name="ct">Cancels the operation.</param>
     private async Task<IActionResult> IssueCodeAsync(
         Guid id, Guid subjectId, LoginCodePurpose purpose,
         INocturneDbContextFactory dbContextFactory,
         ILoginCodeService loginCodeService,
-        MemberRecoveryEligibility? eligibility,
-        ISubjectRepository? activeSubjects,
+        Func<CancellationToken, Task<bool>> mayIssueFor,
         CancellationToken ct)
     {
         if (!await IsCallerTenantOwnerAsync(id, ct))
@@ -404,18 +410,13 @@ public class TenantController : ControllerBase
         if (tenant is null || tenant.Members.All(m => m.SubjectId != subjectId))
             return NotFound();
 
-        if (activeSubjects is not null
-            && await activeSubjects.GetSignInStateAsync(subjectId, ct) is not { IsActive: true })
+        if (!await mayIssueFor(ct))
             return NotFound();
 
         if (!tenant.IsActive)
             return Problem(detail: "Tenant is not active", statusCode: 409, title: "Conflict");
 
         await using var dbContext = await dbContextFactory.CreateForTenantAsync(id, ct);
-
-        if (eligibility is not null
-            && await eligibility.CheckAsync(dbContext, id, subjectId, ct) == RecoveryEligibility.NotLockedOut)
-            return Problem(detail: "This member can still sign in or recover by email", statusCode: 409, title: "Conflict");
 
         var issued = await loginCodeService.IssueAsync(
             dbContext, subjectId, purpose,

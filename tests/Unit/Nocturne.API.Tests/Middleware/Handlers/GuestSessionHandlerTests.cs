@@ -182,6 +182,45 @@ public class GuestSessionHandlerTests
         context.Response.Headers.SetCookie.ToString().Should().NotContain(CookieName);
     }
 
+    private async Task CapAsync(DateTime notAfter)
+    {
+        await using var ctx = new NocturneDbContext(_dbOptions) { TenantId = _tenantId };
+        await using var unit = await DbUnitOfWork.OpenForTenantAsync(ctx.AsFactory(), _tenantId);
+        var capped = await new OAuthGrantRepository(unit).CapGrantsCreatedByAsync(
+            _dataOwnerId, notAfter, DateTime.UtcNow, CancellationToken.None);
+        await unit.Context.SaveChangesAsync();
+        new GrantRevocationService(_sessionCache).EvictSessions(capped);
+    }
+
+    [Fact]
+    public async Task CappedGrant_WithASessionCachedBeforeTheCap_IsRejectedOnceItsNewExpiryHasPassed()
+    {
+        var grantId = await SeedActivatedGrantAsync(_tenantId);
+        var cookie = ProtectCookie(grantId);
+        (await _handler.AuthenticateAsync(BuildContext(_tenantId, cookie))).Succeeded.Should().BeTrue();
+
+        await CapAsync(DateTime.UtcNow.AddMinutes(-1));
+
+        var result = await _handler.AuthenticateAsync(BuildContext(_tenantId, cookie));
+        result.Succeeded.Should().BeFalse();
+        result.ShouldSkip.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CappedGrant_WithASessionCachedBeforeTheCap_AuthenticatesUntilItsNewExpiry()
+    {
+        var grantId = await SeedActivatedGrantAsync(_tenantId);
+        var cookie = ProtectCookie(grantId);
+        (await _handler.AuthenticateAsync(BuildContext(_tenantId, cookie))).Succeeded.Should().BeTrue();
+        var newExpiry = DateTime.UtcNow.AddHours(1);
+
+        await CapAsync(newExpiry);
+
+        var result = await _handler.AuthenticateAsync(BuildContext(_tenantId, cookie));
+        result.Succeeded.Should().BeTrue();
+        result.AuthContext!.ExpiresAt.Should().Be(new DateTimeOffset(newExpiry, TimeSpan.Zero));
+    }
+
     [Fact]
     public async Task RevokedGrant_IsRejectedWithoutWaitingForCacheExpiry()
     {
@@ -229,7 +268,7 @@ public class GuestSessionHandlerTests
 
         var created = await service.CreateGuestLinkAsync(
             _dataOwnerId, _dataOwnerId, "Caregiver", "https://acme.example.test",
-            Unbounded(), limitTo24Hours: limitTo24Hours);
+            Unbounded(), null, limitTo24Hours: limitTo24Hours);
         var activation = await service.ActivateAsync(created.Code, "1.2.3.4", "TestAgent");
 
         activation.Success.Should().BeTrue();

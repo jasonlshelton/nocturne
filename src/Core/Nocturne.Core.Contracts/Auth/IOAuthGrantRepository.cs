@@ -22,7 +22,8 @@ public interface IOAuthGrantRepository
     /// and that authenticates at <paramref name="now"/>, with its subject's membership of that
     /// tenant read in the same statement; null when there is none. A grant is live when it is not
     /// revoked and either open-ended or short of its expiry; the expiry instant itself does not
-    /// authenticate.
+    /// authenticate. It authenticates only while its subject is active, so a deactivated subject's
+    /// grant is refused as a revoked one is.
     /// </summary>
     /// <remarks>
     /// The grant's own tenant is matched as well as pinned, so the tenant a grant authorizes is
@@ -89,8 +90,12 @@ public interface IOAuthGrantRepository
     /// </summary>
     Task<OAuthGrantRecord?> FindLiveDirectGrantAsync(DirectGrantLookup lookup, DateTime now, CancellationToken ct);
 
-    /// <summary>Whether an unrevoked direct grant matches the legacy secret hash <paramref name="legacySecretHash"/>.</summary>
-    Task<bool> HasUnrevokedLegacySecretAsync(string legacySecretHash, CancellationToken ct);
+    /// <summary>
+    /// The oldest direct grant live at <paramref name="now"/> that matches the legacy secret hash
+    /// <paramref name="legacySecretHash"/>, or null when none does: a revoked or expired one no longer
+    /// holds the secret.
+    /// </summary>
+    Task<OAuthGrantRecord?> FindLiveLegacySecretAsync(string legacySecretHash, DateTime now, CancellationToken ct);
 
     /// <summary>The token hashes of every grant of the tenant that has one.</summary>
     Task<IReadOnlySet<string>> GetTokenHashesAsync(CancellationToken ct);
@@ -98,6 +103,45 @@ public interface IOAuthGrantRepository
     /// <summary>The guest links of <paramref name="dataOwnerSubjectId"/>, newest first.</summary>
     Task<IReadOnlyList<OAuthGrantRecord>> GetGuestLinksAsync(
         Guid dataOwnerSubjectId, bool includeDismissed, CancellationToken ct);
+
+    /// <summary>
+    /// The guest links <paramref name="createdBySubjectId"/> made that are unrevoked and unexpired at
+    /// <paramref name="now"/>, whoever the data owner is.
+    /// </summary>
+    Task<IReadOnlyList<OAuthGrantRecord>> GetLiveGuestLinksCreatedByAsync(
+        Guid createdBySubjectId, DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// Lowers to <paramref name="notAfter"/> the expiry of every guest link and device credential
+    /// <paramref name="createdBySubjectId"/> made that is live at <paramref name="now"/> and expires
+    /// later or never, and stages a <c>guest_link_capped</c> or <c>device_credential_capped</c> audit row
+    /// for each. A grant that expires sooner is left alone, and so is one whose revocation is already
+    /// staged on the unit. Stages on the caller's unit of work and does not save.
+    /// </summary>
+    /// <returns>The grants it lowered, for the caller to evict their sessions once the unit commits.</returns>
+    /// <exception cref="InvalidOperationException">The repository is not over a unit of work.</exception>
+    Task<IReadOnlyList<OAuthGrantRecord>> CapGrantsCreatedByAsync(
+        Guid createdBySubjectId, DateTime notAfter, DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// Removes the expiry and the maker's stamp of device credential <paramref name="grantId"/>, an
+    /// unrevoked direct grant a member made for the tenant's device subject, and stages a
+    /// <c>device_credential_kept</c> audit row naming that member. With the stamp gone no later end
+    /// date, removal or rejoin of the maker caps it again.
+    /// </summary>
+    /// <returns>
+    /// False when <paramref name="grantId"/> is not an unrevoked device credential of the tenant that
+    /// carries a maker's stamp, such as one a platform administrator gave an expiry.
+    /// </returns>
+    Task<bool> KeepDeviceCredentialAsync(Guid grantId, CancellationToken ct);
+
+    /// <summary>
+    /// Stages a <c>guest_link_revoked</c> audit row for each of <paramref name="links"/>, which the
+    /// caller revokes because <paramref name="memberSubjectId"/>, who made them, was removed. Stages on
+    /// the caller's unit of work and does not save.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The repository is not over a unit of work.</exception>
+    void StageMemberRemovalGuestLinkAudit(IEnumerable<OAuthGrantRecord> links, Guid memberSubjectId);
 
     /// <summary>How many guest links of <paramref name="dataOwnerSubjectId"/> are unrevoked and unexpired at <paramref name="now"/>.</summary>
     Task<int> CountLiveGuestLinksAsync(Guid dataOwnerSubjectId, DateTime now, CancellationToken ct);

@@ -42,10 +42,12 @@
   import LinkedOidcIdentities from "#lib/components/settings/LinkedOidcIdentities.svelte";
   import ActiveSessions from "#lib/components/settings/ActiveSessions.svelte";
   import TrustedDevices from "#lib/components/settings/TrustedDevices.svelte";
+  import RecoveryEmailSection from "#lib/components/settings/RecoveryEmailSection.svelte";
   import UserProfileCard from "#lib/components/account/UserProfileCard.svelte";
   import SecurityCredentialCard from "#lib/components/account/SecurityCredentialCard.svelte";
   import TotpSetupDialog from "#lib/components/account/TotpSetupDialog.svelte";
   import RecoveryCodes from "#lib/components/auth/RecoveryCodes.svelte";
+  import SignInGate from "#lib/components/auth/SignInGate.svelte";
   import {
     describePasskeyError,
     parseCeremonyOptions,
@@ -66,6 +68,7 @@
   const { data }: { data: PageData } = $props();
 
   const user = $derived(data.user);
+  const handedOff = $derived(data.isHandedOffSession === true);
 
   // ============================================================================
   // Security State
@@ -445,6 +448,9 @@
         </Card.Content>
       </Card.Root>
     {:else}
+      {#if handedOff}
+        <SignInGate reason="Sign in again to add or remove sign-in methods, see trusted devices, or make new recovery codes." />
+      {/if}
       <!-- Section 1: Registered Passkeys -->
       <SecurityCredentialCard
         title="Passkeys"
@@ -463,12 +469,17 @@
         justAddedId={recovered?.passkeyId}
         canRemove={canRemovePasskey}
         maxCredentials={maxPasskeys}
+        readOnly={handedOff}
         onAdd={handleAddPasskey}
         onRemove={(cred) => confirmRemovePasskey(cred)}
       />
 
       <!-- Section 1b: Linked OIDC identities -->
-      <LinkedOidcIdentities {primaryAuthFactorCount} justAddedId={recovered?.identityId} />
+      <LinkedOidcIdentities
+        {primaryAuthFactorCount}
+        justAddedId={recovered?.identityId}
+        readOnly={handedOff}
+      />
 
       <!-- Section 2: Authenticator Apps -->
       <SecurityCredentialCard
@@ -487,14 +498,20 @@
         removingId={totpRemovingId ?? undefined}
         canRemove={true}
         maxCredentials={maxTotpCredentials}
+        readOnly={handedOff}
         onAdd={handleStartTotpSetup}
         onRemove={(cred) => confirmRemoveTotp(cred)}
       />
 
       <!-- A device is trusted in place of the authenticator code, so without an authenticator
-           there is nothing to list. -->
-      {#if totpCredentials.length > 0}
+           there is nothing to list. Listing them is the person's own sign-in's to do. -->
+      {#if totpCredentials.length > 0 && !handedOff}
         <TrustedDevices />
+      {/if}
+
+      <!-- Not rendered where this site cannot send the confirming email, and the tenantless host has no site to send for. -->
+      {#if page.data.tenantless !== true}
+        <RecoveryEmailSection />
       {/if}
 
       <!-- Section 3: Recovery Codes -->
@@ -544,6 +561,7 @@
             </div>
           {/if}
 
+          {#if !handedOff}
           <Separator />
 
           <Button
@@ -560,6 +578,7 @@
               ? "Regenerate recovery codes"
               : "Generate recovery codes"}
           </Button>
+          {/if}
         </Card.Content>
       </Card.Root>
 
