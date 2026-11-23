@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Fido2NetLib;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -40,7 +42,7 @@ public partial class SetupController : ControllerBase
     private readonly ITenantService _tenantService;
     private readonly IPasskeyService _passkeyService;
     private readonly IRecoveryCodeService _recoveryCodeService;
-    private readonly ISessionService _sessionService;
+    private readonly SignInCompletion _signIn;
     private readonly ISubjectService _subjectService;
     private readonly ISubjectRepository _subjects;
     private readonly ITenantRepository _tenants;
@@ -57,7 +59,7 @@ public partial class SetupController : ControllerBase
         ITenantService tenantService,
         IPasskeyService passkeyService,
         IRecoveryCodeService recoveryCodeService,
-        ISessionService sessionService,
+        SignInCompletion signIn,
         ISubjectService subjectService,
         ISubjectRepository subjects,
         ITenantRepository tenants,
@@ -73,7 +75,7 @@ public partial class SetupController : ControllerBase
         _tenantService = tenantService;
         _passkeyService = passkeyService;
         _recoveryCodeService = recoveryCodeService;
-        _sessionService = sessionService;
+        _signIn = signIn;
         _subjectService = subjectService;
         _subjects = subjects;
         _tenants = tenants;
@@ -165,6 +167,7 @@ public partial class SetupController : ControllerBase
     [ProducesResponseType(typeof(SetupOwnerOptionsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> OwnerOptions(
         [FromBody] SetupOwnerOptionsRequest request, CancellationToken ct)
     {
@@ -182,12 +185,13 @@ public partial class SetupController : ControllerBase
         if (UsernameRules.Refusal(normalizedUsername) is { } usernameRefusal)
             return Problem(detail: usernameRefusal, statusCode: 400, title: "Bad Request");
 
-        if (await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct)
-            is not { } subjectId)
-            return UsernameTaken();
+        var (subjectId, ownerRefusal) =
+            await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct);
+        if (ownerRefusal != null)
+            return ownerRefusal;
 
         var result = await _passkeyService.GenerateRegistrationOptionsAsync(
-            subjectId, normalizedUsername);
+            subjectId, normalizedUsername, PasskeyRegistrationFlow.SetupOwner);
 
         return Ok(new SetupOwnerOptionsResponse
         {
@@ -199,8 +203,12 @@ public partial class SetupController : ControllerBase
 
     /// <summary>
     /// Complete passkey registration for the first owner account.
-    /// Verifies attestation, generates recovery codes, issues a full JWT session.
+    /// Verifies attestation, ends setup, generates recovery codes, and signs the owner in.
     /// </summary>
+    /// <remarks>
+    /// Setup closes when the passkey is stored (<see cref="IInstanceSetupState.TenantHasCredentialedMemberAsync"/>).
+    /// A failure after that leaves an owner who signs in with the passkey on the login page.
+    /// </remarks>
     [HttpPost("owner/complete")]
     [EnableRateLimiting("setup")]
     [RemoteCommand]
@@ -217,52 +225,59 @@ public partial class SetupController : ControllerBase
         if (string.IsNullOrEmpty(request.ChallengeToken))
             return Problem(detail: "Challenge token is required", statusCode: 400, title: "Bad Request");
 
-        // The enrolling subject is looked up here rather than taken from the challenge token, so a
-        // registration challenge minted by another flow cannot be redeemed as the first owner.
+        // The enrolling subject is looked up here rather than taken from the challenge token, and
+        // the challenge must have been minted by OwnerOptions (PasskeyRegistrationFlow.SetupOwner).
         var ownerSubjectId = await FindSetupOwnerSubjectIdAsync(tenant!, ct);
         if (ownerSubjectId == null)
-            return Problem(detail: "Start setup again to create the owner account",
-                statusCode: 400, title: "Bad Request");
+            return StartSetupAgain();
 
+        PasskeyCredentialResult credResult;
         try
         {
-            var credResult = await _passkeyService.CompleteRegistrationAsync(
-                request.AttestationResponseJson, request.ChallengeToken, tenant!.Id,
+            credResult = await _passkeyService.CompleteRegistrationAsync(
+                request.AttestationResponseJson, request.ChallengeToken, PasskeyRegistrationFlow.SetupOwner, tenant!.Id,
                 expectedSubjectId: ownerSubjectId.Value);
-
-            await CompleteAsOwnerAsync(credResult.SubjectId);
-
-            await _subjectService.UpdateLastLoginAsync(credResult.SubjectId);
-
-            // Generate recovery codes
-            var recoveryCodes = await _recoveryCodeService.GenerateCodesAsync(credResult.SubjectId);
-
-            var session = await _sessionService.IssueSessionAsync(
-                credResult.SubjectId,
-                new SessionContext(
-                    DeviceDescription: "Setup Passkey",
-                    IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
-                    UserAgent: Request.Headers.UserAgent.ToString()));
-
-            Response.SetSessionCookies(session, _oidcOptions);
-
-            _logger.LogInformation(
-                "Setup complete: first owner {SubjectId} registered with passkey for tenant {TenantId}",
-                credResult.SubjectId, tenant!.Id);
-
-            return Ok(new SetupOwnerCompleteResponse
-            {
-                Success = true,
-                RecoveryCodes = recoveryCodes,
-                AccessToken = session.AccessToken,
-                RefreshToken = session.RefreshToken,
-                ExpiresIn = session.ExpiresInSeconds,
-            });
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Setup owner passkey registration failed");
-            return Problem(detail: "Passkey registration failed during setup", statusCode: 400, title: "Registration Failed");
+            return RegistrationFailed(ex);
+        }
+        catch (Fido2VerificationException ex)
+        {
+            return RegistrationFailed(ex);
+        }
+        catch (JsonException ex)
+        {
+            return RegistrationFailed(ex);
+        }
+
+        await CompleteAsOwnerAsync(credResult.SubjectId);
+
+        var recoveryCodes = await _recoveryCodeService.GenerateCodesAsync(credResult.SubjectId);
+
+        var outcome = await SignInOwnerAsync(
+            credResult.SubjectId, tenant!, SignInMethod.SetupPasskey, "Setup Passkey");
+
+        switch (outcome)
+        {
+            case SignInOutcome.SignedIn signedIn:
+                _logger.LogInformation(
+                    "Setup complete: first owner {SubjectId} registered with passkey for tenant {TenantId}",
+                    credResult.SubjectId, tenant!.Id);
+                return Ok(new SetupOwnerCompleteResponse
+                {
+                    Success = true,
+                    RecoveryCodes = recoveryCodes,
+                    AccessToken = signedIn.Session.AccessToken,
+                    RefreshToken = signedIn.Session.RefreshToken,
+                    ExpiresIn = signedIn.Session.ExpiresInSeconds,
+                });
+            case SignInOutcome.SecondFactorRequired:
+                return Conflict(new { error = "owner_already_exists" });
+            case SignInOutcome.Refused { Reason: SignInRefusal.NotAMember }:
+                return StartSetupAgain();
+            default:
+                throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null);
         }
     }
 
@@ -276,6 +291,7 @@ public partial class SetupController : ControllerBase
     [ProducesResponseType(typeof(SetupOwnerOidcResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> OwnerOidc(
         [FromBody] SetupOwnerOidcRequest request, CancellationToken ct)
     {
@@ -293,9 +309,10 @@ public partial class SetupController : ControllerBase
         if (request.ProviderId == Guid.Empty)
             return Problem(detail: "Provider ID is required", statusCode: 400, title: "Bad Request");
 
-        if (await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct)
-            is not { } subjectId)
-            return UsernameTaken();
+        var (subjectId, ownerRefusal) =
+            await EnsureOwnerSubjectAsync(tenant!, request.DisplayName.Trim(), normalizedUsername, ct);
+        if (ownerRefusal != null)
+            return ownerRefusal;
 
         try
         {
@@ -320,7 +337,7 @@ public partial class SetupController : ControllerBase
 
     /// <summary>
     /// OIDC callback for setup owner creation. Called by the OIDC provider after authentication.
-    /// Links the identity, issues session cookies, and redirects to /setup.
+    /// Links the identity, ends setup, signs the owner in, and redirects to /setup.
     /// </summary>
     [HttpGet("oidc/callback")]
     [AllowAnonymous]
@@ -350,7 +367,7 @@ public partial class SetupController : ControllerBase
         // The sibling setup endpoints all gate on this; without it the callback is the one
         // setup route that stays live on an established instance, and it both links an
         // identity and issues a session for whatever subject the state names.
-        var (_, setupClosed) = await GetSoleTenantWithoutOwnerAsync(ct);
+        var (tenant, setupClosed) = await GetSoleTenantWithoutOwnerAsync(ct);
         if (setupClosed != null)
         {
             ClearOidcStateCookie();
@@ -363,12 +380,9 @@ public partial class SetupController : ControllerBase
         if (string.IsNullOrEmpty(expectedState))
             return Redirect("/setup?error=missing_state");
 
-        var result = await _oidcAuthService.HandleSetupCallbackAsync(
-            code, state, expectedState,
-            ipAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
-            userAgent: Request.Headers.UserAgent.ToString());
+        var result = await _oidcAuthService.HandleSetupCallbackAsync(code, state, expectedState);
 
-        if (!result.Success)
+        if (!result.Success || result.SubjectId is not { } ownerSubjectId)
         {
             _logger.LogWarning(
                 "Setup OIDC callback failed: {Error} - {Description}",
@@ -376,19 +390,18 @@ public partial class SetupController : ControllerBase
             return Redirect($"/setup?error={Uri.EscapeDataString(result.Error ?? "unknown")}");
         }
 
-        if (result.SubjectId is { } oidcOwnerSubjectId)
-            await CompleteAsOwnerAsync(oidcOwnerSubjectId);
+        await CompleteAsOwnerAsync(ownerSubjectId);
 
-        // Temporary bridge: construct SessionTokenPair from OidcTokenResponse until
-        // OidcAuthService is migrated to ISessionService.
-        var sessionPair = new SessionTokenPair(
-            result.Tokens!.AccessToken,
-            result.Tokens.RefreshToken,
-            result.Tokens.ExpiresIn,
-            result.Tokens.SubjectId);
-        Response.SetSessionCookies(sessionPair, _oidcOptions);
+        var outcome = await SignInOwnerAsync(
+            ownerSubjectId, tenant!, SignInMethod.SetupOidc, "Setup OIDC", result.OidcSessionId, result.ProviderId);
 
-        return Redirect(result.ReturnUrl ?? "/setup");
+        return outcome switch
+        {
+            SignInOutcome.SignedIn => Redirect(result.ReturnUrl ?? "/setup"),
+            SignInOutcome.SecondFactorRequired => Redirect("/setup?error=setup_already_complete"),
+            SignInOutcome.Refused { Reason: SignInRefusal.NotAMember } => Redirect("/setup?error=not_a_member"),
+            _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null),
+        };
     }
 
     #region Private Helpers
@@ -479,18 +492,27 @@ public partial class SetupController : ControllerBase
     /// Find (<see cref="ISubjectRepository.FindSetupOwnerCandidateAsync"/>) or create the owner
     /// subject, ensure it is a member of the given tenant with the owner role, and assign the
     /// global admin role. Idempotent: safe to call on retries after a failed WebAuthn/OIDC ceremony.
-    /// Null, with nothing written, when another member of the tenant holds <paramref name="username"/>:
-    /// setup reopens while former members still hold their usernames.
     /// </summary>
-    private async Task<Guid?> EnsureOwnerSubjectAsync(
+    /// <returns>
+    /// The subject, or a refusal with nothing written: <see cref="UsernameTaken"/> when another member
+    /// of the tenant holds <paramref name="username"/> (setup reopens while former members still hold
+    /// their usernames), or <see cref="OwnerRoleMissing"/> when the tenant has no owner role.
+    /// </returns>
+    private async Task<(Guid SubjectId, ObjectResult? Refusal)> EnsureOwnerSubjectAsync(
         TenantRecord tenant, string displayName, string username, CancellationToken ct)
     {
+        if (await _members.FindRoleIdBySlugAsync(tenant.Id, RoleSeeds.Owner, ct) is not { } roleId)
+        {
+            _logger.LogError("Setup: tenant {TenantId} has no owner role, so no owner can be created", tenant.Id);
+            return (default, OwnerRoleMissing());
+        }
+
         var existingSubject = await _subjects.FindSetupOwnerCandidateAsync(tenant.Id, ct);
 
         if (await _members.UsernameExistsAsync(tenant.Id, username, ct)
             && (existingSubject is null
                 || (await _members.FindMemberAsync(tenant.Id, existingSubject.Id, ct))?.Username != username))
-            return null;
+            return (default, UsernameTaken());
 
         Guid subjectId;
         if (existingSubject != null)
@@ -508,16 +530,11 @@ public partial class SetupController : ControllerBase
                 subjectId, username, tenant.Id);
         }
 
-        var ownerRoleId = await _members.FindRoleIdBySlugAsync(tenant.Id, RoleSeeds.Owner, ct);
-        if (ownerRoleId is { } roleId)
-        {
-            // Setup retries, so a subject that is already a member is the state it wants, and the
-            // result of the add is not read.
-            _ = await _members.AddMemberAsync(
-                new NewTenantMember(
-                    tenant.Id, subjectId, [roleId], MadeBy: MembershipMadeBy.Member) { How = MembershipJoinHow.Setup, By = null },
-                ct);
-        }
+        // False means the subject is already a member, which a retry wants; any other failed add throws.
+        _ = await _members.AddMemberAsync(
+            new NewTenantMember(
+                tenant.Id, subjectId, [roleId], MadeBy: MembershipMadeBy.Member) { How = MembershipJoinHow.Setup, By = null },
+            ct);
 
         // Set per-tenant username on the membership
         if (await _members.FindMemberAsync(tenant.Id, subjectId, ct) is { } membership)
@@ -525,7 +542,7 @@ public partial class SetupController : ControllerBase
 
         await _subjectService.AssignRoleAsync(subjectId, GlobalRoles.Admin);
 
-        return subjectId;
+        return (subjectId, null);
     }
 
     /// <summary>
@@ -555,8 +572,61 @@ public partial class SetupController : ControllerBase
             subjectId, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Signs in the owner setup has just completed, and writes the cookies the outcome calls for.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SignInAdmission.Member"/>: the owner step made the membership before the
+    /// ceremony, so it exists here and the sign-in checks it.
+    /// <para>
+    /// The gate answers <see cref="SecondFactorRequirement.NotEnrolled"/>: the owner candidate and an
+    /// adopted subject hold no authenticator, and one is added only from a session. Were a code
+    /// owed, no session is issued and setup still ends: the owner holds a credential and signs in
+    /// on the login page, so the caller answers as setup answers once an owner exists.
+    /// </para>
+    /// </remarks>
+    private async Task<SignInOutcome> SignInOwnerAsync(
+        Guid subjectId, TenantRecord tenant, SignInMethod method, string deviceDescription,
+        string? oidcSessionId = null, Guid? providerId = null)
+    {
+        var outcome = await _signIn.CompleteAsync(new SignInAttempt(
+            subjectId,
+            method,
+            new SignInAdmission.Member(tenant.Id),
+            new SecondFactorProof.Primary(Request.Cookies[SessionCookieExtensions.TrustedDeviceCookieName]),
+            new SessionContext(
+                OidcSessionId: oidcSessionId,
+                DeviceDescription: deviceDescription,
+                IpAddress: HttpContext.GetClientAddress(),
+                UserAgent: Request.Headers.UserAgent.ToString()),
+            providerId));
+
+        await HttpContext.ApplySignInAsync(outcome, _oidcOptions);
+
+        if (outcome is not SignInOutcome.SignedIn)
+            _logger.LogWarning(
+                "Setup: owner {SubjectId} completed setup but was not signed in ({Outcome})",
+                subjectId, outcome.GetType().Name);
+
+        return outcome;
+    }
+
+    private ObjectResult RegistrationFailed(Exception ex)
+    {
+        _logger.LogWarning(ex, "Setup owner passkey registration failed");
+        return Problem(detail: "Passkey registration failed during setup", statusCode: 400, title: "Registration Failed");
+    }
+
+    private ObjectResult StartSetupAgain() =>
+        Problem(detail: "Start setup again to create the owner account", statusCode: 400, title: "Bad Request");
+
     private ObjectResult UsernameTaken() =>
         Problem(detail: "This username is already taken", statusCode: 400, title: "Bad Request");
+
+    private ObjectResult OwnerRoleMissing() =>
+        Problem(
+            detail: "This tenant has no owner role, so setup cannot create the owner account.",
+            statusCode: 500, title: "Internal Server Error");
 
     // Through the shared writer: the setup flow reuses the login flow's state-cookie name, so a
     // scope of its own would leave two same-named cookies the callback cannot tell apart.

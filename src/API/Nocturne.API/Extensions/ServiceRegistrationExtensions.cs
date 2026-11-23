@@ -124,8 +124,8 @@ public static class ServiceRegistrationExtensions
     /// <summary>
     /// The rate-limiting policies partitioned on the calling client, with the ceiling and window
     /// each applies. Held as one table so all of them resolve their partition through
-    /// <see cref="ClientRateLimitKey"/> and the trust decision behind a forwarded address is taken
-    /// in exactly one place.
+    /// <see cref="ClientRateLimitKey"/>, whose address is the one <see cref="ClientAddressResolver"/>
+    /// settles.
     /// </summary>
     internal static readonly (string Policy, int PermitLimit, TimeSpan Window)[] ClientAddressPolicies =
     [
@@ -281,7 +281,7 @@ public static class ServiceRegistrationExtensions
     /// <summary>
     /// Partition key for the translation-drafts limiter: the hashed credential
     /// the request presents. Not the IP — <c>UseForwardedHeaders</c> takes
-    /// <c>RemoteIpAddress</c> from X-Forwarded-For with no trusted-proxy list,
+    /// the remote address from X-Forwarded-For with no trusted-proxy list,
     /// so the sibling per-IP policies are the wrong model to copy here.
     /// Hashing keeps no token as a dictionary key. Requests with no credential
     /// share one fixed bucket, so an anonymous flood cannot evict an editor's.
@@ -546,6 +546,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<DelegatedConnectorSyncLimiter>();
         services.AddSingleton<GuestActivationLimiter>();
         services.AddSingleton<TeamCreationLimiter>();
+        services.AddSingleton<TeamRenameLimiter>();
 
         return services;
     }
@@ -592,6 +593,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IRotationSuccessorCache, RotationSuccessorCache>();
         services.AddScoped<ISubjectService, SubjectService>();
         services.AddScoped<ISessionService, SessionService>();
+        services.AddScoped<SignInCompletion>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IOidcProviderService, OidcProviderService>();
         services.AddScoped<IOidcAuthService, OidcAuthService>();
@@ -612,12 +614,15 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton<IOAuthTokenRevocationCache, OAuthTokenRevocationCache>();
         services.AddScheduledJob<OAuthCodeCleanupJob>();
         services.AddScheduledJob<OAuthStepUpTokenCleanupJob>();
+        services.AddScheduledJob<SpentPasskeyChallengeCleanupJob>();
         services.AddScheduledJob<TrustedDeviceCleanupJob>();
+        services.AddScheduledJob<MembershipLapseJob>();
 
         services.AddHostedService<AuthorizationSeedService>();
 
         services.AddSingleton<GuestSessionCacheService>();
         services.AddScoped<GrantRevocationService>();
+        services.AddScoped<GrantConsentService>();
         services.AddSingleton<PublicAccessCacheService>();
         services.AddSingleton<ShareTokenCacheService>();
         // Same instance behind the seam, so the cache is shared rather than duplicated.
@@ -645,7 +650,9 @@ public static class ServiceRegistrationExtensions
             : configuredBaseDomain;
         var rpId = baseDomain.Split(':')[0]; // hostname without port
         var origin = $"https://{baseDomain}";
-        services.AddFido2(options =>
+        // Options only: PasskeyService builds each ceremony's relying party from them through
+        // IOptionsFactory, so no Fido2Configuration instance is shared between ceremonies.
+        services.Configure<Fido2Configuration>(options =>
         {
             options.RPID = rpId;
             options.RPName = "Nocturne";
@@ -687,6 +694,8 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ITenantOwnerResolver, TenantOwnerResolver>();
         services.AddScoped<ITenantMemberService, TenantMemberService>();
         services.AddScoped<ITenantRoleService, TenantRoleService>();
+        services.AddScoped<TeamAccessService>();
+        services.AddScoped<TeamRenameAnnouncer>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IUnitsAndTimezoneService, UnitsAndTimezoneService>();
         services.AddScoped<ITenantOverviewService, TenantOverviewService>();
@@ -727,6 +736,7 @@ public static class ServiceRegistrationExtensions
             ConnectCallback = new PinnedConnector(OutboundAddressPolicy.NotLinkLocal).ConnectAsync,
         });
 
+        services.AddSingleton<ClientAddressResolver>();
         services.AddApiRateLimiting(configuration);
 
         return services;
@@ -862,6 +872,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IConnectorFoodEntryService, ConnectorFoodEntryService>();
         services.AddScoped<ITreatmentFoodService, TreatmentFoodService>();
         services.AddScoped<IUserFoodFavoriteService, UserFoodFavoriteService>();
+        services.AddScoped<IMealMatchLinker, MealMatchLinker>();
         services.AddScoped<IMealMatchingService, MealMatchingService>();
         services.AddScoped<IMealReadService, MealReadService>();
 

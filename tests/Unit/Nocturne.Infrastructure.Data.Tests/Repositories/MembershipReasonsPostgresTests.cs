@@ -114,7 +114,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         memberIds.Should().NotBeEmpty();
         foreach (var memberId in memberIds)
         {
-            (await MembershipReasons.MatchesAsync(db, memberId, Ct)).Should().BeTrue($"member {memberId} is the sum of its reasons");
+            (await MembershipReasons.MatchesAsync(db, memberId, Now, Ct)).Should().BeTrue($"member {memberId} is the sum of its reasons");
             (await db.TenantMemberReasons.Where(r => r.TenantMemberId == memberId).Select(r => r.Kind).ToListAsync())
                 .Should().Equal(MembershipReasonKind.Direct);
         }
@@ -182,12 +182,12 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         (await s.Members.GetMemberAsync(s.Tenant, member, Ct))!.Roles.Select(r => r.RoleId)
             .Should().BeEquivalentTo([s.CaretakerRole, s.ViewerRole]);
 
-        (await s.Members.DeleteRoleAsync(s.Tenant, s.CaretakerRole, Ct)).Should().BeTrue();
+        (await s.Members.DeleteRoleAsync(s.Tenant, s.CaretakerRole, Now, Ct)).Should().Be(RoleChangeOutcome.Changed);
         await AssertEveryMemberMatchesAsync(s);
         (await CountAsync(database.MigratorConnectionString,
             $"SELECT count(*) FROM tenant_member_reason_roles WHERE tenant_role_id = '{s.CaretakerRole}'")).Should().Be(0);
 
-        (await s.Members.RemoveMemberUnlessLastOwnerAsync(s.Tenant, member, MembershipEndHow.Removed, Ct)).Should().Be(OwnerGuardedChange.Changed);
+        (await s.Members.RemoveMemberUnlessLastOwnerAsync(s.Tenant, member, MembershipEndHow.Removed, Now, Ct)).Should().Be(OwnerGuardedChange.Changed);
         await AssertEveryMemberMatchesAsync(s);
         (await CountAsync(database.MigratorConnectionString,
             $"SELECT count(*) FROM tenant_member_reasons WHERE tenant_member_id = '{member}'")).Should().Be(0);
@@ -228,7 +228,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
             var members = new TenantMembershipRepository(unit, AccountLinkRoutes.Off);
             await unit.CommitAsync(async token =>
             {
-                (await members.RemoveMemberUnlessLastOwnerAsync(s.Tenant, ended, MembershipEndHow.Removed, token)).Should().Be(OwnerGuardedChange.Changed);
+                (await members.RemoveMemberUnlessLastOwnerAsync(s.Tenant, ended, MembershipEndHow.Removed, Now, token)).Should().Be(OwnerGuardedChange.Changed);
                 await unit.Context.SaveChangesAsync(token);
                 (await members.AddMemberAsync(new NewTenantMember(s.Tenant, subject, [s.CaretakerRole], ["glucose.read"]) { How = MembershipJoinHow.Direct, By = null }, token))
                     .Should().BeTrue();
@@ -313,34 +313,38 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         await s.Members.AddMemberAsync(new NewTenantMember(s.Tenant, teamSubject, [s.ViewerRole]) { How = MembershipJoinHow.Direct, By = null }, Ct);
         var drift = await MemberIdAsync(s, driftSubject);
         var team = await MemberIdAsync(s, teamSubject);
+        var (teamAccessSql, teamAccess) = TeamReasonSql.NewAccess(s.Tenant, "Clinic");
         await ExecuteAsync($"""
+            {teamAccessSql}
             UPDATE tenant_members SET direct_permissions = NULL, limit_to_24_hours = true WHERE id IN ('{drift}', '{team}');
             DELETE FROM tenant_member_roles WHERE tenant_member_id = '{drift}';
             INSERT INTO tenant_member_reasons (id, tenant_member_id, kind, source_id, limit_to_24_hours)
-            VALUES ('{Guid.CreateVersion7()}', '{team}', 'team', '{Guid.CreateVersion7()}', false);
+            VALUES ('{Guid.CreateVersion7()}', '{team}', 'team', '{teamAccess}', false);
             """, migrator);
         var rowsBefore = await RowsAsync(migrator);
         var teamReasonsBefore = await CountAsync(migrator, $"SELECT count(*) FROM tenant_member_reasons WHERE tenant_member_id = '{team}'");
 
         var logger = new RecordingLogger();
-        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, logger, Ct);
+        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, Now, logger, Ct);
 
-        (await RowsAsync(migrator)).Should().Equal(rowsBefore, "the row wins and is never written");
+        (await RowsAsync(migrator)).Where(r => !r.StartsWith(team.ToString())).Should().Equal(
+            rowsBefore.Where(r => !r.StartsWith(team.ToString())), "the row wins over a direct reason and is never written");
         await using var db = Context(app, s.Tenant);
         var bareReason = await db.TenantMemberReasons.Include(r => r.ReasonRoles).SingleAsync(r => r.TenantMemberId == bare);
         bareReason.DirectPermissions.Should().Equal("glucose.read");
         bareReason.ReasonRoles.Select(rr => rr.TenantRoleId).Should().Equal(s.ViewerRole);
-        (await MembershipReasons.MatchesAsync(db, bare, Ct)).Should().BeTrue();
+        (await MembershipReasons.MatchesAsync(db, bare, Now, Ct)).Should().BeTrue();
 
         var driftReason = await db.TenantMemberReasons.Include(r => r.ReasonRoles).SingleAsync(r => r.TenantMemberId == drift);
         driftReason.DirectPermissions.Should().BeNull();
         driftReason.LimitTo24Hours.Should().BeTrue();
         driftReason.ReasonRoles.Should().BeEmpty();
-        (await MembershipReasons.MatchesAsync(db, drift, Ct)).Should().BeTrue();
+        (await MembershipReasons.MatchesAsync(db, drift, Now, Ct)).Should().BeTrue();
 
         (await CountAsync(migrator, $"SELECT count(*) FROM tenant_member_reasons WHERE tenant_member_id = '{team}'"))
             .Should().Be(teamReasonsBefore);
-        (await MembershipReasons.MatchesAsync(db, team, Ct)).Should().BeFalse("a member with a reason of another kind is left alone");
+        (await MembershipReasons.MatchesAsync(db, team, Now, Ct)).Should().BeTrue("a member with a reason of another kind is projected from its reasons");
+        (await db.TenantMembers.AsNoTracking().SingleAsync(m => m.Id == team)).LimitTo24Hours.Should().BeFalse();
 
         logger.Entries.Should().HaveCount(3);
         logger.Entries.Should().Contain(e => e.Level == LogLevel.Information && e.Message.Contains("Gave 1 memberships"));
@@ -353,7 +357,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
     {
         var (app, migrator) = await FreshDatabaseAsync("reasons_clean");
         var empty = new RecordingLogger();
-        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, empty, Ct);
+        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, Now, empty, Ct);
         empty.Entries.Should().BeEmpty("no table holds a row");
 
         var s = await SeedTenantAsync("clean", app);
@@ -361,7 +365,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         var reasonsBefore = await ReasonsAsync(migrator);
 
         var logger = new RecordingLogger();
-        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, logger, Ct);
+        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, Now, logger, Ct);
 
         logger.Entries.Should().BeEmpty();
         (await ReasonsAsync(migrator)).Should().Equal(reasonsBefore);
@@ -409,7 +413,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         }, database.MigratorConnectionString);
 
         await using (var before = await s.Factory.CreateForTenantAsync(s.Tenant))
-            (await MembershipReasons.MatchesAsync(before, member, Ct)).Should().BeFalse("the row has fallen out of step");
+            (await MembershipReasons.MatchesAsync(before, member, Now, Ct)).Should().BeFalse("the row has fallen out of step");
         var auditBefore = await AuditIdsAsync(s, subject);
 
         string[] expected;
@@ -432,7 +436,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
                 expected = [AuthAuditEventType.RoleAssigned];
                 break;
             default:
-                (await s.Members.DeleteRoleAsync(s.Tenant, s.CaretakerRole, Ct)).Should().BeTrue();
+                (await s.Members.DeleteRoleAsync(s.Tenant, s.CaretakerRole, Now, Ct)).Should().Be(RoleChangeOutcome.Changed);
                 expected = [AuthAuditEventType.RoleRemoved];
                 break;
         }
@@ -442,7 +446,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         var links = await db.TenantMemberRoles.Where(mr => mr.TenantMemberId == member).Select(mr => mr.TenantRoleId).ToListAsync();
         var reason = await db.TenantMemberReasons.Include(r => r.ReasonRoles).AsNoTracking().SingleAsync(r => r.TenantMemberId == member);
         var reasonRoles = reason.ReasonRoles.Select(rr => rr.TenantRoleId).ToList();
-        (await MembershipReasons.MatchesAsync(db, member, Ct)).Should().BeTrue();
+        (await MembershipReasons.MatchesAsync(db, member, Now, Ct)).Should().BeTrue();
 
         switch (stale)
         {
@@ -475,7 +479,7 @@ public class MembershipReasonsPostgresTests(MembershipReasonsPostgresTests.Datab
         await SeedBareMemberAsync(s, await NewSubjectAsync(s, "malformed-member"), """{"not":"a list"}""", s.ViewerRole, migrator);
 
         var logger = new RecordingLogger();
-        var check = () => DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, logger, Ct);
+        var check = () => DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migrator, Now, logger, Ct);
 
         await check.Should().NotThrowAsync();
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error);

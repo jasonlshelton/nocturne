@@ -61,6 +61,7 @@ msgstr "Desconectado"
 msgid "Using cached data"
 msgstr "Usando datos almacenados"
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/connectors/ConnectionStatusLabel.svelte
 #: src/lib/components/connectors/ConnectorDetailsDialog.svelte
 #: src/lib/components/connectors/ConnectorSelectionGrid.svelte
@@ -288,6 +289,7 @@ msgstr "Usuario"
 msgid "Failed to load session"
 msgstr "No se pudo cargar la sesión"
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/layout/GuestBanner.svelte
 #: src/lib/components/members/GuestLinksSection.svelte
 #: src/lib/components/trackers/TrackerCompletionDialog.svelte
@@ -503,6 +505,7 @@ msgstr "O introduce este secreto manualmente:"
 #: src/lib/components/members/CreateInviteCard.svelte
 #: src/routes/(authenticated)/settings/account/+page.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Label (optional)"
 msgstr "Etiqueta (opcional)"
 
@@ -819,6 +822,7 @@ msgstr "Actualiza los datos y permisos del rol."
 #: src/routes/(authenticated)/community/translations/[locale]/+page.svelte
 #: src/routes/(authenticated)/reports/custom/+page.svelte
 #: src/routes/(authenticated)/reports/custom/[id]/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Name"
 msgstr "Nombre"
 
@@ -994,8 +998,12 @@ msgstr "La prueba de conexión ha fallado"
 #~ msgid "Defines what unauthenticated users can access"
 #~ msgstr ""
 
-#~ msgid "Roles: {0}"
-#~ msgstr ""
+#. 0: (team.roles ?? []).map((r) => r.name).join(", ")
+#. 0: (site.roleNames ?? []).join(", ")
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Roles: {0}"
+msgstr ""
 
 #~ msgid "Created: {0}"
 #~ msgstr ""
@@ -2143,6 +2151,7 @@ msgstr "Altura: {0}px"
 #: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
 #: src/lib/components/settings/RecoveryEmailSection.svelte
 #: src/lib/components/settings/TrustedDevices.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "<0/> Remove"
 msgstr "<0/> Eliminar"
 
@@ -3379,6 +3388,7 @@ msgstr "Solo IOB"
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "IOB"
 msgstr "IOB"
 
@@ -3386,10 +3396,12 @@ msgstr "IOB"
 #~ msgstr "Basal temporal cero"
 
 #: src/lib/components/dashboard/PredictionSettings.svelte
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "ZT"
 msgstr "ZT"
 
 #: src/lib/components/dashboard/PredictionSettings.svelte
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "UAM"
 msgstr "UAM"
 
@@ -4700,6 +4712,8 @@ msgstr "Accedido {0}{1}"
 #: src/lib/components/connectors/ConnectionDetailDialog.svelte
 #: src/lib/components/members/GuestLinksSection.svelte
 #: src/lib/components/settings/ClientDevices.svelte
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "<0/> Revoke"
 msgstr "<0/> Revocar"
 
@@ -4835,6 +4849,7 @@ msgstr "Pico"
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderRow.svelte
 #: src/lib/components/patient/InsulinFormFields.svelte
 msgid "min"
@@ -4929,9 +4944,11 @@ msgid "From {0}"
 msgstr "Desde {0}"
 
 #. 0: new Date(settings.dndManualUntil).toLocaleTimeString(formatLocale(), { hour\\: "numeric", minute\\: "2-digit" })
+#. 0: formatShortDate(accessEndDate(reason.accessEndsAt), true)
 #. 0: formatDate(device.endDate)
 #. 0: formatDate(insulin.endDate)
 #: src/lib/components/alerts/DndPanel.svelte
+#: src/lib/components/members/MemberCard.svelte
 #: src/lib/components/patient/PatientDeviceManager.svelte
 #: src/lib/components/patient/PatientInsulinManager.svelte
 #, python-brace-format
@@ -5168,6 +5185,7 @@ msgstr "Seleccionar un icono"
 
 #: src/lib/components/profile/ProfileEditDialog.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "ISF"
 msgstr "ISF"
 
@@ -5233,7 +5251,6 @@ msgstr "Establece los objetivos mínimo y máximo deseados a lo largo del día"
 msgid "<0/> Add"
 msgstr "<0/> Añadir"
 
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -5585,6 +5602,7 @@ msgid "Total carbs:"
 msgstr "Carbohidratos totales:"
 
 #. 0: m
+#. 0: m
 #. 0: snapshot.cob.toFixed(0)
 #. 0: cob.toFixed(0)
 #. 0: cob.toFixed(0)
@@ -5596,6 +5614,7 @@ msgstr "Carbohidratos totales:"
 #. 0: formatCarbDisplay(treatmentSummary?.totals?.food?.protein)
 #. 0: formatCarbDisplay(treatmentSummary?.totals?.food?.fat)
 #. 0: event.grams
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 #: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/GlucoseInspectionDialog.svelte
@@ -5911,6 +5930,7 @@ msgstr "Basal: {0} U"
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 #: src/lib/components/reports/RetrospectiveStats.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "COB"
 msgstr "COB"
 
@@ -9234,7 +9254,6 @@ msgstr "Este enlace de invitación no es válido o ha caducado."
 #~ msgstr ""
 
 #: src/routes/(authenticated)/settings/account/+page.svelte
-#: src/routes/(authenticated)/settings/account/+page.svelte
 msgid "Failed to register passkey."
 msgstr "No se pudo registrar la clave de acceso."
 
@@ -9245,6 +9264,7 @@ msgstr "Unirse - Nocturne"
 #~ msgid "Invalid Invite"
 #~ msgstr ""
 
+#: src/routes/(authenticated)/teams/join/+page.svelte
 #: src/routes/(unauthenticated)/join/+page.svelte
 msgid "Loading invite..."
 msgstr "Cargando invitación..."
@@ -9644,6 +9664,7 @@ msgstr "media {0}"
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/year-overview/YearHeatmap.svelte
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "TDD"
 msgstr "TDD"
 
@@ -14630,6 +14651,7 @@ msgstr "NOT"
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderRow.svelte
 msgid "for at least"
 msgstr "durante al menos"
@@ -16418,6 +16440,8 @@ msgid "Limit public viewers to recent data only. Older history stays private."
 msgstr "Limita a los visitantes públicos a los datos recientes. El historial anterior permanece privado."
 
 #: src/lib/components/members/PublicAccessCard.svelte
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
 msgid "All history"
 msgstr "Todo el historial"
 
@@ -18617,8 +18641,11 @@ msgstr "Oura"
 #~ msgid "MS Teams"
 #~ msgstr ""
 
-#~ msgid "Teams"
-#~ msgstr ""
+#: src/lib/navigation/settings-navigation.svelte.ts
+#: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Teams"
+msgstr ""
 
 #~ msgid "Microsoft Teams"
 #~ msgstr ""
@@ -19515,9 +19542,8 @@ msgstr "Nocturne reúne todos los CGM, bombas y aplicaciones que usas en un úni
 msgid "Speaks the Nightscout v1, v2, and v3 APIs. The apps, watch faces, and followers you use today keep working; you change the URL they point at."
 msgstr "Habla las API v1, v2 y v3 de Nightscout. Las aplicaciones, esferas de reloj y seguidores que usas hoy siguen funcionando; solo cambias la URL a la que apuntan."
 
-#: ../portal/src/routes/+page.svelte
-msgid "One install, many people. Run a household, a clinic, or a community on a single deployment, with each person's data and settings kept apart."
-msgstr "Una instalación, muchas personas. Gestiona un hogar, una clínica o una comunidad en un solo despliegue, manteniendo separados los datos y ajustes de cada persona."
+#~ msgid "One install, many people. Run a household, a clinic, or a community on a single deployment, with each person's data and settings kept apart."
+#~ msgstr "Una instalación, muchas personas. Gestiona un hogar, una clínica o una comunidad en un solo despliegue, manteniendo separados los datos y ajustes de cada persona."
 
 #: ../portal/src/routes/+page.svelte
 msgid "Real-time by design"
@@ -19776,9 +19802,8 @@ msgstr "Un secreto API compartido para cada aplicación y seguidor"
 msgid "A fixed set of report pages"
 msgstr "Un conjunto fijo de páginas de informes"
 
-#: ../portal/src/routes/features/+page.svelte
-msgid "One install for a household, a clinic, or a community"
-msgstr "Una instalación para un hogar, una clínica o una comunidad"
+#~ msgid "One install for a household, a clinic, or a community"
+#~ msgstr "Una instalación para un hogar, una clínica o una comunidad"
 
 #. 0: DATA_SOURCES.length
 #: ../portal/src/routes/features/+page.svelte
@@ -22447,12 +22472,14 @@ msgstr "Proteína <0>opcional</0>"
 #. 0: food.current?.name ?? 'food'
 #. 0: layer.name
 #. 0: signalLabel(id)
+#. 0: manager.displayName
 #. 0: item.l
 #: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
 #: src/lib/components/admin/RoleDialog.svelte
 #: src/lib/components/reports/custom/workspace/FoodPicker.svelte
 #: src/lib/components/reports/custom/workspace/GivenChartAdvanced.svelte
 #: src/lib/components/reports/custom/workspace/SignalRail.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 #: src/routes/(authenticated)/tools/packing/list/+page.svelte
 #, python-brace-format
 msgid "Remove {0}"
@@ -22887,9 +22914,8 @@ msgstr "Creado por la comunidad de diabetes"
 msgid "The documentation is still growing. If a guide you need is missing, check back soon or contribute one on GitHub."
 msgstr "La documentación sigue creciendo. Si falta una guía que necesitas, vuelve pronto o contribuye con una en GitHub."
 
-#: ../portal/src/routes/features/+page.svelte
-msgid "Run a household, a clinic, or a community on a single deployment. Each tenant gets its own subdomain, and row-level security in the database keeps one tenant's data out of another's."
-msgstr "Gestiona un hogar, una clínica o una comunidad en un solo despliegue. Cada inquilino obtiene su propio subdominio y la seguridad a nivel de fila de la base de datos mantiene los datos de un inquilino fuera del alcance de los demás."
+#~ msgid "Run a household, a clinic, or a community on a single deployment. Each tenant gets its own subdomain, and row-level security in the database keeps one tenant's data out of another's."
+#~ msgstr "Gestiona un hogar, una clínica o una comunidad en un solo despliegue. Cada inquilino obtiene su propio subdominio y la seguridad a nivel de fila de la base de datos mantiene los datos de un inquilino fuera del alcance de los demás."
 
 #: ../portal/src/routes/features/+page.svelte
 msgid "Who it serves"
@@ -23415,6 +23441,7 @@ msgstr "Descubre qué afecta a tu glucosa"
 #~ msgid "Compare patterns across days"
 #~ msgstr "Compara patrones entre días"
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -24239,9 +24266,8 @@ msgstr "Inquilinos"
 #~ msgid "Translations"
 #~ msgstr "Traducciones"
 
-#: src/lib/components/connectors/ConnectorSetup.svelte
-msgid "Only members who can manage this site's settings can configure or enable this connector."
-msgstr "Solo los miembros que pueden gestionar los ajustes de este sitio pueden configurar o habilitar este conector."
+#~ msgid "Only members who can manage this site's settings can configure or enable this connector."
+#~ msgstr "Solo los miembros que pueden gestionar los ajustes de este sitio pueden configurar o habilitar este conector."
 
 #. 0: formatInsulinDisplay(totalInsulin)
 #: src/lib/components/reports/TreatmentSummary.svelte
@@ -25910,6 +25936,7 @@ msgid "Me"
 msgstr "Yo"
 
 #: src/lib/components/alerts/ChannelsSection.svelte
+#: src/lib/teams/member-kind.svelte.ts
 msgid "Member"
 msgstr "Miembro"
 
@@ -27825,6 +27852,7 @@ msgstr "Selecciona las dos fechas que quieres comparar."
 msgid "The second date must be on or after the first date."
 msgstr "La segunda fecha debe ser igual o posterior a la primera."
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/reports/loop-analysis/LoopAnalysisFilterFields.svelte
 msgid "Compare with"
 msgstr "Comparar con"
@@ -31020,6 +31048,7 @@ msgid "Sensor stale"
 msgstr "Datos del sensor desactualizados"
 
 #: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Predicted glucose"
 msgstr "Glucemia prevista"
 
@@ -31900,6 +31929,7 @@ msgstr "Datos básicos"
 msgid "What you told us at the start. You can change these any time."
 msgstr "Lo que nos indicaste al principio. Puedes cambiarlo cuando quieras."
 
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 #: src/routes/(unauthenticated)/setup/hub/HubBasics.svelte
 msgid "You"
 msgstr "Tú"
@@ -32841,9 +32871,8 @@ msgstr "Glucemias, tratamientos, dispositivos e informes. No puede modificar nad
 msgid "Can see and log treatments"
 msgstr "Puede ver y registrar tratamientos"
 
-#: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
-msgid "They can also log insulin and carbs, and change alerts."
-msgstr "También puede registrar insulina e hidratos de carbono y modificar las alertas."
+#~ msgid "They can also log insulin and carbs, and change alerts."
+#~ msgstr "También puede registrar insulina e hidratos de carbono y modificar las alertas."
 
 #: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
 msgid "Can manage settings"
@@ -32941,6 +32970,7 @@ msgstr "Sensibilidad a la insulina"
 msgid "How far one unit of insulin lowers glucose."
 msgstr "Cuánto disminuye la glucemia una unidad de insulina."
 
+#: src/lib/components/alerts/holdText.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/schedule/TargetRangeCard.svelte
 #: src/lib/components/schedule/TargetRangeCard.svelte
@@ -33632,6 +33662,7 @@ msgstr "7. Licencia de código abierto"
 msgid "No invite token provided. Check the link you were given."
 msgstr "No se ha proporcionado ningún token de invitación. Comprueba el enlace que recibiste."
 
+#: src/routes/(authenticated)/teams/join/+page.svelte
 #: src/routes/(unauthenticated)/join/+page.svelte
 msgid "Invite unavailable"
 msgstr "Invitación no disponible"
@@ -33640,6 +33671,7 @@ msgstr "Invitación no disponible"
 msgid "You are in"
 msgstr "Ya estás dentro"
 
+#: src/routes/(authenticated)/teams/join/+page.svelte
 #: src/routes/(unauthenticated)/join/+page.svelte
 msgid "You are already a member"
 msgstr "Ya eres miembro"
@@ -33648,6 +33680,7 @@ msgstr "Ya eres miembro"
 msgid "Accept invite"
 msgstr "Aceptar invitación"
 
+#: src/routes/(authenticated)/teams/join/+page.svelte
 #: src/routes/(unauthenticated)/join/+page.svelte
 msgid "<0/> Accept invite"
 msgstr "<0/> Aceptar invitación"
@@ -34514,6 +34547,7 @@ msgstr "<0/> Invitaciones pendientes"
 
 #: src/lib/components/members/PendingInvitesList.svelte
 #: src/lib/components/members/PendingInvitesList.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Invite link"
 msgstr "Enlace de invitación"
 
@@ -34614,10 +34648,12 @@ msgstr "Factor de sensibilidad a la insulina (FSI)"
 msgid "Target blood glucose range"
 msgstr "Intervalo objetivo de glucemia"
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/profile/ProfileEditDialog.svelte
 msgid "Target low"
 msgstr "Objetivo inferior"
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/profile/ProfileEditDialog.svelte
 msgid "Target high"
 msgstr "Objetivo superior"
@@ -37838,21 +37874,15 @@ msgstr "{0} o {1}"
 msgid "Not ({0})"
 msgstr "No ({0})"
 
-#. 0: bg(p.value ?? 0); 1: bgLabel()
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
 #, python-brace-format
-msgid "Glucose below {0} {1}"
-msgstr "Glucemia inferior a {0} {1}"
+#~ msgid "Glucose below {0} {1}"
+#~ msgstr "Glucemia inferior a {0} {1}"
 
-#. 0: bg(p.value ?? 0); 1: bgLabel()
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
 #, python-brace-format
-msgid "Glucose above {0} {1}"
-msgstr "Glucemia superior a {0} {1}"
+#~ msgid "Glucose above {0} {1}"
+#~ msgstr "Glucemia superior a {0} {1}"
 
-#. 0: bg(p.rate ?? 0); 1: bgLabel()
-#. 0: convertRateToDisplayUnits(m, glucoseUnits.current); 1: bgLabel()
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
+#. 0: convertRateToDisplayUnits(mgdl, glucoseUnits.current); 1: bgLabel()
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 #, python-brace-format
 msgid "{0} {1} per minute"
@@ -37882,11 +37912,9 @@ msgstr "Glucemia cambiando al menos {0}"
 msgid "Sensor data age {0} {1}"
 msgstr "Antigüedad de los datos del sensor: {0} {1}"
 
-#. 0: opSymbol(p.operator); 1: bg(p.value ?? 0); 2: bgLabel(); 3: formatMinutes(p.within_minutes ?? 0)
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
 #, python-brace-format
-msgid "Predicted glucose {0} {1} {2} in {3}"
-msgstr "Glucemia prevista: {0} {1} {2} en {3}"
+#~ msgid "Predicted glucose {0} {1} {2} in {3}"
+#~ msgstr "Glucemia prevista: {0} {1} {2} en {3}"
 
 #. 0: p.from; 1: p.to
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
@@ -38973,9 +39001,8 @@ msgstr "Cuando cambies el elemento, selecciona su pastilla. Después, selecciona
 msgid "My settings"
 msgstr "Mis ajustes"
 
-#: src/lib/navigation/settings-navigation.svelte.ts
-msgid "Your sign-in, your display, and your linked chat accounts."
-msgstr "Tu inicio de sesión, la visualización y tus cuentas de chat vinculadas."
+#~ msgid "Your sign-in, your display, and your linked chat accounts."
+#~ msgstr "Tu inicio de sesión, la visualización y tus cuentas de chat vinculadas."
 
 #: src/lib/navigation/settings-navigation.svelte.ts
 msgid "Profile, passkeys, authenticator apps, recovery codes, and sessions."
@@ -39100,6 +39127,8 @@ msgstr "No se ha podido cargar el estado de Nightscout"
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
 #: src/routes/(authenticated)/settings/migration/NightscoutTransitionStatus.svelte
 #: src/routes/(authenticated)/settings/site/+page.svelte
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Reload the page to try again."
 msgstr "Vuelve a cargar la página para intentarlo de nuevo."
 
@@ -39977,7 +40006,9 @@ msgstr "No puedes utilizar esta dirección."
 msgid "Could not save the setting. Try again."
 msgstr "No se ha podido guardar el ajuste. Inténtalo de nuevo."
 
+#: src/lib/components/teams/AccessLinksSection.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Could not make the link. Try again."
 msgstr "No se ha podido crear el enlace. Inténtalo de nuevo."
 
@@ -40075,11 +40106,14 @@ msgstr "ADVERTENCIA: Cambia tus aplicaciones a la dirección del sitio antes de 
 msgid "Make a link"
 msgstr "Crear un enlace"
 
+#: src/lib/components/teams/AccessLinksSection.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "We show the link one time only. Copy it before you leave this page."
 msgstr "Solo mostramos el enlace una vez. Cópialo antes de salir de esta página."
 
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "For example, the name of the person"
 msgstr "Por ejemplo, el nombre de la persona"
 
@@ -40107,7 +40141,9 @@ msgstr "Número máximo de sitios (opcional)"
 msgid "Who can use the link"
 msgstr "Quién puede utilizar el enlace"
 
+#: src/lib/components/teams/AccessLinksSection.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "The link stops working after"
 msgstr "El enlace dejará de funcionar después de"
 
@@ -40116,14 +40152,18 @@ msgid "I put <0/> into each app, watch face, and bookmark."
 msgstr "He introducido <0/> en cada aplicación, esfera del reloj y marcador."
 
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "<0/> Make link"
 msgstr "<0/> Crear enlace"
 
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Copy the invite link"
 msgstr "Copiar el enlace de invitación"
 
+#: src/lib/components/teams/AccessLinksSection.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Your link is ready"
 msgstr "Tu enlace está listo"
 
@@ -40140,7 +40180,9 @@ msgid "No links yet. Make a link to invite a person."
 msgstr "Todavía no hay enlaces. Crea uno para invitar a una persona."
 
 #: src/lib/components/connectors/ConnectionDetailDialog.svelte
+#: src/lib/components/teams/AccessLinksSection.svelte
 #: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "No label"
 msgstr "Sin etiqueta"
 
@@ -42229,12 +42271,12 @@ msgstr "Hipoglucemia: por debajo de {0} {1}"
 msgid "High: above {0} {1}"
 msgstr "Hiperglucemia: por encima de {0} {1}"
 
-#. 0: bg(leaf?.rate_of_change?.rate ?? 0); 1: bgLabel()
+#. 0: convertRateToDisplayUnits(leaf?.rate_of_change?.rate ?? 0, glucoseUnits.current); 1: bgLabel()
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 msgid "Falling fast: {0} {1} per minute"
 msgstr "Descenso rápido: {0} {1} por minuto"
 
-#. 0: bg(leaf?.rate_of_change?.rate ?? 0); 1: bgLabel()
+#. 0: convertRateToDisplayUnits(leaf?.rate_of_change?.rate ?? 0, glucoseUnits.current); 1: bgLabel()
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 msgid "Rising fast: {0} {1} per minute"
 msgstr "Ascenso rápido: {0} {1} por minuto"
@@ -42387,6 +42429,7 @@ msgstr "sin datos durante al menos"
 msgid "Measure"
 msgstr "Medida"
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -46755,6 +46798,7 @@ msgstr "hidratos de carbono que tomaste durante una bajada"
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "exercise"
 msgstr "ejercicio"
 
@@ -46909,6 +46953,7 @@ msgid "BG"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "sensor"
 msgstr ""
 
@@ -46963,10 +47008,12 @@ msgid "average"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "insulin"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "bolus"
 msgstr ""
 
@@ -46979,6 +47026,8 @@ msgid "rate"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "temp basal"
 msgstr ""
 
@@ -47007,6 +47056,8 @@ msgid "automation"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "closed loop"
 msgstr ""
 
@@ -47043,10 +47094,12 @@ msgid "HR"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "pulse"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "walking"
 msgstr ""
 
@@ -47055,6 +47108,7 @@ msgid "sensitivity"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "carb ratio"
 msgstr ""
 
@@ -47091,6 +47145,7 @@ msgid "infusion set"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "cannula"
 msgstr ""
 
@@ -47115,6 +47170,7 @@ msgid "disconnected"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "compression"
 msgstr ""
 
@@ -47175,6 +47231,7 @@ msgid "ROC"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
 msgid "trend"
 msgstr ""
 
@@ -47881,10 +47938,8 @@ msgstr ""
 msgid "· Access ends {0}"
 msgstr ""
 
-#. 0: formatMediumDateTime(invite.expiresAt)
-#: src/lib/components/members/PendingInvitesList.svelte
-msgid "Expires {0} <0/> <1/> <2/>"
-msgstr ""
+#~ msgid "Expires {0} <0/> <1/> <2/>"
+#~ msgstr ""
 
 #. 0: inviteName
 #: src/lib/components/members/PendingInvitesList.svelte
@@ -47986,7 +48041,6 @@ msgstr ""
 msgid "The public access settings did not load."
 msgstr ""
 
-#: src/lib/components/members/LockedOutMembers.svelte
 #: src/lib/components/members/MemberCard.svelte
 msgid "This member's access lasts longer than yours."
 msgstr ""
@@ -48243,27 +48297,20 @@ msgstr ""
 msgid "Time zone"
 msgstr ""
 
-#. 0: formatDateTimeCompact(hold.since)
-#: src/lib/components/alerts/holdText.svelte.ts
-msgid "Waiting for data since {0}."
-msgstr ""
+#~ msgid "Waiting for data since {0}."
+#~ msgstr ""
 
-#: src/lib/components/alerts/holdText.svelte.ts
-msgid "Waiting for data."
-msgstr ""
+#~ msgid "Waiting for data."
+#~ msgstr ""
 
-#: src/lib/components/alerts/holdText.svelte.ts
-msgid "This alert stays open while its data is missing. It closes after 24 hours of missing data."
-msgstr ""
+#~ msgid "This alert stays open while its data is missing. It closes after 24 hours of missing data."
+#~ msgstr ""
 
-#: src/lib/components/alerts/holdText.svelte.ts
-msgid "Closed because its data was missing for 24 hours."
-msgstr ""
+#~ msgid "Closed because its data was missing for 24 hours."
+#~ msgstr ""
 
-#. 0: holdSinceText(hold)
-#: src/routes/(authenticated)/alerts/[id]/+page.svelte
-msgid "{0} This rule cannot open an alert until the data comes back. After 24 hours of missing data, Nocturne closes an open alert."
-msgstr ""
+#~ msgid "{0} This rule cannot open an alert until the data comes back. After 24 hours of missing data, Nocturne closes an open alert."
+#~ msgstr ""
 
 #. 0: memberFirst; 1: entry.inviteLabel; 2: by
 #: src/lib/components/members/MemberHistoryEntryRow.svelte
@@ -48385,4 +48432,1398 @@ msgstr ""
 #. 0: chip; 1: amount(margin)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "{0}, clear margin {1}"
+msgstr ""
+
+#: src/lib/navigation/settings-navigation.svelte.ts
+msgid "Your sign-in, your display, your teams, and your linked chat accounts."
+msgstr ""
+
+#: src/lib/navigation/settings-navigation.svelte.ts
+msgid "The teams that you are a member of, and their managers."
+msgstr ""
+
+#: src/lib/teams/member-kind.svelte.ts
+msgid "Manager"
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The team name is empty or too long. Change the name and try again."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The label is too long. Use a shorter label."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "Nocturne does not allow this expiry. Select another expiry."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "Nocturne does not allow this number of uses. Try again."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A team must keep one manager. Invite another manager first."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "The operator of this site limits who can create a team."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "You cannot delete this team now."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "This invite link has expired. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A manager revoked this invite link. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "This invite link has no uses left. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The manager who made this link left the team. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "You are already a member of this team."
+msgstr ""
+
+#: src/lib/components/teams/TeamsUnavailable.svelte
+msgid "Teams are not available in the demo."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Could not create the team. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Teams - Settings - Nocturne"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "The teams that you are a member of."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Could not load your teams"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Your teams"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "You are not a member of a team."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "Create a team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "You are the first manager of a team that you create."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Team name"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/+page.svelte
+msgid "<0/> Create team"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "This link has no invite token. Check the link that you were given."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "This invite link is not valid. Ask the manager who sent it for a new link."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Your sign-in cannot join a team."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "This invite link cannot be used."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Could not accept the invite. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Join a team - Nocturne"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Join a team"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Joining..."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "You are already a member of <0/>."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "Open the team"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "<0/> invited you to be a manager of <1/>."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/join/+page.svelte
+msgid "<0/> invited you to join <1/>."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+msgid "Only platform administrators can create a team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/admin/invites/+page.svelte
+msgid "When this is on, other people cannot create a team. Their teams stay as they are."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not rename the team. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not leave the team. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not remove the manager. Try again."
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not revoke the link. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not delete the team. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Team"
+msgstr ""
+
+#. 0: team?.name ?? "Team"
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "{0} - Teams - Settings - Nocturne"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Could not load the team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "The managers of this team, and the links that add a manager."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "<0/> Rename team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Managers"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "A manager can rename the team, add and remove managers, and delete the team."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Leave team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "<0/> Leave"
+msgstr ""
+
+#. 0: team.name
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Leave {0}? You lose access to the team. A manager of the team must add you again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "A team must keep one manager. Invite another manager before you leave."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Remove manager"
+msgstr ""
+
+#. 0: manager.displayName; 1: team.name
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Remove {0} as a manager of {1}? They lose access to the team. The links that they made stop working."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Invite a manager"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "One person can use each link. A link stops working when the manager who made it leaves the team."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "No link works now."
+msgstr ""
+
+#. 0: link.createdByName; 1: formatMediumDateTime(link.expiresAt)
+#. 0: invite.createdByName; 1: formatMediumDateTime(invite.expiresAt)
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Made by {0} · Stops working {1}"
+msgstr ""
+
+#. 0: link.label ?? "with no label"
+#. 0: invite.label ?? "with no label"
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Revoke the link {0}"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Links that work now"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Delete team"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Every manager of the team loses it. You cannot undo this."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "<0/> Delete team"
+msgstr ""
+
+#. 0: team.name
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "Delete {0}? Every manager loses the team. You cannot undo this."
+msgstr ""
+
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "<0/> Teams"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Only for No value. The other states have no start time."
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Warm-up"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Calibration necessary"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "No value"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Sensor state"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The CGM sensor reports a state, for example warm-up or an error"
+msgstr ""
+
+#. 0: formatDateTimeCompact(hold.since)
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Waiting for usable data since {0}."
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Waiting for usable data."
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "This alert stays open while it has no usable data. It closes after 24 hours with no usable data."
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Closed because it had no usable data for 24 hours."
+msgstr ""
+
+#. 0: formatList(p.states.map(sensorStateLabel), "disjunction")
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Sensor state: {0}"
+msgstr ""
+
+#. 0: holdSinceText(hold)
+#: src/routes/(authenticated)/alerts/[id]/+page.svelte
+msgid "{0} This rule cannot open an alert until usable data comes back. After 24 hours with no usable data, Nocturne closes an open alert."
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Forecast choice"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Forecast curve"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "from"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "If the loop does not send a curve that you select, the rule waits and shows the cause."
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderRow.svelte
+msgid "<0/> Choose a forecast curve"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderRow.svelte
+msgid "Use the default forecast"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Default forecast"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "IOB forecast"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "COB forecast"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "UAM forecast"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Zero temp forecast"
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A predicted glucose condition can use one forecast choice only: one curve, the lowest of some curves, or the highest of some curves."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A “lowest of” forecast needs at least one curve chosen."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A “highest of” forecast needs at least one curve chosen."
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "Eventual glucose"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "Carbs needed"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The glucose that the loop expects at the end of its forecast is above or below a level"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The grams of carbs that the loop says are necessary to prevent a low"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Loop result"
+msgstr ""
+
+#~ msgid "{0} {1} {2} {3} in {4}"
+#~ msgstr ""
+
+#~ msgid "Eventual glucose {0} {1} {2}"
+#~ msgstr ""
+
+#. 0: opSymbol(p.operator); 1: p.value
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Carbs needed {0} {1} g"
+msgstr ""
+
+#. 0: formatList(p.min_of.map(forecastCurveLabel), "conjunction")
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Lowest of {0}"
+msgstr ""
+
+#. 0: formatList(p.max_of.map(forecastCurveLabel), "conjunction")
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Highest of {0}"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+#: src/lib/components/connectors/ConnectorDangerZone.svelte
+#: src/lib/components/connectors/DataSourceManageDialog.svelte
+msgid "Only members who can manage this site's settings can delete synced data."
+msgstr ""
+
+#: src/lib/components/connectors/ConnectorSetup.svelte
+msgid "Only members who can manage this site's settings can sign in to CareLink."
+msgstr ""
+
+#: src/lib/components/connectors/ConnectorSetup.svelte
+msgid "Only members who can set up this site's data sources can configure or enable this connector."
+msgstr ""
+
+#: src/lib/components/connectors/ConnectorSetup.svelte
+msgid "Saving a Nightscout API secret here does not create an API secret for uploaders."
+msgstr ""
+
+#: src/lib/components/settings/ConnectorConfigForm.svelte
+msgid "Only members who can manage this site's settings can turn this on."
+msgstr ""
+
+#: src/lib/components/settings/ConnectorConfigForm.svelte
+msgid "Only members who can manage this site's settings can change this address while a secret is saved or data is sent to it."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/connectors/[connector]/+page.svelte
+msgid "Only members who can manage this site's settings can import Oura data."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/sharing/audiences.svelte.ts
+msgid "They can also log insulin and carbs, change alerts, and set up data sources."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A link cannot suggest this role. Choose another role."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The end date must be in the future. Choose a later date."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "This link has expired. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A manager revoked this link. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "This link has no uses left. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The latest end date that this link allows has passed. Ask a manager of the team for a new link."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "This team already has access to this site."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "Only an owner of the site can give a team access to it."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "Choose at least one role."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A role that you chose is not a role of this site. Reload the page and try again."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A team can have only roles for data. Choose other roles."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A role that you chose gives more than this link allows. Choose other roles."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "A role that you chose gives more than you hold. Choose other roles."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "This access must be limited to the last 24 hours."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The access must end no later than this link allows. Choose an earlier end date."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The access cannot last longer than your own access. Choose an earlier end date."
+msgstr ""
+
+#. 0: renamedFrom; 1: renamedTo
+#: src/lib/components/layout/NotificationItem.svelte
+msgid "The team {0} is now named {1}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} stopped the access of the team {1}."
+msgstr ""
+
+#. 0: actor
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} stopped the access of a team that was deleted."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access. The detail is no longer stored."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles; 3: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the role {2} to the last 24 hours only, until {3}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the role {2} to the last 24 hours only."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles; 3: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the role {2} until {3}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the role {2}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles; 3: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the roles {2} to the last 24 hours only, until {3}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the roles {2} to the last 24 hours only."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles; 3: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the roles {2} until {3}."
+msgstr ""
+
+#. 0: actor; 1: entry.team.name; 2: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave the team {1} access with the roles {2}."
+msgstr ""
+
+#. 0: actor
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access. The detail is no longer stored."
+msgstr ""
+
+#. 0: actor; 1: teamRoles; 2: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the role {1} to the last 24 hours only, until {2}."
+msgstr ""
+
+#. 0: actor; 1: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the role {1} to the last 24 hours only."
+msgstr ""
+
+#. 0: actor; 1: teamRoles; 2: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the role {1} until {2}."
+msgstr ""
+
+#. 0: actor; 1: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the role {1}."
+msgstr ""
+
+#. 0: actor; 1: teamRoles; 2: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the roles {1} to the last 24 hours only, until {2}."
+msgstr ""
+
+#. 0: actor; 1: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the roles {1} to the last 24 hours only."
+msgstr ""
+
+#. 0: actor; 1: teamRoles; 2: accessEnd
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the roles {1} until {2}."
+msgstr ""
+
+#. 0: actor; 1: teamRoles
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} gave a team that was deleted access with the roles {1}."
+msgstr ""
+
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/AccessApprovalForm.svelte
+#: src/lib/components/teams/AccessLinksSection.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Only the last 24 hours"
+msgstr ""
+
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Access does not end"
+msgstr ""
+
+#. 0: formatMediumDate(accessEndDate(team.accessEndsAt))
+#. 0: formatMediumDate(accessEndDate(site.accessEndsAt))
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Access ended {0}"
+msgstr ""
+
+#. 0: formatMediumDate(accessEndDate(team.accessEndsAt))
+#. 0: formatMediumDate(accessEndDate(site.accessEndsAt))
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Access ends {0}"
+msgstr ""
+
+#. 0: team.approvedByName ?? "a deleted member"; 1: formatMediumDateTime(team.givenAt)
+#: src/lib/components/members/TeamAccessList.svelte
+msgid "Approved by {0} · {1}"
+msgstr ""
+
+#: src/lib/components/members/TeamAccessList.svelte
+#: src/lib/components/members/TeamAccessList.svelte
+msgid "Stop access"
+msgstr ""
+
+#. 0: team.teamName
+#: src/lib/components/members/TeamAccessList.svelte
+msgid "Stop the access of {0}"
+msgstr ""
+
+#: src/lib/components/members/TeamAccessList.svelte
+msgid "<0/> Stop access"
+msgstr ""
+
+#. 0: team.teamName
+#: src/lib/components/members/TeamAccessList.svelte
+msgid "Stop the access of {0}? The staff of the team lose access at once. A manager of the team must ask again."
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "A team has this role, so it can hold only permissions for data and you cannot delete it."
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "A team has this role, so only an owner can add permissions to it."
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "<0/>Held by a team"
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "Only an owner can add permissions to it."
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "A team has this role. It cannot be deleted, and it can hold only permissions for data. <0/>"
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "A team has this role. You can remove permissions from it, and only an owner can add permissions."
+msgstr ""
+
+#: src/lib/components/members/RolesSection.svelte
+msgid "A team has this role, so it can hold only permissions for data."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "No end date is left that this link and your own access allow."
+msgstr ""
+
+#. 0: formatMediumDate(startOfDay(latestAccessEndDay(site.latestEnd) ?? ""))
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "The access must end on {0} or before. The link or your own access sets this limit."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "No role of this site fits this link and your own access, so the team cannot get access here."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "What the team can see and change with this role"
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "Roles to give the team"
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "The link or your own access requires this limit."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "The team can see only the most recent 24 hours of data."
+msgstr ""
+
+#: src/lib/components/teams/AccessApprovalForm.svelte
+msgid "Give the team access"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Request access"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "A person opens the link and chooses the site to give access to. A link stops working when the manager who made it leaves the team."
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "For example, the name of the person who owns the site"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Label of the access link (optional)"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Choose a role to make the link."
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Role that the link suggests"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Latest end of the access (optional)"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "<0/> Make access link"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Access link"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Copy the access link"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "No access link works now."
+msgstr ""
+
+#. 0: roleName(link.suggestion?.roleSlug)
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Suggests the role {0}"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "Suggests a role that is no longer offered"
+msgstr ""
+
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "· Only the last 24 hours"
+msgstr ""
+
+#. 0: formatMediumDate(accessEndDate(link.suggestion.accessEndsAt))
+#: src/lib/components/teams/AccessLinksSection.svelte
+msgid "· Access ends by {0}"
+msgstr ""
+
+#: src/lib/components/teams/PermissionList.svelte
+msgid "This role gives no permissions."
+msgstr ""
+
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "Sites this team has access to"
+msgstr ""
+
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "No site has given this team access."
+msgstr ""
+
+#. 0: site.limitTo24Hours ? "Only the last 24 hours" \\: "All history"; 1: formatMediumDateTime(site.givenAt)
+#: src/lib/components/teams/TeamSitesSection.svelte
+msgid "{0} · <0/> · Given {1}"
+msgstr ""
+
+#: src/routes/(authenticated)/settings/members/+page.svelte
+msgid "Access of the team stopped."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/members/+page.svelte
+msgid "Failed to stop the access of the team. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/members/+page.svelte
+msgid "This team no longer has access."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "This link is not valid. Ask the manager who sent it for a new link."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "This link has no access token. Check the link that you were given."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Your sign-in cannot give a team access."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "This link cannot be used."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Could not give the team access. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Give a team access - Nocturne"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Give a team access"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "The team has access"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "The team <0/> now has access to <1/>."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Giving access..."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "<0/> asks you to give the team <1/> access to a site."
+msgstr ""
+
+#. 0: view.createdByName
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Nocturne does not check who runs a team. Give access only if you know {0}."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Only an owner of a site can give a team access. You do not own a site."
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Site to give access to"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Link unavailable"
+msgstr ""
+
+#: src/routes/(authenticated)/teams/access/+page.svelte
+msgid "Loading link..."
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Offset"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "plus"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "If your profile has no target range, this condition does not know if it is true."
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Number"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "Latest glucose"
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A glucose condition can compare with a number or with a value such as your target, not both."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A glucose threshold cannot compare the latest glucose with itself. Choose a number or a target."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The amount added to a target or to the latest glucose is too large."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The amount added to a target or to the latest glucose must be a number."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A glucose condition compares with a value that Nocturne does not know. Choose one from the list and save again."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A glucose condition compares with a value, but no value is chosen. Choose one from the list and save again."
+msgstr ""
+
+#. 0: limitPhrase(p)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose below {0}"
+msgstr ""
+
+#. 0: limitPhrase(p)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose above {0}"
+msgstr ""
+
+#. 0: forecastChip(p); 1: opSymbol(p.operator); 2: limitPhrase(p); 3: formatMinutes(p.within_minutes ?? 0)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "{0} {1} {2} in {3}"
+msgstr ""
+
+#. 0: opSymbol(p.operator); 1: limitPhrase(p)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Eventual glucose {0} {1}"
+msgstr ""
+
+#. 0: fact; 1: bg(offset); 2: bgLabel()
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "{0} plus {1} {2}"
+msgstr ""
+
+#. 0: fact; 1: bg(-offset); 2: bgLabel()
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "{0} minus {1} {2}"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
+msgid "Set in the rule editor"
+msgstr ""
+
+#: ../portal/src/routes/+page.svelte
+msgid "One install, many people. Run a household, a camp, or a community on a single deployment, with each person's data and settings kept apart."
+msgstr ""
+
+#: ../portal/src/routes/features/+page.svelte
+msgid "Run a household, a camp, or a community on a single deployment. Each tenant gets its own subdomain, and row-level security in the database keeps one tenant's data out of another's."
+msgstr ""
+
+#: ../portal/src/routes/features/+page.svelte
+msgid "One install for a household, a camp, or a community"
+msgstr ""
+
+#: src/lib/components/members/LockedOutMembers.svelte
+msgid "This member holds permissions that you do not hold. Ask an owner to create the link."
+msgstr ""
+
+#: src/lib/components/members/LockedOutMembers.svelte
+msgid "You can see the last 24 hours only. Ask an owner to create the link."
+msgstr ""
+
+#: src/lib/components/members/LockedOutMembers.svelte
+msgid "This member's access lasts longer than yours. Ask an owner to create the link."
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "overview"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "summary"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "report card"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "snapshot"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "ambulatory glucose profile"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "percentiles"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "target range"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "spread"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "signal"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "rejected uploads"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "a1c"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "hba1c"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "glycated hemoglobin"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "custom"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "saved"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "builder"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "report builder"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "annual"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "yearly"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "12 month"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "heatmap"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "glucose readings"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "log"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "history"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "daily"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "today"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "yesterday"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "comparison"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "weekly"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "compare"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "date ranges"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "hourly"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "time of day"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "best hours"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "worst hours"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "activity"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "movement"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "BPM"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "cardio"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "overnight"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "night time"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "sleeping"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "carbs"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "corrections"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "basal rate"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "background insulin"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "total daily dose"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "basal bolus ratio"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "infusion site"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "rotation"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "set change"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "insulin dosing profile"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "daily insulin"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "dose adjustment"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "pump battery"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "phone battery"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "charge"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "loop analysis"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "loopalyzer"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "AID"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "SMB"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "meal response"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "unannounced meals"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "predictions"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "forecast"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "open loop"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "limits"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "sensitivity ratio"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "basal"
+msgstr ""
+
+#: src/lib/navigation/report-navigation.svelte.ts
+msgid "profile settings"
+msgstr ""
+
+#. 0: invite.createdByName
+#: src/lib/components/members/PendingInvitesList.svelte
+msgid "Made by {0} ·"
+msgstr ""
+
+#. 0: formatMediumDateTime(invite.expiresAt)
+#: src/lib/components/members/PendingInvitesList.svelte
+msgid "<0/> Expires {0} <1/> <2/> <3/>"
+msgstr ""
+
+#: src/routes/(unauthenticated)/join/+page.svelte
+msgid "You made this invite, so you cannot accept it. Ask another member to invite you."
+msgstr ""
+
+#: src/lib/components/members/MemberCard.svelte
+msgid "Reasons for access"
+msgstr ""
+
+#. 0: reason.teamName
+#: src/lib/components/members/MemberCard.svelte
+msgid "Staff of the team {0}"
+msgstr ""
+
+#: src/lib/components/members/MemberCard.svelte
+msgid "Direct access"
+msgstr ""
+
+#: src/lib/components/members/MemberCard.svelte
+msgid "Last 24 hours only"
+msgstr ""
+
+#. 0: formatShortDate(accessEndDate(reason.accessEndsAt), true)
+#: src/lib/components/members/MemberCard.svelte
+msgid "Ended {0}"
+msgstr ""
+
+#: src/lib/components/members/MemberCard.svelte
+msgid "This member's direct access has no 24-hour limit, so the 24-hour limit of the team does not apply."
+msgstr ""
+
+#: src/lib/components/members/MemberCard.svelte
+#: src/routes/(authenticated)/settings/members/+page.svelte
+msgid "This member has access only through a team. To change it, stop the team's access to this site."
+msgstr ""
+
+#. 0: memberFirst; 1: entry.team.name
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} joined as staff of the team {1}."
+msgstr ""
+
+#. 0: memberFirst
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} joined as staff of a team. The detail is no longer stored."
+msgstr ""
+
+#. 0: memberFirst; 1: entry.team.name
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} is no longer staff of the team {1}."
+msgstr ""
+
+#. 0: memberFirst
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "{0} is no longer staff of a team. The detail is no longer stored."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/members/+page.svelte
+msgid "You cannot approve your own request. Ask another member to approve it."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/account/+page.svelte
+msgid "Nocturne did not add the passkey. To try again, select Add passkey."
+msgstr ""
+
+#: src/lib/teams/member-kind.svelte.ts
+msgid "Staff"
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "Staff cannot have this role ceiling. Choose another role."
+msgstr ""
+
+#: src/lib/teams/problem-messages.svelte.ts
+msgid "The end date that this invite gives has passed. Ask a manager of the team for a new link."
 msgstr ""

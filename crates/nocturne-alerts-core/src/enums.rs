@@ -190,6 +190,44 @@ wire_enum! {
 }
 
 wire_enum! {
+    /// `SensorState`: what the sensor's own reports say of its readings
+    /// (engine-semantics.md §4). `no_value` is the host's word for a newest
+    /// reading that carries no glucose value.
+    pub enum SensorState {
+        WarmingUp = "warming_up",
+        Ok = "ok",
+        CalibrationNeeded = "calibration_needed",
+        Error = "error",
+        Expired = "expired",
+        NoValue = "no_value",
+    }
+}
+
+wire_enum! {
+    /// `ForecastCurve`: a forecast series a `predicted` leaf selects
+    /// (engine-semantics.md §3). `default` is the series a host has always
+    /// sent, not a curve of its own; the others are oref's.
+    #[derive(PartialOrd, Ord)]
+    pub enum ForecastCurve {
+        Default = "default",
+        Iob = "iob",
+        Cob = "cob",
+        Uam = "uam",
+        Zt = "zt",
+    }
+}
+
+wire_enum! {
+    /// `AlertLimitFact`: the fact a glucose comparison's `value_from` names
+    /// as its limit (engine-semantics.md §3, a limit from a fact).
+    pub enum LimitFact {
+        LatestGlucose = "latest_glucose",
+        TargetLow = "target_low",
+        TargetHigh = "target_high",
+    }
+}
+
+wire_enum! {
     /// `threshold.direction`.
     pub enum ThresholdDirection {
         Above = "above",
@@ -263,6 +301,9 @@ mod tests {
                 names::<TransmitterBatteryMetric>(),
             ),
             ("TrendBucket", names::<TrendBucket>()),
+            ("SensorState", names::<SensorState>()),
+            ("ForecastCurve", names::<ForecastCurve>()),
+            ("AlertLimitFact", names::<LimitFact>()),
             ("AlertConditionType", names::<ConditionKind>()),
         ];
         for (enum_name, ours) in tables {

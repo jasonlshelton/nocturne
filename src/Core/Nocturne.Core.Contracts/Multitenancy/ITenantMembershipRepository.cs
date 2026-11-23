@@ -1,3 +1,4 @@
+using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
 
 namespace Nocturne.Core.Contracts.Multitenancy;
@@ -30,16 +31,31 @@ namespace Nocturne.Core.Contracts.Multitenancy;
 /// A membership whose end date has passed is absent to every method that takes a <c>now</c>: those
 /// decide what a subject may do on a tenant, which tenants a subject has, or who receives something
 /// for a tenant. The management reads (<see cref="FindMemberAsync"/>, <see cref="GetMemberAsync"/>,
-/// <see cref="ListMembersAsync"/>), the setup gate and the owner reads still return it.
+/// <see cref="ListMembersAsync"/>), the setup gate and the owner reads still return it. So is one
+/// that still gives access a reason that has ended no longer gives, until it is narrowed; the reads
+/// that decide a request or a sign-in (<see cref="ReadSubjectMembershipAsync"/>,
+/// <see cref="GetMemberAccessAsync(Guid, Guid, DateTime, CancellationToken)"/>, <see cref="IsMemberAsync"/>
+/// and <see cref="GetMemberRoleNamesAsync"/>) narrow it themselves and return what is left.
 /// </para>
 /// </remarks>
 public interface ITenantMembershipRepository
 {
     /// <summary>
-    /// Stores a membership with its roles in one save; false when the subject is already a member,
-    /// including when another request made it one in the meantime. Any other failed save throws.
+    /// Stores a membership with its roles in one save; false when the subject holds a membership for
+    /// any reason, including when another request made them a member in the meantime. Any other failed
+    /// save throws. For setup, a new tenant's owner and the system members; a path that lets a person
+    /// in directly uses <see cref="AddDirectMemberAsync"/>.
     /// </summary>
     Task<bool> AddMemberAsync(NewTenantMember member, CancellationToken ct);
+
+    /// <summary>
+    /// Lets the subject in directly, by an invite, a request or a manager: stores the membership, or,
+    /// for a subject who holds one only through a team, gives it a direct reason with the same audit
+    /// rows a new member's would have, projected at <paramref name="now"/>. False when the subject
+    /// already holds a direct reason, ended or not, including when another request gave them one in
+    /// the meantime. Any other failed save throws.
+    /// </summary>
+    Task<bool> AddDirectMemberAsync(NewTenantMember member, DateTime now, CancellationToken ct);
 
     /// <summary>The membership of <paramref name="tenantId"/> held by <paramref name="subjectId"/>, with its roles; null when there is none.</summary>
     Task<TenantMemberRecord?> FindMemberAsync(Guid tenantId, Guid subjectId, CancellationToken ct);
@@ -76,6 +92,13 @@ public interface ITenantMembershipRepository
     Task<bool> IsMemberAsync(Guid tenantId, Guid subjectId, DateTime now, CancellationToken ct);
 
     /// <summary>
+    /// Whether <paramref name="subjectId"/> was let in to <paramref name="tenantId"/> directly and that
+    /// reason has not ended at <paramref name="now"/>: what refuses letting them in directly again.
+    /// Access through a team alone is not, so a team's staff member can still be invited.
+    /// </summary>
+    Task<bool> IsDirectMemberAsync(Guid tenantId, Guid subjectId, DateTime now, CancellationToken ct);
+
+    /// <summary>
     /// The names of the tenant roles <paramref name="subjectId"/> holds on <paramref name="tenantId"/>;
     /// none when the membership has ended at <paramref name="now"/>.
     /// </summary>
@@ -106,19 +129,21 @@ public interface ITenantMembershipRepository
     Task<bool> AnyOtherOwnerAsync(Guid tenantId, Guid memberId, CancellationToken ct);
 
     /// <summary>
-    /// Removes the membership and its roles, refused with <see cref="OwnerGuardedChange.LastOwner"/>
-    /// when <c>TenantOwnerFilter.IsLastOwnerAsync</c> says it is the last owner. Its removed row records
-    /// <paramref name="how"/>.
+    /// Removes the membership's direct reason, refused with <see cref="OwnerGuardedChange.LastOwner"/>
+    /// when <c>TenantOwnerFilter.IsLastOwnerAsync</c> says it is the last owner, and with
+    /// <see cref="OwnerGuardedChange.FromTeam"/> when it holds no direct reason. A membership whose only
+    /// reason it is goes with it; one that also holds a team's reason stays, projected at
+    /// <paramref name="now"/> from what is left. Its removed row records <paramref name="how"/>.
     /// </summary>
     /// <remarks>
     /// The check and the removal hold the tenant's owner lock. Over a unit, call it inside the
     /// unit's commit, which then holds the lock until it commits the removal.
     /// </remarks>
     Task<OwnerGuardedChange> RemoveMemberUnlessLastOwnerAsync(
-        Guid tenantId, Guid memberId, MembershipEndHow how, CancellationToken ct);
+        Guid tenantId, Guid memberId, MembershipEndHow how, DateTime now, CancellationToken ct);
 
     /// <summary>
-    /// Removes every membership <paramref name="subjectId"/> holds, in any tenant, and returns how
+    /// Removes every membership <paramref name="subjectId"/> holds, in any tenant, with every reason, and returns how
     /// many, with the tenants whose last owner it was by <c>TenantOwnerFilter.IsLastOwnerAsync</c>.
     /// Each removed row records <see cref="MembershipEndHow.System"/>.
     /// </summary>
@@ -131,18 +156,24 @@ public interface ITenantMembershipRepository
     /// </remarks>
     Task<SubjectMembershipsRemoval> RemoveMembershipsOfSubjectAsync(Guid subjectId, CancellationToken ct);
 
-    /// <summary>Replaces the membership's direct permissions, null clearing them, and stamps it updated at <paramref name="now"/>.</summary>
+    /// <summary>
+    /// Replaces the direct permissions of the membership's direct reason, null clearing them, and stamps
+    /// it updated at <paramref name="now"/>; false when there is no such membership or it holds no direct reason.
+    /// </summary>
     Task<bool> SetDirectPermissionsAsync(Guid tenantId, Guid memberId, IReadOnlyList<string>? permissions, DateTime now, CancellationToken ct);
 
-    /// <summary>Sets the membership's 24-hour history limit and stamps it updated at <paramref name="now"/>.</summary>
+    /// <summary>
+    /// Sets the 24-hour history limit of the membership's direct reason and stamps it updated at
+    /// <paramref name="now"/>; false when there is no such membership or it holds no direct reason.
+    /// </summary>
     Task<bool> SetLimitTo24HoursAsync(Guid tenantId, Guid memberId, bool limitTo24Hours, DateTime now, CancellationToken ct);
 
     /// <summary>
-    /// Sets when the membership ends, null clearing it, and stamps it updated at
+    /// Sets when the membership's direct reason ends, null clearing it, and stamps it updated at
     /// <paramref name="now"/> when the date moved. Refused with
-    /// <see cref="OwnerGuardedChange.OwnerAccessEnds"/> when it would give an owner an end date.
-    /// In the same save, an alert channel the member added stops no later than the end, and a
-    /// later end does not move a channel's stop back.
+    /// <see cref="OwnerGuardedChange.OwnerAccessEnds"/> when it would give an owner an end date, and
+    /// with <see cref="OwnerGuardedChange.FromTeam"/> when it holds no direct reason.
+    /// It does not cap what the member made: <see cref="ITenantService.SetMemberAccessEndAsync"/> does, in the same commit.
     /// </summary>
     /// <remarks>Holds the tenant's owner lock as <see cref="RemoveMemberUnlessLastOwnerAsync"/> does, so it and a role change cannot race.</remarks>
     Task<OwnerGuardedChange> SetAccessEndUnlessOwnerAsync(
@@ -152,8 +183,9 @@ public interface ITenantMembershipRepository
     Task<bool> SetUsernameAsync(Guid tenantId, Guid memberId, string? username, CancellationToken ct);
 
     /// <summary>
-    /// Removes the roles <paramref name="removedRoleIds"/> from the membership, assigns
-    /// <paramref name="addedRoleIds"/>, and stamps it updated at <paramref name="now"/>, in one save.
+    /// Removes the roles <paramref name="removedRoleIds"/> from the membership's direct reason, assigns
+    /// <paramref name="addedRoleIds"/>, and stamps it updated at <paramref name="now"/>, in one save;
+    /// false when there is no such membership or it holds no direct reason.
     /// </summary>
     /// <remarks>Does not check for the last owner. For a membership a person holds, use <see cref="ReplaceRolesUnlessLastOwnerAsync"/>.</remarks>
     Task<bool> ReplaceRolesAsync(
@@ -163,8 +195,9 @@ public interface ITenantMembershipRepository
     /// <summary>
     /// <see cref="ReplaceRolesAsync"/>, refused with <see cref="OwnerGuardedChange.LastOwner"/> when
     /// it removes the owner role from a membership <c>TenantOwnerFilter.IsLastOwnerAsync</c> says is the last owner,
-    /// and with <see cref="OwnerGuardedChange.OwnerAccessEnds"/> when it gives the owner role to a
-    /// membership that has an end date.
+    /// with <see cref="OwnerGuardedChange.OwnerAccessEnds"/> when it gives the owner role to a direct
+    /// reason that has an end date, and with <see cref="OwnerGuardedChange.FromTeam"/> when the
+    /// membership holds no direct reason.
     /// </summary>
     /// <remarks>Holds the tenant's owner lock as <see cref="RemoveMemberUnlessLastOwnerAsync"/> does.</remarks>
     Task<OwnerGuardedChange> ReplaceRolesUnlessLastOwnerAsync(
@@ -204,7 +237,11 @@ public interface ITenantMembershipRepository
     Task<IReadOnlyList<TenantRecord>> ListTenantsOfSubjectAsync(Guid subjectId, bool activeOnly, DateTime now, CancellationToken ct);
 
     /// <summary>Every membership <paramref name="subjectId"/> holds that has not ended at <paramref name="now"/>, with its tenant and roles.</summary>
-    /// <remarks>Pinned to the subject, as <see cref="ListTenantIdsOfSubjectAsync"/> is.</remarks>
+    /// <remarks>
+    /// Pinned to the subject, as <see cref="ListTenantIdsOfSubjectAsync"/> is. Its reasons are not
+    /// loaded, so each reads as its row, the sum: <see cref="TenantMemberRecord.DirectReason"/> is not
+    /// to be read from it.
+    /// </remarks>
     Task<IReadOnlyList<SubjectMembership>> ListMembershipsOfSubjectAsync(Guid subjectId, DateTime now, CancellationToken ct);
 
     /// <summary>
@@ -255,11 +292,26 @@ public interface ITenantMembershipRepository
     /// <summary>Stores a role and returns it.</summary>
     Task<TenantRoleRecord> CreateRoleAsync(NewTenantRole role, CancellationToken ct);
 
-    /// <summary>Applies <paramref name="edit"/> to the role and stamps it updated at <paramref name="now"/>; null when there is no such role.</summary>
-    Task<TenantRoleRecord?> UpdateRoleAsync(Guid tenantId, Guid roleId, TenantRoleEdit edit, DateTime now, CancellationToken ct);
+    /// <summary>
+    /// Applies <paramref name="edit"/> to the role and stamps it updated at <paramref name="now"/>.
+    /// While a team's access gives the role, an edit that is not data only
+    /// (<see cref="Scope.IsDataOnly"/>) is refused with <see cref="RoleChangeOutcome.HeldByTeam"/>,
+    /// and one that adds a permission the role does not hold is refused with
+    /// <see cref="RoleChangeOutcome.HeldByTeamOwnerOnly"/> unless <paramref name="editorSubjectId"/>
+    /// is an owner of the site in force: only an owner may give a team more. Checked under the site's
+    /// owners lock and team access lock, so an approval or an owner change racing it is either seen or
+    /// waits. A null <paramref name="editorSubjectId"/> is the system, which is no owner.
+    /// </summary>
+    Task<TenantRoleUpdate> UpdateRoleAsync(
+        Guid tenantId, Guid roleId, TenantRoleEdit edit, Guid? editorSubjectId, DateTime now, CancellationToken ct);
 
-    /// <summary>Deletes the role together with every member's assignment of it, in one save; false when there is no such role.</summary>
-    Task<bool> DeleteRoleAsync(Guid tenantId, Guid roleId, CancellationToken ct);
+    /// <summary>
+    /// Deletes the role together with every member's assignment of it, in one save. Refused with
+    /// <see cref="RoleChangeOutcome.HeldByTeam"/> while a team's access gives the role, checked as
+    /// <see cref="UpdateRoleAsync"/> checks. Each holder's row is projected from its reasons in force
+    /// at <paramref name="now"/>.
+    /// </summary>
+    Task<RoleChangeOutcome> DeleteRoleAsync(Guid tenantId, Guid roleId, DateTime now, CancellationToken ct);
 
     /// <summary>Stores the tenant's seed roles whose slugs it does not have yet.</summary>
     Task SeedRolesAsync(Guid tenantId, CancellationToken ct);

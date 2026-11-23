@@ -59,17 +59,18 @@ public class AccessRequestService(
                 return new ApproveAccessRequestResult(ApproveAccessRequestOutcome.NotFound);
 
             var tenantMembers = new TenantMembershipRepository(unit, linkRoute);
-            if (!await tenantMembers.AddMemberAsync(
-                    new NewTenantMember(
-                        tenant, subjectId, roleIds, directPermissions, LimitTo24Hours: limitTo24Hours)
-                        { How = MembershipJoinHow.Request, By = decidedBySubjectId },
-                    ct))
-                return new ApproveAccessRequestResult(ApproveAccessRequestOutcome.AlreadyMember);
-
             try
             {
-                await unit.CommitAsync(async token =>
+                var added = await unit.CommitAsync(async token =>
                 {
+                    if (!await tenantMembers.AddDirectMemberAsync(
+                            new NewTenantMember(
+                                tenant, subjectId, roleIds, directPermissions, LimitTo24Hours: limitTo24Hours)
+                                { How = MembershipJoinHow.Request, By = decidedBySubjectId },
+                            time.GetUtcNow().UtcDateTime,
+                            token))
+                        return false;
+
                     if (await tenantMembers.FindLatestRequestAsync(tenant, subjectId, token) is { Status: MembershipRequestRecord.Pending } request)
                     {
                         await tenantMembers.DecideRequestAsync(
@@ -79,7 +80,10 @@ public class AccessRequestService(
                     }
 
                     await unit.Context.SaveChangesAsync(token);
-                }, ct);
+                    return true;
+                }, ct: ct);
+                if (!added)
+                    return new ApproveAccessRequestResult(ApproveAccessRequestOutcome.AlreadyMember);
             }
             catch (DbUpdateConcurrencyException)
             {

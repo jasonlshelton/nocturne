@@ -87,6 +87,18 @@ public class RequireInteractiveSessionTests
         { typeof(TeamsController), nameof(TeamsController.GetInviteInfo) },
         { typeof(TeamsController), nameof(TeamsController.AcceptInvite) },
         { typeof(TeamsController), nameof(TeamsController.DeleteTeam) },
+        { typeof(TeamsController), nameof(TeamsController.CreateAccessLink) },
+        { typeof(TeamsController), nameof(TeamsController.RevokeAccessLink) },
+        { typeof(TeamsController), nameof(TeamsController.CreateStaffInvite) },
+        { typeof(TeamsController), nameof(TeamsController.RevokeStaffInvite) },
+        { typeof(TeamsController), nameof(TeamsController.GetStaffInviteInfo) },
+        { typeof(TeamsController), nameof(TeamsController.AcceptStaffInvite) },
+        { typeof(TeamsController), nameof(TeamsController.UpdateStaff) },
+        { typeof(TeamsController), nameof(TeamsController.RemoveStaff) },
+
+        // Giving a team access to a site is the owner's own decision, made in their own session.
+        { typeof(TeamsController), nameof(TeamsController.GetAccessLinkInfo) },
+        { typeof(TeamsController), nameof(TeamsController.ApproveAccessLink) },
     };
 
     [Theory]

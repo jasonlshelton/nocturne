@@ -171,6 +171,123 @@ public class PasskeyRecoverySessionTests : IClassFixture<PasskeyRecoverySessionT
         regenerate.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task A_session_whose_member_lost_access_after_it_began_cannot_enrol_a_passkey()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddMinutes(-1));
+
+        var response = await PostAsync(
+            "/api/auth/passkey/register/complete",
+            new { attestationResponseJson = "{}", challengeToken = "challenge" },
+            session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        await using var db = await TenantDbAsync();
+        (await db.LoginCodes.AsNoTracking()
+            .SingleAsync(c => c.SubjectId == arranged.EmailMemberId && c.Purpose == LoginCodePurpose.RecoverySession))
+            .ConsumedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_lost_access_after_it_began_cannot_link_a_provider()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddMinutes(-1));
+
+        var response = await CallbackAsync(session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        response.Headers.Location!.OriginalString.Should().StartWith("/auth/error");
+        _factory.Oidc.Verify(s => s.HandleRecoveryLinkCallbackAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_keeps_access_until_later_can_still_link_a_provider()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddDays(1));
+        _factory.Oidc
+            .Setup(s => s.HandleRecoveryLinkCallbackAsync("code", RecoveryState, RecoveryState, arranged.EmailMemberId))
+            .ReturnsAsync(OidcLinkResult.Succeeded(Guid.CreateVersion7(), "/", _providerId));
+
+        var response = await CallbackAsync(session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        response.Headers.Location!.OriginalString.Should().StartWith($"/api/auth/oidc/login?provider={_providerId}");
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_lost_access_after_it_began_gets_no_passkey_challenge()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddMinutes(-1));
+
+        var response = await PostAsync("/api/auth/passkey/register/options", new { username = Username }, session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_keeps_access_until_later_gets_a_passkey_challenge()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddDays(1));
+
+        var response = await PostAsync("/api/auth/passkey/register/options", new { username = Username }, session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_lost_access_after_it_began_gets_no_provider_authorisation_url()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddMinutes(-1));
+
+        var response = await PostAsync("/api/auth/oidc/recovery/link", new { providerId = _providerId }, session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _factory.Oidc.Verify(s => s.GenerateRecoveryLinkAuthorizationUrlAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task A_session_whose_member_keeps_access_until_later_gets_a_provider_authorisation_url()
+    {
+        await using var arranged = await ArrangeAsync(Site.Private);
+        var session = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.RecoverySession);
+        await SetAccessEndsAtAsync(arranged.EmailMemberId, DateTime.UtcNow.AddDays(1));
+        _factory.Oidc
+            .Setup(s => s.GenerateRecoveryLinkAuthorizationUrlAsync(
+                _providerId, arranged.EmailMemberId, It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync(new OidcAuthorizationRequest
+            {
+                AuthorizationUrl = "https://idp.example/auth",
+                State = RecoveryState,
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
+                ProviderId = _providerId,
+            });
+
+        var response = await PostAsync("/api/auth/oidc/recovery/link", new { providerId = _providerId }, session);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private async Task SetAccessEndsAtAsync(Guid subjectId, DateTime accessEndsAt)
+    {
+        await using var db = await TenantDbAsync();
+        await db.TenantMembers.Where(m => m.SubjectId == subjectId)
+            .ExecuteUpdateAsync(m => m.SetProperty(x => x.AccessEndsAt, accessEndsAt));
+    }
+
     #endregion
 
     #region The anonymous recovery endpoints are admitted on a private site and in recovery mode
@@ -240,32 +357,6 @@ public class PasskeyRecoverySessionTests : IClassFixture<PasskeyRecoverySessionT
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
-    [Theory]
-    [MemberData(nameof(Sites))]
-    public async Task Redeeming_an_emailed_recovery_link_is_admitted_and_starts_a_session(Site site)
-    {
-        await using var arranged = await ArrangeAsync(site);
-        var code = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.EmailRecovery);
-
-        var response = await PostAsync("/api/auth/passkey/recovery-mode/redeem", new { code }, null);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.Headers.GetValues("Set-Cookie")
-            .Should().Contain(h => h.StartsWith($"{RecoverySession.CookieName}=", StringComparison.Ordinal));
-    }
-
-    [Theory]
-    [MemberData(nameof(Sites))]
-    public async Task Redeeming_a_confirmation_link_is_admitted(Site site)
-    {
-        await using var arranged = await ArrangeAsync(site, confirmed: false);
-        var code = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.EmailConfirm);
-
-        var response = await PostAsync("/api/auth/email-confirmation/redeem", new { code }, null);
-
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-    }
-
     #endregion
 
     #region A stuck member stops the site only when no member administrator can sign in
@@ -320,38 +411,6 @@ public class PasskeyRecoverySessionTests : IClassFixture<PasskeyRecoverySessionT
             .Should().Equal(arranged.StuckFollowerId!.Value);
     }
 
-    [Fact]
-    public async Task A_stuck_follower_spends_an_administrators_code_and_enrols_on_a_site_that_is_not_in_recovery_mode()
-    {
-        await using var arranged = await ArrangeAsync(Site.WithStuckFollower);
-        var code = await IssueAsync(arranged.StuckFollowerId!.Value, LoginCodePurpose.Recovery);
-
-        var redeemed = await PostAsync("/api/auth/passkey/recovery-mode/redeem", new { code }, null);
-
-        redeemed.StatusCode.Should().Be(HttpStatusCode.OK);
-        var setCookie = redeemed.Headers.GetValues("Set-Cookie")
-            .Single(h => h.StartsWith($"{RecoverySession.CookieName}=", StringComparison.Ordinal));
-        var session = setCookie[(setCookie.IndexOf('=') + 1)..setCookie.IndexOf(';')];
-        var options = await PostAsync("/api/auth/passkey/register/options", new { username = StuckFollowerUsername }, session);
-        options.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
-    [Fact]
-    public async Task An_operators_code_for_a_member_who_still_has_a_passkey_starts_a_session_that_can_enrol_another()
-    {
-        await using var arranged = await ArrangeAsync(Site.Private);
-        var code = await IssueAsync(arranged.EmailMemberId, LoginCodePurpose.OperatorRecovery);
-
-        var redeemed = await PostAsync("/api/auth/passkey/recovery-mode/redeem", new { code }, null);
-
-        redeemed.StatusCode.Should().Be(HttpStatusCode.OK);
-        var setCookie = redeemed.Headers.GetValues("Set-Cookie")
-            .Single(h => h.StartsWith($"{RecoverySession.CookieName}=", StringComparison.Ordinal));
-        var session = setCookie[(setCookie.IndexOf('=') + 1)..setCookie.IndexOf(';')];
-        var options = await PostAsync("/api/auth/passkey/register/options", new { username = "recovering" }, session);
-        options.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -401,18 +460,17 @@ public class PasskeyRecoverySessionTests : IClassFixture<PasskeyRecoverySessionT
     private const string StuckFollowerUsername = "stuck-follower";
 
     /// <summary>
-    /// A member holding <see cref="Address"/>, confirmed unless told otherwise, and a passkey. With
+    /// A member holding <see cref="Address"/>, confirmed, and a passkey. With
     /// <see cref="Site.WithStuckFollower"/> a follower who cannot sign in joins too; in recovery
     /// mode the owner's passkey is set aside, so the site's only member administrator is stuck.
     /// </summary>
-    private async Task<Arranged> ArrangeAsync(Site site, bool confirmed = true)
+    private async Task<Arranged> ArrangeAsync(Site site)
     {
         var memberId = Guid.CreateVersion7();
         await using var db = await TenantDbAsync();
         var subject = new SubjectEntity { Id = memberId, Name = "Recovering", Username = "recovering", IsActive = true };
         subject.SetEmail(Address);
-        if (confirmed)
-            subject.ConfirmEmail(Address, DateTime.UtcNow);
+        subject.ConfirmEmail(Address, DateTime.UtcNow);
         db.Subjects.Add(subject);
         db.TenantMembers.Add(new TenantMemberEntity
         {

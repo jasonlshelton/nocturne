@@ -167,9 +167,16 @@ internal static class RustEnvelopeMapper
             ReservoirIsLowerBound = ctx.ReservoirIsLowerBound ? true : null,
             LastSiteChangeAt = Utc(ctx.LastSiteChangeAt),
             LastSensorStartAt = Utc(ctx.LastSensorStartAt),
-            Predictions = ctx.Predictions.Count == 0
+            Predictions = ctx.Predictions.Count == 0 ? null : WirePoints(ctx.Predictions),
+            PredictionCurves = ctx.PredictionCurves.Count == 0
                 ? null
-                : ctx.Predictions.Select(p => new WirePrediction(p.OffsetMinutes, p.Mgdl)).ToList(),
+                : ctx.PredictionCurves
+                    .Where(kv => kv.Key != ForecastCurve.Default)
+                    .ToDictionary(kv => WireEnum(kv.Key), kv => WirePoints(kv.Value), StringComparer.Ordinal),
+            ApsDetermination = ctx.ApsDetermination is { } determination
+                ? new WireApsDetermination(
+                    Utc(determination.At)!.Value, determination.EventualMgdl, determination.CarbsRequiredGrams)
+                : null,
             ActiveAlerts = ctx.ActiveAlerts.Count == 0
                 ? null
                 : ctx.ActiveAlerts
@@ -202,6 +209,8 @@ internal static class RustEnvelopeMapper
             HasEverUploaderSnapshot = ctx.HasEverUploaderSnapshot,
             HasEverApsSensitivity = ctx.HasEverApsSensitivity,
             GlucoseBucket = ctx.GlucoseBucket is { } gb ? WireEnum(gb) : null,
+            TargetLow = ctx.TargetLow,
+            TargetHigh = ctx.TargetHigh,
             LastCarbAt = Utc(ctx.LastCarbAt),
             LastBolusAt = Utc(ctx.LastBolusAt),
             TenantTimeZoneId = ctx.TenantTimeZoneId is { Length: > 0 } tenantZone
@@ -228,14 +237,67 @@ internal static class RustEnvelopeMapper
                         kv.Key, Utc(kv.Value.ReferenceAt)!.Value, Utc(kv.Value.RecordedAt), kv.Value.IsScheduled))
                     .ToList(),
             SleepSessionActive = ctx.SleepSessionActive,
+            SensorState = ctx.SensorState is { } sensor
+                ? new WireSensorState(WireEnum(sensor.State), Utc(sensor.Since), Utc(sensor.Until))
+                : null,
         };
 
         return JsonSerializer.SerializeToElement(wire, AlertEnvelopeJson.Options);
     }
 
+    private static List<WirePrediction> WirePoints(IReadOnlyList<PredictedGlucosePoint> points) =>
+        points.Select(p => new WirePrediction(p.OffsetMinutes, p.Mgdl)).ToList();
+
     // -----------------------------------------------------------------------
     // Response mapping
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The engine's <c>met_by</c> as typed points. An entry whose kind, curve or limit fact this host
+    /// has no member for is dropped: it can only come from an engine newer than the host, and the payload
+    /// member is optional.
+    /// </summary>
+    public static IReadOnlyList<AlertMetPoint> MetByFromWire(IReadOnlyList<RustMetPoint>? wire)
+    {
+        if (wire is null || wire.Count == 0)
+            return [];
+        var points = new List<AlertMetPoint>(wire.Count);
+        foreach (var point in wire)
+        {
+            if (AlertConditionTypeNames.FromWireString(point.Kind) is not { } kind)
+                continue;
+            ForecastCurve? curve = null;
+            if (point.Curve is { } curveName)
+            {
+                if (FromWireEnum<ForecastCurve>(curveName) is not { } known)
+                    continue;
+                curve = known;
+            }
+            AlertLimitFact? limitFact = null;
+            if (point.LimitFact is { } factName)
+            {
+                if (FromWireEnum<AlertLimitFact>(factName) is not { } known)
+                    continue;
+                limitFact = known;
+            }
+            points.Add(new AlertMetPoint(
+                point.LeafId, kind, curve, point.OffsetMinutes, point.Value, point.Limit, limitFact,
+                limitFact is null ? null : point.LimitOffset));
+        }
+        return points;
+    }
+
+    private static TEnum? FromWireEnum<TEnum>(string wire) where TEnum : struct, Enum
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<TEnum>($"\"{wire}\"", EnumWireOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     public static ExcursionTransitionType TransitionFromWire(RustTransition wire) => wire switch
     {
@@ -309,6 +371,8 @@ internal static class RustEnvelopeMapper
         [JsonPropertyName("last_site_change_at")] public DateTime? LastSiteChangeAt { get; init; }
         [JsonPropertyName("last_sensor_start_at")] public DateTime? LastSensorStartAt { get; init; }
         [JsonPropertyName("predictions")] public List<WirePrediction>? Predictions { get; init; }
+        [JsonPropertyName("prediction_curves")] public Dictionary<string, List<WirePrediction>>? PredictionCurves { get; init; }
+        [JsonPropertyName("aps_determination")] public WireApsDetermination? ApsDetermination { get; init; }
         [JsonPropertyName("active_alerts")] public List<WireActiveAlert>? ActiveAlerts { get; init; }
         [JsonPropertyName("last_aps_cycle_at")] public DateTime? LastApsCycleAt { get; init; }
         [JsonPropertyName("last_aps_enacted_at")] public DateTime? LastApsEnactedAt { get; init; }
@@ -328,6 +392,8 @@ internal static class RustEnvelopeMapper
         [JsonPropertyName("has_ever_uploader_snapshot")] public bool HasEverUploaderSnapshot { get; init; }
         [JsonPropertyName("has_ever_aps_sensitivity")] public bool HasEverApsSensitivity { get; init; }
         [JsonPropertyName("glucose_bucket")] public string? GlucoseBucket { get; init; }
+        [JsonPropertyName("target_low")] public decimal? TargetLow { get; init; }
+        [JsonPropertyName("target_high")] public decimal? TargetHigh { get; init; }
         [JsonPropertyName("last_carb_at")] public DateTime? LastCarbAt { get; init; }
         [JsonPropertyName("last_bolus_at")] public DateTime? LastBolusAt { get; init; }
         [JsonPropertyName("tenant_time_zone_id")] public string? TenantTimeZoneId { get; init; }
@@ -335,7 +401,18 @@ internal static class RustEnvelopeMapper
         [JsonPropertyName("active_state_spans")] public List<WireStateSpan>? ActiveStateSpans { get; init; }
         [JsonPropertyName("active_trackers")] public List<WireTrackerReference>? ActiveTrackers { get; init; }
         [JsonPropertyName("sleep_session_active")] public bool SleepSessionActive { get; init; }
+        [JsonPropertyName("sensor_state")] public WireSensorState? SensorState { get; init; }
     }
+
+    private sealed record WireSensorState(
+        [property: JsonPropertyName("state")] string State,
+        [property: JsonPropertyName("since")] DateTime? Since,
+        [property: JsonPropertyName("until")] DateTime? Until);
+
+    private sealed record WireApsDetermination(
+        [property: JsonPropertyName("at")] DateTime At,
+        [property: JsonPropertyName("eventual_mgdl")] decimal? EventualMgdl,
+        [property: JsonPropertyName("carbs_required_grams")] decimal? CarbsRequiredGrams);
 
     private sealed record WirePrediction(
         [property: JsonPropertyName("offset_minutes")] int OffsetMinutes,

@@ -8,11 +8,19 @@ public sealed record MembershipGrant(
     bool LimitTo24Hours,
     DateTime? AccessEndsAt);
 
+/// <summary>What a membership's row stores at an instant: the sum of its reasons then, and when the next of them lapses.</summary>
+/// <param name="Grant">The access the row gives.</param>
+/// <param name="NextReasonLapseAt">
+/// The earliest end of a reason in force that is earlier than <see cref="MembershipGrant.AccessEndsAt"/>
+/// of <paramref name="Grant"/>, or any such end when it has none; null when no reason ends before the row does.
+/// </param>
+public sealed record MembershipProjection(MembershipGrant Grant, DateTime? NextReasonLapseAt);
+
 /// <summary>How a membership's reasons combine into the access its row stores.</summary>
 /// <remarks>
 /// <para>
 /// The reasons summed are the ones in force: a reason whose own end has passed gives nothing and is
-/// not passed in.
+/// not passed in. <see cref="InForceAt"/> chooses them.
 /// </para>
 /// <para>
 /// No reasons sum to null, and the membership is removed. Only the count of reasons removes it: a
@@ -47,6 +55,25 @@ public static class MembershipSum
             reasons.All(r => r.LimitTo24Hours),
             reasons.Any(r => r.AccessEndsAt is null) ? null : reasons.Max(r => r.AccessEndsAt));
     }
+
+    /// <summary>
+    /// The row <paramref name="reasons"/> give at <paramref name="now"/>: the <see cref="Of"/> of those
+    /// in force, each one whose end is null or later than <paramref name="now"/>, the rule a membership's
+    /// own end follows. When none is in force it is the sum of them all, which has ended, so the row
+    /// reads as ended and is kept. Null when there are no reasons.
+    /// </summary>
+    public static MembershipProjection? InForceAt(IReadOnlyList<MembershipGrant> reasons, DateTime now)
+    {
+        var inForce = reasons.Where(r => r.AccessEndsAt is not { } end || end > now).ToList();
+        if (Of(inForce.Count == 0 ? reasons : inForce) is not { } sum)
+            return null;
+
+        var lapse = inForce
+            .Select(r => r.AccessEndsAt)
+            .Where(end => end is { } e && (sum.AccessEndsAt is not { } rowEnd || e < rowEnd))
+            .Min();
+        return new MembershipProjection(sum, lapse);
+    }
 }
 
 /// <summary>The kinds of reason a subject holds a membership for.</summary>
@@ -57,4 +84,11 @@ public static class MembershipReasonKind
     /// system for the Public and device subjects.
     /// </summary>
     public const string Direct = "direct";
+
+    /// <summary>
+    /// Access a team's access to the tenant gives a member of the team. Its source is that access
+    /// (<c>team_tenant_access</c>), which cannot be deleted while a reason names it, and it never gives
+    /// the owner role.
+    /// </summary>
+    public const string Team = "team";
 }

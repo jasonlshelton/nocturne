@@ -178,6 +178,12 @@ public class OAuthTokenService : IOAuthTokenService
             ct: ct
         );
 
+        if (grant is null)
+        {
+            _logger.LogWarning("Authorization code exchange failed: subject holds no membership of the tenant");
+            return InvalidAuthorizationCodeFailure();
+        }
+
         return await MintTokenPairAsync(grant, subject, ct);
     }
 
@@ -623,7 +629,7 @@ public class OAuthTokenService : IOAuthTokenService
     private async Task<OAuthGrantInfo?> LoadGrantAsync(Guid grantId, CancellationToken ct)
     {
         var grant = await _grants.GetAsync(grantId, ct);
-        return grant is null || grant.IsRevoked ? null : OAuthGrantService.ToInfo(grant);
+        return grant is null || grant.IsRevoked ? null : OAuthGrantMapper.ToInfo(grant);
     }
 
     /// <summary>

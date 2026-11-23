@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AlertWeekday, defaultPayload, GlucoseBucket, PumpModeState, StateSpanCategory, TransmitterBatteryMetric, type ConditionNode } from "./types";
+import { AlertLimitFact, AlertWeekday, defaultPayload, ForecastCurve, GlucoseBucket, PumpModeState, SensorState, StateSpanCategory, TransmitterBatteryMetric, type ConditionNode, type PredictedCondition } from "./types";
 import { alertWeekdayLabel, summarizeCondition } from "./summarizeCondition.svelte";
 import { LEAF_FACTS } from "./factCatalog";
 import { glucoseUnits } from "#lib/stores/appearance-store.svelte.js";
@@ -16,6 +16,69 @@ describe("summarizeCondition", () => {
 		}
 	});
 
+
+	it("names the forecast curve a predicted condition reads, and none for the default", () => {
+		glucoseUnits.current = "mg/dl";
+		const forecast = (choice: Partial<PredictedCondition>): ConditionNode => ({
+			type: "predicted",
+			predicted: { operator: "<", value: 70, within_minutes: 30, ...choice },
+		});
+		expect(summarizeCondition(forecast({}))).toBe("Predicted glucose < 70 mg/dL in 30 minutes");
+		expect(summarizeCondition(forecast({ curve: ForecastCurve.Cob }))).toBe("COB forecast < 70 mg/dL in 30 minutes");
+		expect(summarizeCondition(forecast({ min_of: [ForecastCurve.Iob, ForecastCurve.Zt] }))).toBe(
+			"Lowest of IOB forecast and Zero temp forecast < 70 mg/dL in 30 minutes",
+		);
+		expect(summarizeCondition(forecast({ max_of: [ForecastCurve.Uam] }))).toBe("Highest of UAM forecast < 70 mg/dL in 30 minutes");
+	});
+
+	it("summarizes the loop's eventual glucose and the carbs it needs", () => {
+		glucoseUnits.current = "mg/dl";
+		expect(
+			summarizeCondition({ type: "eventual_glucose", eventual_glucose: { operator: "<", value: 80, clear_margin: 5 } }),
+		).toBe("Eventual glucose < 80 mg/dL, clear margin 5 mg/dL");
+		expect(summarizeCondition({ type: "carbs_required", carbs_required: { operator: ">=", value: 10 } })).toBe(
+			"Carbs needed ≥ 10 g",
+		);
+	});
+
+	it("says a limit from a fact in words, with its offset", () => {
+		glucoseUnits.current = "mg/dl";
+		expect(
+			summarizeCondition({
+				type: "threshold",
+				threshold: { direction: "below", value_from: { fact: AlertLimitFact.TargetLow, offset: -10 } },
+			}),
+		).toBe("Glucose below target low minus 10 mg/dL");
+		expect(
+			summarizeCondition({
+				type: "predicted",
+				predicted: { operator: "<", within_minutes: 30, value_from: { fact: AlertLimitFact.LatestGlucose, offset: -30 } },
+			}),
+		).toBe("Predicted glucose < latest glucose minus 30 mg/dL in 30 minutes");
+		expect(
+			summarizeCondition({
+				type: "eventual_glucose",
+				eventual_glucose: { operator: ">", value_from: { fact: AlertLimitFact.TargetHigh, offset: 20 } },
+			}),
+		).toBe("Eventual glucose > target high plus 20 mg/dL");
+		expect(
+			summarizeCondition({
+				type: "threshold",
+				threshold: { direction: "above", value_from: { fact: AlertLimitFact.TargetHigh }, clear_margin: 5 },
+			}),
+		).toBe("Glucose above target high, clear margin 5 mg/dL");
+	});
+
+	it("says a limit offset in mmol/L when that is the display unit", () => {
+		glucoseUnits.current = "mmol";
+		expect(
+			summarizeCondition({
+				type: "threshold",
+				threshold: { direction: "below", value_from: { fact: AlertLimitFact.TargetLow, offset: -18 } },
+			}),
+		).toBe("Glucose below target low minus 1 mmol/L");
+		glucoseUnits.current = "mg/dl";
+	});
 
 	it("names the transmitter reading a rule compares", () => {
 		const reading = (metric: TransmitterBatteryMetric, operator: string, value: number): ConditionNode => ({
@@ -48,6 +111,30 @@ describe("summarizeCondition", () => {
 				rate_of_change: { direction: "falling", rate: 2, clear_margin: 0.4 },
 			}),
 		).toBe("Glucose falling at least 2 mg/dL per minute, clear margin 0.4 mg/dL per minute");
+	});
+
+	it("says a rate with its fraction in mg/dL", () => {
+		glucoseUnits.current = "mg/dl";
+		expect(
+			summarizeCondition({
+				type: "rate_of_change",
+				rate_of_change: { direction: "falling", rate: 1.5 },
+			}),
+		).toBe("Glucose falling at least 1.5 mg/dL per minute");
+	});
+
+	it("says a rate and its margin with their fraction in mmol/L", () => {
+		glucoseUnits.current = "mmol";
+		try {
+			expect(
+				summarizeCondition({
+					type: "rate_of_change",
+					rate_of_change: { direction: "falling", rate: 1.5, clear_margin: 0.5 },
+				}),
+			).toBe("Glucose falling at least 0.08 mmol/L per minute, clear margin 0.03 mmol/L per minute");
+		} finally {
+			glucoseUnits.current = "mg/dl";
+		}
 	});
 
 	it("says a glucose margin in the display unit", () => {
@@ -371,6 +458,16 @@ describe("summarizeCondition", () => {
 		);
 	});
 
+	it("names every sensor state in a sensor state condition, with its minutes", () => {
+		const node: ConditionNode = {
+			type: "sensor_state",
+			sensor_state: { states: Object.values(SensorState), for_minutes: 30 },
+		};
+		expect(summarizeCondition(node)).toBe(
+			"Sensor state: Warm-up, OK, Calibration necessary, Error, Expired, or No value for 30 minutes",
+		);
+	});
+
 	it("gives wuchale a chip it can extract for every state of every leaf", () => {
 		const both = [true, false];
 		const stateSpans = Object.values(StateSpanCategory).flatMap((category) =>
@@ -391,8 +488,11 @@ describe("summarizeCondition", () => {
 		const buckets = Object.values(GlucoseBucket).map(
 			(bucket): ConditionNode => ({ type: "glucose_bucket", glucose_bucket: { buckets: [bucket] } }),
 		);
+		const sensorStates = Object.values(SensorState).map(
+			(state): ConditionNode => ({ type: "sensor_state", sensor_state: { states: [state] } }),
+		);
 		const defaults = LEAF_FACTS.map((fact) => defaultPayload(fact.kind));
-		const nodes = [...defaults, ...stateSpans, ...pumpModes, ...alertStates, ...trends, ...sleep, ...buckets];
+		const nodes = [...defaults, ...stateSpans, ...pumpModes, ...alertStates, ...trends, ...sleep, ...buckets, ...sensorStates];
 		for (const node of nodes) {
 			const chip = summarizeCondition(node);
 			expect(chip, JSON.stringify(node)).toMatch(/^\p{Lu}/u);

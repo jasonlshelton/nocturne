@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Nocturne.Alerts.Corpus;
 using Nocturne.API.Services.Alerts;
@@ -18,11 +19,17 @@ namespace Nocturne.API.Tests.Services.Alerts;
 [Trait("Category", "Unit")]
 public class ContextFactWritesTests
 {
-    /// <summary>Every fact some condition kind reads, as the engine names them.</summary>
+    /// <summary>
+    /// Every fact some condition kind reads, or a limit naming each fact reads, as the engine names them.
+    /// </summary>
     private static IReadOnlySet<string> EngineFacts() =>
         Enum.GetValues<AlertConditionType>()
-            .SelectMany(type => RuleTrees.Reads(new AlertRuleSnapshot(
-                Guid.NewGuid(), Guid.NewGuid(), "probe", type, "{}", AlertRuleSeverity.Info, "{}", 0,
+            .Select(type => (Type: type, Params: "{}"))
+            .Concat(Enum.GetValues<AlertLimitFact>().Select(fact => (
+                Type: AlertConditionType.Predicted,
+                Params: $$$"""{"operator":"<","within_minutes":30,"value_from":{"fact":"{{{JsonSerializer.Serialize(fact).Trim('"')}}}"}}""")))
+            .SelectMany(probe => RuleTrees.Reads(new AlertRuleSnapshot(
+                Guid.NewGuid(), Guid.NewGuid(), "probe", probe.Type, probe.Params, AlertRuleSeverity.Info, "{}", 0,
                 AutoResolveEnabled: false, AutoResolveParams: null)))
             .ToHashSet(StringComparer.Ordinal);
 
@@ -61,10 +68,42 @@ public class ContextFactWritesTests
     }
 
     [Fact]
-    public void TheSweepMayWaitOnlyForGlucoseApsUploaderAndTransmitter() =>
+    public void TheSweepMayWaitOnlyForGlucoseApsUploaderTransmitterTheSensorStateTheDeterminationAndDeviceAges() =>
         ContextFactWrites.Facts.Keys.Where(ContextFactWrites.SweepMayWaitFor)
             .Should().BeEquivalentTo(
-                [ContextFactWrites.Glucose, ContextFactWrites.Aps, ContextFactWrites.Uploader, ContextFactWrites.Transmitter]);
+                [ContextFactWrites.Glucose, ContextFactWrites.Aps, ContextFactWrites.Uploader, ContextFactWrites.Transmitter,
+                 ContextFactWrites.SensorState, ContextFactWrites.ApsDetermination, ContextFactWrites.DeviceAges]);
+
+    [Fact]
+    public void OnlyAnApsSnapshotWriteMovesTheDetermination() =>
+        ContextFactWrites.MovedBy.Where(kv => kv.Value.Contains(ContextFactWrites.ApsDetermination)).Select(kv => kv.Key)
+            .Should().BeEquivalentTo([typeof(ApsSnapshot)]);
+
+    /// <summary>
+    /// A target rule is evaluated by a write of each record that moves the target range: the schedule,
+    /// a profile switch, and the therapy settings that hold the time zone the entry is read at.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(TargetRangeSchedule))]
+    [InlineData(typeof(ProfileActivation))]
+    [InlineData(typeof(TherapySettings))]
+    public void EachWriteThatMovesTheTargetRangeAnnouncesIt(Type recordType) =>
+        ContextFactWrites.MovedIn(RecordsChanged.Written([recordType])).Facts
+            .Should().Contain(ContextFactWrites.TargetRange);
+
+    [Fact]
+    public void ASensorStateReportWriteMovesOnlyTheSensorState() =>
+        ContextFactWrites.MovedIn(RecordsChanged.Written([typeof(SensorStateReport)])).Facts
+            .Should().BeEquivalentTo([ContextFactWrites.SensorState]);
+
+    [Fact]
+    public void AnExtrasWriteAloneMovesNothing() =>
+        ContextFactWrites.MovedIn(RecordsChanged.Written([typeof(DeviceStatusExtras)])).Facts.Should().BeEmpty();
+
+    [Fact]
+    public void OnlyAReadingAndASensorStateReportMoveTheSensorState() =>
+        ContextFactWrites.MovedBy.Where(kv => kv.Value.Contains(ContextFactWrites.SensorState)).Select(kv => kv.Key)
+            .Should().BeEquivalentTo([typeof(SensorGlucose), typeof(SensorStateReport)]);
 
     [Theory]
     [InlineData(ContextFactWrites.Insulin)]
@@ -84,7 +123,6 @@ public class ContextFactWritesTests
     [InlineData(ContextFactWrites.Sleep)]
     [InlineData(ContextFactWrites.ActiveAlerts)]
     [InlineData(ContextFactWrites.DoNotDisturb)]
-    [InlineData(ContextFactWrites.DeviceAges)]
     public void AFactWithAWritePathThatDoesNotAnnounceIsNeverWaitedFor(string fact)
     {
         ContextFactWrites.Facts[fact].EveryWriteAnnounces.Should().BeFalse();
@@ -106,7 +144,7 @@ public class ContextFactWritesTests
         ]);
 
         ContextFactWrites.MovedIn(batch).Facts.Should().BeEquivalentTo(
-            [ContextFactWrites.Glucose, ContextFactWrites.Insulin, ContextFactWrites.Pump, ContextFactWrites.Predictions]);
+            [ContextFactWrites.Glucose, ContextFactWrites.SensorState, ContextFactWrites.Insulin, ContextFactWrites.Pump, ContextFactWrites.Predictions]);
     }
 
     [Fact]

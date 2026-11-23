@@ -1,4 +1,4 @@
-import type { ConditionNode } from "./types";
+import type { ConditionNode, GlucoseLimitPayload, PredictedCondition } from "./types";
 import { AlertWeekday, PumpModeState, StateSpanCategory } from "@nocturne/api-client";
 import {
 	bg,
@@ -9,7 +9,7 @@ import {
 } from "#lib/utils/formatting.js";
 import { glucoseUnits } from "#lib/stores/appearance-store.svelte.js";
 import { plural } from "#lib/utils/plural.js";
-import { glucoseBucketLabel } from "./alert-labels.svelte";
+import { forecastCurveLabel, glucoseBucketLabel, limitFactWords, sensorStateLabel } from "./alert-labels.svelte";
 
 /**
  * Optional context for summarisation. The <c>resolveAlertName</c> hook lets the
@@ -58,8 +58,8 @@ export function summarizeCondition(
 			if (!p) return "";
 			return withMargin(
 				p.direction === "below"
-					? `Glucose below ${bg(p.value ?? 0)} ${bgLabel()}`
-					: `Glucose above ${bg(p.value ?? 0)} ${bgLabel()}`,
+					? `Glucose below ${limitPhrase(p)}`
+					: `Glucose above ${limitPhrase(p)}`,
 				p.clear_margin,
 				(m) => `${bg(m)} ${bgLabel()}`,
 			);
@@ -67,12 +67,9 @@ export function summarizeCondition(
 		case "rate_of_change": {
 			const p = node.rate_of_change;
 			if (!p) return "";
-			const rate = `${bg(p.rate ?? 0)} ${bgLabel()} per minute`;
-			return withMargin(
-				rateChip(p.direction, rate),
-				p.clear_margin,
-				(m) => `${convertRateToDisplayUnits(m, glucoseUnits.current)} ${bgLabel()} per minute`,
-			);
+			const perMinute = (mgdl: number) =>
+				`${convertRateToDisplayUnits(mgdl, glucoseUnits.current)} ${bgLabel()} per minute`;
+			return withMargin(rateChip(p.direction, perMinute(p.rate ?? 0)), p.clear_margin, perMinute);
 		}
 		case "staleness": {
 			const p = node.staleness;
@@ -83,9 +80,27 @@ export function summarizeCondition(
 			const p = node.predicted;
 			if (!p) return "";
 			return withMargin(
-				`Predicted glucose ${opSymbol(p.operator)} ${bg(p.value ?? 0)} ${bgLabel()} in ${formatMinutes(p.within_minutes ?? 0)}`,
+				`${forecastChip(p)} ${opSymbol(p.operator)} ${limitPhrase(p)} in ${formatMinutes(p.within_minutes ?? 0)}`,
 				p.clear_margin,
 				(m) => `${bg(m)} ${bgLabel()}`,
+			);
+		}
+		case "eventual_glucose": {
+			const p = node.eventual_glucose;
+			if (!p) return "";
+			return withMargin(
+				`Eventual glucose ${opSymbol(p.operator)} ${limitPhrase(p)}`,
+				p.clear_margin,
+				(m) => `${bg(m)} ${bgLabel()}`,
+			);
+		}
+		case "carbs_required": {
+			const p = node.carbs_required;
+			if (!p) return "";
+			return withMargin(
+				`Carbs needed ${opSymbol(p.operator)} ${p.value} g`,
+				p.clear_margin,
+				(m) => `${m} g`,
 			);
 		}
 		case "trend": {
@@ -236,6 +251,11 @@ export function summarizeCondition(
 			if (!p) return "";
 			return `Time since last bolus ${opSymbol(p.operator)} ${formatMinutes(p.minutes ?? 0)}`;
 		}
+		case "sensor_state": {
+			const p = node.sensor_state;
+			if (!p || !p.states || p.states.length === 0) return "";
+			return withDuration(`Sensor state: ${formatList(p.states.map(sensorStateLabel), "disjunction")}`, p.for_minutes);
+		}
 		case "day_of_week": {
 			const p = node.day_of_week;
 			if (!p || !p.days || p.days.length === 0) return "";
@@ -276,6 +296,25 @@ function withMargin(
 	amount: (margin: number) => string,
 ): string {
 	return margin ? `${chip}, clear margin ${amount(margin)}` : chip;
+}
+
+/** A glucose limit as the summary says it: the number, or the fact with its offset. */
+function limitPhrase(p: GlucoseLimitPayload): string {
+	const reference = p.value_from;
+	if (!reference?.fact) return `${bg(p.value ?? 0)} ${bgLabel()}`;
+	const fact = limitFactWords(reference.fact);
+	const offset = reference.offset ?? 0;
+	if (offset > 0) return `${fact} plus ${bg(offset)} ${bgLabel()}`;
+	if (offset < 0) return `${fact} minus ${bg(-offset)} ${bgLabel()}`;
+	return fact;
+}
+
+/** Which forecast a predicted condition reads, as the summary names it. */
+function forecastChip(p: PredictedCondition): string {
+	if (p.min_of?.length) return `Lowest of ${formatList(p.min_of.map(forecastCurveLabel), "conjunction")}`;
+	if (p.max_of?.length) return `Highest of ${formatList(p.max_of.map(forecastCurveLabel), "conjunction")}`;
+	if (p.curve) return forecastCurveLabel(p.curve);
+	return "Predicted glucose";
 }
 
 function rateChip(direction: string | undefined, rate: string): string {

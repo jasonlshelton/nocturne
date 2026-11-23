@@ -18,9 +18,12 @@
   import {
     ALERT_STATES,
     alertStateLabel,
+    forecastCurveLabel,
     glucoseBucketLabel,
+    limitSourceLabel,
     pumpModeLabel,
     rateDirectionLabel,
+    sensorStateLabel,
     stateSpanCategoryLabel,
     tempBasalMetricLabel,
     transmitterBatteryMetricLabel,
@@ -45,6 +48,16 @@
     PumpModeState,
     StateSpanCategory,
     AlertWeekday,
+    SensorState,
+    ForecastCurve,
+    AlertLimitFact,
+    curveChoice,
+    setCurveChoice,
+    type CurveChoice,
+    type GlucoseLimitPayload,
+    isLimitSource,
+    limitSource,
+    setLimitSource,
   } from "./types";
   import { AlertComparisonOperator } from "@nocturne/api-client";
 
@@ -81,6 +94,7 @@
     switch (node.type) {
       case "threshold":
       case "predicted":
+      case "eventual_glucose":
         return bg(mgdl);
       case "rate_of_change":
         return convertRateToDisplayUnits(mgdl, glucoseUnits.current);
@@ -94,6 +108,7 @@
     switch (node.type) {
       case "threshold":
       case "predicted":
+      case "eventual_glucose":
         return convertFromDisplayUnits(entered, glucoseUnits.current);
       case "rate_of_change":
         return convertRateFromDisplayUnits(entered, glucoseUnits.current);
@@ -102,11 +117,15 @@
     }
   }
 
-  function marginStep(kind: string): string {
+  /** The step of a leaf's value input and of its clear margin input, which are the same. */
+  function valueStep(kind: string): string {
     switch (kind) {
       case "threshold":
       case "predicted":
+      case "eventual_glucose":
         return glucoseUnits.current === "mmol" ? "0.1" : "1";
+      case "carbs_required":
+        return "1";
       case "rate_of_change":
         return glucoseUnits.current === "mmol" ? "0.01" : "0.1";
       case "sensitivity_ratio":
@@ -126,6 +145,44 @@
   const trackerDefinitions = $derived<TrackerDefinitionDto[]>(
     definitionsQuery?.current ?? [],
   );
+
+  /** A sensor state's start is known only for No value, so only it can be timed. */
+  function onlyNoValue(states: SensorState[] | undefined): boolean {
+    return states?.length === 1 && states[0] === SensorState.NoValue;
+  }
+
+  const NAMED_CURVES: readonly ForecastCurve[] = [
+    ForecastCurve.Iob,
+    ForecastCurve.Cob,
+    ForecastCurve.Uam,
+    ForecastCurve.Zt,
+  ];
+
+  function curveChoiceLabel(choice: CurveChoice): string {
+    switch (choice) {
+      case "curve":
+        return "one curve";
+      case "min_of":
+        return "lowest of";
+      case "max_of":
+        return "highest of";
+    }
+  }
+
+  /** A threshold compares the latest glucose, so it cannot compare with it again. */
+  const THRESHOLD_LIMIT_FACTS: readonly AlertLimitFact[] = [
+    AlertLimitFact.TargetLow,
+    AlertLimitFact.TargetHigh,
+  ];
+  const LIMIT_FACTS: readonly AlertLimitFact[] = [
+    AlertLimitFact.TargetLow,
+    AlertLimitFact.TargetHigh,
+    AlertLimitFact.LatestGlucose,
+  ];
+
+  function isCurveChoice(value: string): value is CurveChoice {
+    return value === "curve" || value === "min_of" || value === "max_of";
+  }
 
   // Stored on the wire as the symbol; shown in words.
   const OPERATORS: readonly ComparisonOperator[] = [">=", ">", "<=", "<"];
@@ -177,6 +234,7 @@
       case "reservoir":
         return "U";
       case "cob":
+      case "carbs_required":
         return "g";
       case "site_age":
         return "h";
@@ -197,6 +255,68 @@
   node's payload via the discriminator and binds back through the same key, so
   Svelte 5's deep-proxy state propagates the mutation up the tree.
 -->
+{#snippet glucoseLimit(p: GlucoseLimitPayload, facts: readonly AlertLimitFact[])}
+  {@const source = limitSource(p)}
+  <Select.Root
+    type="single"
+    value={source}
+    onValueChange={(v) => {
+      if (isLimitSource(v)) setLimitSource(p, v, 70);
+    }}
+  >
+    <Select.Trigger size="sm" class="w-32" aria-label="Compare with">
+      {limitSourceLabel(source)}
+    </Select.Trigger>
+    <Select.Content>
+      <Select.Item value="value" label={limitSourceLabel("value")} />
+      {#each facts as fact (fact)}
+        <Select.Item value={fact} label={limitSourceLabel(fact)} />
+      {/each}
+    </Select.Content>
+  </Select.Root>
+  {#if p.value_from}
+    {@const reference = p.value_from}
+    <span class="text-xs text-muted-foreground">plus</span>
+    <Input
+      type="number"
+      aria-label="Offset"
+      step={valueStep(node.type)}
+      size="sm"
+      class="w-20 text-right tabular-nums"
+      value={bg(reference.offset ?? 0)}
+      oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+        reference.offset = convertFromDisplayUnits(
+          parseNumber(e.currentTarget.value, bg(reference.offset ?? 0)),
+          glucoseUnits.current,
+        );
+      }}
+    />
+  {:else}
+    <Input
+      type="number"
+      aria-label="Value"
+      step={valueStep(node.type)}
+      size="sm"
+      class="w-20 text-right tabular-nums"
+      value={bg(p.value ?? 0)}
+      oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+        p.value = convertFromDisplayUnits(
+          parseNumber(e.currentTarget.value, bg(p.value ?? 0)),
+          glucoseUnits.current,
+        );
+      }}
+    />
+  {/if}
+{/snippet}
+
+{#snippet targetNote(p: GlucoseLimitPayload)}
+  {#if p.value_from && p.value_from.fact !== AlertLimitFact.LatestGlucose}
+    <span class="w-full text-xs text-muted-foreground">
+      If your profile has no target range, this condition does not know if it is true.
+    </span>
+  {/if}
+{/snippet}
+
 <div class="flex flex-wrap items-center gap-1.5">
   {#if node.type === "threshold" && node.threshold}
     <Select.Root
@@ -214,22 +334,9 @@
         <Select.Item value="above" label="above" />
       </Select.Content>
     </Select.Root>
-    <Input
-      type="number"
-      aria-label="Value"
-      step={glucoseUnits.current === "mmol" ? "0.1" : "1"}
-      size="sm"
-      class="w-20 text-right tabular-nums"
-      value={bg(node.threshold.value ?? 0)}
-      oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
-        if (node.threshold)
-          node.threshold.value = convertFromDisplayUnits(
-            parseNumber(e.currentTarget.value, bg(node.threshold.value ?? 0)),
-            glucoseUnits.current,
-          );
-      }}
-    />
+    {@render glucoseLimit(node.threshold, THRESHOLD_LIMIT_FACTS)}
     <span class="text-xs text-muted-foreground">{bgLabel()}</span>
+    {@render targetNote(node.threshold)}
   {:else if node.type === "predicted" && node.predicted}
     <Select.Root
       type="single"
@@ -247,21 +354,7 @@
         {/each}
       </Select.Content>
     </Select.Root>
-    <Input
-      type="number"
-      aria-label="Value"
-      step={glucoseUnits.current === "mmol" ? "0.1" : "1"}
-      size="sm"
-      class="w-20 text-right tabular-nums"
-      value={bg(node.predicted.value ?? 0)}
-      oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
-        if (node.predicted)
-          node.predicted.value = convertFromDisplayUnits(
-            parseNumber(e.currentTarget.value, bg(node.predicted.value ?? 0)),
-            glucoseUnits.current,
-          );
-      }}
-    />
+    {@render glucoseLimit(node.predicted, LIMIT_FACTS)}
     <span class="text-xs text-muted-foreground">{bgLabel()} within</span>
     <Input
       type="number"
@@ -279,6 +372,91 @@
       }}
     />
     <span class="text-xs text-muted-foreground">min</span>
+    {@const predicted = node.predicted}
+    {@const choice = curveChoice(predicted)}
+    {#if choice}
+      <span class="text-xs text-muted-foreground">from</span>
+      <Select.Root
+        type="single"
+        value={choice}
+        onValueChange={(v) => {
+          if (isCurveChoice(v)) setCurveChoice(predicted, v);
+        }}
+      >
+        <Select.Trigger size="sm" class="w-32" aria-label="Forecast choice">
+          {curveChoiceLabel(choice)}
+        </Select.Trigger>
+        <Select.Content>
+          {#each ["curve", "min_of", "max_of"] as const as option (option)}
+            <Select.Item value={option} label={curveChoiceLabel(option)} />
+          {/each}
+        </Select.Content>
+      </Select.Root>
+      {#if choice === "curve"}
+        <Select.Root
+          type="single"
+          value={predicted.curve ?? ForecastCurve.Iob}
+          onValueChange={(v) => {
+            if (isStringEnumMember(ForecastCurve, v)) predicted.curve = v;
+          }}
+        >
+          <Select.Trigger size="sm" class="w-44" aria-label="Forecast curve">
+            {forecastCurveLabel(predicted.curve ?? ForecastCurve.Iob)}
+          </Select.Trigger>
+          <Select.Content>
+            {#each NAMED_CURVES as curve (curve)}
+              <Select.Item value={curve} label={forecastCurveLabel(curve)} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      {:else}
+        {@const listed = (choice === "min_of" ? predicted.min_of : predicted.max_of) ?? []}
+        <ToggleGroup.Root
+          type="multiple"
+          size="sm"
+          spacing={1}
+          value={[...listed]}
+          onValueChange={(v: string[]) => {
+            const curves = v.filter((c) => isStringEnumMember(ForecastCurve, c));
+            if (curves.length === 0) return;
+            if (choice === "min_of") predicted.min_of = curves;
+            else predicted.max_of = curves;
+          }}
+          class="flex-wrap"
+        >
+          {#each NAMED_CURVES as curve (curve)}
+            <ToggleGroup.Item value={curve} aria-label={forecastCurveLabel(curve)}>
+              {forecastCurveLabel(curve)}
+            </ToggleGroup.Item>
+          {/each}
+        </ToggleGroup.Root>
+      {/if}
+      <span class="w-full text-xs text-muted-foreground">
+        If the loop does not send a curve that you select, the rule waits and shows the cause.
+      </span>
+    {/if}
+    {@render targetNote(predicted)}
+  {:else if node.type === "eventual_glucose" && node.eventual_glucose}
+    {@const eventual = node.eventual_glucose}
+    <Select.Root
+      type="single"
+      value={eventual.operator ?? "<"}
+      onValueChange={(v) => {
+        eventual.operator = v;
+      }}
+    >
+      <Select.Trigger size="sm" class="w-28" aria-label="Comparison">
+        {operatorLabel(eventual.operator ?? "<")}
+      </Select.Trigger>
+      <Select.Content>
+        {#each OPERATORS as op (op)}
+          <Select.Item value={op} label={operatorLabel(op)} />
+        {/each}
+      </Select.Content>
+    </Select.Root>
+    {@render glucoseLimit(eventual, LIMIT_FACTS)}
+    <span class="text-xs text-muted-foreground">{bgLabel()}</span>
+    {@render targetNote(eventual)}
   {:else if node.type === "rate_of_change" && node.rate_of_change}
     <Select.Root
       type="single"
@@ -300,7 +478,7 @@
     <Input
       type="number"
       aria-label="Value"
-      step={glucoseUnits.current === "mmol" ? "0.01" : "0.1"}
+      step={valueStep(node.type)}
       size="sm"
       class="w-20 text-right tabular-nums"
       value={convertRateToDisplayUnits(node.rate_of_change.rate ?? 0, glucoseUnits.current)}
@@ -409,7 +587,7 @@
         <X class="h-3.5 w-3.5" />
       </Button>
     {/if}
-  {:else if (node.type === "iob" || node.type === "cob" || node.type === "reservoir" || node.type === "site_age" || node.type === "sensor_age" || node.type === "pump_battery" || node.type === "uploader_battery" || node.type === "sensitivity_ratio") && node[node.type]}
+  {:else if (node.type === "iob" || node.type === "cob" || node.type === "reservoir" || node.type === "site_age" || node.type === "sensor_age" || node.type === "pump_battery" || node.type === "uploader_battery" || node.type === "sensitivity_ratio" || node.type === "carbs_required") && node[node.type]}
     {@const payload = node[node.type]!}
     {@const suffix = leafSuffix(node.type)}
     <Select.Root
@@ -431,7 +609,7 @@
     <Input
       type="number"
       aria-label="Value"
-      step={node.type === "sensitivity_ratio" ? "0.01" : "0.1"}
+      step={valueStep(node.type)}
       size="sm"
       class="w-20 text-right tabular-nums"
       value={payload.value ?? 0}
@@ -524,7 +702,7 @@
     <Input
       type="number"
       aria-label="Value"
-      step="0.1"
+      step={valueStep(node.type)}
       size="sm"
       class="w-20 text-right tabular-nums"
       value={node.temp_basal.value ?? 0}
@@ -573,7 +751,7 @@
     <Input
       type="number"
       aria-label="Value"
-      step="1"
+      step={valueStep(node.type)}
       size="sm"
       class="w-20 text-right tabular-nums"
       value={payload.value ?? 0}
@@ -729,6 +907,47 @@
         </ToggleGroup.Item>
       {/each}
     </ToggleGroup.Root>
+  {:else if node.type === "sensor_state" && node.sensor_state}
+    {@const selectedStates = new Set(node.sensor_state.states ?? [])}
+    {@const timed = onlyNoValue(node.sensor_state.states)}
+    <ToggleGroup.Root
+      type="multiple"
+      size="sm"
+      spacing={1}
+      value={[...selectedStates]}
+      onValueChange={(v: string[]) => {
+        if (!node.sensor_state) return;
+        node.sensor_state.states = v.filter((s) => isStringEnumMember(SensorState, s));
+        if (!onlyNoValue(node.sensor_state.states)) node.sensor_state.for_minutes = undefined;
+      }}
+      class="flex-wrap"
+    >
+      {#each Object.values(SensorState) as state (state)}
+        <ToggleGroup.Item value={state} aria-label={sensorStateLabel(state)}>
+          {sensorStateLabel(state)}
+        </ToggleGroup.Item>
+      {/each}
+    </ToggleGroup.Root>
+    <span class="text-xs text-muted-foreground">for at least</span>
+    <Input
+      type="number"
+      aria-label="Minutes, optional"
+      min="1"
+      size="sm"
+      class="w-16 text-right tabular-nums"
+      placeholder="any"
+      disabled={!timed}
+      value={node.sensor_state.for_minutes ?? ""}
+      oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+        const v = e.currentTarget.value;
+        if (node.sensor_state)
+          node.sensor_state.for_minutes = v.length > 0 ? parseNumber(v, 0) : undefined;
+      }}
+    />
+    <span class="text-xs text-muted-foreground">min</span>
+    {#if !timed}
+      <span class="text-xs text-muted-foreground">Only for No value. The other states have no start time.</span>
+    {/if}
   {:else if node.type === "pump_state" && node.pump_state}
     <Select.Root
       type="single"
@@ -910,7 +1129,7 @@
       type="number"
       aria-label="Clear margin"
       min="0"
-      step={marginStep(node.type)}
+      step={valueStep(node.type)}
       size="sm"
       class="w-20 text-right tabular-nums"
       value={marginShown(payload.clear_margin ?? 0)}
@@ -925,7 +1144,7 @@
     <span class="text-xs text-muted-foreground">
       {node.type === "rate_of_change"
         ? `${bgLabel()}/min`
-        : node.type === "threshold" || node.type === "predicted"
+        : node.type === "threshold" || node.type === "predicted" || node.type === "eventual_glucose"
           ? bgLabel()
           : leafSuffix(node.type)}
     </span>

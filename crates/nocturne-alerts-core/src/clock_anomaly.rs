@@ -47,6 +47,8 @@ wire_enum! {
         ActiveDoNotDisturb = "active_do_not_disturb",
         ActivePumpModes = "active_pump_modes",
         ActiveStateSpans = "active_state_spans",
+        SensorState = "sensor_state",
+        ApsDetermination = "aps_determination",
         Sustained = "sustained",
         HysteresisStartedAt = "hysteresis_started_at",
         HeldSince = "held_since",
@@ -74,6 +76,8 @@ impl ClockAnchor {
             | ClockAnchor::ActivePumpModes
             | ClockAnchor::ActiveStateSpans => Some(F::StateSpans),
             ClockAnchor::ActiveDoNotDisturb => Some(F::DoNotDisturb),
+            ClockAnchor::SensorState => Some(F::SensorState),
+            ClockAnchor::ApsDetermination => Some(F::ApsDetermination),
             ClockAnchor::Sustained | ClockAnchor::HysteresisStartedAt | ClockAnchor::HeldSince => {
                 None
             }

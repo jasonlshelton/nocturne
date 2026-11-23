@@ -15,6 +15,15 @@ import {
 	validateChannels,
 	type ChannelDef,
 	type ConditionNode,
+	type PredictedCondition,
+	curveChoice,
+	setCurveChoice,
+	clearCurveChoice,
+	ForecastCurve,
+	AlertLimitFact,
+	limitSource,
+	setLimitSource,
+	type ThresholdCondition,
 } from "./types";
 import { AlertConditionType, AlertRuleSeverity, ChannelType } from "@nocturne/api-client";
 import type { AlertRuleResponse } from "@nocturne/api-client";
@@ -114,6 +123,34 @@ describe("nodeFromApi / nodeToApi", () => {
 			conditionType: "threshold",
 			conditionParams: { direction: "above", value: 180 },
 		});
+	});
+});
+
+describe("a limit from a fact", () => {
+	it("reads a stored limit from a fact without giving it a number, so it saves as it was", () => {
+		const state = parseRule({
+			name: "Below target",
+			conditionType: AlertConditionType.Threshold,
+			conditionParams: { direction: "below", value_from: { fact: "target_low", offset: -10 } },
+		});
+
+		expect(buildBody(state).conditionParams).toEqual({
+			direction: "below",
+			value_from: { fact: "target_low", offset: -10 },
+		});
+	});
+
+	it("takes a number or a fact, never both", () => {
+		const p: ThresholdCondition = { direction: "below", value: 65 };
+
+		setLimitSource(p, AlertLimitFact.TargetHigh, 70);
+		expect(p).toEqual({ direction: "below", value: undefined, value_from: { fact: "target_high", offset: undefined } });
+		expect(limitSource(p)).toBe(AlertLimitFact.TargetHigh);
+
+		setLimitSource(p, "value", 70);
+		expect(p.value_from).toBeUndefined();
+		expect(p.value).toBe(70);
+		expect(limitSource(p)).toBe("value");
 	});
 });
 
@@ -814,5 +851,56 @@ describe("the missing-data settings in a save", () => {
 		expect(freshnessIssue(state, options)).not.toBeNull();
 		state.glucoseFreshnessMinutes = undefined;
 		expect(freshnessIssue(state, options)).toBeNull();
+	});
+});
+
+describe("curve choice", () => {
+	const plain = (): PredictedCondition => ({ operator: "<", value: 70, within_minutes: 30 });
+
+	it("reads no choice when the condition names no curve", () => {
+		expect(curveChoice(plain())).toBeUndefined();
+	});
+
+	it("keeps one choice at a time, so a save never sends two", () => {
+		const p = plain();
+		setCurveChoice(p, "curve");
+		expect(p).toMatchObject({ curve: ForecastCurve.Iob, min_of: undefined, max_of: undefined });
+		setCurveChoice(p, "min_of");
+		expect(p.curve).toBeUndefined();
+		expect(p.min_of).toEqual([ForecastCurve.Iob, ForecastCurve.Cob, ForecastCurve.Uam, ForecastCurve.Zt]);
+		p.min_of = [ForecastCurve.Uam];
+		setCurveChoice(p, "max_of");
+		expect(p).toMatchObject({ curve: undefined, min_of: undefined, max_of: [ForecastCurve.Uam] });
+		expect(curveChoice(p)).toBe("max_of");
+	});
+
+	it("never stores the default as a choice", () => {
+		const stored = nodeFromApi("predicted", { operator: "<", value: 70, within_minutes: 30, curve: ForecastCurve.Default });
+		expect(stored?.predicted?.curve).toBeUndefined();
+		expect(curveChoice({ ...plain(), curve: ForecastCurve.Default })).toBeUndefined();
+
+		const p = plain();
+		p.max_of = [ForecastCurve.Default, ForecastCurve.Zt];
+		setCurveChoice(p, "curve");
+		expect(p.curve).toBe(ForecastCurve.Zt);
+	});
+
+	it("clears every choice, back to the default forecast", () => {
+		const p = plain();
+		setCurveChoice(p, "min_of");
+		clearCurveChoice(p);
+		expect(curveChoice(p)).toBeUndefined();
+		const sent: unknown = JSON.parse(JSON.stringify(nodeToApi({ type: "predicted", predicted: p })?.conditionParams));
+		expect(sent).toEqual({ operator: "<", value: 70, within_minutes: 30 });
+	});
+});
+
+describe("loop conditions", () => {
+	it("start with a comparison the engine reads, and take a clear margin", () => {
+		for (const kind of ["eventual_glucose", "carbs_required"] as const) {
+			const node = defaultPayload(kind);
+			expect(node.type).toBe(kind);
+			expect(node[kind]).toMatchObject({ operator: expect.any(String), value: expect.any(Number) });
+		}
 	});
 });

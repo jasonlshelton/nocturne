@@ -5,6 +5,7 @@ import { formatGlucose, timeAgo, trendArrow } from "../lib/format.js";
 import { encodeActionValue } from "../lib/action-value.js";
 import { isKnownSeverity } from "../lib/severity.js";
 import { describeHeldFacts } from "../lib/held-facts.js";
+import { describeMetBy } from "../lib/met-by.js";
 
 /**
  * Card titles per severity. Every platform gets this, including the ones with
@@ -73,6 +74,9 @@ export function AlertCard(props: {
             value={`${payload.trendRate > 0 ? "+" : ""}${payload.trendRate.toFixed(1)}/min`}
           />
         )}
+        {describeMetBy(payload.metBy, unit).map((met) => (
+          <Field key={met.key} label={met.label} value={met.value} />
+        ))}
       </Fields>
       <Actions>
         <Button id="ack_alert" value={target} style="primary">
@@ -102,8 +106,8 @@ function HeldCard(props: { payload: AlertPayload; closed: boolean }) {
   const severity = isKnownSeverity(payload.severity) ? payload.severity : undefined;
   const titlePrefix = severity ? SEVERITY_TITLES[severity] : "Alert";
   const text = closed
-    ? "The data for this alert has been missing for 24 hours, so Nocturne closes the alert. The rule cannot send alerts until the data comes back."
-    : "This rule has waited 24 hours for data, so it cannot send alerts until the data comes back.";
+    ? "This alert had no usable data for 24 hours, so Nocturne closes the alert. The rule cannot send alerts until usable data comes back."
+    : "This rule has waited 24 hours for usable data, so it cannot send alerts until usable data comes back.";
 
   return (
     <Card title={`${titlePrefix}: ${payload.ruleName}`}>

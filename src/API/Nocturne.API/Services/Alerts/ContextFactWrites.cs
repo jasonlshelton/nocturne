@@ -32,21 +32,32 @@ internal static class ContextFactWrites
     public const string ActiveAlerts = "active_alerts";
     public const string DoNotDisturb = "do_not_disturb";
     public const string TimeZone = "time_zone";
+    public const string SensorState = "sensor_state";
+    public const string ApsDetermination = "aps_determination";
+    public const string TargetRange = "target_range";
 
     /// <param name="EveryWriteAnnounces">
     /// Every write that moves the fact reaches the record-changed event. False where a store writes it
-    /// without announcing (state spans, trackers, sleep sessions, alert instances, Do Not Disturb), or
-    /// where deduplication re-picks which copy reads are shown with no announcement: device events are
-    /// deduplicated, so a merge can move a site change or sensor start by its match tolerance.
-    /// Glucose is deduplicated too, and stays true because the sweep keys a recorded next change by the
-    /// glucose facts it reads itself, so a re-pick that changes the selected reading is seen there.
+    /// without announcing (state spans, trackers, sleep sessions, alert instances, Do Not Disturb).
+    /// Deduplication announces the types whose shown copy it re-picks, so a merge that moves a site
+    /// change, a sensor start or a reading counts as a write.
     /// </param>
     /// <param name="MovesWithClock">
     /// The fact changes with no write: insulin and carbs on board decay, a temp basal or a scheduled
     /// basal depletes the reservoir estimate, a forecast ages, and the tenant's calendar and the
     /// target-range schedule entry follow the local clock (a <c>glucose_bucket</c> reads
-    /// <see cref="TimeZone"/> for that reason).
+    /// <see cref="TimeZone"/> for that reason, and <see cref="TargetRange"/> is that entry).
     /// </param>
+    /// <remarks>
+    /// <see cref="SensorState"/> is moved by a reading (one with no value is its own state) and by a
+    /// <see cref="SensorStateReport"/> write, which announces itself. A reported state
+    /// stops counting at an instant the context carries (<see cref="Nocturne.Core.Models.Alerts.SensorStateSnapshot.Until"/>), which
+    /// the engine reports as a next change, so the fact does not move with the clock.
+    /// <see cref="ApsDetermination"/> is moved only by an APS snapshot write, and goes stale at an
+    /// instant the engine reports as a next change, so it does not move with the clock either.
+    /// <see cref="TargetRange"/> is the schedule entry in effect, which changes at a schedule boundary
+    /// with no write; the engine knows no boundary, so a rule that names a target never waits.
+    /// </remarks>
     internal readonly record struct FactTrigger(bool EveryWriteAnnounces, bool MovesWithClock);
 
     public static readonly IReadOnlyDictionary<string, FactTrigger> Facts = new Dictionary<string, FactTrigger>(StringComparer.Ordinal)
@@ -60,12 +71,15 @@ internal static class ContextFactWrites
         [Uploader] = new(EveryWriteAnnounces: true, MovesWithClock: false),
         [Transmitter] = new(EveryWriteAnnounces: true, MovesWithClock: false),
         [StateSpans] = new(EveryWriteAnnounces: false, MovesWithClock: false),
-        [DeviceAges] = new(EveryWriteAnnounces: false, MovesWithClock: false),
+        [DeviceAges] = new(EveryWriteAnnounces: true, MovesWithClock: false),
         [Trackers] = new(EveryWriteAnnounces: false, MovesWithClock: false),
         [Sleep] = new(EveryWriteAnnounces: false, MovesWithClock: false),
         [ActiveAlerts] = new(EveryWriteAnnounces: false, MovesWithClock: false),
         [DoNotDisturb] = new(EveryWriteAnnounces: false, MovesWithClock: true),
         [TimeZone] = new(EveryWriteAnnounces: true, MovesWithClock: true),
+        [SensorState] = new(EveryWriteAnnounces: true, MovesWithClock: false),
+        [ApsDetermination] = new(EveryWriteAnnounces: true, MovesWithClock: false),
+        [TargetRange] = new(EveryWriteAnnounces: true, MovesWithClock: true),
     };
 
     /// <summary>
@@ -75,7 +89,7 @@ internal static class ContextFactWrites
     /// </summary>
     public static readonly IReadOnlyDictionary<Type, string[]> MovedBy = new Dictionary<Type, string[]>
     {
-        [typeof(SensorGlucose)] = [Glucose],
+        [typeof(SensorGlucose)] = [Glucose, SensorState],
         [typeof(MeterGlucose)] = [],
         [typeof(Calibration)] = [],
         [typeof(BGCheck)] = [],
@@ -86,22 +100,24 @@ internal static class ContextFactWrites
         [typeof(BasalInjection)] = [Insulin, Predictions],
         [typeof(CarbIntake)] = [Carbs, Predictions],
         [typeof(PumpSnapshot)] = [Pump, Insulin],
-        [typeof(ApsSnapshot)] = [Aps, Insulin, Carbs, Predictions],
+        [typeof(ApsSnapshot)] = [Aps, Insulin, Carbs, Predictions, ApsDetermination],
         [typeof(UploaderSnapshot)] = [Uploader, Transmitter],
+        [typeof(SensorStateReport)] = [SensorState],
         [typeof(DeviceEvent)] = [DeviceAges, Pump],
-        [typeof(ProfileActivation)] = [StateSpans, TimeZone, Glucose, Insulin, Carbs, Pump, Predictions],
-        [typeof(TherapySettings)] = [TimeZone, Insulin, Carbs, Predictions],
+        [typeof(ProfileActivation)] = [StateSpans, TimeZone, Glucose, Insulin, Carbs, Pump, Predictions, TargetRange],
+        [typeof(TherapySettings)] = [TimeZone, Insulin, Carbs, Predictions, TargetRange],
         [typeof(BasalSchedule)] = [Insulin, Pump, Predictions],
         [typeof(CarbRatioSchedule)] = [Carbs, Predictions],
         [typeof(SensitivitySchedule)] = [Insulin, Carbs, Predictions],
-        [typeof(TargetRangeSchedule)] = [Glucose, Predictions],
+        [typeof(TargetRangeSchedule)] = [Glucose, Predictions, TargetRange],
     };
 
     /// <summary>
     /// Whether the sweep may wait for the next change of a rule that reads <paramref name="fact"/>:
     /// every write that moves it evaluates the rule, and nothing else does (§5.3). Only
-    /// <see cref="Glucose"/>, <see cref="Aps"/>, <see cref="Uploader"/> and <see cref="Transmitter"/>
-    /// qualify. An unknown fact does not.
+    /// <see cref="Glucose"/>, <see cref="Aps"/>, <see cref="Uploader"/>, <see cref="Transmitter"/>,
+    /// <see cref="SensorState"/>, <see cref="ApsDetermination"/> and <see cref="DeviceAges"/> qualify.
+    /// An unknown fact does not.
     /// </summary>
     public static bool SweepMayWaitFor(string fact) =>
         Facts.TryGetValue(fact, out var trigger) && trigger.EveryWriteAnnounces && !trigger.MovesWithClock;

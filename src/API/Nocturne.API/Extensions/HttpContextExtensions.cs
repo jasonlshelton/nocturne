@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -6,6 +7,7 @@ using Nocturne.API.Middleware;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
+using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Services;
 using Scope = Nocturne.Core.Models.Authorization.Scope;
 
@@ -41,6 +43,20 @@ internal static class AuthContextKeys
 /// </remarks>
 public static class HttpContextExtensions
 {
+    /// <summary>
+    /// The address to record for whoever made this request: what
+    /// <see cref="ClientAddressResolver"/> resolved, falling back to the connection's address for a
+    /// request that did not pass <see cref="ClientAddressMiddleware"/>. Never the unverified header.
+    /// </summary>
+    public static string? GetClientAddress(this HttpContext context) =>
+        (context.Items[ClientAddressItemKey] as IPAddress ?? context.Connection.RemoteIpAddress)
+        ?.ToString();
+
+    private const string ClientAddressItemKey = "ClientAddress";
+
+    internal static void SetClientAddress(this HttpContext context, IPAddress? address) =>
+        context.Items[ClientAddressItemKey] = address;
+
     /// <summary>
     /// Get the new-style authentication context from the request
     /// </summary>
@@ -313,15 +329,7 @@ public static class HttpContextExtensions
     /// <see cref="CallerAccessEndsAt"/>, or no end at all, for a caller whose access ends.
     /// </summary>
     public static bool OutlastsCallerAccess(this HttpContext context, DateTime? requested) =>
-        Outlasts(context.CallerAccessEndsAt(), requested);
-
-    /// <summary>
-    /// Whether <paramref name="end"/> outlasts <paramref name="callerEnd"/>: the caller's access
-    /// ends and <paramref name="end"/> is later or none. The one date test behind every ceiling;
-    /// a member or invite for which it holds is beyond the caller's reach.
-    /// </summary>
-    public static bool Outlasts(DateTime? callerEnd, DateTime? end) =>
-        callerEnd is { } ceiling && (end is not { } e || e > ceiling);
+        MembershipLiveness.Outlasts(context.CallerAccessEndsAt(), requested);
 
     /// <summary>The refusal a caller whose access ends reads on a member whose access outlasts the caller's.</summary>
     public const string MemberOutlastsCallerDetail = "This member's access lasts longer than yours.";

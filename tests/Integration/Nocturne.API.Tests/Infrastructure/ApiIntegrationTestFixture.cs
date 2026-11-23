@@ -194,7 +194,7 @@ public class ApiIntegrationTestFixture : IAsyncLifetime
 
     /// <summary>
     /// Gives <paramref name="client"/> a client address of its own, signed with the instance key
-    /// as the web server signs the address it forwards (<c>ClientRateLimitKey</c>). Every request
+    /// as the web server signs the address it forwards (<c>ClientAddressResolver</c>). Every request
     /// otherwise arrives from loopback, one partition of the per-client rate limits, so the suite
     /// as a whole would exhaust a limit no single test comes near.
     /// </summary>
@@ -421,6 +421,7 @@ public class ApiIntegrationTestFixture : IAsyncLifetime
         "alert_condition_timers",
         "alert_condition_not_true",
         "alert_tracker_state",
+        "alert_evaluated_readings",
         "alert_rules",
         "dnd_windows",
         "tenant_alert_settings",
@@ -456,6 +457,7 @@ public class ApiIntegrationTestFixture : IAsyncLifetime
         "pump_snapshots",
         "uploader_snapshots",
         "device_status_extras",
+        "sensor_state_reports",
         // The devices those records are attributed to: a device one test registers would otherwise
         // show up in a later test's device reads and attributions.
         "patient_devices",
@@ -477,7 +479,8 @@ public class ApiIntegrationTestFixture : IAsyncLifetime
     /// Teams, which belong to no tenant and outlive one: a team one test makes would be in the next
     /// test's list of the same subject's teams.
     /// </summary>
-    private static readonly string[] TeamTables = ["team_invites", "team_members", "teams"];
+    private static readonly string[] TeamTables =
+        ["team_site_staff", "team_tenant_access_roles", "team_tenant_access", "team_access_links", "team_invites", "team_members", "team_staff_invites", "teams"];
 
     /// <summary>The tables holding credentials, which the fixture restores its own into.</summary>
     private static readonly string[] CredentialTables =

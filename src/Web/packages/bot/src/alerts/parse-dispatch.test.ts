@@ -58,6 +58,28 @@ describe("parseAlertDispatchEvent", () => {
     expect(parse({ heldFacts: "glucose" })?.payload.heldFacts).toBeUndefined();
   });
 
+  it("reads what met the condition, keeping each field only when it has its type", () => {
+    const parsed = parse({
+      metBy: [{ leafId: 0, kind: "predicted", curve: "zt", offsetMinutes: 25, value: 62.5 }, "x", { kind: 3, value: "12" }],
+    });
+
+    expect(parsed?.payload.metBy).toEqual([
+      { leafId: 0, kind: "predicted", curve: "zt", offsetMinutes: 25, value: 62.5 },
+      { leafId: undefined, kind: undefined, curve: undefined, offsetMinutes: undefined, value: undefined },
+    ]);
+  });
+
+  it("reads the limit a condition compared with and the fact it came from", () => {
+    const parsed = parse({
+      metBy: [{ leafId: 0, kind: "threshold", value: 66, limit: 70, limitFact: "target_low", limitOffset: -10 }, { kind: "threshold", value: 76, limit: "80", limitFact: 1, limitOffset: "x" }],
+    });
+
+    expect(parsed?.payload.metBy?.[0]).toMatchObject({ limit: 70, limitFact: "target_low", limitOffset: -10 });
+    expect(parsed?.payload.metBy?.[1]?.limitOffset).toBeUndefined();
+    expect(parsed?.payload.metBy?.[1]?.limit).toBeUndefined();
+    expect(parsed?.payload.metBy?.[1]?.limitFact).toBeUndefined();
+  });
+
   it("delivers a payload with a field this build does not know", () => {
     expect(parse({ batteryLevel: 40 })).toBeDefined();
   });

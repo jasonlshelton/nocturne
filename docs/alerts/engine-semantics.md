@@ -34,9 +34,11 @@ has exactly one spelling for every property name and enum value. Anything else i
 - condition-only enums use snake_case wire names (`TempBasalMetric`: `rate` |
   `percent_of_scheduled`; `TransmitterBatteryMetric`: `voltage_a` | `voltage_b` |
   `resistance` | `days`; `GlucoseBucket`: `very_low` | `low` | `tight_range` | `in_range`
-  | `high` | `very_high`; `AlertWeekday`: `sunday` … `saturday`; `TrendBucket`;
-  `AlertComparisonOperator`: `>` `>=` `<` `<=` `==`; the composite operator, `direction`
-  and `alert_state` `state` words)
+  | `high` | `very_high`; `AlertWeekday`: `sunday` … `saturday`; `TrendBucket`; `SensorState`:
+  `warming_up` | `ok` | `calibration_needed` | `error` | `expired` | `no_value`;
+  `AlertComparisonOperator`: `>` `>=` `<` `<=` `==`; `ForecastCurve`: `default` | `iob` |
+  `cob` | `uam` | `zt`; `AlertLimitFact`: `latest_glucose` | `target_low` | `target_high`; the
+  composite operator, `direction` and `alert_state` `state` words)
 - `StateSpanCategory` and `PumpModeState` are domain enums the rest of the API also
   writes, as their **PascalCase member names** (`"Override"`, `"PumpConnectivity"`,
   `"Automatic"`, `"EaseOff"`, …); a condition uses the same names
@@ -91,10 +93,10 @@ this tick):
 | `payload_missing` | a node with no payload for its `type`, or a rule body whose `condition_params` is JSON `null` |
 | `condition_missing` | a `null` slot in a composite's `conditions` |
 | `unknown_field` | a node property other than `type`, `_uid` and its own kind's payload, or a payload property its kind does not read (names match exactly, §1.1), so a misspelt operand such as `timeoutMinutes` or `Value` is not silently dropped. No field is named: the property is the author's text |
-| `field_missing` | a required operand is absent or `null`: every operand except `for_minutes`, `timezone` and `state_span_active` `state`, and the `child` of a `not` or `sustained` |
+| `field_missing` | a required operand is absent or `null`: every operand except `for_minutes`, `timezone` and `state_span_active` `state`, and the `child` of a `not` or `sustained`. On `threshold`, `predicted` and `eventual_glucose` it is on `value` when neither `value` nor `value_from` is present, and on `fact` when a `value_from` has none (§3, a limit from a fact) |
 | `invalid_field` | a value of the wrong JSON kind, a number out of range, an enum operand that is not a string, or a `timezone` that is not exactly an IANA zone id (§4) |
-| `unknown_value` | an enum operand naming no member (§1.1): the composite `operator`, a comparison `operator`, `direction`, `alert_state` `state`, `trend` `bucket`, `temp_basal` or `transmitter_battery` `metric`, `pump_state` `mode`, `state_span_active` `category`, or a `glucose_bucket` or `day_of_week` list member |
-| `list_empty` | a composite's `conditions`, a `glucose_bucket` `buckets` or a `day_of_week` `days` that is absent, `null` or empty |
+| `unknown_value` | an enum operand naming no member (§1.1): the composite `operator`, a comparison `operator`, `direction`, `alert_state` `state`, `trend` `bucket`, `temp_basal` or `transmitter_battery` `metric`, `pump_state` `mode`, `state_span_active` `category`, a `predicted` `curve`, a `value_from` `fact`, or a `glucose_bucket`, `day_of_week`, `sensor_state`, `min_of` or `max_of` list member |
+| `list_empty` | a composite's `conditions`, a `glucose_bucket` `buckets`, a `day_of_week` `days` or a `sensor_state` `states` that is absent, `null` or empty, or a `predicted` `min_of` or `max_of` that is present and empty |
 | `minutes_not_positive` | a duration `<= 0` that leaves its node never true: `sustained` `minutes`, `signal_loss` `timeout_minutes`, `predicted` `within_minutes` (no prediction is at or before now) |
 | `minutes_negative` | a negative bound on an elapsed time: `staleness` `value`, `minutes` on `loop_stale`/`loop_enaction_stale`/`time_since_*`. Elapsed time is never negative and an absent anchor reads as infinite, so every operator would compare the same way on every tick. `tracker_age` is exempt: its elapsed time is negative before a scheduled event |
 | `invalid_time` | a `time_of_day` `from` or `to` that is not exactly `HH:mm` (`"9:00"`, `"24:00"`) |
@@ -104,11 +106,27 @@ this tick):
 | `margin_on_equality` | a `clear_margin` above `0` on an `==` comparison, which has no side to widen (§3, clear margin) |
 | `margin_past_zero` | a `rate_of_change` `clear_margin` above its `rate`, which would carry the limit past zero (§3, clear margin) |
 | `margin_under_sustained` | a `clear_margin` above `0` on a leaf anywhere under a `sustained` (§3, clear margin) |
+| `selector_conflict` | a `predicted` with more than one of `curve`, `min_of` and `max_of` (§3, forecast curves); the field is the second present, in that order |
+| `limit_conflict` | a `threshold`, `predicted` or `eventual_glucose` with both `value` and `value_from` (§3, a limit from a fact); the field is `value_from` |
+| `offset_out_of_range` | a `value_from` `offset` more than 1000 either side of `0` (§3, a limit from a fact); the field is `offset` |
+| `self_reference` | a `threshold` whose `value_from` names `latest_glucose`, which compares the reading with itself plus a constant, so its answer never depends on the reading (§3, a limit from a fact); the field is `value_from` |
 
 `clear_margin` is an optional member added after the first release. An engine older than it
 declares the property on no kind, so it reads a tree that carries one as having an `unknown_field`
 and does not evaluate it: a rule with a margin is skipped, with its unevaluable notice, by a host
 still running such an engine, never evaluated without its margin.
+
+`value_from` on `threshold`, `predicted` and `eventual_glucose` (§3, a limit from a fact) is read the
+same way by an engine older than it: an `unknown_field`, so a rule whose limit names a fact is skipped
+there, with its unevaluable notice, never evaluated against a number it does not have. A limit written
+as `value` reads on every engine as it always has. Such an engine also ignores the context's
+`target_low` and `target_high` (§4), as it ignores any member it does not know.
+
+`curve`, `min_of` and `max_of` on `predicted` (§3, forecast curves) are read the same way by an
+engine older than them: an `unknown_field`, so a rule that selects a curve is skipped there, never
+evaluated against `default`. `eventual_glucose` and `carbs_required` are kinds such an engine does
+not have: an `unknown_kind`, so a rule with either is skipped. A `predicted` with no selector reads
+on every engine as it always has.
 
 A tree that cannot be evaluated:
 
@@ -212,13 +230,17 @@ known. The same evaluation computes it: every node evaluates to its truth and, w
 the set of (fact, reason) pairs it is unknown by.
 
 - A leaf is unknown by the fact and reason its row in §3 gives: the fact its evaluator reads
-  (§5.2), and `absent` (the fact, its guard or a field it needs is missing), `stale` (a judged
-  glucose fact whose reading is past its freshness bound, §3), `ahead_of_clock` (an anchor
+  (§5.2), and `absent` (the fact, its guard or a field it needs is missing, a forecast curve a
+  `predicted` leaf selects included, and a target a limit names that the context does not carry), `stale` (a judged glucose fact whose reading is past its
+  freshness bound, or a determination past the same bound, §3), `ahead_of_clock` (an anchor
   beyond the tolerance ahead of `now`, §5.4, named by the fact that holds it), `unrecognised`
-  (a pump mode the engine has no member for, §3) or `inexact` (a lower-bound `reservoir` reading
-  that does not decide the comparison). A bucket name the engine has no member for reads as an
+  (a pump mode or a sensor state the engine has no member for, §3), `inexact` (a lower-bound
+  `reservoir` reading that does not decide the comparison) or `sensor_not_ok` (a judged glucose
+  leaf whose sensor reports a state other than ok, named by `sensor_state`, §3). A bucket name the engine has no member for reads as an
   absent bucket (§4), so it is `absent`. `pump_suspended` is unknown by `pump` when its guard
   is false and by `state_spans` when its span starts beyond the tolerance ahead.
+- A comparison whose limit names a fact (§3, a limit from a fact) is unknown when its own value or
+  the fact is, by the union of both sides' facts: both when both are unknown.
 - An `and` or `or` that is unknown is unknown by the union of its unknown children's sets: no
   child is false (`and`) or true (`or`), so each unknown child reaches it. One that is known
   names nothing, so an unknown leaf beside a false sibling of an `and`, or a true sibling of an
@@ -247,11 +269,11 @@ as false or true.
 
 | Kind | Payload | Inputs | Semantics | Unknown, and absence that is an answer |
 |---|---|---|---|---|
-| `threshold` | `direction` (`above`\|`below`), `value` | `LatestValue` | below: `v < value`; above: `v > value` (**strict**) | `LatestValue` null, or the reading stale ⇒ **unknown** |
-| `rate_of_change` | `direction` (`rising`\|`falling`), `rate` | `TrendRate` (mg/dL/min, stored or derived, §4) | falling: `rate' <= -rate`; rising: `rate' >= rate` (**inclusive**) | `TrendRate` null, or the reading stale ⇒ **unknown** |
+| `threshold` | `direction` (`above`\|`below`), `value` or `value_from` (a target only) | `LatestValue`, `SensorState`, and with `value_from` `TargetLow` or `TargetHigh` | below: `v < limit`; above: `v > limit` (**strict**) | the sensor not ok, `LatestValue` null, or the reading stale ⇒ **unknown**; a named target absent ⇒ **unknown** (`target_range`, `absent`) |
+| `rate_of_change` | `direction` (`rising`\|`falling`), `rate` | `TrendRate` (mg/dL/min, stored or derived, §4), `SensorState` | falling: `rate' <= -rate`; rising: `rate' >= rate` (**inclusive**) | the sensor not ok, `TrendRate` null, or the reading stale ⇒ **unknown** |
 | `staleness` | `operator`, `value` (minutes, int) | `LastReadingAt`, `LatestTimestamp`, the rule's `enabled_at`, now | `Compare((decimal)(now-last).TotalMinutes, op, value)` | no reading history ⇒ measured from `enabled_at`, and **unknown** without it (below); only `LastReadingAt` null ⇒ elapsed = +∞: `>`/`>=` ⇒ true, others ⇒ false |
-| `predicted` | `operator`, `value`, `within_minutes` | `Predictions[]` | true if **any** point with `OffsetMinutes <= within_minutes` satisfies `Compare(point.Mgdl, op, value)`; points beyond horizon are skipped, not range-checked below | empty predictions ⇒ **unknown**; with points present but none within the horizon or satisfying ⇒ false |
-| `trend` | `bucket` (wire string) | `TrendBucket` (of the rate, else of the arrow, §4) | equality of wire forms (`rising_fast` … `falling_fast`, `unknown`) | `TrendBucket` null, a name the engine has no member for (§4), or the reading stale ⇒ **unknown** |
+| `predicted` | `operator`, `value` or `value_from`, `within_minutes`, at most one of `curve`, `min_of`, `max_of` | `Predictions[]`, `PredictionCurves`, and what `value_from` names | true if **any** point of the selected series (below, forecast curves) with `OffsetMinutes <= within_minutes` satisfies `Compare(point.Mgdl, op, limit)`; points beyond horizon are skipped, not range-checked below. No selector reads `default`, which is `Predictions[]`, exactly as before selectors existed | a selected series that is empty or absent, any listed one for `min_of`/`max_of` ⇒ **unknown** (`predictions`, `absent`); with points present but none within the horizon or satisfying ⇒ false |
+| `trend` | `bucket` (wire string) | `TrendBucket` (of the rate, else of the arrow, §4), `SensorState` | equality of wire forms (`rising_fast` … `falling_fast`, `unknown`) | the sensor not ok, `TrendBucket` null, a name the engine has no member for (§4), or the reading stale ⇒ **unknown** |
 | `time_of_day` | `from`, `to` (`HH:mm` exact, invariant), `timezone` (IANA, nullable) | now | half-open `[from, to)` in resolved tz; `from > to` wraps midnight (`current >= from \|\| current < to`) | Tz resolution: the per-rule tz when set; else tenant tz (`TenantTimeZoneId`), unknown tenant tz ⇒ **UTC**; both absent ⇒ UTC; never unknown |
 | `iob` | `operator`, `value` (units) | `IobUnits` | `Compare` | null ⇒ **unknown** |
 | `cob` | `operator`, `value` (grams) | `CobGrams` | `Compare` | null ⇒ **unknown** |
@@ -269,16 +291,106 @@ as false or true.
 | `override_active` | `is_active`, `for_minutes?` | `ActiveOverride`, now | same shape as `pump_suspended` | **no** HasEver guard (absence of override is legitimate): never unknown |
 | `sensitivity_ratio` | `operator`, `value` | `SensitivityRatio`, `HasEverApsSensitivity` | `Compare` | guard false ⇒ **unknown**; ratio null ⇒ **unknown** |
 | `do_not_disturb` | `is_active`, `for_minutes?` | `ActiveDoNotDisturb`, now | same shape as `pump_suspended` (anchor `StartedAt`); `for_minutes` no-op on the inactive side | no guard; snapshot null = DND off: never unknown |
-| `glucose_bucket` | `buckets: [..]` | `GlucoseBucket` | set membership | bucket null, a name the engine has no member for (§4), or the reading stale ⇒ **unknown** |
+| `glucose_bucket` | `buckets: [..]` | `GlucoseBucket`, `SensorState` | set membership | the sensor not ok, bucket null, a name the engine has no member for (§4), or the reading stale ⇒ **unknown** |
 | `time_since_last_carb` | `operator` (enum), `minutes` | `LastCarbAt`, now | elapsed minutes (double) compared via `AlertComparisonOperator`; **null anchor ⇒ elapsed = +∞** (so `>`/`>=` fire on cold start; intentional, opposite of loop_stale) | `==` against +∞ ⇒ false; never unknown |
 | `time_since_last_bolus` | same | `LastBolusAt` | same | same |
 | `day_of_week` | `days: [..]` (`AlertWeekday` names) | `TenantTimeZoneId`, now | local `now.DayOfWeek ∈ days` | tenant tz null/unknown ⇒ UTC; never unknown |
 | `pump_state` | `mode`, `is_active`, `for_minutes?` | `ActivePumpModes` | `is_active:false`: true whenever no active span is of `mode` (**including no active span**). `is_active:true`: a span of `mode` must be active; `for_minutes` anchors at its `StartedAt` (double, `>=`) | no guard; no active span is an answer; with no span of `mode`, an active span whose mode is a name the engine has no member for (§4) is unknown wherever the answer depends on it (table below) |
 | `state_span_active` | `category`, `state?`, `is_active`, `for_minutes?` | `ActiveStateSpans[(category, state)]` | `is_active:false`: true iff no snapshot under the exact `(category, state)` key (null state = "any of category": the enricher loads that key shape). `is_active:true`: snapshot must exist; `for_minutes` anchors at `StartedAt` | no guard: never unknown; a span of a category the engine has no member for (§4) is not in the lookup |
+| `sensor_state` | `states: [..]` (`SensorState` names), `for_minutes?` | `SensorState`, `LatestValue`, now | the state at `now` (§4: none once its `until` has passed) is one of `states`; then if `for_minutes` set: `(now - Since).TotalMinutes >= for_minutes` (double) | no state and `LatestValue` present: **false** when every listed state is `no_value` (a reading with a value is not `no_value`), else **unknown** (a state no source reported may hold); no state and no value ⇒ **unknown**; a name the engine has no member for ⇒ **unknown**; `for_minutes` set and `Since` null ⇒ **unknown**; a state not listed ⇒ false. Not gated by the sensor's state: it reads it |
+| `eventual_glucose` | `operator`, `value` (mg/dL) or `value_from` | `ApsDetermination.EventualMgdl`, `ApsDetermination.At`, now, and what `value_from` names | `Compare` | no determination, or one without the value ⇒ **unknown** (`absent`); older than the rule's glucose freshness bound ⇒ **unknown** (`stale`, below) |
+| `carbs_required` | `operator`, `value` (grams) | `ApsDetermination.CarbsRequiredGrams`, `ApsDetermination.At`, now | `Compare` | as `eventual_glucose` |
 | `tracker_age` | `tracker_definition_id` (Guid), `operator`, `minutes` | `ActiveTrackers[tracker_definition_id]`, now | `Compare((decimal)(now-reference).TotalMinutes, op, minutes)`; reference is the active instance's start (Duration) or scheduled time (Event), resolved by the enricher; elapsed is **negative before a scheduled event**, while a Duration start ahead of `now` follows §5.4, so negative `minutes` with `>=` means "within N minutes before the event". For a **Duration** instance, a threshold that already held when the instance was recorded is **false** for that instance: with `>=` when `reference + minutes <= RecordedAt`, with `>` when `reference + minutes < RecordedAt`. So a run entered after the fact does not alert for what it has passed, and a later threshold fires as usual | no active instance for the definition ⇒ **false**, never unknown: a tracker that isn't running has no age (deliberately opposite to `time_since_last_*` cold-start infinity). `RecordedAt` null, an **Event** instance (`Scheduled`), or `<`/`<=`/`==` ⇒ nothing is held back |
 
 `sleep_session_active` (`is_active`; `SleepSessionActive`; true while the flag equals
 `is_active`) is never unknown: no session is the state.
+
+**Forecast curves.** The context carries forecast series by name (`ForecastCurve`, §1.1):
+`default` and the oref curves `iob`, `cob`, `uam` and `zt`. `default` is whatever series the host
+has always sent as `Predictions[]`; it is not a curve of its own, and for an oref uploader it is
+usually the `iob` curve (§4). A `predicted` leaf reads one selection:
+
+- **No selector** reads `default`, and evaluates exactly as `predicted` did before selectors
+  existed, for any context: named curves never reach it.
+- **`curve`** reads that one series as `predicted` reads `default`.
+- **`min_of`** and **`max_of`** (a list of at least one name, in any order, a repeat allowed) read
+  a combined series. It has a point at an offset only where **every** listed series has a point at
+  exactly that offset, and its value there is the lowest (`min_of`) or highest (`max_of`) of their
+  points at that offset. An offset where one listed curve has ended has no combined point: the
+  lowest of the listed curves is not known there, and a value from the curves that remain would be
+  the extreme of fewer curves than the rule names, so a rule could fire on a combination that does
+  not exist. Offsets within the horizon where the series do not meet give no point, so the leaf is
+  false, as for points beyond the horizon. oref shortens its curves, so a host that sends them must
+  undo that first (§4, forecast series); the engine does not extend a curve.
+- **An absent series.** A selected series that is empty or that the host did not send leaves the
+  leaf **unknown** by `predictions`, reason `absent`, for `curve` and for `min_of`/`max_of` alike:
+  one absent listed series decides which offsets exist, so it can change the answer at every
+  offset. A low forecast rule over a curve the uploader stopped sending holds and waits (§6.4); it
+  does not read as false.
+- The clear margin (below) moves the limit for every point of the selected series, combined or
+  not.
+
+**A limit from a fact.** `threshold`, `predicted` and `eventual_glucose` compare a value in mg/dL,
+so their limit may name a fact in place of a number: exactly one of `value` (a number, as always)
+and `value_from`, `{"fact": <fact>, "offset"?: <number>}`. Both, or neither, cannot be evaluated
+(`limit_conflict`, `field_missing`, §1.4). No other kind has the member: on one it is an
+`unknown_field`. The facts (`AlertLimitFact`, §1.1) are:
+
+- `latest_glucose`: the newest reading, read exactly as `threshold` reads it, by the same function:
+  unknown while the sensor is not ok (`sensor_state`), absent, stale or ahead of the clock
+  (`glucose`). A `threshold` cannot name it (`self_reference`): its reading against itself plus a
+  constant gives the same answer whatever the reading.
+- `target_low` and `target_high`: the ends of the profile's target range in effect at `now`
+  (`TargetLow`, `TargetHigh`, §4). Absent is **unknown** by `target_range`, reason `absent`. There is
+  no default target.
+
+The **effective limit** is the fact's value plus `offset`: a decimal in mg/dL, `0` when absent,
+negative allowed, read as `value` is (else `invalid_field`) and never more than 1000 either side of
+`0` (`offset_out_of_range`). A sum outside the decimal range, which only a fact value no host sends
+can produce, is unknown by the fact, `absent`. The leaf compares against the effective limit as it
+compares against a literal one, and is **unknown when either side is**: its own value (the reading,
+the series, the determination) or the fact. It is then unknown by every side that is unknown (§2.4),
+so a stale reading under a missing target names both. With `latest_glucose`, `predicted` and
+`eventual_glucose` read `glucose` and `sensor_state` too, and `predicted` goes unknown when the
+reading goes stale (§5.3). A `predicted` leaf against `latest_glucose` compares the newest reading
+with a forecast that can be one loop cycle older than it: a reading arrives before the loop's cycle
+on it, and forecasts carry no freshness judgment of their own (above, `predicted` is not judged).
+
+This fails in a stated direction: a rule against a target the profile does not have waits (§6.4) and
+says why; it never compares against a guess. The clear margin (below) moves the effective limit as it
+moves a literal one, with the same validation and polarity. A `threshold` or `predicted` against a
+target knows no start (table below): the target can change at a schedule boundary after the reading.
+So a `sustained` over one starts its run at the evaluation that first finds it true, not at the
+reading's timestamp as over a literal, and completes later by the time the reading took to arrive.
+
+**Met by.** An evaluation reports, beside its root, what each `predicted`, `eventual_glucose` and
+`carbs_required` leaf, and each `threshold` whose limit names a fact, of the body that is **true** and
+under an even number of `not`s met its comparison with (`met_by`, by leaf id,
+§2.2, with the leaf's kind). A leaf whose limit names a fact adds the limit it compared against
+(`limit`, the effective limit, widened while open as below), the fact (`limit_fact`) and the rule's
+offset to it (`limit_offset`, absent when `0`), so an alert can name the limit first and its source
+second: "limit 70 mg/dL (target low minus 10 mg/dL)", never "target low (70)", which would give the
+limit as the fact's own value. A literal limit adds none of them, so its entry is as it always was. For `predicted` it is the selected series' name, the point's offset in minutes and its value:
+the **first** point, in offset order, that satisfies the comparison (of two points at one offset,
+the one sent first), and for `min_of`/`max_of` the curve that supplied the extreme there (of equal
+values, the first listed). For the determination leaves it is the value compared, with no curve or
+offset. A leaf under an odd number of `not`s is true where it argues against the rule, so it is not
+reported. A reported leaf is reported whatever the root's truth. A leaf that is false or unknown
+reports nothing, and a body with no such true leaf has no `met_by` member. While the excursion is
+open a margined leaf reads its widened limit (§3, clear margin), and so does its `met_by`; the
+evaluation that opens an excursion reads the plain limit, and only an opening's `met_by` reaches an
+alert's payload, so an alert never names a point that met only the widened limit. It is reported whether or not the leaf log is
+requested, so a host that asks for no leaves (`include_leaves: false`) still has it.
+
+**The loop's determination.** `eventual_glucose` and `carbs_required` read the newest
+determination of the user's loop (`ApsDetermination`, §4): when it was made and the eventual
+glucose and the carbohydrate it reported. It is judged for freshness by the rule's glucose
+freshness bound, the one mechanism that judges a reading (below): the determination is **stale**
+when `now - At > bound`, compared as exact durations, so one exactly `bound` old is fresh. `At`
+follows §5.4: more than 5 minutes after `now`, the determination is not known to be fresh
+(`ahead_of_clock`). A determination with no value for the leaf is `absent` before its age is read.
+These leaves are not gated by the sensor's state: the loop decides what it builds on, as for
+`predicted`. The host's rule for what it sends is in §4.
 
 `pump_state` over the set of active pump modes, for a leaf naming mode `X`. Pump-mode spans
 overlap (a suspension runs on top of an automatic or manual span), so the context carries every
@@ -329,6 +441,30 @@ leaves read unknown. Under `hold` that changes nothing (§5.1), but a rule whose
 and closes it, once per reading interval, and `met` opens one on data with no fault. Such a rule
 on a source slower than 5 minutes needs its own `glucose_freshness_minutes`, at least the
 interval between readings plus the delay a reading can arrive with.
+
+**Sensor state.** `threshold`, `rate_of_change`, `trend` and `glucose_bucket` read the
+sensor's state (`SensorState`, §4) before they read the reading. While the state is
+`warming_up`, `calibration_needed`, `error`, `expired`, `no_value`, or a name the engine has no
+member for, each of them is **unknown**, whatever value the reading has and however fresh it is:
+by `sensor_state` with reason `sensor_not_ok`, or `unrecognised` for a name the engine does not
+know (§4). With the state absent or `ok` they read exactly as they would with no such member: a
+host that knows nothing of the sensor changes nothing. So under `hold` (§6.4) a low `threshold`
+rule holds while the sensor warms up rather than firing on a warm-up value, an excursion open
+when the sensor went into error stays open and does not close on a false value, and the 24-hour
+hold bound applies unchanged. The first evaluation with the state ok or absent decides. Unlike a
+stale reading, a state that is not ok makes the leaf unknown at once, with no bound to wait for.
+
+This fails in a stated direction. A glucose leaf made unknown wrongly is a silent rule: the
+person believes a low alarm is watching. So the engine reads only the state the host sends, and
+the host sends only one that a source states outright, that is current and that describes
+the newest reading's own source (§4); with doubt, the
+state is absent and the leaves read as they always have.
+
+`predicted` is not gated. Its points are a forecast the host fetched, not facts of the reading
+(below), and an AID system that forecasts handles its own sensor's state; the forecast's source
+decides what it builds on. `staleness` and `signal_loss` are not gated either: they say that
+data stopped, and readings that arrive with no value do not restart them (§4, the newest
+reading).
 
 **No reading ever.** `staleness` and `signal_loss` measure the time since data stopped. With
 no reading history at all (both `LastReadingAt` and `LatestTimestamp` null), data stopped when
@@ -429,8 +565,8 @@ the reservoir holds at least `b`.
     them at all; the host's raise of §7 covers its evaluations.
 
 **Clear margin.** `threshold`, `rate_of_change` (on `rate`), `predicted`, `iob`, `cob`, `reservoir`,
-`pump_battery`, `uploader_battery`, `transmitter_battery`, `temp_basal` and `sensitivity_ratio`
-take an optional `clear_margin`: a decimal in the unit of the leaf's value (mg/dL for glucose,
+`pump_battery`, `uploader_battery`, `transmitter_battery`, `temp_basal`, `sensitivity_ratio`,
+`eventual_glucose` and `carbs_required` take an optional `clear_margin`: a decimal in the unit of the leaf's value (mg/dL for glucose,
 mg/dL per minute for a rate). It stops an alert chattering at its limit: open below 70, clear only
 at 75. The elapsed-time leaves (`staleness`, `site_age`, `sensor_age`, `loop_stale`,
 `loop_enaction_stale`, `tracker_age`, `time_since_last_*`, `signal_loss`, any `for_minutes`) take
@@ -497,7 +633,8 @@ leaf's `rate` (`margin_past_zero`), and never above `0` on a leaf anywhere under
   separate auto-resolve pass have no tracker and read every leaf closed.
 - **`alert_state`** reads another rule's excursion (§3 table) and is unaffected.
 - **Leaf log.** Each leaf evaluated alone (§2.4) reads the open flag and its own polarity in the
-  tree, so it logs the truth the root read. No outcome reports a limit.
+  tree, so it logs the truth the root read. It reports no limit; `met_by` reports the limit of a
+  leaf whose limit names a fact (above).
 
 **Since when a node has held.** Evaluating a node gives its truth and, when it is true,
 optionally the instant it has held since. Only a true node reports one. A start ahead of
@@ -509,15 +646,16 @@ starts the run later, never earlier.
 
 | Node | Reports, when true |
 |---|---|
-| `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active` on the active side | the span's `StartedAt`; with `for_minutes`, the first instant it has held `for_minutes` (`StartedAt + for_minutes`, as the comparison finds it), not `StartedAt`, since the leaf is false until then |
+| `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active` on the active side, and `sensor_state` | the span's `StartedAt` (for `sensor_state`, its `Since`; nothing without one); with `for_minutes`, the first instant it has held `for_minutes` (`StartedAt + for_minutes`, as the comparison finds it), not `StartedAt`, since the leaf is false until then |
 | the same kinds on the inactive side | nothing (no span is the state, and it has no start) |
 | `temp_basal` with `metric: rate` | the temp's `StartedAt`: its rate stands for the whole temp |
 | `temp_basal` with `metric: percent_of_scheduled` | nothing: the scheduled rate follows the schedule within the temp |
 | `staleness`, `signal_loss`, `site_age`, `sensor_age`, `tracker_age`, `loop_stale`, `loop_enaction_stale`, `time_since_last_carb`, `time_since_last_bolus` with `>=` or `>` (`signal_loss` is `>=`) | the first instant the elapsed time since the anchor met the bound, found by the comparison evaluation makes (§1.3, §5.3), on or after the anchor and rounded up to the 100 ns tick; the anchor itself when the comparison already held there |
 | the same kinds with `<`, `<=` or `==` | nothing: they hold before a bound, not from one |
-| `threshold`, `rate_of_change`, `trend`, `glucose_bucket`, `predicted` | `LatestTimestamp`, the newest reading's time, read as the leaf reads its reading (§3 glucose freshness, §4 selection); nothing without one. `predicted` reports it too, although its points are not facts of the reading (§3) |
+| `threshold` against `target_low` or `target_high`, and `predicted` against either | nothing: the target can move at a schedule boundary after the reading |
+| `threshold`, `rate_of_change`, `trend`, `glucose_bucket`, `predicted` otherwise | `LatestTimestamp`, the newest reading's time, read as the leaf reads its reading (§3 glucose freshness, §4 selection); nothing without one. `predicted` reports it too, although its points are not facts of the reading (§3) |
 | `alert_state`, with or without `for_minutes` | nothing: the other alert's trigger and acknowledgement are its excursion's, not a run of the facts this rule reads |
-| `iob`, `cob`, `reservoir`, `pump_battery`, `uploader_battery`, `transmitter_battery`, `sensitivity_ratio`, `time_of_day`, `day_of_week`, `sleep_session_active` | nothing |
+| `iob`, `cob`, `reservoir`, `pump_battery`, `uploader_battery`, `transmitter_battery`, `sensitivity_ratio`, `eventual_glucose`, `carbs_required`, `time_of_day`, `day_of_week`, `sleep_session_active` | nothing |
 | `composite` `and` | the latest of its children's instants when every child reports one, else nothing |
 | `composite` `or` | the earliest instant among its true children that report one, else nothing. That child alone has held the `or` true since then, and a child that read false at the node's last evaluation cannot pull a start back past it: the `sustained` bound covers that evaluation |
 | `not` | nothing: its child's instant is when the child began to hold, not when it stopped |
@@ -545,6 +683,50 @@ in §3 plus:
   replay, whose reading is at or before its tick. Stored readings, and what charts and statistics
   read, are not filtered. A reading within the tolerance is selected, and the engine reads its
   instant as `now`.
+- **A newest reading with no glucose value.** It is still the newest reading: `LatestTimestamp`
+  and `LatestReceivedAt` are its own, so the context is that reading's. `LatestValue`,
+  `TrendRate`, `TrendBucket` and `GlucoseBucket` are absent, and `SensorState` is `no_value`, with
+  `Since` the first reading with no value after the last reading that has one, unless a source
+  states another state that is not ok (below), which says why. `LastReadingAt` is **the last
+  reading with a value**, looked for at most 24 hours back (with none there, the oldest reading
+  looked at), because `signal_loss` and `staleness` mean no reading with a value: readings that
+  arrive with no value do not hold off a signal-loss alert, as they never have. The engine tells
+  this case from no readings arriving by the newest reading's own times, and the judged glucose
+  leaves by `SensorState` (§3, sensor state).
+- `SensorState` is `{state, since, until}` or absent: what the sensor's own reports say of its
+  readings, `state` one of `warming_up`, `ok`, `calibration_needed`, `error`, `expired`,
+  `no_value`, `since` the instant it began where the source says, and `until` the instant the host
+  stops counting the report. Absent means nothing is known of the sensor, and every glucose leaf
+  reads as it would without the member. **The engine owns the lapse:** a state whose `until` is at
+  or before `now` is no state, so a host that evaluates late cannot keep a report its own bound has
+  ended, and `until` is a next change of every leaf that reads the fact (§5.3). `no_value` has no
+  `until`: it lasts as long as its reading is the newest.
+- A host fills `SensorState` only from a source that states the state outright, never from elapsed
+  time (a warm-up guessed from a sensor start and a device's warm-up length), and only from a
+  report of **the newest reading's own source**: the report's device and data source are both
+  present, the newest reading's are both present, and each equals the other. A report of another
+  device, or one that lacks either member on either side, is no state, so a pump's sensor error
+  never holds a low read from a different CGM. A report counts while its timestamp is within the
+  clock tolerance of `now` (§5.4) and it arrived at most 11 minutes (the default glucose freshness
+  bound) before `now`, its arrival being the earlier of its timestamp and when the host stored it;
+  reports are ordered by that arrival, and `until` is that arrival plus 11 minutes. So a report
+  dated ahead lasts 11 minutes from when it came, and an old report backfilled now never counts.
+- When the backend stores a device status, it reads the status's CareLink `cgm.sensorState`
+  (Medtronic Guardian sensors), then its `xdripjs.state` session code (Dexcom G5 and G6 through
+  Lookout, Logger and xdrip-js), each through an allowlist where every other value is no state, and
+  writes a sensor state report (`SensorStateReport`) for the first value an allowlist maps, under
+  the status's device and the data source it was stored under. A status with neither writes none.
+  The host reads the state only from these reports. A newest report whose state this build cannot
+  read is no state, and an older report does not stand in for it. An entry is added only from a real
+  upload. CareLink's: `NO_ERROR_MESSAGE` ok, `WARM_UP` warming up, `CALIBRATION_REQUIRED`
+  calibration needed, `SENSOR_ERROR` and `CHANGE_SENSOR` error, `SENSOR_END_OF_LIFE` expired.
+  xdripjs: `0x02` warming up, `0x06` ok, `0x04`, `0x05`, `0x08` to `0x0a`, `0x0d` calibration
+  needed, `0x0b`, `0x0c`, `0x10` to `0x12` error, `0x0f` expired. The routine calibration prompts
+  (`0x07`, `0x0e`), a stopped session (`0x01`) and excess noise (`0x03`) are no state. CareLink
+  writes a status and its readings under one device name (`CareLink {family}`) and its connector's
+  data source, so they match. An upload through the v1 API names no data source on its readings or
+  its statuses, so an xdripjs report has no source to match and is no state. Neither source gives a
+  `since`. A reported ok does not replace `no_value`; a reported state that is not ok does.
 - `LatestReceivedAt` is when the host received the newest reading, the instant its glucose
   facts' age runs from (§3). The backend sends the instant it stored the reading's row: a
   re-upload under the reading's sync key, or an edit, updates that row and keeps the instant; a
@@ -571,9 +753,58 @@ in §3 plus:
   bucket of the reading's stored arrow (`DoubleUp` rising_fast, `SingleUp`/`FortyFiveUp`
   rising, `Flat` flat, `FortyFiveDown`/`SingleDown` falling, `DoubleDown` falling_fast;
   any other arrow, or none, gives null). The arrow never becomes a `TrendRate`.
+- **Forecast series.** `Predictions[]` (wire `predictions`, an array of `{offset_minutes,
+  mgdl}`) is the `default` series, in the shape it has always had. `PredictionCurves` (wire
+  `prediction_curves`, an object from curve name to such an array) holds the named curves. A
+  `default` key there is not read: `default` is `predictions`, so a context can never carry two
+  defaults. A host that sends only `predictions`, and every stored replay input, reads as before.
+  The backend sends every curve its prediction source returns, each under its name, with the
+  offsets it has always given `default` (the `i`-th value at `(i + 1) * interval` minutes), and
+  `default` unchanged to the byte. Its device-status source, for an OpenAPS, AAPS or Trio upload,
+  stores oref's `predBGs` `IOB`, `COB`, `UAM` and `ZT` curves, and its `default` is the `IOB` curve
+  (or, without one, the first of `COB`, `ZT`, `UAM` uploaded), so a rule that selects `iob` there
+  reads what an unnamed one reads. A Loop upload has one forecast, `default`, and no named curve.
+  Its server-side oref source sends oref's main forecast as `default` and the four curves by name.
+- **Undoing oref's trim.** oref shortens its curves (`OrefCurveTails`): it pops trailing equal
+  values from `IOB`, `COB` and `UAM` while more than 13 remain, and cuts `ZT` where it turns up
+  above target. So curves of unequal length are the normal case, and read as sent, `min_of`/`max_of`
+  would stop at the shortest. For a source whose algorithm is oref (the prediction response names it:
+  the snapshot's for the device-status source, oref for the server-side run), the backend carries
+  each named curve that ends before the longest named curve out to that length by holding its last
+  value. `IOB`, `COB` and `UAM` are extended only when at least 13 values long, the shortest a
+  trimmed curve can be; a shorter one simply ends, and is read as sent. `ZT` is extended at any
+  length. For `IOB`, `COB` and `UAM` the held value is exact. For `ZT` it is a lower bound of a
+  rising tail, so what it keeps exact depends on the comparison, not on the selector. It is exact
+  for `min_of` with `<` or `<=`: a held point equals ZT's last kept value, which the minimum was
+  already at or below there, so it cannot make the leaf true, and a lower point of another curve
+  past ZT's end is a real low. For any other comparison over a list that holds ZT it can read too
+  low: `max_of` and `min_of` with `>` or `>=` can miss a value above the limit that only the
+  zero-temp tail would give, and `max_of` with `<` or `<=` can be true where the real zero-temp tail
+  is higher. `curve: zt` reads ZT's own values and is the same with or without the extension (below).
+  `default` is never extended, so it stays as it has always been sent. A single `curve`
+  gives the same truth and the same met point either way: every held point equals the last kept
+  one, which comes first.
+- **`TargetLow` and `TargetHigh`** (wire `target_low`, `target_high`, mg/dL decimals) are the ends of
+  the profile's target range in effect at `now`, which a limit can name (§3, a limit from a fact). The
+  backend fills them only for a rule that names one, from the same lookup that places
+  `GlucoseBucket`: the active profile's target-range schedule version at `now` (its newest before
+  its first), and the entry in force at the tenant's local time of day. With no schedule or no
+  entries the bucket falls back to its clinical defaults and the targets stay absent, so a bucket rule
+  still reads while a target rule waits. Replay fills them per tick, from the profile and schedule in
+  effect at the tick.
+- **`ApsDetermination`** (wire `aps_determination`: `{at, eventual_mgdl?, carbs_required_grams?}`)
+  is the newest determination of the loop at or before `now`, or absent with none. The backend
+  reads the newest APS snapshot at or before `now`, at any age (the engine judges the age, §3):
+  `at` is its timestamp, `eventual_mgdl` its eventual glucose, and `carbs_required_grams` the
+  `carbsReq` of the same command its eventual glucose came from. An OpenAPS, AAPS or Trio command
+  that carries no `carbsReq` sends `0`: oref leaves the key out when the carbohydrate it needs is
+  under its own threshold or the low it foresees is too far ahead to act on, which is the loop
+  saying it needs none. A Loop determination, which reports no such value, and a command the host
+  cannot read send no `carbs_required_grams`, which the leaf reads as absent. The engine receives a
+  number or nothing; this rule is the host's.
 - **An enum name the engine has no member for.** A host newer than the engine can send one in
-  the context (a bucket, a pump mode, a state-span category). The context still reads, and the
-  name degrades only the fact that carries it, by what each leaf can honestly say:
+  the context (a bucket, a pump mode, a state-span category, a forecast curve). The context still
+  reads, and the name degrades only the fact that carries it, by what each leaf can honestly say:
   - `trend_bucket` and `glucose_bucket`: read as an absent bucket, so `trend` and
     `glucose_bucket` are **unknown**, whatever bucket the leaf names.
   - `active_pump_modes[].mode`: the entry is kept with no mode, so the pump is in some mode the
@@ -584,11 +815,20 @@ in §3 plus:
     `for_minutes` has passed, is a next change (§5.3). Several entries are each kept: the
     context lists one entry per active span, in any order, and a repeated mode is not an
     error.
+  - `sensor_state.state`: read as a state that is **not ok, state unknown**. The judged glucose
+    leaves are unknown by `sensor_state` with reason `unrecognised`, and a `sensor_state` leaf is
+    unknown, whatever states it lists. A name the engine cannot place may be a state that makes a
+    glucose value unreliable, and treating it as ok would let a warm-up value fire a low; treating
+    it as absent would read that value as good. Unknown holds the rule (§6.4) and the 24-hour bound
+    tells the person.
   - `active_state_spans[].category`: the span is ignored. A `state_span_active` leaf names a
     category the engine knows, and a span of a name the engine does not know is a different
     category, so it can neither be the leaf's span nor stand for its absence. The leaf reads
     the known spans alone. This assumes a category keeps its name: a host that renames one the
     engine knows must send the new name only once the engine knows it.
+  - `prediction_curves` keys: the curve is dropped. A `predicted` leaf selects only names the
+    engine knows (an unknown one is `unknown_value`, §1.4), so a curve of another name is never a
+    series it lists, and it cannot reach an unnamed `predicted`, which reads `default` alone.
   - A state span's `state` is free text matched exactly, not an enum.
 
   A condition operand naming an unknown member is a different case: the tree cannot be
@@ -649,6 +889,7 @@ still: it measures elapsed time against an anchor that a reading does not move.
 | `time_since_last_carb`, `time_since_last_bolus` | last treatment |
 | `alert_state` | the other alert's trigger or acknowledgement (`for_minutes`) |
 | `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active` | start of the span (`for_minutes`) |
+| `sensor_state` | the state's `since` (`for_minutes`) |
 
 Every other kind is not wall-clock. Two cases are deliberate:
 
@@ -677,8 +918,8 @@ past it they read unknown, as they would on any evaluation then.
 
 A rule whose `on_unknown` is `met` or `not_met` (§6.4) is wall-clock as well when its root kind,
 a node of its condition tree or, while auto-resolve is enabled, a node of its auto-resolve tree
-is `threshold`, `rate_of_change`, `trend` or `glucose_bucket`: such a leaf turns unknown when
-its reading goes stale, with only `now` advancing, and the rule reads that as a known value that
+is `threshold`, `rate_of_change`, `trend`, `glucose_bucket`, `eventual_glucose` or
+`carbs_required`: such a leaf turns unknown when its reading or determination goes stale, with only `now` advancing, and the rule reads that as a known value that
 moves the tracker. `references_wall_clock` reads the rule's `on_unknown` for this.
 
 Under `hold` a rule needs no evaluation at that instant, unless another of its nodes changes
@@ -725,7 +966,8 @@ reads a rule's kinds the same way.
 | Fact | `SensorContext` fields | Kinds that read it |
 |---|---|---|
 | `glucose` | `LatestValue`, `LatestTimestamp`, `LatestReceivedAt`, `LastReadingAt`, `TrendRate`, `TrendBucket`, `GlucoseBucket` | `threshold`, `rate_of_change`, `signal_loss`, `staleness`, `trend`, `glucose_bucket` |
-| `predictions` | `Predictions` | `predicted` |
+| `sensor_state` | `SensorState` | `threshold`, `rate_of_change`, `trend`, `glucose_bucket`, `sensor_state` |
+| `predictions` | `Predictions`, `PredictionCurves` | `predicted` |
 | `insulin` | `IobUnits`, `LastBolusAt`, `ActiveTempBasal` | `iob`, `temp_basal`, `time_since_last_bolus` |
 | `carbs` | `CobGrams`, `LastCarbAt` | `cob`, `time_since_last_carb` |
 | `pump` | `ReservoirUnits`, `ReservoirIsLowerBound`, `PumpBatteryPercent`, `HasEverPumpSnapshot` | `reservoir`, `pump_battery`, `pump_suspended` |
@@ -739,13 +981,20 @@ reads a rule's kinds the same way.
 | `active_alerts` | `ActiveAlerts` | `alert_state` |
 | `do_not_disturb` | `ActiveDoNotDisturb` | `do_not_disturb` |
 | `time_zone` | `TenantTimeZoneId` | `time_of_day`, `day_of_week`, `glucose_bucket` |
+| `aps_determination` | `ApsDetermination` | `eventual_glucose`, `carbs_required` |
+| `target_range` | `TargetLow`, `TargetHigh` | a `threshold`, `predicted` or `eventual_glucose` whose `value_from` names `target_low` or `target_high` |
 
 The containers `composite`, `not` and `sustained` read no fact; a `sustained` timer is
 evaluation state, not context. `pump_suspended` reads two facts: its guard is the pump
 snapshot and its anchor the suspension span. No field carries a therapy profile or
-schedule as such; the target range reaches the context only through `GlucoseBucket`, which a
+schedule as such; the target range reaches the context through `GlucoseBucket`, which a
 host derives from the reading and the schedule at the tenant's local time, so
-`glucose_bucket` reads `time_zone` as well as `glucose`.
+`glucose_bucket` reads `time_zone` as well as `glucose`, and through `TargetLow` and `TargetHigh`.
+A leaf reads the facts of its kind and of the fact its limit names (`facts::leaf_reads`):
+`target_range` for a target, `glucose` and `sensor_state` for `latest_glucose`. So
+`facts::rule_reads` counts the limits of a rule's leaves as well as its kinds. The judged glucose leaves read
+`sensor_state` too: a state that is not ok makes them unknown (§3). A `sensor_state` leaf reads
+`glucose` as well: with no state, a reading with a value says the sensor is not `no_value`.
 `now` is not a fact: it is an argument to evaluation.
 
 A host uses facts to evaluate rules on writes other than glucose: a write evaluates the
@@ -760,9 +1009,14 @@ crate's.
 The backend's map is `ContextFactWrites`: the facts a committed write of each V4 record type
 moves, and for each fact whether every write that moves it announces itself and whether it
 also moves with the clock. Every V4 repository announces each committed write, a restore as a
-creation, through the record-changed event, and so does a data source purge. After the commit,
-outside the write's request, the backend adds the facts the write moved to its tenant's pending
-set (`AlertFactEvaluationScheduler`):
+creation, through the record-changed event, and so does a data source purge. The legacy treatment
+writes that go around the repositories announce too: a V1 or V3 delete, a source's delete and a
+find-query delete name the record types that lost rows, a reclassified treatment the types of the
+records it dropped, and a client id rekey every type it can move. Deduplication announces the record
+types whose shown copy it changed: a reconcile batch, the flag audit and each slice of a full run,
+once their changes have committed, naming no record. After the commit, outside the write's request,
+the backend adds the facts the write moved to its tenant's pending set
+(`AlertFactEvaluationScheduler`):
 
 - A moved `glucose` fact starts an evaluation at once, with every fact pending for the tenant. It
   joins only an evaluation that has not yet begun; once one has begun, a new glucose change starts
@@ -795,17 +1049,69 @@ set (`AlertFactEvaluationScheduler`):
 
 Pending work lives in one process. On shutdown, after the server has drained its requests, every
 pending evaluation starts at once and the host waits for them, until its shutdown timeout. Work the
-timeout cuts off, and an evaluation that fails, records nothing. A pass that skipped a reading
-another pass had claimed is not retried when the claiming pass fails; the next write retries it. The 30 s sweep (§5.1) then
-evaluates the wall-clock rules it does not wait for (§5.3). Every other rule, a plain `threshold`
-for one, has no backstop but the tenant's next reading, as when a request that evaluated inline
-died. A write lands in the process that took it: two processes each evaluate their own writes, and
-the rule lock and the evaluation gate serialise what they decide.
+timeout cuts off, and an evaluation that fails, records nothing. A write lands in the process that
+took it: two processes each evaluate their own writes, and the rule lock and the evaluation gate
+serialise what they decide.
+
+The sweep makes good a reading whose evaluation never completed:
+
+- A pass on a reading it claimed records, per tenant and in one statement of its own, that reading
+  (its timestamp, value and trend rate, the claim's key) once it has decided every enabled rule
+  (`alert_evaluated_readings`). A pass in which a rule threw records nothing and releases its claim;
+  a pass that skipped a rule a newer reading decided records nothing and keeps its claim; a pass
+  that did not claim the reading records nothing. A record that fails to write is logged and the
+  evaluation stands.
+- Each run, the sweep compares the newest reading the alert contexts select (a reading with no value
+  included, §4) with the tenant's record. A tenant with no enabled rule reads neither; one with no
+  reading reads only its newest. When they differ and the reading was stored at least 10 s before
+  the run (`AlertSweepJob.LostEvaluationGrace`), the sweep evaluates every enabled rule against it
+  through the write's own evaluation (`CanonicalAlertEvaluator`, the same claim, enrichment,
+  orchestrator and rule gate). The grace measures the reading's stored time against the API's clock;
+  a stored time ahead of the sweep's clock, which another process's clock running ahead gives, is
+  evaluated at once. A glucose write's evaluation starts with no debounce and normally completes in
+  well under a second, so the grace passes it only when it was lost.
+- A reading that arrived more than 1440 minutes before the run (`AlertSweepJob.LostEvaluationReach`,
+  the largest `glucose_freshness_minutes`, §3) is not evaluated, recorded or logged, and its record
+  is not read. Every glucose leaf ages a reading from its arrival and reads such a reading as stale,
+  so its evaluation can open nothing through glucose; it would only start holds (§6.4) that no
+  evaluation started before. (A rule whose `on_unknown` is `met` or `not_met` is wall-clock and is
+  evaluated as §5.1 says.) A reading stored less than 1440 minutes ago is evaluated however old
+  its timestamp is.
+- The sweep runs a tenant once a process takes its run: on a single process whose shutdown cut an
+  evaluation off, that is the restart. From then, an evaluation that died with its process, that
+  the shutdown timeout cut off, or in which a rule threw is made good by the first sweep at or after
+  the later of 10 s after its reading was stored and the end of the failed pass: at most that plus
+  the 30 s interval. A pass that ran to its end and recorded nothing, because its record failed to
+  write or because it read no enabled rule, keeps its claim for 60 s
+  (`AlertEvaluationWatermark.MaxSkipWindow`), so a rule enabled after it is evaluated at most 60 s
+  plus the 30 s interval after the claim. A write's pass still running in the same process holds
+  its claim too, so a later rule of that pass is decided when the pass reaches it, and the sweep
+  cannot take the reading until 60 s after the claim. A process that starts reads the record, so a
+  reading evaluated before the restart is not evaluated again.
+- The claim keeps the sweep's pass and the write's pass on a reading from both running in one
+  process. A write's pass still running in another process past the grace is evaluated a second
+  time; the transition lock re-reads the tracker and drops the stale decision, so the excursion
+  opens once and its opening is dispatched once (§7).
+- A reading that makes some rule throw on every pass keeps its tenant evaluated, every enabled rule,
+  on each sweep until the rule stops throwing, the next reading arrives, or the reading is more than
+  1440 minutes old. The orchestrator logs each failing rule on each pass, and the evaluator logs a
+  pass that throws before it ends on each run.
+- The sweep logs a reading it evaluated once per process, and only once its pass has run: as
+  information when the tenant has no record yet, which is the first sweep of each tenant after the
+  record begins, and as a warning when the record names another reading.
+
+What stays uncovered: the record names readings only. A lost evaluation of a write that moved
+another fact (a pump snapshot moving `iob`, say) is made good by the next reading's evaluation, or,
+when the newest reading itself was never evaluated, by the sweep's pass, which reads every fact
+afresh; with neither, a rule that reads no clock waits for the next reading. The record holds the
+reading's stored trend rate. A reading with none takes a rate derived from the nearest earlier
+reading (§4), so a backfilled earlier reading can change that rate and leave the key unchanged:
+when the backfill's evaluation is lost, a `rate_of_change` or `trend` rule over the derived rate
+waits for the next reading. A wall-clock rule is evaluated by the sweep as §5.1 and §5.3 say.
 
 Some writes do not announce, and their facts' rules are evaluated only by the next reading and,
 when wall-clock, by the sweep: state spans, trackers, sleep sessions, alert instances and Do
-Not Disturb are written by stores outside the V4 repositories, and deduplication re-picks which
-copy of a device event or a glucose reading reads are shown without announcing it.
+Not Disturb are written by stores outside the V4 repositories.
 
 ### 5.3 Next change
 
@@ -834,11 +1140,14 @@ even when the root does not. Containers contribute only through their children, 
 | Node | Contribution |
 |---|---|
 | `signal_loss`, `staleness`, `site_age`, `sensor_age`, `tracker_age`, `loop_stale`, `loop_enaction_stale`, `time_since_last_carb`, `time_since_last_bolus` | The first instant the elapsed time since the anchor, computed exactly as evaluation computes it (§1.3), changes the comparison: where it reaches the bound for `<` and `>=`, where it passes it for `<=` and `>`, both for `==`. |
-| `alert_state`, `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active` with `for_minutes` | On the active side, with the span or alert present, the first instant it has held for `for_minutes`; for `pump_state` over an unrecognised mode that is where the leaf turns from false to unknown. |
+| `alert_state`, `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active`, `sensor_state` with `for_minutes` | On the active side, with the span or alert present (for `sensor_state`, a listed state with a `since`), the first instant it has held for `for_minutes`; for `pump_state` over an unrecognised mode that is where the leaf turns from false to unknown. |
 | `sustained` with a run (including one started by this evaluation) | The first instant `minutes` have passed since the run's start, whatever its child returned. The start can be before the evaluation that set it (§3), so this can be well before `now + minutes`; once passed it contributes nothing. Without a run, only what its child contributes. |
-| `threshold`, `rate_of_change`, `trend`, `glucose_bucket` with their fact present and the reading fresh (§3) | The instant the reading goes stale: where the time since its arrival passes the rule's freshness bound, so arrival `+ bound` on the tick grid, and the next tick when that is `now`. |
+| `threshold`, `rate_of_change`, `trend`, `glucose_bucket` with their fact present, the sensor not reported other than ok, and the reading fresh (§3) | The instant the reading goes stale: where the time since its arrival passes the rule's freshness bound, so arrival `+ bound` on the tick grid, and the next tick when that is `now`. |
+| `predicted`, `eventual_glucose` whose limit names `latest_glucose`, with the reading present, the sensor not reported other than ok, and the reading fresh | The instant the reading goes stale, as for `threshold`. |
+| `eventual_glucose`, `carbs_required` with the determination and its value present, and the determination fresh (§3) | The instant it goes stale: `At + bound` on the tick grid, as for a reading. |
 | `time_of_day` | The next instant the wall clock in the resolved zone (§4) reads `from` or `to`. An edge inside a DST gap is the instant the gap ends; an edge inside a fold is both instants it is read and the fold itself, where the wall clock steps back over it. |
 | `day_of_week` | The next local midnight in the tenant zone, with gaps and folds as for `time_of_day`. |
+| `threshold`, `rate_of_change`, `trend`, `glucose_bucket`, `sensor_state`, and a leaf whose limit names `latest_glucose`, with a sensor state whose `until` is after `now` | That `until`, where the state lapses (§4). |
 | Tracker in `hysteresis` | The instant its window closes (§6.1), or, once that has passed, at once. This holds for an evaluation the rule held (§6.4) as well. |
 | A body with a clear margin above `0` (§3) whose evaluation closed the excursion | At once. The next evaluation reads the plain limit, and can answer false where this one read true: an auto-resolve that closes an excursion the body held by its margin leaves a rule whose next evaluation, read closed, finds the body false and re-arms. An opening adds nothing: the next evaluation reads the root at least as true (§3), so it continues. A margin changes nothing else: a value leaf contributes no instant with or without one, and the open flag moves only on a tracker transition. |
 | Tracker held, its bound not yet reported | `HeldSince + HOLD_BOUND` (§6.4), measured as §5.4 measures an anchor, or, once that has passed, at once. With every fact frozen the root stays unknown, so the hold goes on to its bound. |
@@ -871,7 +1180,16 @@ does not report it.
 
 The backend's sweep waits for it only for a wall-clock rule every fact of which (§5.2) has an
 announcing write for every write that moves it and does not move with the clock: `glucose`,
-`aps`, `uploader` and `transmitter` (`ContextFactWrites.SweepMayWaitFor`). It waits only while
+`aps`, `uploader`, `transmitter`, `sensor_state`, `aps_determination` and `device_ages`
+(`ContextFactWrites.SweepMayWaitFor`). `aps_determination` moves with an APS snapshot write, which
+announces itself; it goes stale at an instant the engine reports as a next change, so it does not
+move with the clock. `device_ages` moves with a device event written, deleted or restored, and with
+deduplication changing which copy of a site change or sensor start reads show, each of which
+announces itself (§5.2).
+`sensor_state` moves with a reading (one with no value is `no_value`) and with a sensor state report
+written or deleted, each of which announces itself, as does a purge that deletes one; a report's
+lapse is its `until`, which the engine reports as a next change, so it does not move with the
+clock. It waits only while
 the newest canonical reading is usable, the one a write's evaluation measures, and the context
 carries the glucose facts the recorded value was computed from. A glucose reading deleted, edited
 or recomputed, or re-picked by deduplication, moves those facts, so the sweep then evaluates. An
@@ -884,10 +1202,15 @@ Every other wall-clock rule keeps the 30 s cadence:
   announces: insulin and carbs on board decay, the reservoir estimate depletes by the basal
   delivered, a forecast ages, and the calendar and the target-range schedule entry follow the
   tenant's local time. A `glucose_bucket` rule reads `time_zone`, so it never waits.
+- `target_range` is moved by a target-range schedule, a profile activation or a therapy settings
+  write, each of which announces itself, and with the clock at each schedule boundary. The engine
+  knows no boundary and reports none, so a rule whose limit names `target_low` or `target_high`
+  never waits; only such rules lose the wait, and a rule whose limit is a number or names
+  `latest_glucose` reads only `glucose` and `sensor_state` for it. A target rule that is not
+  wall-clock is, like a `glucose_bucket` rule, evaluated at the next reading after a boundary
+  (§5.1).
 - `state_spans`, `trackers`, `sleep`, `active_alerts` and `do_not_disturb` have writes that do not
   announce (§5.2).
-- `device_ages` has one too: deduplication can re-pick the copy of a site change or sensor start
-  that reads show, moving the anchor by the match tolerance with no announcement.
 
 A held evaluation (§6.4) records its next change like any other: the value is read from the
 state the evaluation left, which is the state it found with its hold's start, and it is keyed by
@@ -923,6 +1246,8 @@ The rule applies to every comparison of `now - anchor`:
 | `last_carb_at`, `last_bolus_at` | `time_since_last_carb`, `time_since_last_bolus` |
 | `active_alerts` | `alert_state` `for_minutes` |
 | `active_pump_suspension`, `active_override`, `active_do_not_disturb`, `active_pump_modes`, `active_state_spans` | `for_minutes` on `pump_suspended`, `override_active`, `do_not_disturb`, `pump_state`, `state_span_active` |
+| `sensor_state` | `for_minutes` on `sensor_state`, from the state's `since` |
+| `aps_determination` | the freshness of `eventual_glucose` and `carbs_required` (§3) |
 | `sustained` | a `sustained` run's start (§3) |
 | `hysteresis_started_at` | the tracker's hysteresis window (§6.1), including a start adopted from `UpdatedAt` |
 | `held_since` | the hold's bound (§6.4) |
@@ -1298,9 +1623,14 @@ it:
   rule is evaluated there, as live evaluates every rule per reading (§5.2).
 - A **sample** tick in a gap between readings, every 5 minutes after the last tick until the next
   reading. It is a sweep: each rule's elapsed hysteresis window closes (§6.1), then the rules the
-  live sweep evaluates (wall-clock, §5.1) and the rules that read a fact other than `glucose` and
-  `time_zone` (§5.2) are evaluated. A rule that reads only those is not: live evaluates it only
-  per reading, so between readings a `sustained` run over its reading cannot complete.
+  live sweep evaluates (wall-clock, §5.1) and the rules that read a fact other than `glucose`,
+  `time_zone`, `sensor_state` and `target_range` (§5.2) are evaluated. `time_zone` and
+  `target_range` move between readings with the clock, which evaluates nothing live, so a
+  target rule that is not wall-clock opens at the next reading after a schedule boundary in replay
+  as live. A rule that reads only those is not: live
+  evaluates it only per reading, so between readings a `sustained` run over its reading cannot
+  complete. Replay has no tick for a device-status write: live evaluates the rules that read
+  `sensor_state` at a status write (§5.2), and replay sees that status at its next tick.
 
 **Where a reading is evaluated.** Live evaluates a reading when it arrives, which the backend
 stores as the reading's `CreatedAt`. Replay tells a late upload from imported history by the
@@ -1421,7 +1751,13 @@ after the last tick, is an error (`StepLimit`), not a result cut short.
 
 - Window resolution, the canonical reading stream, the ticks above and their enrichment as of
   each tick. Glucose is the newest reading evaluated by the tick, and `LastReadingAt` is that
-  reading's time, so a gap after a reading reads as stale. `LatestReceivedAt` is its arrival
+  reading's time, so a gap after a reading reads as stale. A newest reading with no value is
+  replayed as live reads it (§4): no value, `SensorState` `no_value` from the first such reading
+  after the last one with a value, and `LastReadingAt` that last reading's time, found among the
+  readings replay has loaded rather than 24 hours back. The sensor state a device status reports
+  is read as of each tick through the same enrichment as live, from sensor state reports stored by
+  the tick (receipt-gated), so replay sees a report where live could first have read it. Unlike
+  live, a report that arrives between readings is evaluated at the next tick, not at its write. `LatestReceivedAt` is its arrival
   when that was a live arrival, else absent (Ticks). `until` is the window's end.
 - Do Not Disturb: for each tick, the rules an excursion opening on it, or on a step before the
   next tick, is recorded for as suppressed (the gate live delivery applies on open,
@@ -1461,6 +1797,9 @@ after the last tick, is an error (`StepLimit`), not a result cut short.
 - **The rules as they were.** Replay evaluates the rules as they are now, not as they were
   stored over the window, and reads no `enabled_at` (above).
 - **Clock anomalies** (§5.4) are not reported.
+- **What a true leaf met** (`met_by`, §3) is not in the replay output; the leaf log reports truth
+  only. The forecast curves and the determination are read at each tick through the same
+  enrichment as live, so replay evaluates the same selections.
 
 **Where replay differs from live.** Replay steps the ideal host of §5.3. The backend differs in
 these, each by at most its 30 s sweep:

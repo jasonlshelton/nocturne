@@ -116,7 +116,7 @@ describe("AlertCard for a rule held for 24 hours", () => {
 
     expect(cardTitle(card)).toBe("Warning: Urgent low");
     expect(cardTexts(card)).toEqual([
-      "This rule has waited 24 hours for data, so it cannot send alerts until the data comes back.",
+      "This rule has waited 24 hours for usable data, so it cannot send alerts until usable data comes back.",
     ]);
     expect(cardFields(card)).toEqual(["Glucose readings: Too old", "Pump data: Missing"]);
     expect(cardButtons(card)).toHaveLength(0);
@@ -126,7 +126,7 @@ describe("AlertCard for a rule held for 24 hours", () => {
     const card = AlertCard({ payload: { ...held, kind: "held_closed" } });
 
     expect(cardTexts(card)).toEqual([
-      "The data for this alert has been missing for 24 hours, so Nocturne closes the alert. The rule cannot send alerts until the data comes back.",
+      "This alert had no usable data for 24 hours, so Nocturne closes the alert. The rule cannot send alerts until usable data comes back.",
     ]);
     expect(cardButtons(card)).toHaveLength(0);
   });
@@ -171,6 +171,90 @@ describe("AlertCard with no glucose reading", () => {
     expect(cardTexts(card).join(" ")).not.toMatch(/N\/A|Alex is/);
     expect(cardFields(card)).toHaveLength(0);
     expect(cardButtons(card).map((b) => b.id)).toEqual(["ack_alert"]);
+  });
+});
+
+describe("AlertCard for an alert a forecast or loop condition started", () => {
+  it("names the curve, the time ahead and the value that met the condition", () => {
+    const card = AlertCard({
+      payload: {
+        ...payload,
+        alertType: "predicted",
+        metBy: [
+          { leafId: 0, kind: "predicted", curve: "cob", offsetMinutes: 20, value: 65 },
+          { leafId: 1, kind: "carbs_required", value: 12 },
+          { leafId: 2, kind: "eventual_glucose", value: 75 },
+        ],
+      },
+    });
+
+    expect(cardFields(card)).toEqual(
+      expect.arrayContaining([
+        "COB forecast: 65 mg/dL in 20 minutes",
+        "Carbs needed: 12 g",
+        "Eventual glucose: 75 mg/dL",
+      ]),
+    );
+  });
+
+  it("shows the forecast in the reader's unit, and a curve this build does not know as it was sent", () => {
+    const card = AlertCard({
+      payload: { ...payload, metBy: [{ leafId: 0, kind: "predicted", curve: "ar2", offsetMinutes: 5, value: 72 }] },
+      unit: "mmol/L",
+    });
+
+    expect(cardFields(card)).toContain("ar2: 4.0 mmol/L in 5 minutes");
+  });
+
+  it("keys each line on its condition, so two from one curve both show", () => {
+    const card = AlertCard({
+      payload: {
+        ...payload,
+        metBy: [
+          { leafId: 0, kind: "predicted", curve: "cob", offsetMinutes: 20, value: 65 },
+          { leafId: 2, kind: "predicted", curve: "cob", offsetMinutes: 30, value: 190 },
+        ],
+      },
+    });
+
+    expect(cardFields(card).filter((f) => f.startsWith("COB forecast"))).toEqual([
+      "COB forecast: 65 mg/dL in 20 minutes",
+      "COB forecast: 190 mg/dL in 30 minutes",
+    ]);
+  });
+
+  it("gives the limit first and its source second, and a fact this build does not know as it was sent", () => {
+    const card = AlertCard({
+      payload: {
+        ...payload,
+        metBy: [
+          { leafId: 0, kind: "threshold", value: 66, limit: 70, limitFact: "target_low", limitOffset: -10 },
+          { leafId: 1, kind: "threshold", value: 76, limit: 80, limitFact: "target_low" },
+          { leafId: 2, kind: "predicted", curve: "default", offsetMinutes: 15, value: 49, limit: 50, limitFact: "latest_glucose", limitOffset: -30 },
+          { leafId: 3, kind: "eventual_glucose", value: 200, limit: 180, limitFact: "target_middle" },
+          { leafId: 4, kind: "eventual_glucose", value: 220, limit: 200, limitFact: "target_high", limitOffset: 20 },
+        ],
+      },
+    });
+
+    expect(cardFields(card)).toEqual(
+      expect.arrayContaining([
+        "Glucose: 66 mg/dL, limit 70 mg/dL (target low minus 10 mg/dL)",
+        "Glucose: 76 mg/dL, limit 80 mg/dL (target low)",
+        "Forecast: 49 mg/dL in 15 minutes, limit 50 mg/dL (latest glucose minus 30 mg/dL)",
+        "Eventual glucose: 200 mg/dL, limit 180 mg/dL (target_middle)",
+        "Eventual glucose: 220 mg/dL, limit 200 mg/dL (target high plus 20 mg/dL)",
+      ]),
+    );
+  });
+
+  it("shows nothing for a kind this build does not know, or with no met point", () => {
+    const fields = cardFields(AlertCard({ payload }));
+    const unknown = cardFields(
+      AlertCard({ payload: { ...payload, metBy: [{ leafId: 0, kind: "warp_core", value: 1 }] } }),
+    );
+
+    expect(unknown).toEqual(fields);
   });
 });
 

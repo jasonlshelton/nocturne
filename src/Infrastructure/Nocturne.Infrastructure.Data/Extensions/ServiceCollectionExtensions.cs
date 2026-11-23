@@ -69,6 +69,21 @@ public static class ServiceCollectionExtensions
             PostgreSqlConfiguration.Resolve(connectionString, configuration, configure));
 
     /// <summary>
+    /// Register the resolved options so the host's resolution is observable from DI. Separate from
+    /// <see cref="AddPostgreSqlInfrastructure(IServiceCollection, PostgreSqlConfiguration)"/>
+    /// because a host that skips the pool (the test host runs as Testing) still exposes them.
+    /// </summary>
+    /// <returns>Service collection for chaining</returns>
+    public static IServiceCollection AddPostgreSqlConfiguration(
+        this IServiceCollection services,
+        PostgreSqlConfiguration config
+    )
+    {
+        services.AddSingleton(config);
+        return services;
+    }
+
+    /// <summary>
     /// Add PostgreSQL data services from already-resolved options. The single registration path:
     /// every other overload resolves its options through
     /// <see cref="PostgreSqlConfiguration.Resolve"/> and lands here.
@@ -185,9 +200,11 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ISubjectRepository, SubjectRepository>();
         services.AddTransient<ITenantRepository, TenantRepository>();
         services.AddTransient<ITenantMembershipRepository, TenantMembershipRepository>();
+        services.AddTransient<IMembershipReasonLapses, MembershipReasonLapses>();
         services.AddTransient<IOidcProviderRepository, OidcProviderRepository>();
         services.AddTransient<IRoleRepository, RoleRepository>();
         services.AddTransient<IPasskeyCredentialRepository, PasskeyCredentialRepository>();
+        services.AddTransient<ISpentPasskeyChallengeRepository, SpentPasskeyChallengeRepository>();
         services.AddTransient<ITotpCredentialRepository, TotpCredentialRepository>();
         services.AddTransient<ITrustedDeviceRepository, TrustedDeviceRepository>();
         services.AddTransient<IRecoveryCodeRepository, RecoveryCodeRepository>();
@@ -249,6 +266,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPumpSnapshotRepository, PumpSnapshotRepository>();
         services.AddScoped<IUploaderSnapshotRepository, UploaderSnapshotRepository>();
         services.AddScoped<IDeviceStatusExtrasRepository, DeviceStatusExtrasRepository>();
+        services.AddScoped<ISensorStateReportRepository, SensorStateReportRepository>();
         services.AddScoped<IDeviceStatusGroupRepository, DeviceStatusGroupRepository>();
 
         services.AddScoped<ITherapySettingsRepository, TherapySettingsRepository>();
@@ -270,6 +288,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IAlertRepository, AlertRepository>();
         services.AddScoped<IAlertTrackerRepository, AlertTrackerRepository>();
+        services.AddScoped<IEvaluatedReadingStore, AlertEvaluatedReadingRepository>();
         services.AddScoped<IAlertRuleRepository, AlertRuleRepository>();
         services.AddScoped<IDndWindowRepository, DndWindowRepository>();
         services.AddScoped<ITenantAlertSettingsRepository, TenantAlertSettingsRepository>();

@@ -39,12 +39,14 @@ use nocturne_alerts_core::excursion::{
     CloseReason, ExcursionTracker, HOLD_BOUND, TrackerRuleConfig, TrackerState, TrackerStateKind,
     Transition, TransitionType,
 };
+use nocturne_alerts_core::facts::ContextFact;
 use nocturne_alerts_core::model::{
     ConditionKind, Node, ParseError, Payload, Reason, parse_payload,
 };
 use nocturne_alerts_core::next_change::RESOLUTION;
 use nocturne_alerts_core::sustained::{TimerOp, TimerOpKind, TimerState, TimerStore};
 use nocturne_alerts_core::truth::Truth;
+use nocturne_alerts_core::unknown::UnknownReason;
 use nocturne_alerts_core::validate::{validate_node, validate_rule};
 
 use clock::{clock_context, enabled_at, naming_the_context, word_or_unrecognised};
@@ -2153,5 +2155,159 @@ proptest! {
             _ => Truth::Unknown,
         };
         prop_assert_eq!(bucket_truth, expected);
+    }
+}
+
+/// The kinds of the leaves of a node's JSON in leaf-id order (engine-semantics.md §2.2).
+fn leaf_kinds(node: &Value) -> Vec<String> {
+    let kind = node["type"].as_str().unwrap();
+    let payload = &node[kind];
+    match kind {
+        "composite" => payload["conditions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(leaf_kinds)
+            .collect(),
+        "not" | "sustained" => leaf_kinds(&payload["child"]),
+        _ => vec![kind.to_owned()],
+    }
+}
+
+fn with_sensor_state(tick: &Tick, state: &str, since: Option<i64>) -> SensorContext {
+    let mut context = tick.context.clone();
+    let mut sensor = json!({ "state": state });
+    if let Some(ago) = since {
+        sensor["since"] = (tick.now - TimeDelta::seconds(ago)).to_rfc3339().into();
+    }
+    context["sensor_state"] = sensor;
+    serde_json::from_value(context).unwrap()
+}
+
+proptest! {
+    /// §3 sensor state: with no `sensor_state` leaf, a context whose sensor is ok, from any start,
+    /// evaluates byte for byte as one that says nothing of the sensor, tick after tick.
+    #[test]
+    fn an_ok_sensor_evaluates_as_no_sensor_state(
+        spec in rule_spec(),
+        ticks in skewed_ticks(),
+        since in option::of(-600..=7200i64),
+    ) {
+        let rule = rule_from_wire(spec.wire());
+        let (mut absent, mut ok) = (EngineState::new(), EngineState::new());
+        for tick in &ticks {
+            let a = evaluate_rule(&rule, &context_of(tick), tick.now, &mut absent, true);
+            let b = evaluate_rule(&rule, &with_sensor_state(tick, "ok", since), tick.now, &mut ok, true);
+            prop_assert_eq!(a.to_json(), b.to_json());
+        }
+    }
+
+    /// §3 sensor state: while the sensor is in any state but ok, or one the engine has no name
+    /// for, no `threshold` leaf is known, and no root is unknown by the glucose fact: the
+    /// sensor's state names why.
+    #[test]
+    fn a_sensor_that_is_not_ok_leaves_no_glucose_leaf_known(
+        spec in rule_spec(),
+        ticks in skewed_ticks(),
+        state in select(vec!["warming_up", "calibration_needed", "error", "expired", "no_value", "rebooting"]),
+    ) {
+        let rule = rule_from_wire(spec.wire());
+        let kinds = leaf_kinds(&node("composite", spec.wire()["condition_params"].clone()));
+        let reason = if state == "rebooting" {
+            UnknownReason::Unrecognised
+        } else {
+            UnknownReason::SensorNotOk
+        };
+        let mut engine = EngineState::new();
+        for tick in &ticks {
+            let ctx = with_sensor_state(tick, state, None);
+            let outcome = evaluate_rule(&rule, &ctx, tick.now, &mut engine, true);
+            let evaluation = outcome.evaluation.expect("the body is evaluable");
+            let leaves = evaluation.leaves.expect("the leaves were requested");
+            for (kind, truth) in kinds.iter().zip(&leaves) {
+                if kind == "threshold" {
+                    prop_assert!(truth.is_unknown(), "{kind} read {truth:?} under {state}");
+                }
+            }
+            for (fact, why) in evaluation.unknown.iter() {
+                prop_assert_ne!(fact, ContextFact::Glucose);
+                if fact == ContextFact::SensorState {
+                    prop_assert_eq!(why, reason);
+                }
+            }
+        }
+    }
+}
+
+fn forecast() -> BoxedStrategy<Value> {
+    vec(
+        (0..=60i32, 40..=300i32)
+            .prop_map(|(offset, mgdl)| json!({ "offset_minutes": offset, "mgdl": mgdl })),
+        0..=4,
+    )
+    .prop_map(Value::from)
+    .boxed()
+}
+
+fn curves_and_determination() -> BoxedStrategy<(Value, Value)> {
+    (
+        vec(option::of(forecast()), 6),
+        option::of((
+            -600..=1800i64,
+            option::of(40..=300i32),
+            option::of(0..=60i32),
+        )),
+    )
+        .prop_map(|(series, determination)| {
+            let names = ["iob", "cob", "uam", "zt", "default", "ar2"];
+            let curves: Map<String, Value> = names
+                .iter()
+                .zip(series)
+                .filter_map(|(name, s)| Some(((*name).to_owned(), s?)))
+                .collect();
+            let determination = determination.map_or(Value::Null, |(ago, eventual, carbs)| {
+                json!({
+                    "at": (base() - TimeDelta::seconds(ago)).to_rfc3339(),
+                    "eventual_mgdl": eventual,
+                    "carbs_required_grams": carbs,
+                })
+            });
+            (Value::Object(curves), determination)
+        })
+        .boxed()
+}
+
+proptest! {
+    /// §3 `predicted`, §4: a rule that names no curve and reads no determination evaluates byte
+    /// for byte the same whether or not the context carries named curves and a determination, tick
+    /// after tick: only `default` (`predictions`, the old wire shape) reaches it.
+    #[test]
+    fn named_curves_and_a_determination_move_no_rule_that_does_not_name_them(
+        spec in rule_spec(),
+        predicted in (select(vec!["<", "<=", ">", ">=", "=="]), 40..=300i32, 1..=60i32),
+        ticks in skewed_ticks(),
+        forecasts in vec((forecast(), curves_and_determination()), 24),
+    ) {
+        let body = spec.wire()["condition_params"].clone();
+        let (op, value, within) = predicted;
+        let mut wire = spec.wire();
+        wire["condition_params"] = json!({ "operator": "or", "conditions": [
+            node("composite", body),
+            node("predicted", json!({ "operator": op, "value": value, "within_minutes": within })),
+        ] });
+        let rule = rule_from_wire(wire);
+        let (mut without, mut with) = (EngineState::new(), EngineState::new());
+        for (tick, (default, (curves, determination))) in ticks.iter().zip(&forecasts) {
+            let mut old = tick.context.clone();
+            old["predictions"] = default.clone();
+            let mut new = old.clone();
+            new["prediction_curves"] = curves.clone();
+            new["aps_determination"] = determination.clone();
+            let old: SensorContext = serde_json::from_value(old).unwrap();
+            let new: SensorContext = serde_json::from_value(new).unwrap();
+            let a = evaluate_rule(&rule, &old, tick.now, &mut without, true);
+            let b = evaluate_rule(&rule, &new, tick.now, &mut with, true);
+            prop_assert_eq!(a.to_json(), b.to_json());
+        }
     }
 }

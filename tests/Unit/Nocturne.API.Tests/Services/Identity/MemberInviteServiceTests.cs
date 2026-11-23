@@ -60,7 +60,7 @@ public class MemberInviteServiceTests : IDisposable
             new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), new MemberInviteRepository(_dbContext.AsFactory()), new SubjectRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off),
             _dbContext.AsFactory(),
             _jwtService.Object,
-            new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), _time, Moq.Mock.Of<Nocturne.Core.Contracts.Identity.IMemberInviteRepository>()),
+            new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), _time, Moq.Mock.Of<Nocturne.Core.Contracts.Identity.IMemberInviteRepository>(), new Nocturne.Infrastructure.Data.Repositories.TeamRepository(_dbContext.AsFactory())),
             Options.Create(new BaseDomainOptions { BaseDomain = BaseDomain }),
             _time,
             logger.Object, AccountLinkRoutes.Off,
@@ -89,6 +89,14 @@ public class MemberInviteServiceTests : IDisposable
         {
             Id = _acceptorSubjectId,
             Name = "Acceptor User",
+        });
+
+        // An invite lives only while its maker is a member in force.
+        _dbContext.TenantMembers.Add(new TenantMemberEntity
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = _tenantId,
+            SubjectId = _creatorSubjectId,
         });
 
         // Seed a follower role for the tenant

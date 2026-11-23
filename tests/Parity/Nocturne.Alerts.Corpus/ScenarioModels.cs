@@ -153,6 +153,9 @@ public sealed record ScenarioContext
     [JsonPropertyName("last_site_change_at")] public DateTime? LastSiteChangeAt { get; init; }
     [JsonPropertyName("last_sensor_start_at")] public DateTime? LastSensorStartAt { get; init; }
     public List<ScenarioPrediction>? Predictions { get; init; }
+    /// <summary>Named curves by wire name; a name the host has no member for is not read.</summary>
+    [JsonPropertyName("prediction_curves")] public Dictionary<string, List<ScenarioPrediction>>? PredictionCurves { get; init; }
+    [JsonPropertyName("aps_determination")] public ScenarioApsDetermination? ApsDetermination { get; init; }
     [JsonPropertyName("active_alerts")] public List<ScenarioActiveAlert>? ActiveAlerts { get; init; }
     [JsonPropertyName("last_aps_cycle_at")] public DateTime? LastApsCycleAt { get; init; }
     [JsonPropertyName("last_aps_enacted_at")] public DateTime? LastApsEnactedAt { get; init; }
@@ -173,6 +176,8 @@ public sealed record ScenarioContext
     [JsonPropertyName("has_ever_aps_sensitivity")] public bool HasEverApsSensitivity { get; init; }
     /// <summary>Wire form of GlucoseBucket (<c>very_low</c> … <c>very_high</c>).</summary>
     [JsonPropertyName("glucose_bucket")] public string? GlucoseBucket { get; init; }
+    [JsonPropertyName("target_low")] public decimal? TargetLow { get; init; }
+    [JsonPropertyName("target_high")] public decimal? TargetHigh { get; init; }
     [JsonPropertyName("last_carb_at")] public DateTime? LastCarbAt { get; init; }
     [JsonPropertyName("last_bolus_at")] public DateTime? LastBolusAt { get; init; }
     [JsonPropertyName("tenant_time_zone_id")] public string? TenantTimeZoneId { get; init; }
@@ -180,7 +185,19 @@ public sealed record ScenarioContext
     [JsonPropertyName("active_state_spans")] public List<ScenarioStateSpan>? ActiveStateSpans { get; init; }
     [JsonPropertyName("active_trackers")] public List<ScenarioTrackerReference>? ActiveTrackers { get; init; }
     [JsonPropertyName("sleep_session_active")] public bool SleepSessionActive { get; init; }
+    [JsonPropertyName("sensor_state")] public ScenarioSensorState? SensorState { get; init; }
 }
+
+/// <summary>State uses the snake_case wire form of SensorState (<c>"warming_up"</c>, <c>"no_value"</c>, …).</summary>
+public sealed record ScenarioSensorState(
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("since")] DateTime? Since,
+    [property: JsonPropertyName("until")] DateTime? Until = null);
+
+public sealed record ScenarioApsDetermination(
+    [property: JsonPropertyName("at")] DateTime At,
+    [property: JsonPropertyName("eventual_mgdl")] decimal? EventualMgdl,
+    [property: JsonPropertyName("carbs_required_grams")] decimal? CarbsRequiredGrams);
 
 public sealed record ScenarioPrediction(
     [property: JsonPropertyName("offset_minutes")] int OffsetMinutes,
@@ -273,6 +290,13 @@ public sealed record ExpectedRuleResult
     public List<ExpectedLeaf>? Leaves { get; init; }
 
     /// <summary>
+    /// What each true forecast or loop leaf met its comparison with; carried only when one did
+    /// (docs/alerts/engine-semantics.md §3, met by).
+    /// </summary>
+    [JsonPropertyName("met_by")]
+    public List<ExpectedMetPoint>? MetBy { get; init; }
+
+    /// <summary>
     /// Tracker transition: <c>none | opened | continues | hysteresis_started |
     /// hysteresis_resumed | closed</c>.
     /// </summary>
@@ -313,6 +337,16 @@ public sealed record ExpectedRuleResult
     [JsonPropertyName("clock_anomaly")]
     public List<ExpectedClockAnomaly>? ClockAnomaly { get; init; }
 }
+
+public sealed record ExpectedMetPoint(
+    [property: JsonPropertyName("leaf_id")] int LeafId,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("curve")] string? Curve,
+    [property: JsonPropertyName("offset_minutes")] int? OffsetMinutes,
+    [property: JsonPropertyName("value")] decimal Value,
+    [property: JsonPropertyName("limit")] decimal? Limit = null,
+    [property: JsonPropertyName("limit_fact")] string? LimitFact = null,
+    [property: JsonPropertyName("limit_offset")] decimal? LimitOffset = null);
 
 public sealed record ExpectedClockAnomaly(
     [property: JsonPropertyName("fact")] string Fact,

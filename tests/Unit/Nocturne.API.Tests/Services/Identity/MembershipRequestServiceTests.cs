@@ -63,7 +63,7 @@ public class MembershipRequestServiceTests : IDisposable
             new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off),
             new SubjectRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off),
             _dbContext.AsFactory(),
-            new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), _time, Moq.Mock.Of<Nocturne.Core.Contracts.Identity.IMemberInviteRepository>()),
+            new TenantRoleService(new TenantMembershipRepository(_dbContext.AsFactory(), AccountLinkRoutes.Off), _time, Moq.Mock.Of<Nocturne.Core.Contracts.Identity.IMemberInviteRepository>(), new Nocturne.Infrastructure.Data.Repositories.TeamRepository(_dbContext.AsFactory())),
             _notificationService.Object,
             _audit.Object,
             _time,
@@ -528,7 +528,7 @@ public class MembershipRequestServiceTests : IDisposable
         // Create first request, then deny it so a second pending can be created
         await _service.CreateRequestAsync(_tenantId, _subjectId, "First");
         var first = await _dbContext.MembershipRequests.FirstAsync();
-        first.CreatedAt = DateTime.UtcNow.AddDays(-1);
+        first.CreatedAt = _time.GetUtcNow().UtcDateTime.AddDays(-1);
         await _dbContext.SaveChangesAsync();
 
         // Deny so that duplicate check passes
@@ -736,6 +736,11 @@ public class MembershipRequestServiceTests : IDisposable
         _dbContext.Subjects.Add(new SubjectEntity
         {
             Id = requester, Name = "Sam Smith", IsActive = isActive, ApprovalStatus = approvalStatus,
+        });
+        _dbContext.PasskeyCredentials.Add(new PasskeyCredentialEntity
+        {
+            Id = Guid.CreateVersion7(), SubjectId = requester, CredentialId = Guid.CreateVersion7().ToByteArray(),
+            PublicKey = [1, 2, 3], CreatedAt = DateTime.UtcNow,
         });
         _dbContext.MembershipRequests.Add(new MembershipRequestEntity
         {

@@ -32,6 +32,7 @@ public class CanonicalAlertEvaluatorTests
     private readonly Mock<IAlertRepository> _rules = new();
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(Reading, TimeSpan.Zero));
     private readonly Mock<IClockAnomalyNotice> _notice = new();
+    private readonly Mock<IEvaluatedReadingStore> _evaluated = new();
     private readonly AlertEvaluationWatermark _watermark;
     private readonly AlertRuleDecisions _decisions;
 
@@ -43,6 +44,9 @@ public class CanonicalAlertEvaluatorTests
     {
         _watermark = new AlertEvaluationWatermark(_clock);
         _decisions = new AlertRuleDecisions(_clock);
+        _orchestrator
+            .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AlertPassOutcome.Decided);
         RulesAre(Rule(AlertConditionType.Threshold, """{"direction":"below","value":70}"""));
     }
 
@@ -63,6 +67,7 @@ public class CanonicalAlertEvaluatorTests
             Mock.Of<ITenantAccessor>(a => a.TenantId == tenantId),
             _watermark,
             decisions ?? _decisions,
+            _evaluated.Object,
             _notice.Object,
             NullLogger<CanonicalAlertEvaluator>.Instance);
 
@@ -174,7 +179,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .SetupSequence(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("engine unavailable"))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
         var evaluator = Evaluator(Tenant);
 
         await evaluator.EvaluateAsync(GlucoseMoved);
@@ -253,14 +258,38 @@ public class CanonicalAlertEvaluatorTests
         _watermark.AlreadyEvaluated(Guid.Empty, Latest(Reading)).Should().BeFalse();
     }
 
+    /// <summary>
+    /// A newest reading with no value is evaluated: it is the reading, the sensor's state says it
+    /// has no value, and signal loss reads from the last reading with one
+    /// (docs/alerts/engine-semantics.md §4, sensor state).
+    /// </summary>
     [Fact]
-    public async Task EvaluateAsync_DoesNotEvaluateWithoutAPositiveReading()
+    public async Task EvaluateAsync_EvaluatesAReadingWithNoValueAsTheNoValueState()
     {
         LatestIs(Latest(Reading, mgdl: 0));
+        _canonical
+            .Setup(c => c.GetRecentAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                Latest(Reading.AddMinutes(-15), mgdl: 90),
+                Latest(Reading.AddMinutes(-10), mgdl: 0),
+                Latest(Reading.AddMinutes(-5), mgdl: 0),
+                Latest(Reading, mgdl: 0),
+            ]);
+        SensorContext? seen = null;
+        _orchestrator
+            .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
+            .ReturnsAsync(AlertPassOutcome.Decided);
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
 
-        VerifyPasses(0);
+        VerifyPasses(1);
+        seen!.LatestValue.Should().BeNull();
+        seen.TrendRate.Should().BeNull();
+        seen.LatestTimestamp.Should().Be(Reading);
+        seen.LatestReceivedAt.Should().Be(Reading);
+        seen.LastReadingAt.Should().Be(Reading.AddMinutes(-15), "signal loss means no reading with a value");
+        seen.SensorState.Should().Be(new SensorStateSnapshot(SensorState.NoValue, Reading.AddMinutes(-10)));
     }
 
     [Fact]
@@ -271,7 +300,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
 
@@ -319,7 +348,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
 
@@ -360,7 +389,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
 
@@ -396,7 +425,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
 
@@ -506,21 +535,24 @@ public class CanonicalAlertEvaluatorTests
     }
 
     [NativeFact]
-    public async Task EvaluateAsync_WithoutAUsableReadingAPumpWriteEvaluatesNothing()
+    public async Task EvaluateAsync_BehindAReadingWithNoValueAPumpWriteEvaluatesItsRules()
     {
         LatestIs(Latest(Reading, mgdl: 0));
+        _canonical
+            .Setup(c => c.GetRecentAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Latest(Reading, mgdl: 0)]);
         RulesAre(ReservoirRule);
 
         await Evaluator(Tenant).EvaluateAsync(Moved(ContextFactWrites.Pump));
 
-        VerifyPasses(0);
+        VerifyPasses(1);
     }
 
     [NativeFact]
     public async Task EvaluateAsync_APassOverlappingOneStillDeliveringOnTheSameReadingStopsAfterItsRead()
     {
         LatestIs(Latest(Reading));
-        var delivering = new TaskCompletionSource();
+        var delivering = new TaskCompletionSource<AlertPassOutcome>();
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Returns(delivering.Task);
@@ -530,7 +562,7 @@ public class CanonicalAlertEvaluatorTests
 
         VerifyPasses(1);
         first.IsCompleted.Should().BeFalse();
-        delivering.SetResult();
+        delivering.SetResult(AlertPassOutcome.Decided);
         await first;
     }
 
@@ -564,7 +596,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, _, r, _) => readAt = r)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
         var before = _decisions.BeginRead().Sequence;
 
         await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
@@ -586,7 +618,7 @@ public class CanonicalAlertEvaluatorTests
         _orchestrator
             .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .Callback<IReadOnlyList<AlertRuleSnapshot>, IReadOnlySet<Guid>, SensorContext, long?, CancellationToken>((_, _, c, _, _) => seen = c)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(AlertPassOutcome.Decided);
         await Evaluator(Tenant, decisions).EvaluateAsync(Moved(ContextFactWrites.Pump));
         return seen!;
     }
@@ -627,4 +659,94 @@ public class CanonicalAlertEvaluatorTests
         wallClock.Now = Reading.AddSeconds(-10);
         (await PumpPassAsync(decisions)).LatestValue.Should().Be(52m, "a later read never bounds its selection earlier");
     }
+
+    private void PassEnds(AlertPassOutcome outcome) =>
+        _orchestrator
+            .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(outcome);
+
+    private void VerifyRecorded(int times) =>
+        _evaluated.Verify(e => e.RecordAsync(It.IsAny<EvaluatedReading>(), It.IsAny<CancellationToken>()), Times.Exactly(times));
+
+    [Fact]
+    public async Task EvaluateAsync_RecordsAReadingWhosePassDecidedEveryRule()
+    {
+        var latest = Latest(Reading);
+        LatestIs(latest);
+
+        await Evaluator(Tenant).EvaluateAsync(GlucoseMoved);
+
+        _evaluated.Verify(e => e.RecordAsync(EvaluatedReading.Of(latest), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RecordsNothingForAPassANewerReadingSuperseded()
+    {
+        LatestIs(Latest(Reading));
+        PassEnds(AlertPassOutcome.Superseded);
+        var evaluator = Evaluator(Tenant);
+
+        await evaluator.EvaluateAsync(GlucoseMoved);
+        await evaluator.EvaluateAsync(GlucoseMoved);
+
+        VerifyRecorded(0);
+        VerifyPasses(1);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RecordsNothingForAPassInWhichARuleThrewAndReleasesTheReading()
+    {
+        LatestIs(Latest(Reading));
+        PassEnds(AlertPassOutcome.Failed);
+        var evaluator = Evaluator(Tenant);
+
+        (await evaluator.EvaluateAsync(GlucoseMoved)).Should().BeTrue("the pass ran to its end, though a rule threw");
+        PassEnds(AlertPassOutcome.Decided);
+        await evaluator.EvaluateAsync(GlucoseMoved);
+
+        VerifyPasses(2);
+        VerifyRecorded(1);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RecordsNothingWhenTheReadingWasClaimedByAnotherPass()
+    {
+        LatestIs(Latest(Reading));
+        var evaluator = Evaluator(Tenant);
+
+        (await evaluator.EvaluateAsync(GlucoseMoved)).Should().BeTrue();
+        (await evaluator.EvaluateAsync(GlucoseMoved)).Should().BeFalse("the repeat was refused the claim and ran no pass");
+
+        VerifyRecorded(1);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RecordsNothingForAWriteThatMovedNoReading()
+    {
+        LatestIs(Latest(Reading));
+        RulesAre(LowRule, ReservoirRule);
+
+        (await Evaluator(Tenant).EvaluateAsync(Moved(ContextFactWrites.Pump))).Should().BeFalse(
+            "a pass over the rules a pump write selects is not a pass of every enabled rule");
+
+        VerifyPasses(1);
+        VerifyRecorded(0);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ARecordThatFailsLeavesTheEvaluationStanding()
+    {
+        LatestIs(Latest(Reading));
+        _evaluated
+            .Setup(e => e.RecordAsync(It.IsAny<EvaluatedReading>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new StoreUnavailable());
+        var evaluator = Evaluator(Tenant);
+
+        await evaluator.Invoking(e => e.EvaluateAsync(GlucoseMoved)).Should().NotThrowAsync();
+        await evaluator.EvaluateAsync(GlucoseMoved);
+
+        VerifyPasses(1);
+    }
+
+    private sealed class StoreUnavailable() : System.Data.Common.DbException("The store is unavailable");
 }

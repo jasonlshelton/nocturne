@@ -29,6 +29,21 @@ describe("conditionIssuesMessage", () => {
 		);
 	});
 
+	it("says what is wrong with a limit from a fact", () => {
+		expect(conditionIssuesMessage(rejected(400, [issue("limit_conflict", "value_from")]))).toBe(
+			"A glucose condition can compare with a number or with a value such as your target, not both."
+		);
+		expect(conditionIssuesMessage(rejected(400, [issue("self_reference", "value_from")]))).toBe(
+			"A glucose threshold cannot compare the latest glucose with itself. Choose a number or a target."
+		);
+		expect(conditionIssuesMessage(rejected(400, [issue("offset_out_of_range", "offset")]))).toBe(
+			"The amount added to a target or to the latest glucose is too large."
+		);
+		expect(conditionIssuesMessage(rejected(400, [issue("unknown_value", "fact")]))).toBe(
+			"A glucose condition compares with a value that Nocturne does not know. Choose one from the list and save again."
+		);
+	});
+
 	it("prefers the field-specific sentence", () => {
 		expect(
 			conditionIssuesMessage(rejected(400, [issue("invalid_field", "alert_id")]))
@@ -66,6 +81,11 @@ describe("conditionIssuesMessage", () => {
 			["margin_on_equality", "clear_margin"],
 			["margin_past_zero", "clear_margin"],
 			["margin_under_sustained", "clear_margin"],
+			["selector_conflict", "min_of"],
+			["selector_conflict", "max_of"],
+			["list_empty", "min_of"],
+			["list_empty", "max_of"],
+			["unknown_value", "curve"],
 		] as const) {
 			expect(
 				conditionIssuesMessage(rejected(400, [issue(reason, field)])),
@@ -94,6 +114,12 @@ describe("conditionIssuesMessage", () => {
 				rejected(400, [issue("field_missing", "from"), issue("field_missing", "to")])
 			)
 		).toBe("A time-of-day condition needs both a start and an end time.");
+		expect(conditionIssuesMessage(rejected(400, [issue("selector_conflict", "max_of")]))).toBe(
+			"A predicted glucose condition can use one forecast choice only: one curve, the lowest of some curves, or the highest of some curves."
+		);
+		expect(conditionIssuesMessage(rejected(400, [issue("list_empty", "min_of")]))).toBe(
+			"A “lowest of” forecast needs at least one curve chosen."
+		);
 	});
 
 	it("leaves other rejections to the caller", () => {

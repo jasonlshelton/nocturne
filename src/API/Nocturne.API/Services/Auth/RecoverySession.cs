@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Nocturne.API.Extensions;
 using Nocturne.Core.Contracts.Auth;
+using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Configuration;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
@@ -28,6 +29,7 @@ namespace Nocturne.API.Services.Auth;
 public sealed class RecoverySession(
     INocturneDbContextFactory contexts,
     ILoginCodeService loginCodes,
+    ITenantMemberService tenantMembers,
     IOptions<OidcOptions> oidcOptions,
     ILogger<RecoverySession> logger)
 {
@@ -55,7 +57,7 @@ public sealed class RecoverySession(
         await using var db = await contexts.CreateAsync(ct);
         var issued = await loginCodes.IssueAsync(
             db, subjectId, LoginCodePurpose.RecoverySession,
-            http.Connection.RemoteIpAddress?.ToString(), http.Request.Headers.UserAgent.ToString(),
+            http.GetClientAddress(), http.Request.Headers.UserAgent.ToString(),
             AuthAuditActor.From(http.GetAuthContext()), ct);
         return issued.Code;
     }
@@ -68,21 +70,26 @@ public sealed class RecoverySession(
         http.Response.Cookies.Append(CookieName, code, options);
     }
 
-    /// <summary>The member whose live session the request carries, without spending it; otherwise null.</summary>
+    /// <summary>
+    /// The member whose live session the request carries, without spending it; otherwise null.
+    /// Admits the same members <see cref="EnrolAsync{T}"/> does.
+    /// </summary>
     public async Task<Guid?> ReadSubjectAsync(HttpContext http, CancellationToken ct)
     {
         if (CodeOf(http) is not { } code)
             return null;
 
         await using var db = await contexts.CreateAsync(ct);
-        return (await loginCodes.FindLiveAsync(db, code, Purposes, ct))?.SubjectId;
+        return (await loginCodes.FindLiveAsync(db, code, Purposes, Admits(db), ct))?.SubjectId;
     }
 
     /// <summary>
     /// Runs <paramref name="enrol"/> for the session's member and spends the session when
     /// <paramref name="enrolled"/> accepts what it returned. Both happen in the claim's transaction:
     /// a refusal or an exception rolls the claim back, so the session stays usable, and a
-    /// concurrent second enrolment on the same session finds it spent. A write
+    /// concurrent second enrolment on the same session finds it spent. A member whose access to the
+    /// tenant has ended since the session began finds no session
+    /// (<see cref="LoginCodeAdmission.LiveMemberOf"/>). A write
     /// <paramref name="enrol"/> makes through another context commits on its own, so it must not
     /// write anything it would have to undo when it then refuses.
     /// </summary>
@@ -101,14 +108,14 @@ public sealed class RecoverySession(
         try
         {
             spent = await loginCodes.RedeemAsync(
-                db, code, Purposes, admits: null,
+                db, code, Purposes, admits: Admits(db),
                 withSpend: async (session, token) =>
                 {
                     outcome = await enrol(session.SubjectId, token);
                     if (!enrolled(outcome))
                         throw new EnrolmentRefusedException();
                 },
-                http.Connection.RemoteIpAddress?.ToString(), http.Request.Headers.UserAgent.ToString(), ct);
+                http.GetClientAddress(), http.Request.Headers.UserAgent.ToString(), ct);
         }
         catch (EnrolmentRefusedException)
         {
@@ -142,6 +149,9 @@ public sealed class RecoverySession(
             logger.LogWarning(ex, "Could not void outstanding recovery codes for {SubjectId}", subjectId);
         }
     }
+
+    private Func<RedeemedLoginCode, CancellationToken, Task<bool>> Admits(NocturneDbContext db) =>
+        LoginCodeAdmission.LiveMemberOf(tenantMembers, db.TenantId);
 
     private static string? CodeOf(HttpContext http) =>
         http.Request.Cookies[CookieName] is { Length: > 0 } code ? code : null;

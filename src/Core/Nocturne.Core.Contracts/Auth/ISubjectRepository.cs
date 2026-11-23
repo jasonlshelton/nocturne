@@ -13,8 +13,8 @@ namespace Nocturne.Core.Contracts.Auth;
 /// <c>subject_pin</c> policy narrows them only on a context pinned to a subject. Every method runs
 /// as the scope's reader unless its remarks name a pin: a platform context where the caller has no
 /// resolved tenant, the subject pin where the caller is the subject's own connection, the setup
-/// flow's tenant pin, and the system pin for the two setup-state reads a public share host must
-/// answer, which <c>SystemPinnedAllowlistTests</c> limits to their callers.
+/// flow's tenant pin, and the system pin for the reads a public share host must answer, which
+/// <c>SystemPinnedAllowlistTests</c> limits to their callers.
 /// </remarks>
 public interface ISubjectRepository
 {
@@ -34,15 +34,15 @@ public interface ISubjectRepository
     Task<SubjectRecord?> FindSystemSubjectAsync(string name, CancellationToken ct);
 
     /// <summary>
-    /// The subject holding a membership of <paramref name="tenantId"/> that has not ended at
-    /// <paramref name="now"/> whose username is <paramref name="username"/>, with its roles; with
+    /// The subject holding a membership of <paramref name="tenantId"/> in force at
+    /// <paramref name="now"/>, recomputed first when a reason of it has lapsed, whose username is <paramref name="username"/>, with its roles; with
     /// <paramref name="activeOnly"/>, only an active one. Null when no member matches.
     /// </summary>
     Task<SubjectRecord?> FindMemberByUsernameAsync(Guid tenantId, string username, bool activeOnly, DateTime now, CancellationToken ct);
 
     /// <summary>
-    /// The active members of <paramref name="tenantId"/> whose membership has not ended at
-    /// <paramref name="now"/>, neither system nor demo subjects, whose confirmed address is
+    /// The active members of <paramref name="tenantId"/> whose membership is in force at
+    /// <paramref name="now"/>, recomputed first when a reason of it has lapsed, neither system nor demo subjects, whose confirmed address is
     /// <paramref name="email"/> by <see cref="EmailAddresses.AreSame"/>, roles not read. One address
     /// can sit on several accounts, so there may be more than one.
     /// </summary>
@@ -110,20 +110,36 @@ public interface ISubjectRepository
     /// </summary>
     Task<Guid> EnsureDeviceSubjectAsync(CancellationToken ct);
 
-    /// <summary>The pending access requests, newest first, roles not read. A system subject is never one.</summary>
+    /// <summary>
+    /// The pending access requests, newest first, roles not read. A system subject is never one, and
+    /// neither is a pending subject with no passkey: its enrolment never registered one, so approving
+    /// it would leave an account no one can sign in to.
+    /// </summary>
     Task<IReadOnlyList<SubjectRecord>> ListPendingAccessRequestsAsync(CancellationToken ct);
 
     /// <summary>
-    /// The subjects part-way through an anonymous enrolment that <paramref name="match"/> names:
-    /// not a system subject, and holding no way to sign in: no passkey, no identity-provider link,
-    /// no authenticator and no unexpired session. An enrolment gives the subject to whoever names
-    /// it, and an invite enrolment signs them in without asking for a code, so a subject holding
-    /// any of these is an account, not an enrolment. Any provider link counts, not only one to an enabled provider,
-    /// for the reason <see cref="FindSetupOwnerCandidateAsync"/> gives. Newest first, by id,
-    /// which for UUID v7 ids is creation order. Membership is not consulted here; the caller asks
-    /// it per candidate under that subject's own pin.
+    /// Whether a pending access request of the kind <see cref="ListPendingAccessRequestsAsync"/>
+    /// lists is under <paramref name="name"/> and has a pending request to join
+    /// <paramref name="tenantId"/>. A request filed on another tenant does not count.
     /// </summary>
-    Task<IReadOnlyList<Guid>> FindCredentiallessSubjectIdsAsync(EnrolmentMatch match, CancellationToken ct);
+    /// <remarks>
+    /// System-pinned: a public-share host's visitor gets the answer a member's host gives, though a
+    /// share is hidden the tenant's membership requests, which are tenant-scoped. The caller is
+    /// pinned by <c>SystemPinnedAllowlistTests</c>.
+    /// </remarks>
+    Task<bool> AnyPendingAccessRequestNamedAsync(Guid tenantId, string name, CancellationToken ct);
+
+    /// <summary>
+    /// Whether <paramref name="subjectId"/> is still what an anonymous enrolment's options step left
+    /// for <paramref name="match"/>: of the kind and under the name the match names, not a system
+    /// subject, and holding no way to sign in: no passkey, no identity-provider link, no
+    /// authenticator and no unexpired session. The complete step gives the subject a passkey, and an
+    /// invite enrolment signs it in without asking for a code, so a subject holding any of these is
+    /// an account, not an enrolment. Any provider link counts, not only one to an enabled provider,
+    /// for the reason <see cref="FindSetupOwnerCandidateAsync"/> gives. Membership is not consulted
+    /// here; the caller asks it under that subject's own pin.
+    /// </summary>
+    Task<bool> IsEnrollingSubjectAsync(Guid subjectId, EnrolmentMatch match, CancellationToken ct);
 
     /// <summary>
     /// Applies <paramref name="edit"/> to the subject and stamps it updated. A null member of the
@@ -155,9 +171,6 @@ public interface ISubjectRepository
     /// <see cref="SubjectEdit.EmailConfirmedAt"/>), this is the only way an address becomes confirmed.
     /// </summary>
     Task<EmailConfirmation> ConfirmEmailAsync(Guid subjectId, string email, DateTime now, CancellationToken ct);
-
-    /// <summary>Sets, or with null clears, the message a subject submitted with its access request.</summary>
-    Task<bool> SetAccessRequestMessageAsync(Guid subjectId, string? message, CancellationToken ct);
 
     /// <summary>
     /// Deletes the subject, and in the same transaction clears its personal data from the three

@@ -85,6 +85,9 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MaxRequestBodySize = 100 * 1024 * 1024; // 100 MB
 });
 
+builder.Services.Configure<HostOptions>(options =>
+    options.ShutdownTimeout = TimeSpan.FromSeconds(ApplicationConstants.Shutdown.HostTimeoutSeconds));
+
 builder.AddServiceDefaults();
 builder.Services.AddRequestPathRedactor<CredentialPathRedactor>();
 
@@ -109,9 +112,7 @@ var postgreSqlOptions = PostgreSqlConfiguration.ResolveForEnvironment(
     builder.Configuration,
     builder.Environment.IsDevelopment());
 
-// Registered whether or not the pool is built, so the resolution above is observable from a test
-// host, which always runs as Testing and so never reaches the registration below.
-builder.Services.AddSingleton(postgreSqlOptions);
+builder.Services.AddPostgreSqlConfiguration(postgreSqlOptions);
 
 if (!isTesting)
 {
@@ -401,6 +402,7 @@ app.UseWhen(
     branch => branch.UseCors());
 app.UseStaticFiles();
 app.UseNocturneForwardedHeaders(builder.Configuration);
+app.UseMiddleware<ClientAddressMiddleware>();
 
 // Response caching must run after UseForwardedHeaders so its cache key uses the per-tenant
 // Host (rewritten from X-Forwarded-Host) rather than the constant gateway destination host
@@ -641,7 +643,8 @@ if (!isNSwagGeneration && !app.Environment.IsEnvironment("Testing"))
         // Apply the tenant-table storage parameters; see TenantTableStorageParameters for why.
         await DatabaseInitializationExtensions.ReconcileTenantTableStorageParametersAsync(migratorConnectionString, logger);
 
-        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(migratorConnectionString, logger);
+        await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(
+            migratorConnectionString, scope.ServiceProvider.GetRequiredService<TimeProvider>().GetUtcNow().UtcDateTime, logger);
 
         // Background job records left Pending/Running by a previous process are orphans —
         // the detached tasks died with it. Mark them Interrupted so polls report the truth.
