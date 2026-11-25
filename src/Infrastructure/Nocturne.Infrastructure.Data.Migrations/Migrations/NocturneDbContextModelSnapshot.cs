@@ -316,6 +316,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_alert_excursions_tenant_owed")
+                        .HasFilter("opened_owed_at IS NOT NULL OR closed_owed_at IS NOT NULL");
+
                     b.HasIndex("AlertRuleId", "EndedAt")
                         .HasDatabaseName("ix_alert_excursions_rule_ended_at");
 
@@ -1454,10 +1458,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("BackfillLowWaterMarks")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("backfill_low_water_marks");
-
                     b.Property<string>("ConfigurationJson")
                         .IsRequired()
                         .HasColumnType("jsonb")
@@ -1499,6 +1499,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("modified_by");
 
+                    b.Property<string>("ResumeStateJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("backfill_low_water_marks");
+
                     b.Property<int>("SchemaVersion")
                         .HasColumnType("integer")
                         .HasColumnName("schema_version");
@@ -1507,10 +1511,6 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("secrets");
-
-                    b.Property<string>("SyncCursorsJson")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("sync_cursors");
 
                     b.Property<DateTime>("SysCreatedAt")
                         .ValueGeneratedOnAdd()
@@ -1527,6 +1527,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
+
+                    b.Property<string>("VendorStateJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sync_cursors");
 
                     b.HasKey("Id");
 
@@ -2324,6 +2328,49 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.ToTable("google_health_grant_holders");
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.GoogleHealthWorkEntity", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("DisconnectRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("disconnect_request_id");
+
+                    b.Property<Guid?>("DisconnectSubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("disconnect_subject_id");
+
+                    b.Property<int>("ProgressCompletedDataTypes")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_completed_data_types");
+
+                    b.Property<string>("ProgressDataType")
+                        .HasColumnType("text")
+                        .HasColumnName("progress_data_type");
+
+                    b.Property<int>("ProgressPagesRead")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_pages_read");
+
+                    b.Property<string>("ProgressPhase")
+                        .HasColumnType("text")
+                        .HasColumnName("progress_phase");
+
+                    b.Property<int>("ProgressTotalDataTypes")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_total_data_types");
+
+                    b.Property<bool>("ProgressWorkerOwned")
+                        .HasColumnType("boolean")
+                        .HasColumnName("progress_worker_owned");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("google_health_work");
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.HeartRateEntity", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -3034,6 +3081,14 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
+
+                    b.Property<Guid?>("StartedBySubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("started_by_subject_id");
+
+                    b.Property<DateTime?>("StarterAccessEndsAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("starter_access_ends_at");
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -4961,6 +5016,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("UpstreamFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("upstream_fingerprint");
+
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
                         .HasColumnName("writer_grant_id");
@@ -5692,6 +5751,37 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TeamSiteDeclineEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("SubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_id");
+
+                    b.Property<DateTime>("SysCreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sys_created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<Guid>("TeamTenantAccessId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("team_tenant_access_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubjectId");
+
+                    b.HasIndex("TeamTenantAccessId", "SubjectId")
+                        .IsUnique();
+
+                    b.ToTable("team_site_declines");
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TeamSiteStaffEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5734,7 +5824,7 @@ namespace Nocturne.Infrastructure.Data.Migrations
 
                     b.ToTable("team_site_staff", t =>
                         {
-                            t.HasCheckConstraint("ck_team_site_staff_status", "status IN ('pending', 'approved')");
+                            t.HasCheckConstraint("ck_team_site_staff_status", "status IN ('pending', 'approved', 'declined')");
                         });
                 });
 
@@ -7529,6 +7619,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
 
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
+
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
                         .HasColumnName("writer_grant_id");
@@ -7977,6 +8071,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
 
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
+
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
                         .HasColumnName("writer_grant_id");
@@ -8170,6 +8268,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
+
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
 
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
@@ -8471,6 +8573,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
+
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
 
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
@@ -8812,6 +8918,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
+
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
 
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
@@ -9160,6 +9270,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
+
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
 
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
@@ -9658,6 +9772,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Property<int?>("UtcOffset")
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
+
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
 
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
@@ -10607,6 +10725,10 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("utc_offset");
 
+                    b.Property<string>("WriteBackSentFingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("write_back_sent_fingerprint");
+
                     b.Property<Guid?>("WriterGrantId")
                         .HasColumnType("uuid")
                         .HasColumnName("writer_grant_id");
@@ -11436,6 +11558,15 @@ namespace Nocturne.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.GoogleHealthWorkEntity", b =>
+                {
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.HeartRateEntity", b =>
                 {
                     b.HasOne("Nocturne.Infrastructure.Data.Entities.TenantEntity", null)
@@ -11951,6 +12082,25 @@ namespace Nocturne.Infrastructure.Data.Migrations
                     b.Navigation("Subject");
 
                     b.Navigation("Team");
+                });
+
+            modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TeamSiteDeclineEntity", b =>
+                {
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.SubjectEntity", "Subject")
+                        .WithMany()
+                        .HasForeignKey("SubjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Nocturne.Infrastructure.Data.Entities.TeamTenantAccessEntity", "TeamTenantAccess")
+                        .WithMany()
+                        .HasForeignKey("TeamTenantAccessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Subject");
+
+                    b.Navigation("TeamTenantAccess");
                 });
 
             modelBuilder.Entity("Nocturne.Infrastructure.Data.Entities.TeamSiteStaffEntity", b =>

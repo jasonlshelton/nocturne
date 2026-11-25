@@ -6,17 +6,21 @@ using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nocturne.API.Controllers.V4.Identity;
+using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Identity;
+using Nocturne.API.Tests.Infrastructure;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Identity;
 using Nocturne.Infrastructure.Data.Extensions;
+using Nocturne.Infrastructure.Data.Services;
 using Xunit;
 
 namespace Nocturne.API.Tests.Controllers.V4;
@@ -36,6 +40,10 @@ public class TeamsControllerTests
     private readonly Mock<ISubjectRepository> _subjects = new();
     private readonly Mock<ITenantMembershipRepository> _members = new();
     private readonly Mock<ITenantRoleService> _roles = new();
+
+    public TeamsControllerTests() =>
+        _subjects.Setup(s => s.GetSignInStateAsync(Caller, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SubjectSignInState(IsActive: true, IsPlatformAdmin: false));
 
     private static IEnumerable<MethodInfo> Actions => typeof(TeamsController)
         .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -158,7 +166,6 @@ public class TeamsControllerTests
             .ReturnsAsync((Guid?)null);
         _teams.Setup(t => t.RevokeInviteAsync(TeamId, Caller, It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        _teams.Setup(t => t.DeleteAsync(TeamId, Caller, It.IsAny<CancellationToken>())).ReturnsAsync(TeamDeletion.NotFound);
         _teams.Setup(t => t.CreateAccessLinkAsync(TeamId, Caller, It.IsAny<NewTeamAccessLink>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         _teams.Setup(t => t.RevokeAccessLinkAsync(TeamId, Caller, It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -167,9 +174,6 @@ public class TeamsControllerTests
             .ReturnsAsync((Guid?)null);
         _teams.Setup(t => t.RevokeStaffInviteAsync(TeamId, Caller, It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        _teams.Setup(t => t.UpdateStaffAsync(TeamId, Caller, It.IsAny<Guid>(), It.IsAny<TeamStaffNarrowing>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(TeamStaffChange.NotFound);
-        _teams.Setup(t => t.RemoveStaffAsync(TeamId, Caller, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var controller = Controller(Session());
 
         IActionResult[] results =
@@ -179,13 +183,10 @@ public class TeamsControllerTests
             await controller.RemoveManager(TeamId, Guid.CreateVersion7(), default),
             await controller.CreateManagerInvite(TeamId, new CreateTeamInviteRequest(null), default),
             await controller.RevokeManagerInvite(TeamId, Guid.CreateVersion7(), default),
-            await controller.DeleteTeam(TeamId, default),
             await controller.CreateAccessLink(TeamId, new CreateTeamAccessLinkRequest(null, RoleSeeds.Caretaker, false, null), default),
             await controller.RevokeAccessLink(TeamId, Guid.CreateVersion7(), default),
             await controller.CreateStaffInvite(TeamId, new CreateTeamStaffInviteRequest(null, null, false, null), default),
             await controller.RevokeStaffInvite(TeamId, Guid.CreateVersion7(), default),
-            await controller.UpdateStaff(TeamId, Guid.CreateVersion7(), new UpdateTeamStaffRequest(null, false, null), default),
-            await controller.RemoveStaff(TeamId, Guid.CreateVersion7(), default),
         ];
 
         results.Should().AllBeOfType<NotFoundResult>("a 403 would tell a stranger the team exists");
@@ -253,6 +254,51 @@ public class TeamsControllerTests
             .Be(new TeamInviteDetails(TeamId, "Camp", "Sam", TeamMemberKind.Manager, false));
     }
 
+    [Fact]
+    public async Task An_inactive_subject_is_refused_every_action_that_mints_a_link_and_nothing_is_stored()
+    {
+        _subjects.Setup(s => s.GetSignInStateAsync(Caller, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SubjectSignInState(IsActive: false, IsPlatformAdmin: false));
+        var controller = Controller(Session());
+
+        IActionResult[] results =
+        [
+            await controller.CreateManagerInvite(TeamId, new CreateTeamInviteRequest(null), default),
+            await controller.CreateAccessLink(TeamId, new CreateTeamAccessLinkRequest(null, RoleSeeds.Caretaker, false, null), default),
+            await controller.ApproveAccessLink(
+                "token", new ApproveTeamAccessRequest(Guid.CreateVersion7(), [Guid.CreateVersion7()], false, null, null), Access(), default),
+        ];
+
+        results.Should().AllBeOfType<ChallengeResult>();
+        _teams.Invocations.Should().BeEmpty();
+        _members.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_subject_with_no_row_is_refused_as_inactive_and_nothing_is_stored()
+    {
+        _subjects.Setup(s => s.GetSignInStateAsync(Caller, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SubjectSignInState?)null);
+
+        var result = await Controller(Session()).CreateManagerInvite(TeamId, new CreateTeamInviteRequest(null), default);
+
+        result.Should().BeOfType<ChallengeResult>();
+        _teams.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_active_subject_is_not_refused_by_the_state_read()
+    {
+        _subjects.Setup(s => s.GetSignInStateAsync(Caller, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SubjectSignInState(IsActive: true, IsPlatformAdmin: false));
+        _teams.Setup(t => t.CreateInviteAsync(TeamId, Caller, It.IsAny<NewTeamInvite>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.CreateVersion7());
+
+        var result = await Controller(Session()).CreateManagerInvite(TeamId, new CreateTeamInviteRequest(null), default);
+
+        result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
     [Theory]
     [InlineData(0, 1, null, TeamProblemCodes.ExpiryInvalid)]
     [InlineData(7, 0, null, TeamProblemCodes.UsesInvalid)]
@@ -270,35 +316,12 @@ public class TeamsControllerTests
         CodeOf(problem).Should().Be(code);
     }
 
-    [Theory]
-    [InlineData(TeamInviteRefusal.Expired, "This invite has expired.", TeamProblemCodes.Expired)]
-    [InlineData(TeamInviteRefusal.Revoked, "This invite has been revoked.", TeamProblemCodes.Revoked)]
-    [InlineData(TeamInviteRefusal.UsedUp, "This invite has reached its maximum uses.", TeamProblemCodes.UsedUp)]
-    [InlineData(TeamInviteRefusal.NoLongerValid, "This invite is no longer valid.", TeamProblemCodes.NoLongerValid)]
-    [InlineData(TeamInviteRefusal.StaffEndPassed, "The end this invite gives has passed.", TeamProblemCodes.StaffInviteEndPassed)]
-    [InlineData(TeamInviteRefusal.AlreadyMember, "You are already a member of this team.", TeamProblemCodes.AlreadyMember)]
-    public async Task A_staff_invite_that_cannot_be_accepted_states_why(TeamInviteRefusal refusal, string detail, string code)
-    {
-        _teams.Setup(t => t.AcceptStaffInviteAsync(It.IsAny<string>(), Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TeamInviteAcceptance(TeamId, refusal));
-
-        var result = await Controller(Session()).AcceptStaffInvite("token", default);
-
-        var problem = result.Should().BeOfType<ObjectResult>().Subject;
-        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        problem.Value.Should().BeOfType<ProblemDetails>().Which.Detail.Should().Be(detail);
-        CodeOf(problem).Should().Be(code);
-    }
-
     [Fact]
-    public async Task A_staff_token_nobody_holds_is_not_found_when_accepted_or_looked_up()
+    public async Task A_staff_token_nobody_holds_is_not_found_when_looked_up()
     {
-        _teams.Setup(t => t.AcceptStaffInviteAsync(It.IsAny<string>(), Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound));
         _teams.Setup(t => t.GetStaffInviteInfoAsync(It.IsAny<string>(), Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TeamStaffInviteInfo?)null);
 
-        (await Controller(Session()).AcceptStaffInvite("token", default)).Should().BeOfType<NotFoundResult>();
         (await Controller(Session()).GetStaffInviteInfo("token", default)).Should().BeOfType<NotFoundResult>();
     }
 
@@ -323,7 +346,7 @@ public class TeamsControllerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Looking_up_a_staff_invite_says_what_narrows_the_staff_member_and_whether_the_caller_is_a_member(bool member)
+    public async Task Looking_up_a_staff_invite_says_what_narrows_the_staff_member_whether_the_caller_is_a_member_and_the_role_names(bool member)
     {
         var narrowing = new TeamStaffNarrowing(RoleSeeds.Viewer, true, DateTime.UtcNow.AddDays(3));
         _teams.Setup(t => t.GetStaffInviteInfoAsync(It.IsAny<string>(), Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -332,7 +355,7 @@ public class TeamsControllerTests
         var result = await Controller(Session()).GetStaffInviteInfo("token", default);
 
         result.Should().BeOfType<OkObjectResult>().Which.Value.Should()
-            .Be(new TeamStaffInviteDetails(TeamId, "Camp", "Sam", narrowing, member));
+            .Be(new TeamStaffInviteDetails(TeamId, "Camp", "Sam", narrowing, member, TeamSuggestableRoles.All));
     }
 
     [Fact]
@@ -382,88 +405,11 @@ public class TeamsControllerTests
     public async Task A_staff_edit_with_a_ceiling_staff_cannot_have_is_refused_with_its_code(string ceiling)
     {
         var result = await Controller(Session()).UpdateStaff(
-            TeamId, Guid.CreateVersion7(), new UpdateTeamStaffRequest(ceiling, false, null), default);
+            TeamId, Guid.CreateVersion7(), new UpdateTeamStaffRequest(ceiling, false, null), Access(), default);
 
         var problem = result.Should().BeOfType<ObjectResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         CodeOf(problem).Should().Be(TeamProblemCodes.StaffCeilingInvalid);
-    }
-
-    [Fact]
-    public async Task A_passed_end_the_team_refuses_on_a_staff_edit_carries_the_end_code()
-    {
-        var staff = Guid.CreateVersion7();
-        var passed = DateTimeOffset.UtcNow.AddDays(-1);
-        _teams.Setup(t => t.UpdateStaffAsync(TeamId, Caller, staff, It.IsAny<TeamStaffNarrowing>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(TeamStaffChange.EndPassed);
-
-        var result = await Controller(Session()).UpdateStaff(TeamId, staff, new UpdateTeamStaffRequest(null, true, passed), default);
-
-        var problem = result.Should().BeOfType<ObjectResult>().Subject;
-        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        CodeOf(problem).Should().Be(TeamProblemCodes.StaffEndInvalid);
-    }
-
-    [Fact]
-    public async Task A_staff_edit_passes_the_narrowing_to_the_team_and_answers_no_content()
-    {
-        var staff = Guid.CreateVersion7();
-        var end = new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        TeamStaffNarrowing? passed = null;
-        _teams.Setup(t => t.UpdateStaffAsync(TeamId, Caller, staff, It.IsAny<TeamStaffNarrowing>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, Guid, Guid, TeamStaffNarrowing, DateTime, CancellationToken>((_, _, _, narrowing, _, _) => passed = narrowing)
-            .ReturnsAsync(TeamStaffChange.Changed);
-
-        var result = await Controller(Session()).UpdateStaff(TeamId, staff, new UpdateTeamStaffRequest(null, true, end), default);
-
-        result.Should().BeOfType<NoContentResult>();
-        passed.Should().Be(new TeamStaffNarrowing(null, true, end.UtcDateTime));
-    }
-
-    [Fact]
-    public async Task Removing_staff_passes_the_callers_own_id_so_that_leaving_is_the_same_call()
-    {
-        _teams.Setup(t => t.RemoveStaffAsync(TeamId, Caller, Caller, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-
-        (await Controller(Session()).RemoveStaff(TeamId, Caller, default)).Should().BeOfType<NoContentResult>();
-    }
-
-    [Theory]
-    [InlineData(null, true)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public async Task An_approval_that_does_not_state_the_switch_leaves_the_team_managing_its_staff(bool? requested, bool stored)
-    {
-        var site = Guid.CreateVersion7();
-        TeamAccessGrant? grant = null;
-        _teams.Setup(t => t.GetAccessLinkInfoAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TeamAccessLinkInfo(
-                Guid.CreateVersion7(), TeamId, "Clinic", "Sam", new TeamAccessSuggestion(RoleSeeds.Caretaker, false, null),
-                DateTime.UtcNow.AddDays(1), null));
-        _members.Setup(m => m.ListMembershipsOfSubjectAsync(Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([OwnerOf(site)]);
-        _roles.Setup(r => r.ValidateRoleGrantAsync(site, It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RoleGrantValidation.Valid);
-        _teams.Setup(t => t.ApproveAccessAsync(It.IsAny<string>(), It.IsAny<TeamAccessApproverCredential>(), It.IsAny<TeamAccessGrant>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Callback<string, TeamAccessApproverCredential, TeamAccessGrant, DateTime, CancellationToken>((_, _, g, _, _) => grant = g)
-            .ReturnsAsync(new TeamAccessApproval(Guid.CreateVersion7(), null));
-
-        await Controller(Session()).ApproveAccessLink(
-            "token", new ApproveTeamAccessRequest(site, [Guid.CreateVersion7()], false, null, requested), Access(), default);
-
-        grant!.TeamManagesStaff.Should().Be(stored);
-    }
-
-    [Fact]
-    public async Task A_refused_delete_carries_its_code()
-    {
-        _teams.Setup(t => t.DeleteAsync(TeamId, Caller, It.IsAny<CancellationToken>())).ReturnsAsync(TeamDeletion.Refused);
-
-        var result = await Controller(Session()).DeleteTeam(TeamId, default);
-
-        var problem = result.Should().BeOfType<ObjectResult>().Subject;
-        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        CodeOf(problem).Should().Be(TeamProblemCodes.DeleteRefused);
     }
 
     [Fact]
@@ -558,13 +504,7 @@ public class TeamsControllerTests
         _teams.Setup(t => t.GetAccessLinkInfoAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new TeamAccessLinkInfo(
                 Guid.CreateVersion7(), TeamId, "Clinic", "Sam", new TeamAccessSuggestion(RoleSeeds.Caretaker, false, null),
-                DateTime.UtcNow.AddDays(1), null));
-        _members.Setup(m => m.ListMembershipsOfSubjectAsync(Caller, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([OwnerOf(site)]);
-        _roles.Setup(r => r.ValidateRoleGrantAsync(site, It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RoleGrantValidation.Valid);
-        _teams.Setup(t => t.ApproveAccessAsync(It.IsAny<string>(), It.Is<TeamAccessApproverCredential>(c => c.SubjectId == Caller), It.IsAny<TeamAccessGrant>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TeamAccessApproval(null, refusal));
+                DateTime.UtcNow.AddDays(1), refusal));
 
         var result = await Controller(Session()).ApproveAccessLink(
             "token", new ApproveTeamAccessRequest(site, [Guid.CreateVersion7()], false, null, null), Access(), default);
@@ -608,8 +548,9 @@ public class TeamsControllerTests
         typeof(TeamAccessSiteOption).GetProperties().Select(p => p.Name).Should().BeEquivalentTo(
             "TenantId", "DisplayName", "AlreadyGiven", "Roles", "DefaultRoleId", "LimitForced", "LatestEnd");
         typeof(TeamSiteAccess).GetProperties().Select(p => p.Name).Should().BeEquivalentTo(
-            ["TenantId", "DisplayName", "RoleNames", "LimitTo24Hours", "AccessEndsAt", "HasEnded", "GivenAt"],
-            "a team learns a site's name and what it was given, never who approved or who is in it");
+            ["TenantId", "DisplayName", "RoleNames", "LimitTo24Hours", "AccessEndsAt", "HasEnded", "GivenAt",
+                "TeamManagesStaff", "PendingStaffCount", "DeclinedStaffCount"],
+            "a team learns a site's name, what it was given and how many of its staff wait or were declined, never who approved, who decided or who is in it");
     }
 
     [Theory]
@@ -661,11 +602,15 @@ public class TeamsControllerTests
             [new TenantMemberRoleRecord(Guid.CreateVersion7(), "Owner", RoleSeeds.Owner, [Scope.FullAccess])],
             null, null, null, false, null, null, null, DateTime.UtcNow, []));
 
-    private TeamRenameAnnouncer Announcer() => new(
-        _teams.Object, _members.Object, Mock.Of<ITenantRepository>(), new ServiceCollection().BuildServiceProvider(),
-        TimeProvider.System, NullLogger<TeamRenameAnnouncer>.Instance);
+    private static SiteNotices Sites() => new(Mock.Of<ITenantRepository>(), new ServiceCollection().BuildServiceProvider());
 
-    private TeamAccessService Access() => new(_teams.Object, _members.Object, _roles.Object, TimeProvider.System);
+    private TeamRenameAnnouncer Announcer() => new(
+        _teams.Object, _members.Object, Sites(), TimeProvider.System, NullLogger<TeamRenameAnnouncer>.Instance);
+
+    private TeamAccessService Access() => new(
+        _teams.Object, _members.Object, _roles.Object, TimeProvider.System, Mock.Of<INocturneDbContextFactory>(),
+        new GrantRevocationService(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
+        new TeamStaffAnnouncer(_teams.Object, _members.Object, Sites(), TimeProvider.System, NullLogger<TeamStaffAnnouncer>.Instance));
 
     private static object? CodeOf(ObjectResult problem) =>
         problem.Value.Should().BeOfType<ProblemDetails>().Which.Extensions["code"];
@@ -677,6 +622,7 @@ public class TeamsControllerTests
     private static AuthContext Session(bool isPlatformAdmin = false) => new()
     {
         IsAuthenticated = true, AuthType = AuthType.SessionCookie, SubjectId = Caller, IsPlatformAdmin = isPlatformAdmin,
+        SessionId = LiveSession.Id,
     };
 
     private TeamsController Controller(AuthContext auth)
@@ -697,6 +643,7 @@ public class TeamsControllerTests
         var services = new ServiceCollection();
         services.AddMvcCore();
         services.AddSingleton(_subjects.Object);
+        services.AddLiveSession();
         var httpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         httpContext.Items["AuthContext"] = auth;
         return httpContext;

@@ -217,14 +217,28 @@ public class PasskeyService : IPasskeyService
         var attestationResponse = JsonSerializer.Deserialize<AuthenticatorAttestationRawResponse>(attestationResponseJson)
             ?? throw new InvalidOperationException("Failed to deserialize attestation response.");
 
-        // Fido2 refuses a response with no authenticator response part.
-        var credential = await VerifierFor(attestationResponse.Response?.ClientDataJson).MakeNewCredentialAsync(new MakeNewCredentialParams
+        var verifier = VerifierFor(attestationResponse.Response?.ClientDataJson);
+        RegisteredPublicKeyCredential credential;
+        try
         {
-            AttestationResponse = attestationResponse,
-            OriginalOptions = originalOptions,
-            IsCredentialIdUniqueToUserCallback = async (args, ct) =>
-                !await _passkeys.ExistsAsync(args.CredentialId, ct),
-        });
+            // Fido2 refuses a response with no authenticator response part. Uniqueness is read
+            // after the call, so a failure of that read is not taken for a refusal.
+            credential = await verifier.MakeNewCredentialAsync(new MakeNewCredentialParams
+            {
+                AttestationResponse = attestationResponse,
+                OriginalOptions = originalOptions,
+                IsCredentialIdUniqueToUserCallback = (_, _) => Task.FromResult(true),
+            });
+        }
+        // The verifier parses caller-supplied bytes and lets arbitrary types out of its parsers,
+        // so every failure of this call is a refused registration.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PasskeyRegistrationRefusedException("The attestation was refused.", ex);
+        }
+
+        if (await _passkeys.ExistsAsync(credential.Id, CancellationToken.None))
+            throw new PasskeyRegistrationRefusedException("The credential is already registered.");
 
         // Enforce 20 credential cap
         var existingCount = await _passkeys.CountAsync(subjectId, CancellationToken.None);
@@ -235,18 +249,20 @@ public class PasskeyService : IPasskeyService
                 $"Maximum of {MaxCredentialsPerSubject} passkey credentials per user has been reached.");
         }
 
-        var credentialId = await _passkeys.CreateAsync(
-            new NewPasskeyCredential(
-                subjectId,
-                credential.Id,
-                credential.PublicKey,
-                credential.SignCount,
-                credential.Transports?.Select(t => t.ToString()).ToList() ?? [],
-                string.IsNullOrWhiteSpace(label) ? null : label.Trim(),
-                // AaGuid is not directly exposed by Fido2NetLib v4 RegisteredPublicKeyCredential
-                AaGuid: null,
-                DateTime.UtcNow),
-            CancellationToken.None);
+        var stored = new NewPasskeyCredential(
+            subjectId,
+            credential.Id,
+            credential.PublicKey,
+            credential.SignCount,
+            credential.Transports?.Select(t => t.ToString()).ToList() ?? [],
+            string.IsNullOrWhiteSpace(label) ? null : label.Trim(),
+            // AaGuid is not directly exposed by Fido2NetLib v4 RegisteredPublicKeyCredential
+            AaGuid: null,
+            DateTime.UtcNow);
+        var credentialId = flow == PasskeyRegistrationFlow.SetupOwner
+            ? await _passkeys.CreateForSetupOwnerAsync(tenantId, stored, CancellationToken.None)
+                ?? throw new SetupOwnerTakenException()
+            : await _passkeys.CreateAsync(stored, CancellationToken.None);
 
         _logger.LogInformation(
             "Passkey credential {CredentialId} registered for subject {SubjectId} in tenant {TenantId}",

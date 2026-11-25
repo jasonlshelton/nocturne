@@ -8,18 +8,18 @@ namespace Nocturne.Infrastructure.Data.Repositories;
 
 /// <summary>
 /// A team's staff: the invites a manager makes, the narrowing a manager sets, and the
-/// <c>team_site_staff</c> row each staff member has for each site the team follows. Writes the
-/// team's own rows only: no membership of any site and no reason for one.
+/// <c>team_site_staff</c> row each staff member has for each site the team follows. A join and an edit
+/// return the team reasons that bring the staff member's memberships into line with those rows
+/// (<see cref="TeamReasonChanges"/>); removing a staff member removes the reasons it ends
+/// (<see cref="LockStaffRemovalAsync"/>).
 /// </summary>
 /// <remarks>
 /// Every write here holds the team's manager lock, which an approval of the team's access holds too, so
 /// a join and an approval each see the other's rows. A join also takes the access locks of every site
-/// the team follows (<see cref="LockAccessOfTeamsAsync"/>), manager lock first and sites in ascending
-/// tenant id, the order a team deletion takes them in. A stop of a site's access takes only that site's
-/// lock and never waits on a manager lock, so no two of them each hold what the other waits for, and a
-/// join either reads the access before a stop commits and has its row removed by the stop's cascade, or
-/// waits and reads it gone. An edit takes the same locks, so the rows it loads cannot be removed by a stop
-/// before it saves.
+/// the team follows (<see cref="LockAccessOfTeamsAsync"/>), in the order <see cref="MembershipLock"/>
+/// gives every write that takes them, after the staff member's subject row. So a join either reads the
+/// access before a stop commits and has its row and reason removed by the stop, or waits and reads it
+/// gone. An edit takes the same locks, so the rows it loads cannot be removed by a stop before it saves.
 /// </remarks>
 public partial class TeamRepository
 {
@@ -77,118 +77,133 @@ public partial class TeamRepository
             invite.Invite.TeamId, invite.TeamName, invite.CreatedByName, NarrowingOf(invite.Invite), refusal);
     }
 
-    /// <inheritdoc/>
-    public virtual async Task<TeamInviteAcceptance> AcceptStaffInviteAsync(
-        string tokenHash, Guid subjectId, DateTime now, CancellationToken ct)
+    /// <summary>
+    /// Makes <paramref name="subjectId"/> staff of the invite's team, on <paramref name="unit"/>, which must
+    /// not be pinned to a tenant: with what the invite gives, one use of the invite taken, and a
+    /// <c>team_site_staff</c> row for each site the team has access to, saved. Returns with it the team
+    /// reasons that bring the subject's memberships of those sites into line
+    /// (<see cref="TeamReasonChanges.SyncAsync"/>), none when it is refused. A subject whose account was
+    /// deleted first is <see cref="TeamInviteRefusal.NotFound"/>. A subject already a member of
+    /// either kind changes nothing and is told so. A manager token is <see cref="TeamInviteRefusal.NotFound"/>
+    /// here, as a staff token is to <see cref="AcceptInviteAsync"/>.
+    /// </summary>
+    public static async Task<(TeamInviteAcceptance Acceptance, TeamReasonChanges? Changes)> LockStaffJoinAsync(
+        DbUnitOfWork unit, string tokenHash, Guid subjectId, DateTime now, CancellationToken ct)
     {
-        await using var db = await contexts.CreatePlatformAsync(ct);
-        return await db.ExecuteInTransactionAsync(async token =>
+        var db = unit.Context;
+        await db.LockSubjectRowSharedAsync(subjectId, ct);
+        if (!await db.Subjects.AnyAsync(s => s.Id == subjectId, ct))
+            return (new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound), null);
+
+        var teamId = await db.TeamStaffInvites.AsNoTracking()
+            .Where(i => i.TokenHash == tokenHash)
+            .Select(i => (Guid?)i.TeamId)
+            .FirstOrDefaultAsync(ct);
+        if (teamId is not { } id)
+            return (new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound), null);
+
+        await db.LockTeamManagersAsync(id, ct);
+        await LockAccessOfTeamsAsync(db, [id], ct);
+
+        var invite = await db.TeamStaffInvites.FirstOrDefaultAsync(i => i.TokenHash == tokenHash, ct);
+        if (invite is null)
+            return (new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound), null);
+        if (await RefusalAsync(db, invite, now, ct) is { } refusal)
+            return (new TeamInviteAcceptance(id, refusal), null);
+        if (StaffEndRefusal(invite, now) is { } ended)
+            return (new TeamInviteAcceptance(id, ended), null);
+        if (await db.TeamMembers.AnyAsync(m => m.TeamId == id && m.SubjectId == subjectId, ct))
+            return (new TeamInviteAcceptance(id, TeamInviteRefusal.AlreadyMember), null);
+
+        invite.UseCount++;
+        var member = new TeamMemberEntity
         {
-            var teamId = await db.TeamStaffInvites.AsNoTracking()
-                .Where(i => i.TokenHash == tokenHash)
-                .Select(i => (Guid?)i.TeamId)
-                .FirstOrDefaultAsync(token);
-            if (teamId is not { } id)
-                return new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound);
+            Id = Guid.CreateVersion7(),
+            TeamId = id,
+            SubjectId = subjectId,
+            Kind = TeamMemberKind.Staff,
+            RoleCeilingSlug = invite.RoleCeilingSlug,
+            LimitTo24Hours = invite.LimitTo24Hours,
+            EndsAt = invite.StaffEndsAt,
+            CreatedFromStaffInviteId = invite.Id,
+        };
+        db.TeamMembers.Add(member);
 
-            await db.LockTeamManagersAsync(id, token);
-            await LockAccessOfTeamsAsync(db, [id], token);
+        var accesses = await db.TeamTenantAccess.AsNoTracking()
+            .Where(a => a.TeamId == id)
+            .Select(a => new { a.Id, a.TenantId, a.TeamManagesStaff })
+            .ToListAsync(ct);
+        foreach (var access in accesses)
+            db.TeamSiteStaff.Add(await NewSiteStaffAsync(db, access.Id, member.Id, subjectId, access.TeamManagesStaff, ct));
 
-            var invite = await db.TeamStaffInvites.FirstOrDefaultAsync(i => i.TokenHash == tokenHash, token);
-            if (invite is null)
-                return new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound);
-            if (await RefusalAsync(db, invite, now, token) is { } refusal)
-                return new TeamInviteAcceptance(id, refusal);
-            if (StaffEndRefusal(invite, now) is { } ended)
-                return new TeamInviteAcceptance(id, ended);
-            if (await db.TeamMembers.AnyAsync(m => m.TeamId == id && m.SubjectId == subjectId, token))
-                return new TeamInviteAcceptance(id, TeamInviteRefusal.AlreadyMember);
-
-            invite.UseCount++;
-            var member = new TeamMemberEntity
-            {
-                Id = Guid.CreateVersion7(),
-                TeamId = id,
-                SubjectId = subjectId,
-                Kind = TeamMemberKind.Staff,
-                RoleCeilingSlug = invite.RoleCeilingSlug,
-                LimitTo24Hours = invite.LimitTo24Hours,
-                EndsAt = invite.StaffEndsAt,
-                CreatedFromStaffInviteId = invite.Id,
-            };
-            db.TeamMembers.Add(member);
-
-            var accesses = await db.TeamTenantAccess.AsNoTracking()
-                .Where(a => a.TeamId == id)
-                .Select(a => new { a.Id, a.TeamManagesStaff })
-                .ToListAsync(token);
-            foreach (var access in accesses)
-                db.TeamSiteStaff.Add(NewSiteStaff(access.Id, member.Id, access.TeamManagesStaff));
-
-            TeamAudit.StageStaffAdded(db, id, subjectId, invite.Id);
-            await db.SaveChangesAsync(token);
-            return new TeamInviteAcceptance(id, null);
-        }, ct: ct);
+        TeamAudit.StageStaffAdded(db, id, subjectId, invite.Id);
+        await db.SaveChangesAsync(ct);
+        return (new TeamInviteAcceptance(id, null), (await TeamReasonChanges.SyncAsync(
+            unit, accesses.Select(a => (a.TenantId, subjectId)), now, ct)).WithStaffNotices(id, accesses.Select(a => a.TenantId)));
     }
 
-    /// <inheritdoc/>
-    public virtual Task<TeamStaffChange> UpdateStaffAsync(
-        Guid teamId, Guid callerSubjectId, Guid staffSubjectId, TeamStaffNarrowing narrowing, DateTime now, CancellationToken ct) =>
-        AsManagerAsync(teamId, callerSubjectId, TeamStaffChange.NotFound, async (db, token) =>
-        {
-            await LockAccessOfTeamsAsync(db, [teamId], token);
-
-            var member = await StaffMemberAsync(db, teamId, staffSubjectId, token);
-            if (member is null)
-                return TeamStaffChange.NotFound;
-
-            var before = NarrowingOf(member);
-            if (before == narrowing)
-                return TeamStaffChange.Changed;
-            if (narrowing.EndsAt != before.EndsAt && MembershipLiveness.HasEnded(narrowing.EndsAt, now))
-                return TeamStaffChange.EndPassed;
-
-            member.RoleCeilingSlug = narrowing.RoleCeilingSlug;
-            member.LimitTo24Hours = narrowing.LimitTo24Hours;
-            member.EndsAt = narrowing.EndsAt;
-
-            if (TeamStaffRules.Widens(before, narrowing))
-            {
-                var approvedWhereSiteDecides = await db.TeamSiteStaff
-                    .Where(s => s.TeamMemberId == member.Id
-                        && s.Status == TeamSiteStaffStatus.Approved
-                        && !s.TeamTenantAccess!.TeamManagesStaff)
-                    .ToListAsync(token);
-                foreach (var row in approvedWhereSiteDecides)
-                    row.Status = TeamSiteStaffStatus.Pending;
-            }
-
-            TeamAudit.StageStaffChanged(db, teamId, staffSubjectId, before, narrowing);
-            await db.SaveChangesAsync(token);
-            return TeamStaffChange.Changed;
-        }, ct);
-
-    /// <inheritdoc/>
-    public virtual async Task<bool> RemoveStaffAsync(
-        Guid teamId, Guid callerSubjectId, Guid staffSubjectId, CancellationToken ct)
+    /// <summary>
+    /// Sets what narrows the staff member <paramref name="staffSubjectId"/>, on <paramref name="unit"/>, which
+    /// must not be pinned to a tenant, and saves it. An edit that gives them more than they held
+    /// (<see cref="TeamStaffRules.Widens"/>) returns every approval of theirs that the site, not the team,
+    /// decides to pending. Returns with it the team reasons that bring the staff member's memberships of
+    /// the team's sites into line (<see cref="TeamReasonChanges.SyncAsync"/>), none when nothing changed.
+    /// <see cref="TeamStaffChange.NotFound"/> when the caller is not a manager of the team or the subject
+    /// is not its staff, and <see cref="TeamStaffChange.EndPassed"/> when the end at <paramref name="now"/>
+    /// has passed and is not the end they already have, so a manager can still narrow a staff member whose
+    /// end has passed without moving it.
+    /// </summary>
+    public static async Task<(TeamStaffChange Change, TeamReasonChanges? Changes)> LockStaffUpdateAsync(
+        DbUnitOfWork unit, Guid teamId, Guid callerSubjectId, Guid staffSubjectId, TeamStaffNarrowing narrowing,
+        DateTime now, CancellationToken ct)
     {
-        await using var db = await contexts.CreatePlatformAsync(ct);
-        return await db.ExecuteInTransactionAsync(async token =>
+        var db = unit.Context;
+        await db.LockSubjectRowSharedAsync(staffSubjectId, ct);
+        await db.LockTeamManagersAsync(teamId, ct);
+        if (!await IsManagerAsync(db, teamId, callerSubjectId, ct))
+            return (TeamStaffChange.NotFound, null);
+
+        await LockAccessOfTeamsAsync(db, [teamId], ct);
+
+        var member = await StaffMemberAsync(db, teamId, staffSubjectId, ct);
+        if (member is null)
+            return (TeamStaffChange.NotFound, null);
+
+        var before = NarrowingOf(member);
+        if (before == narrowing)
+            return (TeamStaffChange.Changed, null);
+        if (narrowing.EndsAt != before.EndsAt && MembershipLiveness.HasEnded(narrowing.EndsAt, now))
+            return (TeamStaffChange.EndPassed, null);
+
+        member.RoleCeilingSlug = narrowing.RoleCeilingSlug;
+        member.LimitTo24Hours = narrowing.LimitTo24Hours;
+        member.EndsAt = narrowing.EndsAt;
+
+        var sentBack = new List<Guid>();
+        if (TeamStaffRules.Widens(before, narrowing))
         {
-            await db.LockTeamManagersAsync(teamId, token);
+            var approvedWhereSiteDecides = await db.TeamSiteStaff
+                .Where(s => s.TeamMemberId == member.Id
+                    && s.Status == TeamSiteStaffStatus.Approved
+                    && !s.TeamTenantAccess!.TeamManagesStaff)
+                .Select(s => new { Row = s, s.TeamTenantAccess!.TenantId })
+                .ToListAsync(ct);
+            foreach (var approved in approvedWhereSiteDecides)
+            {
+                approved.Row.Status = TeamSiteStaffStatus.Pending;
+                sentBack.Add(approved.TenantId);
+            }
+        }
 
-            if (callerSubjectId != staffSubjectId && !await IsManagerAsync(db, teamId, callerSubjectId, token))
-                return false;
+        TeamAudit.StageStaffChanged(db, teamId, staffSubjectId, before, narrowing);
+        await db.SaveChangesAsync(ct);
 
-            var member = await StaffMemberAsync(db, teamId, staffSubjectId, token);
-            if (member is null)
-                return false;
-
-            db.TeamMembers.Remove(member);
-            TeamAudit.StageStaffRemoved(db, teamId, staffSubjectId);
-            await db.SaveChangesAsync(token);
-            return true;
-        }, ct: ct);
+        var sites = await db.TeamTenantAccess.AsNoTracking()
+            .Where(a => a.TeamId == teamId)
+            .Select(a => a.TenantId)
+            .ToListAsync(ct);
+        return (TeamStaffChange.Changed, (await TeamReasonChanges.SyncAsync(
+            unit, sites.Select(site => (site, staffSubjectId)), now, ct)).WithStaffNotices(teamId, sentBack));
     }
 
     private static Task<TeamMemberEntity?> StaffMemberAsync(
@@ -196,12 +211,20 @@ public partial class TeamRepository
         db.TeamMembers.FirstOrDefaultAsync(
             m => m.TeamId == teamId && m.SubjectId == subjectId && m.Kind == TeamMemberKind.Staff, ct);
 
-    private static TeamSiteStaffEntity NewSiteStaff(Guid accessId, Guid memberId, bool teamManagesStaff) => new()
+    /// <summary>
+    /// The <c>team_site_staff</c> row of a staff member at a site: declined when an owner of the site
+    /// declined the subject on this access before (<see cref="TeamSiteDeclineEntity"/>), else approved when
+    /// the team manages its staff there and pending when it does not.
+    /// </summary>
+    private static async Task<TeamSiteStaffEntity> NewSiteStaffAsync(
+        NocturneDbContext db, Guid accessId, Guid memberId, Guid subjectId, bool teamManagesStaff, CancellationToken ct) => new()
     {
         Id = Guid.CreateVersion7(),
         TeamTenantAccessId = accessId,
         TeamMemberId = memberId,
-        Status = teamManagesStaff ? TeamSiteStaffStatus.Approved : TeamSiteStaffStatus.Pending,
+        Status = await db.TeamSiteDeclines.AnyAsync(d => d.TeamTenantAccessId == accessId && d.SubjectId == subjectId, ct)
+            ? TeamSiteStaffStatus.Declined
+            : teamManagesStaff ? TeamSiteStaffStatus.Approved : TeamSiteStaffStatus.Pending,
     };
 
     private static TeamStaffNarrowing NarrowingOf(TeamMemberEntity member) =>

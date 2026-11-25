@@ -93,8 +93,10 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>
     /// The tenant whose rows this context reaches: a pin when one is set, otherwise the scope's
     /// resolved tenant, read live. The tenant query filter and the <c>app.current_tenant_id</c> GUC
-    /// both read it. Only <see cref="INocturneDbContextFactory"/> and
-    /// <see cref="Extensions.RlsPinningExtensions.PinTenantAsync"/> pin it.
+    /// both read it. Only <see cref="INocturneDbContextFactory"/>,
+    /// <see cref="Extensions.RlsPinningExtensions.PinTenantAsync"/> and
+    /// <see cref="Extensions.RlsPinningExtensions.InTenantForTransactionAsync{T}"/> pin it; the last
+    /// leaves the context pinned to the tenant it read before the call.
     /// </summary>
     public Guid TenantId
     {
@@ -299,6 +301,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<TeamSiteStaffEntity> TeamSiteStaff { get; set; } = null!;
 
+    public DbSet<TeamSiteDeclineEntity> TeamSiteDeclines { get; set; } = null!;
+
     public DbSet<MembershipRequestEntity> MembershipRequests { get; set; } = null!;
 
     public DbSet<CompressionLowSuggestionEntity> CompressionLowSuggestions { get; set; }
@@ -469,6 +473,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<TenantDemoConfigEntity> TenantDemoConfigs => Set<TenantDemoConfigEntity>();
 
     public DbSet<GoogleHealthGrantHolderEntity> GoogleHealthGrantHolders => Set<GoogleHealthGrantHolderEntity>();
+
+    public DbSet<GoogleHealthWorkEntity> GoogleHealthWork => Set<GoogleHealthWorkEntity>();
 
     /// <summary>
     /// Configure the database model and relationships
@@ -995,7 +1001,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     {
         if (entry.State is EntityState.Deleted or EntityState.Detached
             || entry.Entity is not IUpstreamFingerprinted { LegacyId: { } legacyId } row
-            || !UpstreamFingerprintScope.TryGet(row.DataSource, legacyId, out var fingerprint)
+            || !UpstreamFingerprintScope.TryGet(row.UpstreamSource, legacyId, out var fingerprint)
             || row.UpstreamFingerprint == fingerprint)
             return;
 

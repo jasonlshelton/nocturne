@@ -392,13 +392,16 @@ public class OidcAuthService : IOidcAuthService
             var digest = existing is null
                 ? ExternalIdentityDigest(provider.IssuerUrl, idTokenClaims.Sub)
                 : null;
-            _logger.LogWarning(
-                "OIDC login denied: provider {ProviderId} identity (subject {SubjectId}, "
-                    + "identity digest {IdentityDigest}) is not admitted to tenant {TenantId}",
-                provider.Id,
-                existing?.Id,
-                digest,
-                currentTenantId);
+            if (currentTenantId is { } deniedTenant)
+                _logger.LogWarning(
+                    "OIDC login denied: provider {ProviderId} identity (subject {SubjectId}, "
+                        + "identity digest {IdentityDigest}) is not admitted to tenant {TenantId}",
+                    provider.Id, existing?.Id, digest, deniedTenant);
+            else
+                _logger.LogWarning(
+                    "OIDC login denied: provider {ProviderId} identity (subject {SubjectId}, "
+                        + "identity digest {IdentityDigest}) is not admitted (no tenant resolved)",
+                    provider.Id, existing?.Id, digest);
             return OidcCallbackResult.NotAMember(
                 existing?.Id, provider.Id, digest, stateData.ReturnUrl);
         }
@@ -444,9 +447,7 @@ public class OidcAuthService : IOidcAuthService
                 _logger.LogWarning(
                     "OIDC login refused at completion: subject {SubjectId} via provider {ProviderId} "
                         + "is not admitted to tenant {TenantId}",
-                    subject.Id,
-                    provider.Id,
-                    currentTenantId);
+                    subject.Id, provider.Id, currentTenantId);
                 var refused = OidcCallbackResult.NotAMember(
                     subject.Id, provider.Id, externalIdentityDigest: null, stateData.ReturnUrl);
                 refused.RefusalAudited = true;
@@ -552,7 +553,7 @@ public class OidcAuthService : IOidcAuthService
     /// <param name="path">The page the link opens.</param>
     /// <param name="parameter">The query parameter carrying the token.</param>
     /// <returns>The token, or null.</returns>
-    private static string? TokenFromReturnUrl(string? returnUrl, string path, string parameter)
+    internal static string? TokenFromReturnUrl(string? returnUrl, string path, string parameter)
     {
         if (string.IsNullOrEmpty(returnUrl))
             return null;
@@ -635,19 +636,13 @@ public class OidcAuthService : IOidcAuthService
     }
 
     /// <inheritdoc />
-    public async Task<OidcLogoutResult> LogoutAsync(string refreshToken, Guid? providerId = null)
+    public async Task<OidcLogoutResult> LogoutAsync(
+        string? refreshToken, RefreshTokenSession? signedIn, Guid? providerId = null)
     {
-        // Revoke the refresh token
-        var revoked = await _refreshTokenService.RevokeRefreshTokenAsync(
-            refreshToken,
-            "User logout"
-        );
-
-        if (!revoked)
-        {
-            // Token might already be revoked, which is fine
-            _logger.LogDebug("Refresh token not found or already revoked during logout");
-        }
+        var presented = string.IsNullOrEmpty(refreshToken) ? null : await _refreshTokenService.FindOwnerAsync(refreshToken);
+        foreach (var session in new[] { presented, signedIn }.OfType<RefreshTokenSession>()
+                     .DistinctBy(session => (session.SubjectId, session.SessionId)))
+            await _refreshTokenService.RevokeSessionForSubjectAsync(session.SubjectId, session.SessionId, "User logout");
 
         // Get provider logout URL if requested
         string? providerLogoutUrl = null;
@@ -810,13 +805,13 @@ public class OidcAuthService : IOidcAuthService
 
     /// <inheritdoc />
     public async Task<OidcSetupCallbackResult> HandleSetupCallbackAsync(
-        string code, string state, string expectedState)
+        string code, string state, string expectedState, Guid tenantId)
     {
         var parsed = await ValidateCallbackAndParseIdTokenAsync(code, state, expectedState, SetupCallbackPath);
         if (!parsed.Success)
             return OidcSetupCallbackResult.Failed(parsed.Error ?? "callback_failed", parsed.ErrorDescription);
 
-        return await CompleteSetupAsync(parsed.StateData!, parsed.Provider!, parsed.Claims!);
+        return await CompleteSetupAsync(parsed.StateData!, parsed.Provider!, parsed.Claims!, tenantId);
     }
 
     /// <summary>
@@ -827,7 +822,8 @@ public class OidcAuthService : IOidcAuthService
     internal async Task<OidcSetupCallbackResult> CompleteSetupAsync(
         OidcStateData stateData,
         OidcProvider provider,
-        OidcIdTokenClaims claims)
+        OidcIdTokenClaims claims,
+        Guid tenantId)
     {
         if (stateData.Intent != "setup")
             return OidcSetupCallbackResult.Failed("invalid_intent", "State was not issued for a setup flow");
@@ -837,13 +833,18 @@ public class OidcAuthService : IOidcAuthService
 
         var subjectId = stateData.SubjectId.Value;
 
-        var (outcome, _) = await _subjectService.AttachOidcIdentityAsync(
+        var outcome = await _subjectService.AttachSetupOwnerOidcIdentityAsync(
+            tenantId,
             subjectId,
             provider.Id,
             claims.Sub,
             provider.IssuerUrl,
             claims.Email,
             claims.EmailVerified == true);
+
+        if (outcome is null)
+            return OidcSetupCallbackResult.Failed(
+                "setup_already_complete", "Another completion has claimed the setup");
 
         if (outcome == OidcLinkOutcome.AlreadyLinkedToOther)
         {

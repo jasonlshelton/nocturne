@@ -95,7 +95,7 @@ public partial class TeamRepository(INocturneDbContextFactory contexts) : ITeamR
             isManager ? await LiveStaffInvitesAsync(db, teamId, now, ct) : [],
             isManager ? await LiveAccessLinksAsync(db, teamId, now, ct) : [],
             isManager ? await SitesOfAsync(db, teamId, now, ct) : [],
-            isManager ? TeamSuggestableRoles.All : [],
+            TeamSuggestableRoles.All,
             await db.IsLastManagerAsync(teamId, callerSubjectId, ct),
             await CanDeleteAsync(db, teamId, callerSubjectId, ct),
             team.Caller.Kind,
@@ -218,6 +218,7 @@ public partial class TeamRepository(INocturneDbContextFactory contexts) : ITeamR
             if (teamId is not { } id)
                 return new TeamInviteAcceptance(null, TeamInviteRefusal.NotFound);
 
+            await db.LockSubjectRowSharedAsync(subjectId, token);
             await db.LockTeamManagersAsync(id, token);
 
             var invite = await db.TeamInvites.FirstOrDefaultAsync(i => i.TokenHash == tokenHash, token);
@@ -242,32 +243,12 @@ public partial class TeamRepository(INocturneDbContextFactory contexts) : ITeamR
         }, ct: ct);
     }
 
-    /// <inheritdoc/>
-    public virtual async Task<TeamDeletion> DeleteAsync(Guid teamId, Guid callerSubjectId, CancellationToken ct)
-    {
-        await using var db = await contexts.CreatePlatformAsync(ct);
-        return await db.ExecuteInTransactionAsync(async token =>
-        {
-            await db.LockTeamManagersAsync(teamId, token);
-
-            var team = await db.Teams.FirstOrDefaultAsync(
-                t => t.Id == teamId && t.Members.Any(m => m.SubjectId == callerSubjectId), token);
-            if (team is null)
-                return TeamDeletion.NotFound;
-
-            if (!await CanDeleteAsync(db, teamId, callerSubjectId, token))
-                return TeamDeletion.Refused;
-
-            await RemoveAsync(db, team, token);
-            await db.SaveChangesAsync(token);
-            return TeamDeletion.Deleted;
-        }, ct: ct);
-    }
-
     /// <summary>
     /// Removes the team, whose members, invites, access links and access to sites go with it by
     /// cascade, and stages its audit row and a stopped row for each site it had access to. The caller
-    /// holds the team's manager lock and an open transaction.
+    /// holds the team's manager lock and an open transaction, and has removed every team reason that
+    /// stands on the team's access: a deletion (<see cref="LockTeamDeletionAsync"/>) removes them, and
+    /// account deletion removes only teams with no member but the subject, whose memberships it removed.
     /// </summary>
     internal static async Task RemoveAsync(NocturneDbContext db, TeamEntity team, CancellationToken ct)
     {
@@ -292,7 +273,9 @@ public partial class TeamRepository(INocturneDbContextFactory contexts) : ITeamR
     /// <summary>
     /// Runs <paramref name="write"/> under the team's manager lock, in one transaction with the check
     /// that the caller manages the team, so a manager removed meanwhile cannot write once the removal
-    /// commits. <paramref name="notManager"/> is the answer when the caller does not manage it.
+    /// commits. <paramref name="notManager"/> is the answer when the caller does not manage it. The
+    /// caller's subject row is locked first, since a write may name the caller as its maker
+    /// (<see cref="MembershipLock"/>).
     /// </summary>
     private async Task<T> AsManagerAsync<T>(
         Guid teamId, Guid callerSubjectId, T notManager,
@@ -301,6 +284,7 @@ public partial class TeamRepository(INocturneDbContextFactory contexts) : ITeamR
         await using var db = await contexts.CreatePlatformAsync(ct);
         return await db.ExecuteInTransactionAsync(async token =>
         {
+            await db.LockSubjectRowSharedAsync(callerSubjectId, token);
             await db.LockTeamManagersAsync(teamId, token);
             return await IsManagerAsync(db, teamId, callerSubjectId, token)
                 ? await write(db, token)

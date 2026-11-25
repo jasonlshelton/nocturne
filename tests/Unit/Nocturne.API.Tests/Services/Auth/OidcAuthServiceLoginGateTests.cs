@@ -121,19 +121,20 @@ public class OidcAuthServiceLoginGateTests
     {
         var provider = Provider();
         var ownerId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
         var state = LoginState(returnUrl: "/setup");
         state.Intent = "setup";
         state.SubjectId = ownerId;
         _subjectService
-            .Setup(s => s.AttachOidcIdentityAsync(
-                ownerId, provider.Id, "google-123", provider.IssuerUrl, "user@example.com", false))
-            .ReturnsAsync((OidcLinkOutcome.Created, Guid.NewGuid()));
+            .Setup(s => s.AttachSetupOwnerOidcIdentityAsync(
+                tenantId, ownerId, provider.Id, "google-123", provider.IssuerUrl, "user@example.com", false))
+            .ReturnsAsync(OidcLinkOutcome.Created);
         _subjectService.Setup(s => s.GetSubjectByIdAsync(ownerId)).ReturnsAsync(new Subject { Id = ownerId, Name = "Owner" });
 
         var claims = Claims();
         claims.Sid = "provider-sid";
 
-        var result = await _service.CompleteSetupAsync(state, provider, claims);
+        var result = await _service.CompleteSetupAsync(state, provider, claims, tenantId);
 
         result.Success.Should().BeTrue(result.ErrorDescription);
         result.SubjectId.Should().Be(ownerId);
@@ -145,6 +146,36 @@ public class OidcAuthServiceLoginGateTests
             Times.Never,
             "the caller ends setup before the sign-in issues a session");
         _subjectService.Verify(s => s.UpdateLastLoginAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CompleteSetupAsync_WhenAnotherCompletionHasClaimedTheSetup_AnswersSetupAlreadyCompleteAndAdoptsNothing()
+    {
+        var provider = Provider();
+        var ownerId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        var state = LoginState(returnUrl: "/setup");
+        state.Intent = "setup";
+        state.SubjectId = ownerId;
+        state.TenantSlug = "my-instance";
+        _subjectService
+            .Setup(s => s.AttachSetupOwnerOidcIdentityAsync(
+                tenantId, ownerId, provider.Id, "google-123", provider.IssuerUrl, "user@example.com", false))
+            .ReturnsAsync((OidcLinkOutcome?)null);
+
+        var result = await _service.CompleteSetupAsync(state, provider, Claims(), tenantId);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("setup_already_complete");
+        result.SubjectId.Should().BeNull();
+        _subjectService.Verify(
+            s => s.AdoptForSetupAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        _subjectService.Verify(
+            s => s.AttachOidcIdentityAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>()),
+            Times.Never);
     }
 
     [Fact]
@@ -672,6 +703,57 @@ public class OidcAuthServiceLoginGateTests
         result.SubjectId.Should().Be(subject.Id);
         result.ExternalIdentityDigest.Should().BeNull("the subject id already names the person");
         VerifyNothingWrittenForTheIdentity();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CompleteLoginAsync_ForARefusalWithNoTenantResolved_LogsNoTenantProperty()
+    {
+        SetupFirstTimeIdentity();
+
+        var result = await _service.CompleteLoginAsync(
+            LoginState(tenantSlug: ""), Provider(), Claims(), currentTenantId: null, ipAddress: null, userAgent: null);
+
+        result.IsAccessDenied.Should().BeTrue();
+        var refusal = _logger.WarningEvents.Should().ContainSingle(e => e.Message.Contains("is not admitted")).Which;
+        refusal.Message.Should().EndWith("(no tenant resolved)");
+        refusal.Properties.Should().NotContainKey("TenantId");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CompleteLoginAsync_ForARefusalOnATenant_LogsTheTenant()
+    {
+        SetupFirstTimeIdentity();
+        var tenantId = Guid.NewGuid();
+
+        await _service.CompleteLoginAsync(
+            LoginState(), Provider(), Claims(), tenantId, ipAddress: null, userAgent: null);
+
+        var refusal = _logger.WarningEvents.Should().ContainSingle(e => e.Message.Contains("is not admitted")).Which;
+        refusal.Message.Should().EndWith($"to tenant {tenantId}");
+        refusal.Properties.Should().Contain("TenantId", tenantId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CompleteLoginAsync_ForARefusalAtCompletion_LogsTheTenantItWasRefusedFrom()
+    {
+        var subject = SetupResolvedSubject();
+        var tenantId = Guid.NewGuid();
+        _tenantMemberService
+            .SetupSequence(t => t.IsMemberAsync(subject.Id, tenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+
+        var result = await _service.CompleteLoginAsync(
+            LoginState(), Provider(), Claims(), tenantId, ipAddress: null, userAgent: null);
+
+        result.IsAccessDenied.Should().BeTrue();
+        result.RefusalAudited.Should().BeTrue();
+        var refusal = _logger.WarningEvents.Should().ContainSingle(e => e.Message.Contains("refused at completion")).Which;
+        refusal.Message.Should().EndWith($"to tenant {tenantId}");
+        refusal.Properties.Should().Contain("TenantId", tenantId);
     }
 
     [Fact]
