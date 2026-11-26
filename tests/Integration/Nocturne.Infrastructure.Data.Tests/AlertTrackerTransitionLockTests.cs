@@ -8,7 +8,6 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Infrastructure.Data.Tests.Rls;
-using Npgsql;
 using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
@@ -34,7 +33,7 @@ public class AlertTrackerTransitionLockTests
     {
         var tenant = Guid.NewGuid();
         await SeedTenantAsync(tenant);
-        await using var provider = BuildProvider();
+        await using var provider = TestContexts.BuildProvider(_fx.AppConnectionString);
         var ruleId = await SeedRuleAsync(provider, tenant);
 
         await using var first = await ContextAsync(provider, tenant);
@@ -73,7 +72,7 @@ public class AlertTrackerTransitionLockTests
     {
         var tenant = Guid.NewGuid();
         await SeedTenantAsync(tenant);
-        await using var provider = BuildProvider();
+        await using var provider = TestContexts.BuildProvider(_fx.AppConnectionString);
         var ruleA = await SeedRuleAsync(provider, tenant);
         var ruleB = await SeedRuleAsync(provider, tenant);
 
@@ -108,7 +107,7 @@ public class AlertTrackerTransitionLockTests
     {
         var tenant = Guid.NewGuid();
         await SeedTenantAsync(tenant);
-        await using var provider = BuildProvider();
+        await using var provider = TestContexts.BuildProvider(_fx.AppConnectionString);
         await using var context = await ContextAsync(provider, tenant);
 
         var act = () => new AlertTrackerRepository(DbUnitOfWork.Own(context)).LockRuleAsync(Guid.NewGuid());
@@ -121,7 +120,7 @@ public class AlertTrackerTransitionLockTests
     {
         var tenant = Guid.NewGuid();
         await SeedTenantAsync(tenant);
-        await using var provider = BuildProvider();
+        await using var provider = TestContexts.BuildProvider(_fx.AppConnectionString);
         var ruleId = await SeedRuleAsync(provider, tenant);
 
         await using var context = await ContextAsync(provider, tenant);
@@ -146,15 +145,6 @@ public class AlertTrackerTransitionLockTests
         State = state,
         UpdatedAt = DateTime.UtcNow,
     };
-
-    private ServiceProvider BuildProvider()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddHttpContextAccessor();
-        services.AddPostgreSqlInfrastructure(_fx.AppConnectionString, configuration: null);
-        return services.BuildServiceProvider();
-    }
 
     private static async Task<NocturneDbContext> ContextAsync(ServiceProvider provider, Guid tenantId)
     {
@@ -187,13 +177,6 @@ public class AlertTrackerTransitionLockTests
     private async Task SeedTenantAsync(Guid tenantId)
     {
         await using var conn = await _fx.OpenMigratorConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-            VALUES (@id, @slug, 'transition-lock-test', true, now(), now())
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("@id", tenantId));
-        cmd.Parameters.Add(new NpgsqlParameter("@slug", $"lock-{tenantId:N}"));
-        await cmd.ExecuteNonQueryAsync();
+        await conn.SeedTenantAsync(tenantId, $"lock-{tenantId:N}", "transition-lock-test");
     }
 }

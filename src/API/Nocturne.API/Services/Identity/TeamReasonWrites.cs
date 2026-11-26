@@ -14,8 +14,9 @@ namespace Nocturne.API.Services.Identity;
 /// team being deleted, and a staff member being removed or leaving remove the reasons that stand on what
 /// goes. A staff member joining or being edited, a site approving the team's access, and a role a team's
 /// access gives being edited, and an owner of a site changing what the team's access gives, approving or
-/// declining a staff member or turning "the team manages its own staff" on or off, bring the reasons of the
-/// staff they reach into line with the team's rows.
+/// declining a staff member, setting who decides about the team's staff, or stopping one person through
+/// every team or removing the stop, and a manager changing the team's groups or which people its staff reach,
+/// bring the reasons of the staff they reach into line with the team's rows.
 /// A member whose last reason goes loses the membership with what a direct removal takes
 /// (<see cref="MembershipRemoval.StageLossAsync"/>), what they made stopped at once; a member whose end
 /// moves earlier has what they made capped at it.
@@ -136,11 +137,61 @@ internal static class TeamReasonWrites
     /// <inheritdoc cref="TeamRepository.LockStaffRuleAsync"/>
     public static Task<Written<OwnerDecision>> SetStaffRuleAsync(
         INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid tenantId, Guid teamId,
-        Guid callerSubjectId, bool teamManagesStaff, DateTime now, CancellationToken ct) =>
+        Guid callerSubjectId, string staffRule, DateTime now, CancellationToken ct) =>
         RunWithNoticesAsync(
             "staff rule change",
             token => DbUnitOfWork.OpenForTenantAsync(contexts, tenantId, token),
-            (unit, token) => TeamRepository.LockStaffRuleAsync(unit, tenantId, teamId, callerSubjectId, teamManagesStaff, now, token),
+            (unit, token) => TeamRepository.LockStaffRuleAsync(unit, tenantId, teamId, callerSubjectId, staffRule, now, token),
+            grantRevocation, now, ct);
+
+    /// <inheritdoc cref="TeamRepository.LockStaffBlockAsync"/>
+    public static Task<Written<OwnerDecision>> BlockStaffAsync(
+        INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid tenantId, Guid callerSubjectId,
+        Guid subjectId, bool blocked, DateTime now, CancellationToken ct) =>
+        RunWithNoticesAsync(
+            blocked ? "staff block" : "staff unblock",
+            token => DbUnitOfWork.OpenForTenantAsync(contexts, tenantId, token),
+            (unit, token) => TeamRepository.LockStaffBlockAsync(unit, tenantId, callerSubjectId, subjectId, blocked, now, token),
+            grantRevocation, now, ct);
+
+    /// <inheritdoc cref="TeamRepository.LockGroupPersonAsync"/>
+    public static Task<Written<TeamGroupChange>> ChangeGroupPersonAsync(
+        INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid teamId, Guid callerSubjectId,
+        Guid groupId, Guid tenantId, bool add, DateTime now, CancellationToken ct) =>
+        RunWithNoticesAsync(
+            add ? "group person added" : "group person removed",
+            token => DbUnitOfWork.OpenPlatformAsync(contexts, token),
+            (unit, token) => TeamRepository.LockGroupPersonAsync(unit, teamId, callerSubjectId, groupId, tenantId, add, now, token),
+            grantRevocation, now, ct);
+
+    /// <inheritdoc cref="TeamRepository.LockGroupStaffAsync"/>
+    public static Task<Written<TeamGroupChange>> ChangeGroupStaffAsync(
+        INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid teamId, Guid callerSubjectId,
+        Guid groupId, Guid staffSubjectId, bool add, DateTime now, CancellationToken ct) =>
+        RunWithNoticesAsync(
+            add ? "group staff added" : "group staff removed",
+            token => DbUnitOfWork.OpenPlatformAsync(contexts, token),
+            (unit, token) => TeamRepository.LockGroupStaffAsync(unit, teamId, callerSubjectId, groupId, staffSubjectId, add, now, token),
+            grantRevocation, now, ct);
+
+    /// <inheritdoc cref="TeamRepository.LockGroupDeletionAsync"/>
+    public static Task<Written<TeamGroupChange>> DeleteGroupAsync(
+        INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid teamId, Guid callerSubjectId,
+        Guid groupId, DateTime now, CancellationToken ct) =>
+        RunWithNoticesAsync(
+            "group deletion",
+            token => DbUnitOfWork.OpenPlatformAsync(contexts, token),
+            (unit, token) => TeamRepository.LockGroupDeletionAsync(unit, teamId, callerSubjectId, groupId, now, token),
+            grantRevocation, now, ct);
+
+    /// <inheritdoc cref="TeamRepository.LockStaffReachAsync"/>
+    public static Task<Written<TeamGroupChange>> SetStaffReachAsync(
+        INocturneDbContextFactory contexts, GrantRevocationService grantRevocation, Guid teamId, Guid callerSubjectId,
+        string staffReach, DateTime now, CancellationToken ct) =>
+        RunWithNoticesAsync(
+            "staff reach change",
+            token => DbUnitOfWork.OpenPlatformAsync(contexts, token),
+            (unit, token) => TeamRepository.LockStaffReachAsync(unit, teamId, callerSubjectId, staffReach, now, token),
             grantRevocation, now, ct);
 
     /// <inheritdoc cref="TenantMembershipRepository.LockRoleEditAsync"/>

@@ -57,26 +57,10 @@ public class DeviceCredentialAccessEndPostgresTests(DeviceCredentialAccessEndPos
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
 
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("device_credential_access_end");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("device_credential_access_end");
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant);
 
     private sealed record Seeded(Guid Tenant, Guid Maker, SuppliedContextFactory Contexts);
 
@@ -87,14 +71,7 @@ public class DeviceCredentialAccessEndPostgresTests(DeviceCredentialAccessEndPos
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'device-credential-test', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", $"{slug}-{tenant:N}"));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, $"{slug}-{tenant:N}", "device-credential-test");
         }
 
         var contexts = new SuppliedContextFactory(() => Context(tenant));
@@ -421,10 +398,7 @@ public class DeviceCredentialAccessEndPostgresTests(DeviceCredentialAccessEndPos
     }
 
     private NocturneDbContext ContextRefusingGrantSaves(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor(), new RefuseGrantSaves())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant, [new RefuseGrantSaves()]);
 
     [Fact]
     public async Task ADateChangeThatRollsBackCapsNothing()
@@ -840,7 +814,7 @@ public class DeviceCredentialAccessEndPostgresTests(DeviceCredentialAccessEndPos
     {
         var provider = MigrationJobHarness.BuildProvider(
             new OneTokenSite(),
-            database: o => o.UseNpgsql(database.AppConnectionString).AddInterceptors(new TenantConnectionInterceptor()));
+            database: o => o.UseTenantInterceptor(database.AppConnectionString));
         var service = MigrationJobHarness.CreateService(provider);
         var tenant = new TenantContext(seeded.Tenant, "device", "Device", IsActive: true, IsDemo: false);
         var job = await service.StartMigrationAsync(
@@ -981,16 +955,10 @@ public class DeviceCredentialAccessEndPostgresTests(DeviceCredentialAccessEndPos
     {
         await using var conn = new NpgsqlConnection(database.MigratorConnectionString);
         await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT set_config('app.current_tenant_id', @tenant, false);
-            SELECT row_to_json(g)::text FROM oauth_grants g WHERE g.id = @id;
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("@tenant", seeded.Tenant.ToString()));
-        cmd.Parameters.Add(new NpgsqlParameter("@id", id));
-        await using var reader = await cmd.ExecuteReaderAsync();
-        await reader.NextResultAsync();
-        (await reader.ReadAsync()).Should().BeTrue();
-        return reader.GetString(0);
+        await conn.PinTenantAsync(seeded.Tenant);
+        var rows = await conn.QueryAsync(
+            "SELECT row_to_json(g)::text FROM oauth_grants g WHERE g.id = @id;", r => r.GetString(0), ("id", id));
+        rows.Should().NotBeEmpty();
+        return rows[0];
     }
 }

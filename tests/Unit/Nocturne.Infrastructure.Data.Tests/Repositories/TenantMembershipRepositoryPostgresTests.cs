@@ -26,20 +26,7 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryPostgresTests.Database database)
     : IClassFixture<TenantMembershipRepositoryPostgresTests.Database>
 {
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("tenant_membership_repo");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("tenant_membership_repo");
 
     /// <summary>
     /// A scope whose every entry point reads as <paramref name="scope"/>, except the system pin,
@@ -71,11 +58,7 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
     }
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString, npgsql => npgsql.EnableRetryOnFailure(
-                maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(1), errorCodesToAdd: null))
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant, npgsql: TestContexts.RetryingBriefly);
 
     private sealed record Seeded(Guid Tenant, Guid Owner, Guid Orphan);
 
@@ -86,14 +69,7 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'membership-repo-test', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", $"{slug}-{tenant:N}"));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, $"{slug}-{tenant:N}", "membership-repo-test");
         }
 
         var factory = new Factory(Context, tenant);
@@ -300,7 +276,7 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
     public async Task OwnerLock_DeletingTheSecondOwnerWaitsForTheFirstLeavingAndIsRefused()
     {
         var raced = await RaceAgainstFirstOwnerLeavingAsync("g", (factory, second) =>
-            new SubjectRepository(factory, AccountLinkRoutes.Off).DeleteAsync(second, CancellationToken.None));
+            SubjectDeletions.DeleteAsync(factory, AccountLinkRoutes.Off, second, CancellationToken.None));
 
         raced.Removal.Should().Be(OwnerGuardedChange.Changed);
         raced.Contender.Should().BeOfType<SubjectChange.LastOwnerOf>()
@@ -326,13 +302,13 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
     }
 
     [Fact]
-    public async Task OwnerLock_RemovingEveryMembershipWaitsForTheFirstLeavingAndNamesTheTenantItLeavesWithoutAnOwner()
+    public async Task OwnerLock_DeletingEvenALastOwnerWaitsForTheFirstLeavingAndNamesTheTenantItLeavesWithoutAnOwner()
     {
         var raced = await RaceAgainstFirstOwnerLeavingAsync("i", (factory, second) =>
-            new TenantMembershipRepository(factory, AccountLinkRoutes.Off).RemoveMembershipsOfSubjectAsync(second, CancellationToken.None));
+            SubjectDeletions.DeleteEvenLastOwnerAsync(factory, AccountLinkRoutes.Off, second, CancellationToken.None));
 
         raced.Removal.Should().Be(OwnerGuardedChange.Changed);
-        raced.Contender.Removed.Should().Be(1);
+        raced.Contender.Change.Should().BeOfType<SubjectChange.Changed>();
         raced.Contender.TenantsLeftWithoutOwner.Select(t => t.TenantId).Should().Equal(raced.Seeded.Tenant);
         (await new TenantMembershipRepository(new Factory(Context, raced.Seeded.Tenant), AccountLinkRoutes.Off)
             .ListOwnersAsync(raced.Seeded.Tenant, CancellationToken.None)).Should().BeEmpty();
@@ -393,7 +369,7 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
         });
         await held.Task;
 
-        var removal = Task.Run(() => members.RemoveMembershipsOfSubjectAsync(subject, CancellationToken.None));
+        var removal = Task.Run(() => SubjectDeletions.DeleteEvenLastOwnerAsync(factory, AccountLinkRoutes.Off, subject, CancellationToken.None));
         await PostgresLockWaits.UntilBlockedAsync(database.AppConnectionString, removal);
 
         await using var probe = await DbUnitOfWork.OpenPlatformAsync(factory);
@@ -401,8 +377,8 @@ public class TenantMembershipRepositoryPostgresTests(TenantMembershipRepositoryP
         release.SetResult();
         await holding;
 
-        lowIsHeld.Should().BeTrue("the removal holds the lower tenant's lock while it waits for the higher's");
-        (await removal).Removed.Should().Be(2);
+        lowIsHeld.Should().BeTrue("the delete holds the lower tenant's lock while it waits for the higher's");
+        (await removal).Change.Should().BeOfType<SubjectChange.Changed>();
     }
 
     private static readonly DateTime EndNow = new(2026, 11, 22, 9, 0, 0, DateTimeKind.Utc);

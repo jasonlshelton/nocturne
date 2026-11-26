@@ -40,20 +40,22 @@ public class AddDuplicateFlagToLinkedRecordTypesFixture : IAsyncLifetime
         var database = await SharedPostgres.CreateDatabaseAtMigrationAsync(PriorMigration, "duplicate_flag_backfill");
         _migrator = database.MigratorConnectionString;
 
-        await ExecuteAsync(string.Concat(LaterColumns.Select(c => $"ALTER TABLE {c.Table} ADD COLUMN {c.Column} {c.Type};")));
+        await NpgsqlTestCommands.ExecuteAsync(
+            _migrator, string.Concat(LaterColumns.Select(c => $"ALTER TABLE {c.Table} ADD COLUMN {c.Column} {c.Type};")));
         foreach (var tenant in new[] { TenantA, TenantB })
             Expected.AddRange(await SeedAsync(tenant));
-        await ExecuteAsync(string.Concat(LaterColumns.Select(c => $"ALTER TABLE {c.Table} DROP COLUMN {c.Column};")));
+        await NpgsqlTestCommands.ExecuteAsync(
+            _migrator, string.Concat(LaterColumns.Select(c => $"ALTER TABLE {c.Table} DROP COLUMN {c.Column};")));
 
         await MigrateToAsync(null);
         FlaggedAfterUp = await FlaggedAsync();
         MismatchesAfterUp = await MismatchesAsync();
         VersionsAfterUp = await FlaggedVersionsAsync();
 
-        await ExecuteAsync(AddDuplicateFlagToLinkedRecordTypes.BackfillSql);
+        await NpgsqlTestCommands.ExecuteAsync(_migrator, AddDuplicateFlagToLinkedRecordTypes.BackfillSql);
         VersionsAfterRerun = await FlaggedVersionsAsync();
 
-        await ExecuteAsync($"DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{Migration}'");
+        await NpgsqlTestCommands.ExecuteAsync(_migrator, $"DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{Migration}'");
         await MigrateToAsync(null);
         VersionsAfterRestart = await FlaggedVersionsAsync();
 
@@ -90,10 +92,7 @@ public class AddDuplicateFlagToLinkedRecordTypesFixture : IAsyncLifetime
     /// <returns>The non-primary copies.</returns>
     private async Task<List<Guid>> SeedAsync(Guid tenant)
     {
-        await ExecuteAsync($"""
-            INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-            VALUES ('{tenant}', 'dup-{tenant:N}', 'duplicate-flag-backfill', true, now(), now())
-            """);
+        await NpgsqlTestCommands.SeedTenantAsync(_migrator, tenant, $"dup-{tenant:N}", "duplicate-flag-backfill");
 
         await using var db = new NocturneDbContext(Options()) { TenantId = tenant };
         var at = DateTime.UtcNow.AddDays(-3);
@@ -135,10 +134,7 @@ public class AddDuplicateFlagToLinkedRecordTypesFixture : IAsyncLifetime
     };
 
     private DbContextOptions<NocturneDbContext> Options() =>
-        new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(_migrator, npgsql => npgsql.UseNocturneMigrations())
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options;
+        TestContexts.MigrationsOptions(_migrator);
 
     private async Task MigrateToAsync(string? target)
     {
@@ -182,8 +178,7 @@ public class AddDuplicateFlagToLinkedRecordTypesFixture : IAsyncLifetime
         foreach (var tenant in new[] { TenantA, TenantB })
         {
             await using var transaction = await conn.BeginTransactionAsync();
-            await using (var pin = new NpgsqlCommand($"SELECT set_config('app.current_tenant_id', '{tenant}', true)", conn))
-                await pin.ExecuteNonQueryAsync();
+            await conn.PinTenantAsync(tenant, local: true);
             await using var cmd = new NpgsqlCommand(sql, conn);
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -191,14 +186,6 @@ public class AddDuplicateFlagToLinkedRecordTypesFixture : IAsyncLifetime
         }
 
         return rows;
-    }
-
-    private async Task ExecuteAsync(string sql)
-    {
-        await using var conn = new NpgsqlConnection(_migrator);
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        await cmd.ExecuteNonQueryAsync();
     }
 }
 

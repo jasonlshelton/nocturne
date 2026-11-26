@@ -14,7 +14,9 @@ namespace Nocturne.API.Services.Identity;
 /// than the roles they could grant, or than their own access. Also the other team writes that change
 /// the team reasons of its staff (<see cref="TeamReasonWrites"/>): a staff member joining, being edited,
 /// being removed or leaving, a site stopping the team's access, the team being deleted, and an owner of
-/// a site changing what the access gives or deciding which of the team's staff reach it. Each of those, once committed, files or takes back
+/// a site changing what the access gives, deciding which of the team's staff reach it, or stopping one person
+/// through every team, and a manager changing the team's groups or which people its staff reach. Each of
+/// those, once committed, files or takes back
 /// the notices the owners of the sites are owed (<see cref="TeamStaffAnnouncer"/>).
 /// </summary>
 /// <remarks>
@@ -155,8 +157,46 @@ public sealed class TeamAccessService(
 
     /// <inheritdoc cref="TeamRepository.LockStaffRuleAsync"/>
     public Task<OwnerDecision> SetStaffRuleAsync(
-        Guid tenantId, Guid teamId, Guid callerSubjectId, bool teamManagesStaff, CancellationToken ct) =>
-        AnnouncedAsync(TeamReasonWrites.SetStaffRuleAsync(contexts, grantRevocation, tenantId, teamId, callerSubjectId, teamManagesStaff, Now, ct));
+        Guid tenantId, Guid teamId, Guid callerSubjectId, string staffRule, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.SetStaffRuleAsync(contexts, grantRevocation, tenantId, teamId, callerSubjectId, staffRule, Now, ct));
+
+    /// <summary>
+    /// An owner of <paramref name="tenantId"/> stops <paramref name="subjectId"/> reaching it through any team
+    /// (<see cref="TeamRepository.LockStaffBlockAsync"/>).
+    /// </summary>
+    public Task<OwnerDecision> BlockStaffAsync(Guid tenantId, Guid callerSubjectId, Guid subjectId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.BlockStaffAsync(contexts, grantRevocation, tenantId, callerSubjectId, subjectId, true, Now, ct));
+
+    /// <summary>
+    /// An owner of <paramref name="tenantId"/> lets <paramref name="subjectId"/> reach it through teams again
+    /// (<see cref="TeamRepository.LockStaffBlockAsync"/>).
+    /// </summary>
+    public Task<OwnerDecision> UnblockStaffAsync(Guid tenantId, Guid callerSubjectId, Guid subjectId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.BlockStaffAsync(contexts, grantRevocation, tenantId, callerSubjectId, subjectId, false, Now, ct));
+
+    /// <summary>A manager puts a site in the team's group (<see cref="TeamRepository.LockGroupPersonAsync"/>).</summary>
+    public Task<TeamGroupChange> AddGroupPersonAsync(Guid teamId, Guid callerSubjectId, Guid groupId, Guid tenantId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.ChangeGroupPersonAsync(contexts, grantRevocation, teamId, callerSubjectId, groupId, tenantId, true, Now, ct));
+
+    /// <summary>A manager takes a site out of the team's group (<see cref="TeamRepository.LockGroupPersonAsync"/>).</summary>
+    public Task<TeamGroupChange> RemoveGroupPersonAsync(Guid teamId, Guid callerSubjectId, Guid groupId, Guid tenantId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.ChangeGroupPersonAsync(contexts, grantRevocation, teamId, callerSubjectId, groupId, tenantId, false, Now, ct));
+
+    /// <summary>A manager puts a staff member in the team's group (<see cref="TeamRepository.LockGroupStaffAsync"/>).</summary>
+    public Task<TeamGroupChange> AddGroupStaffAsync(Guid teamId, Guid callerSubjectId, Guid groupId, Guid staffSubjectId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.ChangeGroupStaffAsync(contexts, grantRevocation, teamId, callerSubjectId, groupId, staffSubjectId, true, Now, ct));
+
+    /// <summary>A manager takes a staff member out of the team's group (<see cref="TeamRepository.LockGroupStaffAsync"/>).</summary>
+    public Task<TeamGroupChange> RemoveGroupStaffAsync(Guid teamId, Guid callerSubjectId, Guid groupId, Guid staffSubjectId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.ChangeGroupStaffAsync(contexts, grantRevocation, teamId, callerSubjectId, groupId, staffSubjectId, false, Now, ct));
+
+    /// <inheritdoc cref="TeamRepository.LockGroupDeletionAsync"/>
+    public Task<TeamGroupChange> DeleteGroupAsync(Guid teamId, Guid callerSubjectId, Guid groupId, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.DeleteGroupAsync(contexts, grantRevocation, teamId, callerSubjectId, groupId, Now, ct));
+
+    /// <inheritdoc cref="TeamRepository.LockStaffReachAsync"/>
+    public Task<TeamGroupChange> SetStaffReachAsync(Guid teamId, Guid callerSubjectId, string staffReach, CancellationToken ct) =>
+        AnnouncedAsync(TeamReasonWrites.SetStaffReachAsync(contexts, grantRevocation, teamId, callerSubjectId, staffReach, Now, ct));
 
     private DateTime Now => time.GetUtcNow().UtcDateTime;
 

@@ -29,7 +29,10 @@ namespace Nocturne.Infrastructure.Data.Repositories;
 /// <c>kind</c> = <c>team_access</c> and no target, so it never appears in a page narrowed to a member.
 /// It names the team by its name now, or the name the row recorded once the team is gone. An owner's
 /// approval or decline of a staff member is a <c>team_access</c> row that targets the staff member, so it
-/// appears in their page too; a change of the switch has no target.
+/// appears in their page too; a change of the switch has no target. An owner's stop of one person through
+/// any team, set or removed, is a <c>team_access</c> row with no team that targets that person. A manager's
+/// change to the team's groups or to which people its staff reach is a <c>team_access</c> row of the system
+/// (<see cref="TeamAudit"/>), so the page names the team and never the manager.
 /// </para>
 /// <para>
 /// A change an invite made is <see cref="MemberHistoryEntry.InRecordedJoin"/> when a
@@ -54,6 +57,14 @@ public class MemberHistoryReader(INocturneDbContextFactory contexts) : IMemberHi
         AuthAuditEventType.TeamStaffApproved,
         AuthAuditEventType.TeamStaffDeclined,
         AuthAuditEventType.TeamStaffRuleChanged,
+        AuthAuditEventType.TeamStaffBlocked,
+        AuthAuditEventType.TeamStaffUnblocked,
+        AuthAuditEventType.TeamGroupPersonAdded,
+        AuthAuditEventType.TeamGroupPersonRemoved,
+        AuthAuditEventType.TeamGroupStaffAdded,
+        AuthAuditEventType.TeamGroupStaffRemoved,
+        AuthAuditEventType.TeamGroupDeleted,
+        AuthAuditEventType.TeamStaffReachChanged,
     ];
 
     private const string MemberChangeRows =
@@ -175,6 +186,14 @@ public class MemberHistoryReader(INocturneDbContextFactory contexts) : IMemberHi
             AuthAuditEventType.TeamStaffApproved => MemberHistoryKind.TeamStaffApproved,
             AuthAuditEventType.TeamStaffDeclined => MemberHistoryKind.TeamStaffDeclined,
             AuthAuditEventType.TeamStaffRuleChanged => MemberHistoryKind.TeamStaffRuleChanged,
+            AuthAuditEventType.TeamStaffBlocked => MemberHistoryKind.TeamStaffBlocked,
+            AuthAuditEventType.TeamStaffUnblocked => MemberHistoryKind.TeamStaffUnblocked,
+            AuthAuditEventType.TeamGroupPersonAdded => MemberHistoryKind.TeamGroupPersonAdded,
+            AuthAuditEventType.TeamGroupPersonRemoved => MemberHistoryKind.TeamGroupPersonRemoved,
+            AuthAuditEventType.TeamGroupStaffAdded => MemberHistoryKind.TeamGroupStaffAdded,
+            AuthAuditEventType.TeamGroupStaffRemoved => MemberHistoryKind.TeamGroupStaffRemoved,
+            AuthAuditEventType.TeamGroupDeleted => MemberHistoryKind.TeamGroupDeleted,
+            AuthAuditEventType.TeamStaffReachChanged => MemberHistoryKind.TeamStaffReachChanged,
             AuthAuditEventType.AccessEndChanged => details switch
             {
                 { AccessEndRecorded: false } => MemberHistoryKind.AccessEndChanged,
@@ -209,7 +228,8 @@ public class MemberHistoryReader(INocturneDbContextFactory contexts) : IMemberHi
                 && joins.Contains((member, via, row.CreatedAt)),
             row.TeamId is { } team ? new MemberHistoryTeam(team, teamNames.GetValueOrDefault(team) ?? details.Name) : null,
             details.Roles,
-            kind == MemberHistoryKind.TeamStaffRuleChanged ? details.TeamManagesStaff : null);
+            kind == MemberHistoryKind.TeamStaffRuleChanged ? details.StaffRule : null,
+            kind == MemberHistoryKind.TeamStaffReachChanged ? details.StaffReach : null);
     }
 
     /// <summary>
@@ -242,9 +262,9 @@ public class MemberHistoryReader(INocturneDbContextFactory contexts) : IMemberHi
         string? Role, string? Permission, MemberHistoryLimit? HistoryLimit, Guid? InviteId,
         IReadOnlyList<string>? Gained, IReadOnlyList<string>? Lost, bool AccessEndRecorded, DateTime? AccessEndsAt,
         MembershipJoinHow? JoinedHow, MembershipEndHow? RemovedHow, Guid? By, string? Name, IReadOnlyList<string>? Roles,
-        bool? TeamManagesStaff)
+        string? StaffRule, string? StaffReach)
     {
-        private static readonly Details Unknown = new(null, null, null, null, null, null, false, null, null, null, null, null, null, null);
+        private static readonly Details Unknown = new(null, null, null, null, null, null, false, null, null, null, null, null, null, null, null);
 
         public static Details Of(string? json)
         {
@@ -278,11 +298,21 @@ public class MemberHistoryReader(INocturneDbContextFactory contexts) : IMemberHi
                 Guid.TryParse(Text(root, MemberAccessAudit.ByKey), out var by) ? by : null,
                 Text(root, TeamAudit.NameKey),
                 List(root, TeamAudit.RolesKey),
-                root.TryGetProperty(TeamAudit.TeamManagesStaffKey, out var manages)
-                    && manages.ValueKind is JsonValueKind.True or JsonValueKind.False
-                    ? manages.GetBoolean()
-                    : null);
+                StaffRuleOf(root),
+                Text(root, TeamAudit.StaffReachKey) is { } reach && TeamStaffReach.IsKnown(reach) ? reach : null);
         }
+
+        private static string? StaffRuleOf(JsonElement root) =>
+            Text(root, TeamAudit.StaffRuleKey) is { } rule
+                ? TeamStaffRule.IsKnown(rule) ? rule : null
+                : root.TryGetProperty(TeamAudit.TeamManagesStaffKey, out var manages)
+                    ? manages.ValueKind switch
+                    {
+                        JsonValueKind.True => TeamStaffRule.TeamDecides,
+                        JsonValueKind.False => TeamStaffRule.OwnerApproves,
+                        _ => null,
+                    }
+                    : null;
 
         private static string? Text(JsonElement root, string key) =>
             root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

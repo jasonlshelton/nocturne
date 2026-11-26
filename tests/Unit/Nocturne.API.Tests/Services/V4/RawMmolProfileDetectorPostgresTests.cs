@@ -20,28 +20,12 @@ namespace Nocturne.API.Tests.Services.V4;
 public class RawMmolProfileDetectorPostgresTests(RawMmolProfileDetectorPostgresTests.Database database)
     : IClassFixture<RawMmolProfileDetectorPostgresTests.Database>
 {
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("raw_mmol_detector");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("raw_mmol_detector");
 
     private sealed class Contexts(string connectionString, Guid tenant) : IDbContextFactory<NocturneDbContext>
     {
         public NocturneDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<NocturneDbContext>()
-                .UseNpgsql(connectionString)
-                .AddInterceptors(new TenantConnectionInterceptor())
-                .Options) { TenantId = tenant };
+            TestContexts.Context(connectionString, tenant);
     }
 
     private sealed record Store(Guid TargetId, Guid SensitivityId);
@@ -54,14 +38,7 @@ public class RawMmolProfileDetectorPostgresTests(RawMmolProfileDetectorPostgresT
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'raw-mmol-detector-test', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", $"raw-mmol-{tenant:N}"));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, $"raw-mmol-{tenant:N}", "raw-mmol-detector-test");
         }
 
         return (new Contexts(database.AppConnectionString, tenant).AsNocturneFactory(tenant), tenant);

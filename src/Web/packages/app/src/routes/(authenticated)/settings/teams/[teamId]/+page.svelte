@@ -36,10 +36,13 @@
   import { MANAGER_KIND, STAFF_KIND } from "#lib/teams/member-kind.svelte.js";
   import { linkExpiryOptions } from "#lib/teams/link-expiry.svelte.js";
   import { teamProblemMessages } from "#lib/teams/problem-messages.svelte.js";
+  import { plural } from "#lib/utils/plural.js";
   import TeamsUnavailable from "#lib/components/teams/TeamsUnavailable.svelte";
   import AccessLinksSection from "#lib/components/teams/AccessLinksSection.svelte";
   import TeamSitesSection from "#lib/components/teams/TeamSitesSection.svelte";
   import TeamStaffSection from "#lib/components/teams/TeamStaffSection.svelte";
+  import TeamGroupsSection from "#lib/components/teams/TeamGroupsSection.svelte";
+  import { REACH_EVERY_PERSON, REACH_THEIR_GROUPS } from "#lib/teams/staff-reach.svelte.js";
   import StaffInvitesSection from "#lib/components/teams/StaffInvitesSection.svelte";
   import StaffNarrowing from "#lib/components/teams/StaffNarrowing.svelte";
 
@@ -407,6 +410,14 @@
               hasEnded={team.ownStaff?.hasEnded}
             />
           </p>
+          {#if (team.ownStaff?.sitesBlocked ?? 0) > 0}
+            <p class="text-sm text-muted-foreground">
+              {plural(team.ownStaff?.sitesBlocked ?? 0, [
+                "One site you would see through this team stopped your access.",
+                "# sites you would see through this team stopped your access.",
+              ])}
+            </p>
+          {/if}
           {#if staffLeaveError}
             <p class="text-sm text-destructive" role="alert">{staffLeaveError}</p>
           {/if}
@@ -545,18 +556,28 @@
         teamName={team.name ?? ""}
         staff={team.staff ?? []}
         roles={team.suggestableRoles ?? []}
+        narrowsToGroups={team.staffReach === REACH_THEIR_GROUPS}
+      />
+      <TeamGroupsSection
+        {teamId}
+        groups={team.groups ?? []}
+        staffReach={team.staffReach ?? REACH_EVERY_PERSON}
+        accessesOutsideGroups={team.accessesOutsideGroups ?? 0}
+        sites={team.sites ?? []}
+        staff={team.staff ?? []}
       />
       <StaffInvitesSection
         {teamId}
         invites={team.staffInvites ?? []}
         roles={team.suggestableRoles ?? []}
+        narrowsToGroups={team.staffReach === REACH_THEIR_GROUPS}
       />
       <AccessLinksSection
         {teamId}
         links={team.accessLinks ?? []}
         roles={team.suggestableRoles ?? []}
       />
-      <TeamSitesSection sites={team.sites ?? []} />
+      <TeamSitesSection sites={team.sites ?? []} narrowsToGroups={team.staffReach === REACH_THEIR_GROUPS} />
     {/if}
 
     {#if isManager && team.canDelete}

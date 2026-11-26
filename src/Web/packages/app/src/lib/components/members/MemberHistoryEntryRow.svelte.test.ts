@@ -537,43 +537,97 @@ describe("MemberHistoryEntryRow an owner's decisions about a team's staff", () =
     await expect.element(row).toHaveTextContent("Alex declined Sam as staff of a team that was deleted.");
   });
 
-  it("states the switch turned off, and that new staff now wait", async () => {
-    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, team, teamManagesStaff: false });
-    await expect
-      .element(row)
-      .toHaveTextContent(
-        `Alex turned off "the team manages its own staff" for the team Clinic. New staff now wait for an owner's approval.`,
-      );
+  it.each([
+    [MemberHistoryKind.TeamStaffBlocked, "Alex stopped Sam from seeing this site through any team."],
+    [MemberHistoryKind.TeamStaffUnblocked, "Alex let Sam see this site through teams again."],
+  ])("states %s", async (kind, line) => {
+    const row = await sentence({ kind });
+    await expect.element(row).toHaveTextContent(line);
   });
 
-  it("states the switch turned on", async () => {
-    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, team, teamManagesStaff: true });
-    await expect.element(row).toHaveTextContent("Alex let the team Clinic approve its own staff.");
+  it.each([
+    [MemberHistoryKind.TeamStaffBlocked, "A deleted member stopped a deleted member from seeing this site through any team."],
+    [MemberHistoryKind.TeamStaffUnblocked, "A deleted member let a deleted member see this site through teams again."],
+  ])("states %s when the person and the actor were deleted", async (kind, line) => {
+    const row = await sentence({
+      kind,
+      actor: { kind: MemberHistoryActorKind.Person, subjectId: undefined, name: undefined },
+      member: undefined,
+    });
+    await expect.element(row).toHaveTextContent(line);
   });
 
-  it("states the switch turned off for a team that was deleted", async () => {
-    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, teamManagesStaff: false });
-    await expect
-      .element(row)
-      .toHaveTextContent('Alex turned off "the team manages its own staff" for a team that was deleted.');
+  it.each([
+    ["owner_approves", "Alex set the team Clinic so that an owner approves each staff member."],
+    ["team_decides", "Alex set the team Clinic so that the team decides who on its staff can see this site."],
+    ["team_trusted", "Alex set the team Clinic so that every staff member of the team can see this site."],
+  ])("states the staff rule set to %s", async (staffRule, line) => {
+    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, team, staffRule });
+    await expect.element(row).toHaveTextContent(line);
   });
 
-  it("states the switch turned on for a team that was deleted", async () => {
-    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, teamManagesStaff: true });
-    await expect.element(row).toHaveTextContent("Alex let a team that was deleted approve its own staff.");
+  it.each([
+    ["owner_approves", "Alex set a team that was deleted so that an owner approves each staff member."],
+    ["team_decides", "Alex set a team that was deleted so that the team decides who on its staff can see this site."],
+    ["team_trusted", "Alex set a team that was deleted so that every staff member of the team can see this site."],
+  ])("states the staff rule set to %s for a team that was deleted", async (staffRule, line) => {
+    const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, staffRule });
+    await expect.element(row).toHaveTextContent(line);
   });
 
-  it("says the detail is gone when the switch's value is not known", async () => {
+  it("says the detail is gone when the rule is not known", async () => {
     const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined, team });
     await expect
       .element(row)
       .toHaveTextContent("Alex changed who approves the staff of the team Clinic. The detail is no longer stored.");
   });
 
-  it("says the detail is gone when neither the team nor the switch's value is known", async () => {
+  it("says the detail is gone when neither the team nor the rule is known", async () => {
     const row = await sentence({ kind: MemberHistoryKind.TeamStaffRuleChanged, member: undefined });
     await expect
       .element(row)
       .toHaveTextContent("Alex changed who approves the staff of a team that was deleted. The detail is no longer stored.");
+  });
+
+  const system = { kind: MemberHistoryActorKind.System };
+
+  it.each([
+    [MemberHistoryKind.TeamGroupPersonAdded, "The team Clinic added this site to a group."],
+    [MemberHistoryKind.TeamGroupPersonRemoved, "The team Clinic removed this site from a group."],
+    [MemberHistoryKind.TeamGroupStaffAdded, "The team Clinic added Sam to a group with this site."],
+    [MemberHistoryKind.TeamGroupStaffRemoved, "The team Clinic removed Sam from a group with this site."],
+    [MemberHistoryKind.TeamGroupDeleted, "The team Clinic removed a group with this site."],
+  ])("states %s as the team's change", async (kind, line) => {
+    const row = await sentence({ kind, actor: system, team: { teamId: "t1", name: "Clinic" } });
+    await expect.element(row).toHaveTextContent(line);
+  });
+
+  it.each([
+    [MemberHistoryKind.TeamGroupPersonAdded, "A team that was deleted added this site to a group."],
+    [MemberHistoryKind.TeamGroupPersonRemoved, "A team that was deleted removed this site from a group."],
+    [MemberHistoryKind.TeamGroupStaffAdded, "A team that was deleted added a deleted member to a group with this site."],
+    [MemberHistoryKind.TeamGroupStaffRemoved, "A team that was deleted removed a deleted member from a group with this site."],
+    [MemberHistoryKind.TeamGroupDeleted, "A team that was deleted removed a group with this site."],
+  ])("states %s for a team that was deleted", async (kind, line) => {
+    const row = await sentence({ kind, actor: system, member: undefined });
+    await expect.element(row).toHaveTextContent(line);
+  });
+
+  it.each([
+    ["their_groups", { teamId: "t1", name: "Clinic" }, "The team Clinic set its staff to see only the people in their groups."],
+    ["every_person", { teamId: "t1", name: "Clinic" }, "The team Clinic set its staff to see every person that the team follows."],
+    ["their_groups", undefined, "A team that was deleted set its staff to see only the people in their groups."],
+    ["every_person", undefined, "A team that was deleted set its staff to see every person that the team follows."],
+    [undefined, { teamId: "t1", name: "Clinic" }, "The team Clinic changed which people its staff see. The detail is no longer stored."],
+    [undefined, undefined, "A team that was deleted changed which people its staff see. The detail is no longer stored."],
+  ])("states the staff reach set to %s", async (staffReach, team, line) => {
+    const row = await sentence({
+      kind: MemberHistoryKind.TeamStaffReachChanged,
+      actor: system,
+      member: undefined,
+      team,
+      staffReach,
+    });
+    await expect.element(row).toHaveTextContent(line);
   });
 });

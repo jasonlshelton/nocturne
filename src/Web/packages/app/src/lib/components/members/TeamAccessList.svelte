@@ -1,6 +1,7 @@
 <script lang="ts">
   import UsersRound from "@lucide/svelte/icons/users-round";
   import TeamAccessCard from "#lib/components/members/TeamAccessCard.svelte";
+  import { REACH_THEIR_GROUPS } from "#lib/teams/staff-reach.svelte.js";
   import type { TenantRoleDto, TenantTeamAccess } from "@nocturne/api-client";
 
   interface Props {
@@ -18,6 +19,8 @@
     limitForced: boolean;
     /** When the caller's direct access ends, which bounds the end they set. */
     callerAccessEndsAt?: string;
+    /** The caller, whose own staff line offers no stop. */
+    currentSubjectId?: string;
     /** The team the page was opened for, from a notice. Its row is scrolled to and focused. */
     linkedTeamId?: string | null;
     stoppingId?: string | null;
@@ -35,12 +38,15 @@
     onRetryRoles,
     limitForced,
     callerAccessEndsAt,
+    currentSubjectId,
     linkedTeamId = null,
     stoppingId = null,
     onStop,
     onStale,
     onSuccess,
   }: Props = $props();
+
+  const anyNarrows = $derived(teams.some((t) => t.staffReach === REACH_THEIR_GROUPS));
 
   let followedId: string | null = null;
 
@@ -65,7 +71,12 @@
         Teams
       </h2>
       <p class="text-sm text-muted-foreground">
-        Staff are the people who work for a team. Approved staff can see this site through the team.
+        {#if anyNarrows}
+          Staff are the people who work for a team. Approved staff can see this site through the team. When a team
+          limits its staff to their groups, only its staff in a group with this site can see it, as this site allows.
+        {:else}
+          Staff are the people who work for a team. Approved staff can see this site through the team.
+        {/if}
       </p>
     </div>
     {#each teams as team (team.teamId)}
@@ -78,6 +89,7 @@
         {onRetryRoles}
         {limitForced}
         {callerAccessEndsAt}
+        {currentSubjectId}
         stoppingId={stoppingId ?? null}
         {onStop}
         {onStale}

@@ -23,6 +23,40 @@ public static class TeamSiteStaffStatus
     public const string Declined = "declined";
 }
 
+/// <summary>Who decides which staff of a team reach a site the team has access to.</summary>
+public static class TeamStaffRule
+{
+    /// <summary>Each new staff member, and each one the team gives more, waits for an owner of the site to approve them.</summary>
+    public const string OwnerApproves = "owner_approves";
+
+    /// <summary>Staff reach the site as they join, its owners are told, and an owner may decline any one of them.</summary>
+    public const string TeamDecides = "team_decides";
+
+    /// <summary>
+    /// Every staff member reaches the site whatever an owner decided about them, and no owner decides about one.
+    /// Their decisions are kept, and apply again once the site stops trusting the team.
+    /// </summary>
+    public const string TeamTrusted = "team_trusted";
+
+    public static IReadOnlyList<string> All { get; } = [OwnerApproves, TeamDecides, TeamTrusted];
+
+    public static bool IsKnown(string? rule) => rule is OwnerApproves or TeamDecides or TeamTrusted;
+}
+
+/// <summary>Which of the people a team follows its staff reach, as the team sets it.</summary>
+public static class TeamStaffReach
+{
+    /// <summary>Every staff member reaches every site the team follows, as each site allows.</summary>
+    public const string EveryPerson = "every_person";
+
+    /// <summary>A staff member reaches a site only while both are in the same group of the team.</summary>
+    public const string TheirGroups = "their_groups";
+
+    public static IReadOnlyList<string> All { get; } = [EveryPerson, TheirGroups];
+
+    public static bool IsKnown(string? reach) => reach is EveryPerson or TheirGroups;
+}
+
 /// <summary>A team the caller is a member of.</summary>
 /// <param name="Kind">What the caller is in the team, a <see cref="TeamMemberKind"/> value.</param>
 public sealed record TeamSummary(Guid Id, string Name, string Kind);
@@ -41,15 +75,70 @@ public sealed record TeamStaffNarrowing(string? RoleCeilingSlug, bool LimitTo24H
 /// A staff member of a team, as a manager of the team reads them.
 /// </summary>
 /// <param name="HasEnded">Whether <see cref="TeamStaffNarrowing.EndsAt"/> has passed.</param>
-/// <param name="SitesApproved">The sites the team follows where the staff member is approved.</param>
-/// <param name="SitesPending">The sites the team follows where the staff member waits for approval.</param>
+/// <param name="SitesApproved">
+/// The sites the team follows that the staff member reaches: approved or trusted, not stopped, and while the
+/// team narrows to groups (<see cref="TeamStaffReach.TheirGroups"/>), in a group with them.
+/// </param>
+/// <param name="SitesPending">
+/// The sites the team follows where the staff member waits for approval, is not stopped, and while the team
+/// narrows to groups, is in a group with them.
+/// </param>
+/// <param name="SitesBlocked">
+/// The sites the team follows that stopped the staff member reaching them through any team. Never which
+/// sites, and never why.
+/// </param>
+/// <param name="InNoGroup">Whether the staff member is in none of the team's groups.</param>
 public sealed record TeamStaffMember(
     Guid SubjectId,
     string DisplayName,
     TeamStaffNarrowing Narrowing,
     bool HasEnded,
     int SitesApproved,
-    int SitesPending);
+    int SitesPending,
+    int SitesBlocked,
+    bool InNoGroup);
+
+/// <summary>A site in a team's group, as a manager of the team reads it.</summary>
+/// <param name="HasEnded">Whether the team's access to the site has ended.</param>
+public sealed record TeamGroupPerson(Guid TenantId, string DisplayName, bool HasEnded);
+
+/// <summary>A staff member in a team's group, as a manager of the team reads them.</summary>
+/// <param name="HasEnded">Whether the staff member's end has passed.</param>
+public sealed record TeamGroupStaff(Guid SubjectId, string DisplayName, bool HasEnded);
+
+/// <summary>
+/// A group of a team, as a manager of the team reads it: the sites the team follows that are in it, and its
+/// staff. A site the team no longer follows keeps its place, unlisted, until the team follows it again.
+/// </summary>
+/// <param name="HasNobodyCurrent">
+/// Whether no site in it has access that has not ended and no staff member in it has an end that has not
+/// passed, so a manager may want to remove it. Nothing removes it on its own.
+/// </param>
+public sealed record TeamGroup(
+    Guid Id,
+    string Name,
+    IReadOnlyList<TeamGroupPerson> People,
+    IReadOnlyList<TeamGroupStaff> Staff,
+    bool HasNobodyCurrent);
+
+/// <summary>What a manager's change to a team's groups, or to which people its staff reach, found.</summary>
+public enum TeamGroupChange
+{
+    /// <summary>The change was made, or there was nothing to change.</summary>
+    Changed,
+
+    /// <summary>
+    /// The caller does not manage the team, the team has no such group, the site is not one the team follows
+    /// with access that has not ended, or the subject is not current staff of the team.
+    /// </summary>
+    NotFound,
+
+    /// <summary>Another group of the team has the name, ignoring case.</summary>
+    NameTaken,
+}
+
+/// <summary>What creating a group found: the group made, or why not.</summary>
+public sealed record TeamGroupCreation(TeamGroupChange Change, Guid? GroupId);
 
 /// <summary>A staff invite that can still be accepted, as a manager reads it. The token is never read back.</summary>
 public sealed record TeamStaffInviteSummary(
@@ -63,7 +152,11 @@ public sealed record TeamStaffInviteSummary(
     TeamStaffNarrowing Narrowing);
 
 /// <summary>What narrows the caller, a staff member of the team, and whether their end has passed.</summary>
-public sealed record TeamStaffSelf(TeamStaffNarrowing Narrowing, bool HasEnded);
+/// <param name="SitesBlocked">
+/// The sites the team follows that stopped the caller reaching them through any team, as
+/// <see cref="TeamStaffMember.SitesBlocked"/> counts them.
+/// </param>
+public sealed record TeamStaffSelf(TeamStaffNarrowing Narrowing, bool HasEnded, int SitesBlocked);
 
 /// <summary>
 /// A manager invite that can still be accepted, and the manager who made it. The token is never read back.
@@ -91,6 +184,13 @@ public sealed record TeamManagerInvite(
 /// <param name="CanDelete">Whether the caller may delete the team now.</param>
 /// <param name="CallerKind">What the caller is in the team, a <see cref="TeamMemberKind"/> value.</param>
 /// <param name="OwnStaff">What narrows the caller; null unless the caller is a staff member.</param>
+/// <param name="StaffReach">Which people the team's staff reach, a <see cref="TeamStaffReach"/> value; null unless the caller is a manager.</param>
+/// <param name="Groups">The team's groups, by name; empty unless the caller is a manager.</param>
+/// <param name="AccessesOutsideGroups">
+/// How many pairs of a staff member and a site reach each other through the team now and share no group, so
+/// lose that access if the team narrows to groups (<see cref="TeamStaffReach.TheirGroups"/>). 0 while it
+/// narrows, and unless the caller is a manager.
+/// </param>
 public sealed record TeamDetail(
     Guid Id,
     string Name,
@@ -105,7 +205,10 @@ public sealed record TeamDetail(
     bool IsLastManager,
     bool CanDelete,
     string CallerKind,
-    TeamStaffSelf? OwnStaff);
+    TeamStaffSelf? OwnStaff,
+    string? StaffReach,
+    IReadOnlyList<TeamGroup> Groups,
+    int AccessesOutsideGroups);
 
 /// <summary>A seed role an access link may suggest, with its permissions as every new site is seeded with it.</summary>
 public sealed record TeamSuggestableRole(string Slug, string Name, IReadOnlyList<string> Permissions);
@@ -235,11 +338,12 @@ public sealed record TeamAccessLinkSummary(
 
 /// <summary>
 /// A site the team has access to, as a manager of the team reads it: how many of its staff wait for the
-/// site's approval there and how many the site declined, never which of them or who decided.
+/// site's approval there and how many the site's declines keep out, never which of them or who decided.
+/// Both are 0 while the site trusts the whole team, since then nobody waits and no decline applies.
 /// </summary>
 /// <param name="HasEnded">Whether <paramref name="AccessEndsAt"/> has passed.</param>
 /// <param name="GivenAt">When the access was given.</param>
-/// <param name="TeamManagesStaff">Whether the team's staff are approved at the site as they join.</param>
+/// <param name="StaffRule">Who decides which of the team's staff reach the site, a <see cref="TeamStaffRule"/> value.</param>
 public sealed record TeamSiteAccess(
     Guid TenantId,
     string DisplayName,
@@ -248,7 +352,7 @@ public sealed record TeamSiteAccess(
     DateTime? AccessEndsAt,
     bool HasEnded,
     DateTime GivenAt,
-    bool TeamManagesStaff,
+    string StaffRule,
     int PendingStaffCount,
     int DeclinedStaffCount);
 
@@ -313,12 +417,9 @@ public enum TeamAccessRefusal
 
 /// <summary>What a team is given on a site.</summary>
 /// <param name="AccessEndsAt">When the access ends, in UTC; null for no end.</param>
-/// <param name="TeamManagesStaff">
-/// Whether the team's managers decide which of their staff reach the site: its staff are approved
-/// there as they join. When false each waits for the site to approve them.
-/// </param>
+/// <param name="StaffRule">Who decides which of the team's staff reach the site, a <see cref="TeamStaffRule"/> value.</param>
 public sealed record TeamAccessGrant(
-    Guid TenantId, IReadOnlyList<Guid> RoleIds, bool LimitTo24Hours, DateTime? AccessEndsAt, bool TeamManagesStaff);
+    Guid TenantId, IReadOnlyList<Guid> RoleIds, bool LimitTo24Hours, DateTime? AccessEndsAt, string StaffRule);
 
 /// <summary>What approving an access link did: the access made, or why it was refused.</summary>
 public sealed record TeamAccessApproval(Guid? AccessId, TeamAccessRefusal? Refusal);
@@ -337,9 +438,8 @@ public sealed record TeamAccessEdit(OwnerDecision Decision, TeamAccessRefusal? R
 /// <summary>A team with access to a site, as the site reads it.</summary>
 /// <param name="HasEnded">Whether <paramref name="AccessEndsAt"/> has passed.</param>
 /// <param name="ApprovedBySubjectId">Who approved it; null once that subject is deleted.</param>
-/// <param name="TeamManagesStaff">
-/// Whether the team's staff are approved at the site as they join. When false each waits for an owner.
-/// </param>
+/// <param name="StaffRule">Who decides which of the team's staff reach the site, a <see cref="TeamStaffRule"/> value.</param>
+/// <param name="StaffReach">Which people the team's staff reach, a <see cref="TeamStaffReach"/> value.</param>
 /// <param name="Staff">The team's staff, each with whether the site approved them.</param>
 public sealed record TenantTeamAccess(
     Guid TeamId,
@@ -351,15 +451,33 @@ public sealed record TenantTeamAccess(
     Guid? ApprovedBySubjectId,
     string? ApprovedByName,
     DateTime GivenAt,
-    bool TeamManagesStaff,
+    string StaffRule,
+    string StaffReach,
     IReadOnlyList<TenantTeamStaff> Staff);
 
 /// <summary>A staff member of a team with access to a site, as the site reads them.</summary>
 /// <param name="Status">Whether the site approved them, a <see cref="TeamSiteStaffStatus"/> value.</param>
 /// <param name="HasEnded">Whether <see cref="TeamStaffNarrowing.EndsAt"/> has passed.</param>
 /// <param name="RoleCeilingName">The name of <see cref="TeamStaffNarrowing.RoleCeilingSlug"/>; null when there is no ceiling.</param>
+/// <param name="Blocked">
+/// Whether the site stopped them reaching it through any team, so <paramref name="Status"/> gives nothing
+/// while the stop stands.
+/// </param>
+/// <param name="OutsideTeamGroups">
+/// Whether the team narrows to groups (<see cref="TeamStaffReach.TheirGroups"/>) and they share none of its
+/// groups with the site, so <paramref name="Status"/> gives nothing until the team puts them in one.
+/// </param>
 public sealed record TenantTeamStaff(
-    Guid SubjectId, string DisplayName, string Status, TeamStaffNarrowing Narrowing, bool HasEnded, string? RoleCeilingName);
+    Guid SubjectId, string DisplayName, string Status, TeamStaffNarrowing Narrowing, bool HasEnded, string? RoleCeilingName,
+    bool Blocked, bool OutsideTeamGroups);
+
+/// <summary>A person a site stopped reaching it through any team, as the site reads the stop.</summary>
+/// <param name="DisplayName">The person's name.</param>
+/// <param name="BlockedAt">When the stop was set, in UTC.</param>
+/// <param name="BlockedBySubjectId">The owner who set it; null once that subject is deleted.</param>
+/// <param name="BlockedByName">The name of that owner; null once that subject is deleted.</param>
+public sealed record TenantTeamStaffBlock(
+    Guid SubjectId, string DisplayName, DateTime BlockedAt, Guid? BlockedBySubjectId, string? BlockedByName);
 
 /// <summary>
 /// What an owner's decision at their site found: about a team's access to it, or about the team's staff there.
@@ -368,7 +486,10 @@ public enum OwnerDecision
 {
     Decided,
 
-    /// <summary>The team has no access to the site, or the subject is not its staff.</summary>
+    /// <summary>
+    /// The team has no access to the site, or the subject is not its staff; for a stop, the subject is staff
+    /// of no team with access to the site.
+    /// </summary>
     NotFound,
 
     /// <summary>The caller holds no direct reason in force on the site, so gives nothing.</summary>
@@ -376,6 +497,9 @@ public enum OwnerDecision
 
     /// <summary>The caller's direct reason on the site does not hold the owner role.</summary>
     NotOwner,
+
+    /// <summary>The site trusts the team's whole staff (<see cref="TeamStaffRule.TeamTrusted"/>), so no owner decides about one of them.</summary>
+    TeamTrusted,
 }
 
 /// <summary>A role a team's access gives.</summary>

@@ -16,11 +16,12 @@ using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
+using Nocturne.Core.Contracts.Repositories;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Infrastructure.Data;
-using Nocturne.Infrastructure.Data.Abstractions;
 using Nocturne.Infrastructure.Data.Entities;
+using Nocturne.Infrastructure.Data.Mappers;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Infrastructure.Shared.Services;
@@ -40,7 +41,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
     private readonly ScanClock _clock = new(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
     private readonly SqliteTestDatabase _database = TestDbContextFactory.CreateSqlite();
     private readonly List<Sent> _sent = [];
-    private readonly List<InAppNotificationEntity> _active = [];
+    private readonly List<InAppNotification> _active = [];
     private readonly List<(string UserId, string Type, string SourceId, NotificationArchiveReason Reason)> _archived = [];
     private readonly Dictionary<Guid, string[]> _owners = [];
     private readonly ListLogger _log = new();
@@ -64,7 +65,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
 
         var services = new ServiceCollection();
         services.AddSingleton(_database.ContextFactory);
-        services.AddScoped<ITenantAccessor, StubTenantAccessor>();
+        services.AddScoped<ITenantAccessor, SettableTenantAccessor>();
         services.AddScoped(sp => _database.ContextFactory.AsNocturneFactory(sp.GetRequiredService<ITenantAccessor>().TenantId));
         services.AddScoped(_ => owners.Object);
         services.AddScoped(_ => repository.Object);
@@ -130,7 +131,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
 
         await CreateService().ReconcileAsync(generation, CancellationToken.None);
 
-        var json = InAppNotificationRepository.SerializeMetadata(_sent[0].Metadata)!;
+        var json = InAppNotificationMapper.SerializeMetadata(_sent[0].Metadata)!;
         using var document = JsonDocument.Parse(json);
         document.RootElement.GetProperty("AlertChannels")[0].EnumerateObject().Select(p => p.Name)
             .Should().Equal("ruleId", "ruleName", "destination");
@@ -540,7 +541,7 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
             lock (test._sent)
             {
                 test._sent.Add(new Sent(tenant.TenantId, userId, type, sourceId!, urgency, actions ?? [], metadata!));
-                test._active.Add(new InAppNotificationEntity
+                test._active.Add(new InAppNotification
                 {
                     Id = Guid.NewGuid(), UserId = userId, Type = type, Source = InstanceKeyChangeService.Source,
                     SourceId = sourceId,
@@ -622,14 +623,5 @@ public sealed class InstanceKeyChangeServiceTests : IDisposable
             lock (Entries)
                 Entries.Add((logLevel, formatter(state, exception)));
         }
-    }
-
-    private sealed class StubTenantAccessor : ITenantAccessor
-    {
-        public TenantContext? Context { get; private set; }
-        public Guid TenantId => Context?.TenantId ?? Guid.Empty;
-        public bool IsResolved => Context is not null;
-
-        public void SetTenant(TenantContext context) => Context = context;
     }
 }

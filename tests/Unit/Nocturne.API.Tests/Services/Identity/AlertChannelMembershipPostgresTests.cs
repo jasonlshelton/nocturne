@@ -44,20 +44,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
 
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("alert_channel_membership");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("alert_channel_membership");
 
     /// <summary>Records every dispatch the chat provider makes to the bot service.</summary>
     private sealed class BotService : HttpMessageHandler
@@ -72,10 +59,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
     }
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant);
 
     private sealed class Site(Guid tenant, string slug, Guid guest, SuppliedContextFactory contexts, FakeTimeProvider clock, BotService bot)
     {
@@ -97,14 +81,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'alert-channel-test', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", fullSlug));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, fullSlug, "alert-channel-test");
         }
 
         var contexts = new SuppliedContextFactory(() => Context(tenant));
@@ -418,7 +395,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
         var deletion = new SubjectDeletion(
             contexts,
             new SubjectRepository(contexts, AccountLinkRoutes.Off),
-            new TenantMembershipRepository(contexts, AccountLinkRoutes.Off),
+            AccountLinkRoutes.Off,
             new GrantRevocationService(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions()))),
             Mock.Of<IAuthAuditService>(),
             site.Clock,

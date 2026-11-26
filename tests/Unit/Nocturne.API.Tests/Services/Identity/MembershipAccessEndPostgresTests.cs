@@ -47,26 +47,10 @@ public class MembershipAccessEndPostgresTests(MembershipAccessEndPostgresTests.D
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
 
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("membership_access_end");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("membership_access_end");
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant);
 
     private static GrantRevocationService Revocation() =>
         new(new GuestSessionCacheService(new MemoryCache(new MemoryCacheOptions())));
@@ -80,14 +64,7 @@ public class MembershipAccessEndPostgresTests(MembershipAccessEndPostgresTests.D
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'access-end-test', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", $"{slug}-{tenant:N}"));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, $"{slug}-{tenant:N}", "access-end-test");
         }
 
         var contexts = new SuppliedContextFactory(() => Context(tenant));
@@ -556,10 +533,7 @@ public class MembershipAccessEndPostgresTests(MembershipAccessEndPostgresTests.D
     }
 
     private NocturneDbContext ContextRefusingGrantSaves(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor(), new RefuseGrantSaves())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant, [new RefuseGrantSaves()]);
 
     [Fact]
     public async Task ASetMemberAccessEndThatFailsAfterTheCapIsStagedChangesNothingAndEvictsNothing()

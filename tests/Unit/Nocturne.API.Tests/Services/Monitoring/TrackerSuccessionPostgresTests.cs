@@ -34,20 +34,7 @@ public class TrackerSuccessionPostgresTests(TrackerSuccessionPostgresTests.Datab
     private static readonly DateTime Now = new(2026, 9, 10, 8, 0, 0, DateTimeKind.Utc);
     private const string OwnerId = "owner";
 
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("tracker_succession");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("tracker_succession");
 
     /// <summary>
     /// Holds each writer after it reads the running instances until the other has read them too, or
@@ -80,24 +67,14 @@ public class TrackerSuccessionPostgresTests(TrackerSuccessionPostgresTests.Datab
     }
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString, o => o.EnableRetryOnFailure())
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant, npgsql: TestContexts.Retrying);
 
     private async Task<Guid> SeedTenantAsync()
     {
         var tenant = Guid.NewGuid();
         await using var conn = new NpgsqlConnection(database.MigratorConnectionString);
         await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-            VALUES (@id, @slug, 'tracker-succession-test', true, now(), now())
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-        cmd.Parameters.Add(new NpgsqlParameter("@slug", $"succession-{tenant:N}"));
-        await cmd.ExecuteNonQueryAsync();
+        await conn.SeedTenantAsync(tenant, $"succession-{tenant:N}", "tracker-succession-test");
         return tenant;
     }
 

@@ -39,6 +39,14 @@ vi.mock("#lib/api/generated/teams.generated.remote.js", () => ({
   createManagerInvite: vi.fn(),
   revokeManagerInvite: vi.fn(),
   deleteTeam: vi.fn(),
+  createGroup: vi.fn(),
+  renameGroup: vi.fn(),
+  deleteGroup: vi.fn(),
+  addGroupPerson: vi.fn(),
+  removeGroupPerson: vi.fn(),
+  addGroupStaff: vi.fn(),
+  removeGroupStaff: vi.fn(),
+  setStaffReach: vi.fn(),
 }));
 
 vi.mock("$app/navigation", () => ({
@@ -118,6 +126,24 @@ describe("team page for a staff member", () => {
       )
       .toBeVisible();
     expect(page.getByText("Your access through this team ended", { exact: false }).elements()).toHaveLength(0);
+  });
+
+  it.each([
+    [1, "One site you would see through this team stopped your access."],
+    [3, "3 sites you would see through this team stopped your access."],
+  ])("says how many sites stopped the staff member's access, and not which: %i", async (sitesBlocked, line) => {
+    mocks.team = { ...staffView, ownStaff: { ...staffView.ownStaff, sitesBlocked } };
+    render(TeamPage);
+
+    await expect.element(page.getByText(line)).toBeVisible();
+  });
+
+  it("says nothing about stopped access when no site stopped it", async () => {
+    mocks.team = { ...staffView, ownStaff: { ...staffView.ownStaff, sitesBlocked: 0 } };
+    render(TeamPage);
+
+    await expect.element(page.getByRole("heading", { name: "Clinic" })).toBeVisible();
+    expect(page.getByText("stopped your access", { exact: false }).elements()).toHaveLength(0);
   });
 
   it("says the access ended, and claims no current access, when the API says it has", async () => {

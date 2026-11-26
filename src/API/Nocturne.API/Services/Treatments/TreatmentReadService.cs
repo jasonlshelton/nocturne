@@ -60,7 +60,8 @@ internal class TreatmentReadService : ITreatmentStore
     /// <inheritdoc />
     public async Task<IReadOnlyList<Treatment>> QueryAsync(TreatmentQuery query, CancellationToken ct = default)
     {
-        var find = FindQuery.Parse(query.Find, FindQuery.TreatmentBareRegexFields);
+        var parsed = FindQuery.Parse(query.Find, FindQuery.TreatmentBareRegexFields);
+        var find = query.IncludesDeletedWhenNamed ? parsed : parsed.OnlyValid();
 
         var descending = !query.ReverseResults;
 
@@ -117,13 +118,10 @@ internal class TreatmentReadService : ITreatmentStore
 
     private Task<IEnumerable<Treatment>> FetchWindowAsync(
         FindQuery find, int limit, bool descending, CancellationToken ct) =>
-        NamesIsValid(find)
-            ? _projection.GetProjectedTreatmentsIncludingDeletedAsync(
-                find.FromMills, find.ToMills, limit, descending, ct)
-            : _projection.GetProjectedTreatmentsAsync(
-                find.FromMills, find.ToMills, limit, descending, ct);
-
-    private static bool NamesIsValid(FindQuery find) => find.Fields.Contains("isValid");
+        _projection.GetProjectedTreatmentsAsync(
+            LegacyTreatmentRange.FromMills(
+                find.FromMills, find.ToMills, limit, descending, includeDeleted: find.ReadsDeleted),
+            ct);
 
     private static IEnumerable<Treatment> OrderByTime(IEnumerable<Treatment> treatments, bool descending) =>
         descending ? treatments.OrderByDescending(t => t.Mills) : treatments.OrderBy(t => t.Mills);
@@ -175,7 +173,8 @@ internal class TreatmentReadService : ITreatmentStore
         // The projection service already orders newest-first internally, but we re-sort here
         // to make the contract explicit at the read boundary.
         var projected = await _projection.GetProjectedTreatmentsAsync(
-            fromMills, toMills, limit: int.MaxValue, ct: ct);
+            LegacyTreatmentRange.FromMills(fromMills, toMills, int.MaxValue, descending: true),
+            ct);
 
         return projected.OrderByDescending(t => t.Mills).ToList();
     }

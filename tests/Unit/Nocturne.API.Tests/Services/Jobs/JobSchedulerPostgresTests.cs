@@ -31,22 +31,14 @@ namespace Nocturne.API.Tests.Services.Jobs;
 public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database database)
     : IClassFixture<JobSchedulerPostgresTests.Database>, IAsyncLifetime
 {
-    public sealed class Database : IAsyncLifetime
-    {
-        public TestDatabase Created { get; private set; } = null!;
-
-        public async Task InitializeAsync() =>
-            Created = await SharedPostgres.CreateMigratedDatabaseAsync("job_scheduler");
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("job_scheduler");
 
     private static readonly DateTimeOffset Start = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
 
     private readonly FakeTimeProvider _clock = new(Start);
     private readonly List<ServiceProvider> _providers = [];
-    private readonly string _app = database.Created.AppConnectionString;
-    private readonly string _migrator = database.Created.MigratorConnectionString;
+    private readonly string _app = database.AppConnectionString;
+    private readonly string _migrator = database.MigratorConnectionString;
 
     public async Task InitializeAsync()
     {
@@ -646,11 +638,7 @@ public sealed class JobSchedulerPostgresTests(JobSchedulerPostgresTests.Database
         var tenant = Guid.CreateVersion7();
         await using var conn = new NpgsqlConnection(_migrator);
         await conn.OpenAsync();
-        await using var insert = new NpgsqlCommand(
-            "INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at) VALUES (@id, @slug, 'T', true, now(), now())", conn);
-        insert.Parameters.AddWithValue("id", tenant);
-        insert.Parameters.AddWithValue("slug", tenant.ToString("N"));
-        await insert.ExecuteNonQueryAsync();
+        await conn.SeedTenantAsync(tenant, tenant.ToString("N"), "T");
         return tenant;
     }
 

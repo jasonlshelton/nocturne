@@ -45,7 +45,7 @@ public class SourceDeletePlanTests(SourceDeletePlanTests.NeverAnalysedDatabase d
 
         deleted.Should().Be(Groups);
         recorder.Stamps.Should().HaveCount(2, "one update per chunk of ids");
-        var plan = await PlanTestSupport.ExplainAsync(conn, recorder.Stamps[0]);
+        var plan = await QueryPlans.ExplainAsync(conn, recorder.Stamps[0]);
         plan.Descendants("Relation Name").Should().Equal(
             ["sensor_glucose", "sensor_glucose"], "the update reads its table once: " + plan);
         plan.Descendants("Node Type").Should().NotContain(
@@ -125,7 +125,7 @@ public class SourceDeletePlanTests(SourceDeletePlanTests.NeverAnalysedDatabase d
         {
             var conn = new NpgsqlConnection(_database.AppConnectionString);
             await conn.OpenAsync();
-            await PlanTestSupport.SetTenantAsync(conn, tenant);
+            await conn.PinTenantAsync(tenant);
             return conn;
         }
 
@@ -133,15 +133,14 @@ public class SourceDeletePlanTests(SourceDeletePlanTests.NeverAnalysedDatabase d
         /// <paramref name="groups"/> duplicate groups for <paramref name="tenant"/>, each a reading from
         /// <c>source-a</c>, its group's primary, and one from <c>source-b</c>.
         /// </summary>
-        public async Task SeedAsync(Guid tenant, int groups)
+        public async Task SeedAsync(Guid tenant, int groups, RecordType linkedType = RecordType.SensorGlucose)
         {
             await using var conn = new NpgsqlConnection(_database.MigratorConnectionString);
             await conn.OpenAsync();
+            await conn.SeedTenantAsync(tenant, $"srcplan-{tenant:N}", "source-delete-plan-test");
+            await conn.PinTenantAsync(tenant);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@tid, @slug, 'source-delete-plan-test', true, now(), now());
-                SELECT set_config('app.current_tenant_id', @tid::text, false);
                 WITH g AS MATERIALIZED (
                     SELECT gen_random_uuid() AS canonical, gen_random_uuid() AS a, gen_random_uuid() AS b,
                            date_trunc('minute', now()) - make_interval(mins => i) AS ts
@@ -158,9 +157,8 @@ public class SourceDeletePlanTests(SourceDeletePlanTests.NeverAnalysedDatabase d
                 SELECT gen_random_uuid(), @tid, canonical, @type, b, 'source-b', false, (extract(epoch FROM ts) * 1000)::bigint, now() FROM g;
                 """;
             cmd.Parameters.AddWithValue("tid", tenant);
-            cmd.Parameters.AddWithValue("slug", $"srcplan-{tenant:N}");
             cmd.Parameters.AddWithValue("groups", groups);
-            cmd.Parameters.AddWithValue("type", RecordTypeKeys.Key(RecordType.SensorGlucose));
+            cmd.Parameters.AddWithValue("type", RecordTypeKeys.Key(linkedType));
             await cmd.ExecuteNonQueryAsync();
         }
     }

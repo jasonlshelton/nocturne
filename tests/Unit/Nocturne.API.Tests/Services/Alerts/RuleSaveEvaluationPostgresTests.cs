@@ -34,7 +34,6 @@ using Nocturne.Infrastructure.Data.Interceptors;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
-using Nocturne.Tests.Shared.Mocks;
 using Npgsql;
 using Xunit;
 
@@ -56,20 +55,7 @@ public class RuleSaveEvaluationPostgresTests(RuleSaveEvaluationPostgresTests.Dat
     private const string Below50 = """{"direction":"below","value":50}""";
     private const string TelegramUserId = "864203571";
 
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-        public string MigratorConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync()
-        {
-            var database = await SharedPostgres.CreateMigratedDatabaseAsync("rule_save_evaluation");
-            AppConnectionString = database.AppConnectionString;
-            MigratorConnectionString = database.MigratorConnectionString;
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("rule_save_evaluation");
 
     /// <summary>Records the rules each pass evaluated, then decides them.</summary>
     private sealed class RecordingOrchestrator(AlertOrchestrator inner, List<IReadOnlyList<Guid>> passes) : IAlertOrchestrator
@@ -213,7 +199,7 @@ public class RuleSaveEvaluationPostgresTests(RuleSaveEvaluationPostgresTests.Dat
                 new SubjectRepository(Contexts, AccountLinkRoutes.Off),
                 new AlertRepository(Contexts),
                 new AlertRuleRepository(Contexts, TimeProvider.System),
-                MockTenantAccessor.Create(Id).Object,
+                SettableTenantAccessor.Resolved(Id),
                 Mock.Of<IAlertReferenceService>(),
                 Mock.Of<IAlertDeliveryService>(),
                 Classifier(),
@@ -253,10 +239,7 @@ public class RuleSaveEvaluationPostgresTests(RuleSaveEvaluationPostgresTests.Dat
     }
 
     private NocturneDbContext Context(Guid tenant) =>
-        new(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(database.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options) { TenantId = tenant };
+        TestContexts.Context(database.AppConnectionString, tenant);
 
     private async Task<Tenant> SeedAsync()
     {
@@ -264,14 +247,7 @@ public class RuleSaveEvaluationPostgresTests(RuleSaveEvaluationPostgresTests.Dat
         await using (var conn = new NpgsqlConnection(database.MigratorConnectionString))
         {
             await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at)
-                VALUES (@id, @slug, 'rule-save', true, now(), now())
-                """;
-            cmd.Parameters.Add(new NpgsqlParameter("@id", tenant));
-            cmd.Parameters.Add(new NpgsqlParameter("@slug", $"save-{tenant:N}"));
-            await cmd.ExecuteNonQueryAsync();
+            await conn.SeedTenantAsync(tenant, $"save-{tenant:N}", "rule-save");
         }
 
         return new Tenant(tenant, () => Context(tenant));

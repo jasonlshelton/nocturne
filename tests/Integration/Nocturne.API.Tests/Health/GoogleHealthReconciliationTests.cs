@@ -23,8 +23,8 @@ using Nocturne.Core.Contracts.Legacy;
 using Nocturne.Core.Contracts.Sleep;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
-using Npgsql;
 using Nocturne.Tests.Shared.Infrastructure;
+using Npgsql;
 using Xunit;
 using Nocturne.Infrastructure.Data.Repositories;
 
@@ -41,7 +41,7 @@ public sealed class GoogleHealthReconciliationTests(GoogleHealthPostgresFixture 
 
     public async Task InitializeAsync()
     {
-        connectionString = fixture.Database.SuperuserConnectionString;
+        connectionString = fixture.SuperuserConnectionString;
         await using var db = Context();
         db.Tenants.AddRange(
             new TenantEntity { Id = tenantId, Slug = $"google-test-{tenantId:N}", DisplayName = "Synthetic", IsActive = true },
@@ -561,9 +561,9 @@ public sealed class GoogleHealthReconciliationTests(GoogleHealthPostgresFixture 
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ITenantAccessor, HttpContextTenantAccessor>();
-        services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(fixture.Database.AppConnectionString));
+        services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(fixture.AppConnectionString));
         services.AddDbContextFactory<NocturneDbContext>((provider, options) => options
-            .UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()).AddInterceptors(new TenantConnectionInterceptor()));
+            .UseTenantInterceptor(provider.GetRequiredService<NpgsqlDataSource>()));
         services.AddDataServices();
         services.AddSingleton(AccountLinkRoutes.Off);
         var tenants = new Mock<ITenantService>();
@@ -581,8 +581,7 @@ public sealed class GoogleHealthReconciliationTests(GoogleHealthPostgresFixture 
         if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
             await db.Database.OpenConnectionAsync();
         await db.Database.ExecuteSqlRawAsync("SET ROLE nocturne_app");
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT set_config('app.current_tenant_id', {tenant.ToString()}, false)");
-        db.TenantId = tenant;
+        await db.PinTenantAsync(tenant);
     }
 
     private static HealthRecordTransactions Transactions(NocturneDbContext db) =>
@@ -601,12 +600,4 @@ public sealed class GoogleHealthReconciliationTests(GoogleHealthPostgresFixture 
 
 }
 
-public sealed class GoogleHealthPostgresFixture : IAsyncLifetime
-{
-    public TestDatabase Database { get; private set; } = null!;
-
-    public async Task InitializeAsync() =>
-        Database = await SharedPostgres.CreateMigratedDatabaseAsync("google_health");
-
-    public Task DisposeAsync() => Task.CompletedTask;
-}
+public sealed class GoogleHealthPostgresFixture() : MigratedDatabase("google_health");

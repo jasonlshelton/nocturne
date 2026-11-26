@@ -32,8 +32,20 @@ namespace Nocturne.Infrastructure.Data.Services;
 /// <para>
 /// An owner's decision about the team's staff at a site is a <c>team_access</c> row too, naming the team's
 /// name under <c>name</c>. A staff member approved or declined targets that staff member, so their own
-/// history reads it. A change of the switch has no target and holds the new value under
-/// <c>team_manages_staff</c>.
+/// history reads it. A change of the rule has no target and holds the new rule under <c>staff_rule</c>;
+/// rows written before the rule had three values hold a boolean under <c>team_manages_staff</c>. An owner's
+/// stop of one person through any team, set or removed, is a <c>team_access</c> row with no team that
+/// targets that person.
+/// </para>
+/// <para>
+/// A group made, renamed or deleted, a site or a staff member put in a group or taken out, and a change of
+/// which people the staff reach are <c>team</c> rows naming the group under <c>group</c>, a site under
+/// <c>site</c>, a staff member as the target, a name under <c>name</c> and <c>old_name</c>, and the value
+/// under <c>staff_reach</c>. Each of them that changes who can see a site is also a <c>team_access</c> row at
+/// that site, naming the team's name under <c>name</c>, targeting a staff member put in or taken out, and
+/// holding <c>staff_reach</c> for a change of it. Those rows are attributed to the system, as the team
+/// reasons they change are (<see cref="Repositories.TeamReasonChanges"/>), so the site never reads which manager made it,
+/// and name no group, so no site reads another site's group.
 /// </para>
 /// </remarks>
 internal static class TeamAudit
@@ -52,6 +64,12 @@ internal static class TeamAudit
     internal const string EndsAtKey = "ends_at";
     internal const string StoppedHow = "stopped";
     internal const string TeamDeletedHow = "team_deleted";
+    internal const string StaffRuleKey = "staff_rule";
+    internal const string StaffReachKey = "staff_reach";
+    internal const string GroupKey = "group";
+    internal const string SiteKey = "site";
+
+    /// <summary>The key of the rule's rows written before it had three values: true for <see cref="TeamStaffRule.TeamDecides"/>, false for <see cref="TeamStaffRule.OwnerApproves"/>.</summary>
     internal const string TeamManagesStaffKey = "team_manages_staff";
 
     public static void StageCreated(NocturneDbContext db, Guid teamId, string name) =>
@@ -154,8 +172,81 @@ internal static class TeamAudit
         {
             [AuthAuditKind.Key] = AuthAuditKind.TeamAccess,
             [NameKey] = teamName,
-            [TeamManagesStaffKey] = access.TeamManagesStaff,
+            [StaffRuleKey] = access.StaffRule,
         });
+
+    /// <summary>
+    /// Stages an owner's stop of <paramref name="subjectId"/> at <paramref name="tenantId"/> through any team,
+    /// set or removed: <see cref="AuthAuditEventType.TeamStaffBlocked"/> or <see cref="AuthAuditEventType.TeamStaffUnblocked"/>.
+    /// </summary>
+    public static void StageStaffBlock(NocturneDbContext db, string eventType, Guid tenantId, Guid subjectId) =>
+        AuthAuditRows.Stage(db, eventType, tenantId, teamId: null, subjectId, new Dictionary<string, object?>
+        {
+            [AuthAuditKind.Key] = AuthAuditKind.TeamAccess,
+        });
+
+    public static void StageGroupCreated(NocturneDbContext db, Guid teamId, Guid groupId, string name) =>
+        Stage(db, AuthAuditEventType.TeamGroupCreated, teamId, null, new() { [GroupKey] = groupId.ToString(), [NameKey] = name });
+
+    public static void StageGroupRenamed(NocturneDbContext db, Guid teamId, Guid groupId, string oldName, string name) =>
+        Stage(db, AuthAuditEventType.TeamGroupRenamed, teamId, null,
+            new() { [GroupKey] = groupId.ToString(), [OldNameKey] = oldName, [NameKey] = name });
+
+    /// <summary>Stages a group's deletion, and a row at each of <paramref name="sites"/>, the sites whose access it changes.</summary>
+    public static void StageGroupDeleted(
+        NocturneDbContext db, Guid teamId, string teamName, Guid groupId, string groupName, IEnumerable<Guid> sites)
+    {
+        Stage(db, AuthAuditEventType.TeamGroupDeleted, teamId, null, new() { [GroupKey] = groupId.ToString(), [NameKey] = groupName });
+        StageAtSites(db, AuthAuditEventType.TeamGroupDeleted, sites, teamId, teamName, targetSubjectId: null, staffReach: null);
+    }
+
+    /// <summary>
+    /// Stages a site put in a group or taken out, <see cref="AuthAuditEventType.TeamGroupPersonAdded"/> or
+    /// <see cref="AuthAuditEventType.TeamGroupPersonRemoved"/>, and a row at the site when <paramref name="atSite"/>.
+    /// </summary>
+    public static void StageGroupPerson(
+        NocturneDbContext db, string eventType, Guid teamId, string teamName, Guid groupId, Guid tenantId, bool atSite)
+    {
+        Stage(db, eventType, teamId, null, new() { [GroupKey] = groupId.ToString(), [SiteKey] = tenantId.ToString() });
+        StageAtSites(db, eventType, atSite ? [tenantId] : [], teamId, teamName, targetSubjectId: null, staffReach: null);
+    }
+
+    /// <summary>
+    /// Stages a staff member put in a group or taken out, <see cref="AuthAuditEventType.TeamGroupStaffAdded"/> or
+    /// <see cref="AuthAuditEventType.TeamGroupStaffRemoved"/>, and a row at each of <paramref name="sites"/>.
+    /// </summary>
+    public static void StageGroupStaff(
+        NocturneDbContext db, string eventType, Guid teamId, string teamName, Guid groupId, Guid staffSubjectId,
+        IEnumerable<Guid> sites)
+    {
+        Stage(db, eventType, teamId, staffSubjectId, new() { [GroupKey] = groupId.ToString() });
+        StageAtSites(db, eventType, sites, teamId, teamName, staffSubjectId, staffReach: null);
+    }
+
+    /// <summary>Stages a change of which people the team's staff reach to <paramref name="staffReach"/>, and a row at each of <paramref name="sites"/>.</summary>
+    public static void StageStaffReachChanged(
+        NocturneDbContext db, Guid teamId, string teamName, string staffReach, IEnumerable<Guid> sites)
+    {
+        Stage(db, AuthAuditEventType.TeamStaffReachChanged, teamId, null, new() { [StaffReachKey] = staffReach });
+        StageAtSites(db, AuthAuditEventType.TeamStaffReachChanged, sites, teamId, teamName, targetSubjectId: null, staffReach);
+    }
+
+    private static void StageAtSites(
+        NocturneDbContext db, string eventType, IEnumerable<Guid> sites, Guid teamId, string teamName, Guid? targetSubjectId,
+        string? staffReach)
+    {
+        foreach (var site in sites.Distinct().Order())
+        {
+            var details = new Dictionary<string, object?>
+            {
+                [AuthAuditKind.Key] = AuthAuditKind.TeamAccess,
+                [NameKey] = teamName,
+            };
+            if (staffReach is not null)
+                details[StaffReachKey] = staffReach;
+            AuthAuditRows.Stage(db, eventType, site, teamId, targetSubjectId, details, MemberAccessSource.System);
+        }
+    }
 
     private static string HistoryLimit(TeamStaffNarrowing narrowing) =>
         narrowing.LimitTo24Hours ? MemberAccessAudit.TwentyFourHours : MemberAccessAudit.FullHistory;

@@ -28,9 +28,11 @@
     teamName: string;
     staff: TeamStaffMember[];
     roles: TeamSuggestableRole[];
+    /** The team's staff see only the people in their groups. */
+    narrowsToGroups: boolean;
   }
 
-  let { teamId, teamName, staff, roles }: Props = $props();
+  let { teamId, teamName, staff, roles, narrowsToGroups }: Props = $props();
 
   const now = new Now(60_000);
 
@@ -116,7 +118,12 @@
   <Card.Header>
     <Card.Title>Staff</Card.Title>
     <Card.Description>
-      The people who work for the team. A staff member can see a site when the site lets them in.
+      {#if narrowsToGroups}
+        The people who work for the team. A staff member can see a site when the site lets them in and they are in a
+        group with the site.
+      {:else}
+        The people who work for the team. A staff member can see a site when the site lets them in.
+      {/if}
     </Card.Description>
   </Card.Header>
   <Card.Content>
@@ -132,6 +139,7 @@
         {#each staff as member (member.subjectId)}
           {@const approved = member.sitesApproved ?? 0}
           {@const pending = member.sitesPending ?? 0}
+          {@const blocked = member.sitesBlocked ?? 0}
           <li class="space-y-3 py-3">
             <div class="flex flex-col gap-2 @md:flex-row @md:items-start @md:justify-between">
               <div class="min-w-0 space-y-1">
@@ -141,13 +149,22 @@
                 </p>
                 {#if !member.hasEnded}
                   <p class="text-sm text-muted-foreground">
-                    {#if approved > 0}
+                    {#if narrowsToGroups && member.inNoGroup}
+                      In no group. Sees no one through the team.
+                    {:else if narrowsToGroups && approved > 0}
+                      {plural(approved, ["Sees # person through the team.", "Sees # people through the team."])}
+                    {:else if narrowsToGroups}
+                      Sees no one through the team.
+                    {:else if approved > 0}
                       {plural(approved, ["Approved at # site.", "Approved at # sites."])}
                     {/if}
                     {#if pending > 0}
                       {plural(pending, ["Waits for approval at # site.", "Waits for approval at # sites."])}
                     {/if}
-                    {#if approved === 0 && pending === 0}
+                    {#if blocked > 0}
+                      {plural(blocked, ["Stopped by # site.", "Stopped by # sites."])}
+                    {/if}
+                    {#if !narrowsToGroups && approved === 0 && pending === 0 && blocked === 0}
                       Not approved at any site.
                     {/if}
                   </p>

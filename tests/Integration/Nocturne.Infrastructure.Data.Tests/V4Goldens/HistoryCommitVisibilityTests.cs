@@ -222,10 +222,8 @@ public class HistoryCommitVisibilityTests(V4GoldenFixture fixture)
     {
         var tenant = Guid.NewGuid();
         using (await fixture.BeginTenantScopeAsync(tenant)) { }
-        var options = new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(new NpgsqlConnectionStringBuilder(fixture.AppConnectionString) { MaxPoolSize = 1 }.ConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options;
+        var options = TestContexts.Options(
+            new NpgsqlConnectionStringBuilder(fixture.AppConnectionString) { MaxPoolSize = 1 }.ConnectionString);
 
         await using (var pinned = new NocturneDbContext(options) { TenantId = tenant })
             (await ApplicationNameAsync(pinned)).Should().Be(HistoryHorizon.SessionTag(tenant));
@@ -240,10 +238,7 @@ public class HistoryCommitVisibilityTests(V4GoldenFixture fixture)
         var tenant = Guid.NewGuid();
         using (await fixture.BeginTenantScopeAsync(tenant)) { }
         var pool = new SlowPool();
-        var options = new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(fixture.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor(), pool)
-            .Options;
+        var options = TestContexts.Options(fixture.AppConnectionString, [pool]);
         var reading = new SensorGlucoseEntity
         {
             Id = Guid.CreateVersion7(), TenantId = tenant, Timestamp = T0, Mgdl = 120, DataSource = "xdrip",
@@ -263,10 +258,7 @@ public class HistoryCommitVisibilityTests(V4GoldenFixture fixture)
     {
         var tenant = Guid.NewGuid();
         using var scope = await fixture.BeginTenantScopeAsync(tenant);
-        var options = new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(fixture.AppConnectionString)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options;
+        var options = TestContexts.Options(fixture.AppConnectionString);
         var written = await CreateAsync(scope, T0, "xdrip");
 
         var first = await ProductionHistoryAsync(options, tenant);
@@ -307,7 +299,7 @@ public class HistoryCommitVisibilityTests(V4GoldenFixture fixture)
         public override Task ConnectionOpenedAsync(
             DbConnection connection, ConnectionEndEventData eventData, CancellationToken ct = default)
         {
-            OpenedAt = NocturneDbContext.UtcNowAtStoredPrecision();
+            OpenedAt = NocturneDbContext.AtStoredPrecision(DateTime.UtcNow);
             return Task.CompletedTask;
         }
     }
@@ -417,13 +409,10 @@ public class HistoryCommitVisibilityTests(V4GoldenFixture fixture)
     private static async Task<NpgsqlTransaction> HoldRowAsync(NpgsqlConnection connection, Guid tenant, Guid id)
     {
         var transaction = await connection.BeginTransactionAsync();
+        await connection.PinTenantAsync(tenant, local: true);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            SELECT set_config('app.current_tenant_id', @tenant, true);
-            SELECT 1 FROM sensor_glucose WHERE id = @id FOR UPDATE;
-            """;
-        command.Parameters.AddWithValue("tenant", tenant.ToString());
+        command.CommandText = "SELECT 1 FROM sensor_glucose WHERE id = @id FOR UPDATE;";
         command.Parameters.AddWithValue("id", id);
         await command.ExecuteNonQueryAsync();
         return transaction;

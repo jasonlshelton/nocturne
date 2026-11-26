@@ -6,6 +6,7 @@ using Moq;
 using Nocturne.API.Services.V4;
 using Nocturne.API.Tests.Integration.Infrastructure;
 using Nocturne.Core.Contracts.Audit;
+using Nocturne.Core.Contracts.Profiles;
 using Nocturne.Core.Contracts.V4;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.V4;
@@ -131,17 +132,14 @@ public sealed class RawMmolProfileStoresFixture : IAsyncLifetime
 
         await using var conn = new NpgsqlConnection(database.MigratorConnectionString);
         await conn.OpenAsync();
-        await conn.ExecuteAsync($"""
-            INSERT INTO tenants (id, slug, display_name, is_active, sys_created_at, sys_updated_at) VALUES
-              ('{TenantA}', 'tenant-a', 'Tenant A', true, now(), now()),
-              ('{TenantB}', 'tenant-b', 'Tenant B', true, now(), now());
-            """);
+        await conn.SeedTenantAsync(TenantA, "tenant-a", "Tenant A");
+        await conn.SeedTenantAsync(TenantB, "tenant-b", "Tenant B");
 
         foreach (var store in Stores)
             await SeedStoreAsync(conn, store);
         foreach (var activation in Activations)
         {
-            await Context(conn, activation.Tenant);
+            await conn.PinTenantAsync(activation.Tenant);
             var deleted = activation.Deleted ? $"'{Seeded:O}'" : "NULL";
             await conn.ExecuteAsync($"""
                 INSERT INTO profile_activations
@@ -157,7 +155,7 @@ public sealed class RawMmolProfileStoresFixture : IAsyncLifetime
 
     private static async Task SeedStoreAsync(NpgsqlConnection conn, Store store)
     {
-        await Context(conn, store.Tenant);
+        await conn.PinTenantAsync(store.Tenant);
         string Key(string? value) => value is null ? "NULL" : $"'{value}'";
         var correlation = store.Correlation is { } c ? $"'{c}'" : "NULL";
         var deleted = store.Deleted ? $"'{Seeded:O}'" : "NULL";
@@ -191,9 +189,6 @@ public sealed class RawMmolProfileStoresFixture : IAsyncLifetime
                 """);
         }
     }
-
-    private static Task Context(NpgsqlConnection conn, Guid tenant) =>
-        conn.ExecuteAsync($"SELECT set_config('app.current_tenant_id', '{tenant}', false);");
 }
 
 /// <summary>
@@ -217,10 +212,7 @@ public class RawMmolProfileDetectorTests : IClassFixture<RawMmolProfileStoresFix
     public async Task DisposeAsync() => await _dataSource.DisposeAsync();
 
     private INocturneDbContextFactory Contexts(Guid tenant) =>
-        new OptionsFactory(new DbContextOptionsBuilder<NocturneDbContext>()
-            .UseNpgsql(_dataSource)
-            .AddInterceptors(new TenantConnectionInterceptor())
-            .Options).AsNocturneFactory(tenant);
+        new OptionsFactory(TestContexts.Options(_dataSource)).AsNocturneFactory(tenant);
 
     private RawMmolProfileDetector Detector(Guid tenant) => new(Contexts(tenant));
 
@@ -362,6 +354,7 @@ public class RawMmolProfileDetectorTests : IClassFixture<RawMmolProfileStoresFix
             new TargetRangeScheduleRepository(contexts, audit, NullLogger<TargetRangeScheduleRepository>.Instance),
             Mock.Of<ITempBasalRateReresolver>(),
             Mock.Of<ILoopClosedLoopStamper>(),
+            Mock.Of<IProfileProjectionService>(),
             audit,
             NullLogger<ProfileDecomposer>.Instance);
     }

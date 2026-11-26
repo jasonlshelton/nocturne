@@ -30,6 +30,14 @@ vi.mock("#lib/api/generated/teams.generated.remote.js", () => ({
   createManagerInvite: vi.fn(),
   revokeManagerInvite: vi.fn(),
   deleteTeam: vi.fn(),
+  createGroup: vi.fn(),
+  renameGroup: vi.fn(),
+  deleteGroup: vi.fn(),
+  addGroupPerson: vi.fn(),
+  removeGroupPerson: vi.fn(),
+  addGroupStaff: vi.fn(),
+  removeGroupStaff: vi.fn(),
+  setStaffReach: vi.fn(),
 }));
 
 vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
@@ -68,6 +76,7 @@ function staffMember(overrides: Partial<TeamStaffMember> = {}): TeamStaffMember 
     hasEnded: false,
     sitesApproved: 0,
     sitesPending: 0,
+    sitesBlocked: 0,
     ...overrides,
   };
 }
@@ -79,7 +88,7 @@ function site(overrides: Partial<TeamSiteAccess> = {}): TeamSiteAccess {
     roleNames: ["Viewer"],
     limitTo24Hours: false,
     givenAt: "2026-11-01T00:00:00Z",
-    teamManagesStaff: true,
+    staffRule: "team_decides",
     pendingStaffCount: 0,
     declinedStaffCount: 0,
     ...overrides,
@@ -128,6 +137,32 @@ describe("team page staff sections", () => {
       for (const text of shown) await expect.element(staffRow().getByText(text, { exact: false })).toBeVisible();
       for (const text of absent) expect(staffRow().getByText(text, { exact: false }).elements(), text).toHaveLength(0);
     });
+
+    it.each([
+      ["stopped by one", 0, 0, 1, ["Stopped by 1 site."], [/Approved at \d/, "Waits for approval", "Not approved at any site."]],
+      ["stopped by two", 0, 0, 2, ["Stopped by 2 sites."], [/Approved at \d/, "Waits for approval", "Not approved at any site."]],
+      [
+        "all three",
+        1,
+        1,
+        1,
+        ["Approved at 1 site.", "Waits for approval at 1 site.", "Stopped by 1 site."],
+        ["Not approved at any site."],
+      ],
+    ])(
+      "states the sites that stopped a staff member, and never which one or who: %s",
+      async (_case, approved, pending, blocked, shown, absent) => {
+        mocks.team = {
+          ...manager,
+          staff: [staffMember({ sitesApproved: approved, sitesPending: pending, sitesBlocked: blocked })],
+        };
+        render(TeamPage);
+
+        for (const text of shown) await expect.element(staffRow().getByText(text, { exact: false })).toBeVisible();
+        for (const text of absent) expect(staffRow().getByText(text, { exact: false }).elements(), String(text)).toHaveLength(0);
+        expect(staffRow().getByText("Sam's site", { exact: false }).elements()).toHaveLength(0);
+      },
+    );
 
     it.each([
       ["approved at one", 1, 0, ["Approved at 1 site."], ["Waits for approval", "Not approved at any site."]],
@@ -310,6 +345,62 @@ describe("team page staff sections", () => {
 
       await expect.element(dialog()).not.toBeInTheDocument();
       expect(mocks.removeStaff).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("what a staff member sees, by the team's setting", () => {
+    const narrowed = { ...manager, staffReach: "their_groups" };
+
+    it("words the staff card for the sites that let them in, and for a group with the site while staff see only their groups", async () => {
+      mocks.team = manager;
+      const { unmount } = render(TeamPage);
+      await expect
+        .element(page.getByText("A staff member can see a site when the site lets them in.", { exact: false }))
+        .toBeVisible();
+      expect(page.getByText("and they are in a group with the site", { exact: false }).elements()).toHaveLength(0);
+      unmount();
+
+      mocks.team = narrowed;
+      render(TeamPage);
+      await expect
+        .element(
+          page.getByText(
+            "A staff member can see a site when the site lets them in and they are in a group with the site.",
+            { exact: false },
+          ),
+        )
+        .toBeVisible();
+    });
+
+    it("words the staff link card for the sites that let them in, and for a group with them while staff see only their groups", async () => {
+      mocks.team = manager;
+      const { unmount } = render(TeamPage);
+      await expect
+        .element(
+          page.getByText(
+            "A staff member works for the team and sees the sites that the team has access to and that let them in.",
+            { exact: false },
+          ),
+        )
+        .toBeVisible();
+      expect(page.getByText("that have a group with them", { exact: false }).elements()).toHaveLength(0);
+      unmount();
+
+      mocks.team = narrowed;
+      render(TeamPage);
+      await expect
+        .element(
+          page.getByText(
+            "A staff member works for the team and sees the sites that the team has access to, that let them in and that have a group with them.",
+            { exact: false },
+          ),
+        )
+        .toBeVisible();
+      expect(
+        page
+          .getByText("sees the sites that the team has access to and that let them in", { exact: false })
+          .elements(),
+      ).toHaveLength(0);
     });
   });
 
@@ -501,19 +592,42 @@ describe("team page staff sections", () => {
   });
 
   describe("sites", () => {
-    it.each([
-      [true, "The team decides which of its staff can see this site.", "An owner of the site must approve each staff member."],
-      [false, "An owner of the site must approve each staff member.", "The team decides which of its staff can see this site."],
-    ])("words the switch when the team manages its staff is %s", async (teamManagesStaff, shown, absent) => {
-      mocks.team = { ...manager, sites: [site({ teamManagesStaff })] };
+    const sentences = {
+      owner_approves: "An owner of the site must approve each staff member.",
+      team_decides: "The team decides which of its staff can see this site.",
+      team_trusted: "The site trusts the whole team. Every staff member that the site did not stop can see this site.",
+    };
+
+    it.each(Object.entries(sentences))("states the rule %s in one sentence", async (staffRule, shown) => {
+      mocks.team = { ...manager, sites: [site({ staffRule })] };
       render(TeamPage);
 
       await expect.element(page.getByText(shown)).toBeVisible();
-      expect(page.getByText(absent).elements()).toHaveLength(0);
+      for (const [other, absent] of Object.entries(sentences)) {
+        if (other !== staffRule) expect(page.getByText(absent).elements(), other).toHaveLength(0);
+      }
+    });
+
+    it("says a trusting site lets in only the staff in a group with it while staff see only their groups", async () => {
+      const trusting = "The site trusts the whole team. Every staff member that the site did not stop can see this site.";
+      const inGroup =
+        "The site trusts the whole team. Every staff member that the site did not stop and that is in a group with this site can see this site.";
+      mocks.team = { ...manager, sites: [site({ staffRule: "team_trusted" })], staffReach: "their_groups" };
+      const { unmount } = render(TeamPage);
+
+      await expect.element(page.getByText(inGroup)).toBeVisible();
+      expect(page.getByText(trusting, { exact: true }).elements()).toHaveLength(0);
+      unmount();
+
+      mocks.team = { ...manager, sites: [site({ staffRule: "team_trusted" })], staffReach: "every_person" };
+      render(TeamPage);
+
+      await expect.element(page.getByText(trusting, { exact: true })).toBeVisible();
+      expect(page.getByText(inGroup).elements()).toHaveLength(0);
     });
 
     it("says that declines still hold when the team decides and the site declined staff", async () => {
-      mocks.team = { ...manager, sites: [site({ teamManagesStaff: true, declinedStaffCount: 2 })] };
+      mocks.team = { ...manager, sites: [site({ staffRule: "team_decides", declinedStaffCount: 2 })] };
       render(TeamPage);
 
       await expect
@@ -526,14 +640,14 @@ describe("team page staff sections", () => {
       await expect.element(page.getByText("The site declined 2 staff members.")).toBeVisible();
     });
 
-    it("states no switch and no count for a site whose access ended", async () => {
+    it("states no rule and no count for a site whose access ended", async () => {
       mocks.team = {
         ...manager,
         sites: [
           site({
             accessEndsAt: "2020-02-01T00:00:00Z",
             hasEnded: true,
-            teamManagesStaff: true,
+            staffRule: "team_decides",
             pendingStaffCount: 2,
             declinedStaffCount: 1,
           }),
@@ -568,7 +682,7 @@ describe("team page staff sections", () => {
     ])("states %i waiting and %i declined", async (pending, declined, pendingText, declinedText) => {
       mocks.team = {
         ...manager,
-        sites: [site({ teamManagesStaff: false, pendingStaffCount: pending, declinedStaffCount: declined })],
+        sites: [site({ staffRule: "owner_approves", pendingStaffCount: pending, declinedStaffCount: declined })],
       };
       render(TeamPage);
 
@@ -576,14 +690,14 @@ describe("team page staff sections", () => {
       await expect.element(page.getByText(declinedText)).toBeVisible();
     });
 
-    it("states that only an owner of the site changes the switch, and offers no control for it", async () => {
+    it("states that only an owner of the site changes the rule, and offers no control for it", async () => {
       mocks.team = { ...manager, sites: [site()] };
       render(TeamPage);
 
       await expect
         .element(page.getByText("Only an owner of the site can change this.", { exact: false }))
         .toBeVisible();
-      expect(page.getByRole("switch").elements()).toHaveLength(0);
+      expect(page.getByRole("radio", { name: /I trust the whole team/ }).elements()).toHaveLength(0);
     });
   });
 });

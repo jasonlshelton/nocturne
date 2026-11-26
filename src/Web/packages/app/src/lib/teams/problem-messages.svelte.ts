@@ -22,6 +22,9 @@ export function teamProblemMessages(): ProblemCodeMessages {
     team_staff_end_invalid: "The end date must be in the future. Choose a later date.",
     team_staff_invite_end_passed:
       "The end date that this invite gives has passed. Ask a manager of the team for a new link.",
+    team_group_name_invalid: "The group name is empty or too long. Change the name and try again.",
+    team_group_name_taken: "Another group of this team has this name. Use a different name.",
+    team_staff_reach_invalid: "Nocturne does not know this setting. Reload the page and try again.",
   };
 }
 
@@ -56,13 +59,24 @@ export function teamAccessProblemMessages(): ProblemCodeMessages {
 
 /**
  * The sentence for each problem code an owner's decision about a team's staff at their site can meet:
- * approve, decline, and the switch for the team's own staff decisions.
+ * approve, decline, and who decides about the team's staff.
  */
 export function teamStaffDecisionProblemMessages(): ProblemCodeMessages {
   return {
     team_staff_decision_not_owner: "Only an owner of this site can decide which staff of a team can see this site.",
+    team_staff_team_trusted:
+      "You trust the whole team at this site, so you cannot approve or decline one staff member. Change the setting to decide again.",
     caller_access_from_team:
       "You have access to this site only through a team, so you cannot change the access of a team or its staff.",
+  };
+}
+
+/** The sentence for each problem code stopping a person's access through every team, or ending that stop, can meet. */
+export function teamStaffBlockProblemMessages(): ProblemCodeMessages {
+  return {
+    team_staff_decision_not_owner: "Only an owner of this site can stop a person's access through teams or let them back in.",
+    caller_access_from_team:
+      "You have access to this site only through a team, so you cannot stop a person's access through teams or let them back in.",
   };
 }
 

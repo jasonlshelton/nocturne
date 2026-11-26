@@ -59,14 +59,14 @@ public sealed class AlertOrchestratorSupersededPassTests
                 _evaluated.Enqueue((rule.Id, context.LatestValue));
                 return new AlertEngineEvaluation
                 {
-                    Transition = new ExcursionTransition(ExcursionTransitionType.ExcursionOpened, Guid.NewGuid()),
+                    Transition = new ExcursionTransition(ExcursionTransitionType.ExcursionOpened, Guid.NewGuid(), OwedAt: DateTime.UtcNow),
                 };
             });
 
         var opened = new Mock<IExcursionOpenedHandler>();
         opened
-            .Setup(h => h.HandleOpenedAsync(It.IsAny<AlertRuleSnapshot>(), It.IsAny<Guid>(), It.IsAny<SensorContext>(),
-                It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<IReadOnlyList<AlertMetPoint>>(), It.IsAny<CancellationToken>()))
+            .Setup(h => h.HandleOpenedAsync(It.IsAny<AlertRuleSnapshot>(), It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<SensorContext>(),
+                It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<IReadOnlyList<AlertMetPoint>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
                 if (Interlocked.Increment(ref _deliveries) != 1) return;

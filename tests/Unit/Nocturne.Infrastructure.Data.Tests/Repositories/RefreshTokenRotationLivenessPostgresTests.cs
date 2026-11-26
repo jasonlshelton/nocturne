@@ -21,23 +21,12 @@ namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 public class RefreshTokenRotationLivenessPostgresTests(RefreshTokenRotationLivenessPostgresTests.Database database)
     : IClassFixture<RefreshTokenRotationLivenessPostgresTests.Database>
 {
-    public sealed class Database : IAsyncLifetime
-    {
-        public string AppConnectionString { get; private set; } = string.Empty;
-
-        public async Task InitializeAsync() =>
-            AppConnectionString = (await SharedPostgres.CreateMigratedDatabaseAsync("refresh_token_rotation_liveness")).AppConnectionString;
-
-        public Task DisposeAsync() => Task.CompletedTask;
-    }
+    public sealed class Database() : MigratedDatabase("refresh_token_rotation_liveness");
 
     private sealed class Factory(string connectionString, params IInterceptor[] interceptors) : SingleReaderDbContextFactory
     {
         public override ValueTask<NocturneDbContext> CreateAsync(CancellationToken ct = default) =>
-            ValueTask.FromResult(new NocturneDbContext(new DbContextOptionsBuilder<NocturneDbContext>()
-                .UseNpgsql(connectionString)
-                .AddInterceptors([new TenantConnectionInterceptor(), .. interceptors])
-                .Options));
+            ValueTask.FromResult(TestContexts.Context(connectionString, null, interceptors));
     }
 
     /// <summary>
