@@ -263,6 +263,8 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
     public DbSet<InstanceKeyCheckEntity> InstanceKeyChecks { get; set; }
 
+    public DbSet<PageViewCountEntity> PageViewCounts { get; set; }
+
     /// <summary>
     /// Notices senders outside Nocturne sent to members (not tenant-scoped), one per sender, tenant,
     /// member and key.
@@ -322,6 +324,10 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<TeamGroupPersonEntity> TeamGroupPeople { get; set; } = null!;
 
     public DbSet<TeamGroupStaffEntity> TeamGroupStaff { get; set; } = null!;
+
+    public DbSet<FlagRuleEntity> FlagRules { get; set; } = null!;
+
+    public DbSet<PeopleViewEntity> PeopleViews { get; set; } = null!;
 
     public DbSet<MembershipRequestEntity> MembershipRequests { get; set; } = null!;
 
@@ -623,12 +629,22 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     ];
 
     /// <summary>
-    /// The tables a connector watermarks on their newest timestamp, adding the span-shaped
-    /// <see cref="TempBasalEntity"/>, whose <see cref="IObservationTimestamped.Timestamp"/> is the
-    /// span start.
+    /// The record tables that get the <c>(tenant_id, data_source, timestamp)</c> index: every source-owned
+    /// table with an <see cref="IObservationTimestamped.Timestamp"/>. A connector watermarks some of them
+    /// on their newest timestamp and none of the others, which share the index for a source's count.
     /// </summary>
-    internal static readonly Type[] V4WatermarkedEntities =
-        [.. V4TimeSeriesRecordEntities, typeof(TempBasalEntity)];
+    internal static readonly Type[] SourceTimestampIndexedEntities =
+    [.. V4RecordTables.All.Select(t => t.Entity)
+        .Where(t => typeof(ISourcedEntity).IsAssignableFrom(t) && typeof(IObservationTimestamped).IsAssignableFrom(t))];
+
+    /// <summary>
+    /// The source-owned tables with no <see cref="IObservationTimestamped.Timestamp"/>, which the
+    /// <see cref="SourceTimestampIndexedEntities"/> index cannot cover, so a source's count has its own
+    /// <c>(tenant_id, data_source)</c> index.
+    /// </summary>
+    internal static readonly Type[] SourceCountedWithoutTimestampEntities =
+    [.. V4RecordTables.All.Select(t => t.Entity)
+        .Where(t => typeof(ISourcedEntity).IsAssignableFrom(t) && !typeof(IObservationTimestamped).IsAssignableFrom(t))];
 
     /// <summary>
     /// V4 record tables whose lists read one tenant newest-first by timestamp, then id on the tables

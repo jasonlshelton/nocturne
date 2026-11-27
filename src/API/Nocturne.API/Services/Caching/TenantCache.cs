@@ -64,18 +64,22 @@ public sealed class TenantCache(
             local.Set(full, value, ttl);
     }
 
+    public Task<T> GetOrCreateLocalAsync<T>(
+        string key, Func<Task<T>> factory, TimeSpan ttl, CancellationToken ct = default) =>
+        GetOrCreateLocalAsync(key, factory, ttl, _ => true, ct);
+
     public async Task<T> GetOrCreateLocalAsync<T>(
-        string key, Func<Task<T>> factory, TimeSpan ttl, CancellationToken ct = default)
+        string key, Func<Task<T>> factory, TimeSpan ttl, Func<T, bool> isFresh, CancellationToken ct)
     {
         if (KeyFor(key) is not { } full)
             return await factory();
 
-        if (local.TryGetValue(full, out T? cached))
+        if (local.TryGetValue(full, out T? cached) && isFresh(cached!))
             return cached!;
 
         return await flights.RunAsync($"local:{full}", async () =>
         {
-            if (local.TryGetValue(full, out T? again))
+            if (local.TryGetValue(full, out T? again) && isFresh(again!))
                 return again!;
 
             var value = await factory();

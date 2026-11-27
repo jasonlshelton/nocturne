@@ -30,18 +30,8 @@ public class AlertDeliveryServiceStoreFailureTests
     private static readonly Guid Tenant = Guid.CreateVersion7();
     private const string Unread = "Not sent: the members of this site could not be read";
 
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext()
-        {
-            var ctx = TestDbContextFactory.CreateInMemoryContext(dbName);
-            ctx.TenantId = Tenant;
-            return ctx;
-        }
-    }
-
     private readonly IDbContextFactory<NocturneDbContext> _factory =
-        new SharedInMemoryFactory($"delivery_store_failure_{Guid.NewGuid()}");
+        TestDbContextFactory.ForInMemoryDatabase($"delivery_store_failure_{Guid.NewGuid()}", Tenant);
     private readonly WebhookTestHarness.CapturingWebhookHandler _webhook = new();
 
     private static readonly AlertRuleChannelSnapshot Webhook =
@@ -68,15 +58,11 @@ public class AlertDeliveryServiceStoreFailureTests
                 NullLogger<DeviceActionProvider>.Instance, TimeProvider.System))
             .BuildServiceProvider();
 
-        return new AlertDeliveryService(
+        return DeliveryServices.Build(
             _factory.AsNocturneFactory(),
-            members.Object,
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
-            Mock.Of<ISignalRBroadcastService>(),
-            Mock.Of<IEngineAlarmRelay>(),
-            services,
-            NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            SettableTenantAccessor.Resolved(Tenant),
+            providers: services,
+            members: members.Object);
     }
 
     private static AlertPayload Payload(Guid instanceId) => new()

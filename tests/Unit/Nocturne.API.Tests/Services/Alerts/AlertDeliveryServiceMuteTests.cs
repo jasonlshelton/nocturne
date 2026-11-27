@@ -48,15 +48,10 @@ public class AlertDeliveryServiceMuteTests
             .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(NullLogger<>))
             .AddSingleton<InAppProvider>()
             .BuildServiceProvider();
-        return new AlertDeliveryService(
+        return DeliveryServices.Build(
             factory.Object.AsNocturneFactory(),
-            new TenantMembershipRepository(factory.Object.AsNocturneFactory(), AccountLinkRoutes.Off),
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
-            Mock.Of<ISignalRBroadcastService>(),
-            Mock.Of<IEngineAlarmRelay>(),
-            services,
-            NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            SettableTenantAccessor.Resolved(Tenant),
+            providers: services);
     }
 
     private static AlertPayload Payload(Guid excursionId) => new()

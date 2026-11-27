@@ -54,6 +54,47 @@ public class MyFitnessPalClockTests
             .BeEquivalentTo("lookback-day", "later-today");
     }
 
+    /// <summary>An open request is the scheduled catch-up, so it reads what the next poll reads.</summary>
+    [Fact]
+    public async Task Sync_OfAnOpenRequest_ImportsWhatTheScheduledPollImports()
+    {
+        IReadOnlyList<(string, string)> diary =
+        [
+            ("before-window", "2026-07-12"),
+            ("lookback-day", "2026-07-14"),
+            ("later-today", "2026-07-20"),
+        ];
+        var open = new Fixture(new FakeTimeProvider(Now), diary);
+        var scheduled = new Fixture(new FakeTimeProvider(Now), diary);
+
+        await open.Service.SyncDataAsync(new SyncRequest(), open.Config, CancellationToken.None);
+        await scheduled.Service.SyncDataAsync(scheduled.Config, CancellationToken.None);
+
+        scheduled.Imported.Select(e => e.ExternalEntryId).Should().BeEquivalentTo("lookback-day", "later-today");
+        open.Imported.Select(e => e.ExternalEntryId).Should()
+            .BeEquivalentTo(scheduled.Imported.Select(e => e.ExternalEntryId));
+    }
+
+    [Theory]
+    [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
+    public async Task Sync_OfAWindowWithNoLowerBound_ImportsTheWholeDiaryUpToItsEnd(string shape)
+    {
+        var fixture = new Fixture(new FakeTimeProvider(Now),
+        [
+            ("years-back", "2019-03-01"),
+            ("lookback-day", "2026-07-14"),
+        ]);
+        fixture.State.Resume[MyFitnessPalConstants.FullWalkStamp] = Now.UtcDateTime;
+
+        await fixture.Service.SyncDataAsync(
+            NoLowerBound.Request(shape, Now.UtcDateTime, [SyncDataType.Food]), fixture.Config, CancellationToken.None);
+
+        fixture.Imported.Select(e => e.ExternalEntryId).Should()
+            .BeEquivalentTo("years-back", "lookback-day");
+        fixture.Imported.Single(e => e.ExternalEntryId == "years-back").MealName.Should().BeNull(
+            "a day past the naming budget arrives unnamed, which keeps the name already stored");
+    }
+
     [Fact]
     public async Task Sync_StampsTheFullWalkAtTheClockInstant()
     {

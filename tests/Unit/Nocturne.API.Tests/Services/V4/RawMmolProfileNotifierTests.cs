@@ -7,7 +7,7 @@ using Nocturne.API.Services.BackgroundServices;
 using Nocturne.API.Services.Notifications;
 using Nocturne.API.Services.NotificationTemplates;
 using Nocturne.API.Services.Realtime;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.API.Services.V4;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
@@ -49,7 +49,7 @@ public class RawMmolProfileNotifierTests : IDisposable
 
         var contexts = _db.AsFactory();
         _services = new ServiceCollection()
-            .AddScoped(_ => Mock.Of<ITenantAccessor>())
+            .AddScoped<ITenantAccessor>(_ => new SettableTenantAccessor())
             .AddScoped(_ => _detector.Object)
             .AddScoped(_ => _owners.Object)
             .AddScoped<IInAppNotificationRepository>(_ => new InAppNotificationRepository(contexts))

@@ -2,9 +2,8 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using Moq;
 using Nocturne.API.Services.Alerts;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.Core.Contracts.Alerts;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
@@ -84,7 +83,7 @@ public sealed class AlertOrchestratorSupersededPassTests
             engine.Object,
             new AlertRuleEvaluationGate(),
             _decisions,
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
+            SettableTenantAccessor.Resolved(Tenant),
             enricher.Object,
             opened.Object,
             Mock.Of<IExcursionResolutionHandler>(),

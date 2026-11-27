@@ -36,7 +36,9 @@ namespace Nocturne.API.Services.Alerts;
 /// passes "now" as the as-of timestamp, and <c>EnrichAsOfAsync</c> passes the replay tick.
 /// Replay skips the prediction service (intrinsically forward-looking) and the active-alerts
 /// repo fetch (the replay walker maintains its own running set across the window and threads
-/// it in via <see cref="SensorContext.ActiveAlerts"/>).
+/// it in via <see cref="SensorContext.ActiveAlerts"/>), and reads no recent readings: the walker
+/// selects <see cref="SensorContext.GlucoseSeries"/> from the readings it walks, by
+/// <see cref="RecentReadings"/> as this does.
 ///
 /// Data-source dependencies are bundled into <see cref="SensorContextEnricherDependencies"/>
 /// so this constructor stays focused on orchestration concerns (service provider for the
@@ -128,6 +130,15 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
                 : (DateTimeOffset?)null;
             var (predictions, curves) = await FetchPredictionsAsync(asOf, ct);
             enriched = enriched with { Predictions = predictions, PredictionCurves = curves };
+        }
+
+        // Replay fills the series per tick from the readings it walks (AlertReplayService).
+        if (needs.NeedsGlucoseSeries && !isReplay && RecentReadings.NewestOf(baseContext) is { } newest)
+        {
+            enriched = enriched with
+            {
+                GlucoseSeries = await RecentReadings.ReadAsync(newest, _deps.CanonicalGlucose, ct),
+            };
         }
 
         if (needs.NeedsReservoir)
@@ -528,8 +539,9 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
     /// The sensor state the newest recent <see cref="Nocturne.Core.Models.V4.SensorStateReport"/> of the newest reading's source states
     /// (<see cref="SensorStateReports"/>), with the instant the engine stops counting it. A state other
     /// than ok replaces the <see cref="SensorState.NoValue"/> the base context may carry for a newest
-    /// reading with no value, since it says why; an ok one does not. A context whose reading source
-    /// lacks a device or a data source reads no report.
+    /// reading with no value, since it says why, and that <see cref="SensorState.NoValue"/> holds again
+    /// once the report lapses (<see cref="SensorStateSnapshot.OnceLapsed"/>); an ok one does not replace it.
+    /// A context whose reading source lacks a device or a data source reads no report.
     /// </summary>
     private async Task<SensorContext> WithReportedSensorStateAsync(
         SensorContext context, DateTime now, CancellationToken ct)
@@ -537,10 +549,17 @@ internal sealed class SensorContextEnricher : ISensorContextEnricher
         if (context.LatestSource is not { Device: { Length: > 0 } device, DataSource: { Length: > 0 } dataSource })
             return context;
         var newest = await _deps.SensorStates.GetNewestAsync(
-            device, dataSource, now - SensorStateReports.MaxAge, now, AlertReadings.Bound(now), ct);
+            device, dataSource, now - SensorStateReports.MaxAge, now, ct);
         return SensorStateReports.StateOf(newest) is var (reported, until)
                && (reported != SensorState.Ok || context.SensorState is null)
-            ? context with { SensorState = new SensorStateSnapshot(reported, Since: null, until) }
+            ? context with
+            {
+                SensorState = new SensorStateSnapshot(
+                    reported, Since: null, until,
+                    OnceLapsed: context.SensorState is { State: SensorState.NoValue } noValue
+                        ? new LapsedSensorState(noValue.State, noValue.Since)
+                        : null),
+            }
             : context;
     }
 

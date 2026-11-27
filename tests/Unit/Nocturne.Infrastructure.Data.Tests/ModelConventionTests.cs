@@ -52,7 +52,7 @@ public class ModelConventionTests
     public void TheTimestampIndexedRecords_AreEveryV4RecordButTheTwoSpanTables() =>
         NocturneDbContext.V4TimeSeriesRecordEntities.Should().BeEquivalentTo(
             NocturneDbContext.V4LegacyIdRecordEntities.Except([typeof(TempBasalEntity), typeof(ProfileActivationEntity)]),
-            "a new V4 record table gets its legacy id index by its marker, and has to be listed here to get its timestamp and watermark indexes");
+            "a new V4 record table gets its legacy id index by its marker, and has to be listed here to get its timestamp index");
 
     [Fact]
     public void EveryV4RecordTable_HasANewestFirstTimestampIndex() =>
@@ -108,23 +108,53 @@ public class ModelConventionTests
                 && i.GetFilter() == "sync_identifier IS NOT NULL AND deleted_by_user");
 
     /// <summary>
+    /// Every sourced record table with a timestamp has the tenant, source and timestamp index. Of those,
     /// <see cref="Nocturne.Infrastructure.Data.Repositories.V4.V4RepositoryBase{TModel,TEntity}"/>
-    /// watermarks each connector sync on the newest timestamp for one tenant and data source. The
+    /// and the health series repository watermark each connector sync on the newest timestamp for one
+    /// tenant and data source, and the rest (therapy settings, the profile schedules, sensor state
+    /// reports, profile activations) share the index for a source's count. The
     /// filter is load-bearing rather than a size saving: soft-deleted rows left in the index have
     /// to be skipped a heap fetch at a time, which costs the index-only scan.
     /// </summary>
     [Fact]
-    public void EveryWatermarkedTable_HasTheTenantSourceWatermarkIndex() =>
+    public void EverySourceTimestampIndexedTable_HasTheTenantSourceTimestampIndex() =>
         AssertFamily(
-            NocturneDbContext.V4WatermarkedEntities,
+            NocturneDbContext.SourceTimestampIndexedEntities,
             "_tenant_source_timestamp",
             i => Columns(i).SequenceEqual([
                     nameof(ITenantScoped.TenantId),
-                    nameof(IV4TimeSeriesEntity.DataSource),
-                    nameof(IV4TimeSeriesEntity.Timestamp)])
+                    nameof(ISourcedEntity.DataSource),
+                    nameof(IObservationTimestamped.Timestamp)])
                 && !i.IsUnique
                 && i.IsDescending is not null
                 && i.IsDescending.SequenceEqual([false, false, true])
+                && i.GetFilter() == "deleted_at IS NULL");
+
+    [Fact]
+    public void EverySourceCountedTableWithoutATimestamp_HasTheTenantSourceIndex() =>
+        AssertFamily(
+            NocturneDbContext.SourceCountedWithoutTimestampEntities,
+            "_tenant_source",
+            i => Columns(i).SequenceEqual([
+                    nameof(ITenantScoped.TenantId),
+                    nameof(ISourcedEntity.DataSource)])
+                && !i.IsUnique
+                && i.GetFilter() == "deleted_at IS NULL");
+
+    /// <summary>
+    /// A source's count and stats read the rows only their device names (SourceFilter.Parts) off this
+    /// index, on every sourced table the record registry holds.
+    /// </summary>
+    [Fact]
+    public void EverySourcedRecordTable_HasTheTenantDeviceSourceIndex() =>
+        AssertFamily(
+            [.. V4RecordTables.All.Select(t => t.Entity).Where(typeof(ISourcedEntity).IsAssignableFrom)],
+            "_tenant_device_source",
+            i => Columns(i).SequenceEqual([
+                    nameof(ITenantScoped.TenantId),
+                    nameof(ISourcedEntity.Device),
+                    nameof(ISourcedEntity.DataSource)])
+                && !i.IsUnique
                 && i.GetFilter() == "deleted_at IS NULL");
 
     /// <summary>

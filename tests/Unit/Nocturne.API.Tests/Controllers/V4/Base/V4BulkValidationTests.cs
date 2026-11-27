@@ -109,22 +109,26 @@ public class V4BulkValidationTests
     }
 
     [Fact]
-    public async Task UnsetTimestampOnAnyItem_IsRejected()
+    public async Task UnsetTimestampOnAnyItem_IsRejectedAtItsIndex()
     {
         var requests = Snapshots(3);
         requests[2].Timestamp = default;
 
-        Rejected((await ApsController().CreateApsSnapshots(requests)).Result, "Timestamp is required");
+        Rejected(
+            (await RegisteredValidators.On(ApsController()).CreateApsSnapshots(requests)).Result,
+            "APS snapshot at index 2 is invalid: Timestamp: Timestamp is required");
         NothingPersisted();
     }
 
     [Fact]
-    public async Task SyncIdentifierWithoutDataSource_IsRejected()
+    public async Task SyncIdentifierWithoutDataSource_IsRejectedAtItsIndex()
     {
         var requests = Snapshots(2);
         requests[1].SyncIdentifier = "upstream-42";
 
-        Rejected((await ApsController().CreateApsSnapshots(requests)).Result, "DataSource is required when SyncIdentifier is supplied");
+        Rejected(
+            (await RegisteredValidators.On(ApsController()).CreateApsSnapshots(requests)).Result,
+            "APS snapshot at index 1 is invalid: DataSource: DataSource is required when SyncIdentifier is supplied.");
         NothingPersisted();
     }
 
@@ -138,7 +142,7 @@ public class V4BulkValidationTests
         requests[0].DataSource = "trio";
         requests[0].SyncIdentifier = "upstream-42";
 
-        var result = await ApsController().CreateApsSnapshots(requests);
+        var result = await RegisteredValidators.On(ApsController()).CreateApsSnapshots(requests);
 
         result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(201);
     }
@@ -185,7 +189,7 @@ public class V4BulkValidationTests
         Rejected(
             await DriveBulkAsync(controllerType, V4BulkValidation.MaxItems + 1),
             $"Bulk operations are limited to {V4BulkValidation.MaxItems} {naming.Plural} per request");
-        Rejected(await DriveBulkAsync(controllerType, 1), "Timestamp is required");
+        Rejected(await DriveBulkAsync(controllerType, 1), $"{naming.Subject} at index 0 is invalid: Timestamp: Timestamp is required");
     }
 
     public static TheoryData<Type> CrudControllers()
@@ -226,8 +230,7 @@ public class V4BulkValidationTests
     private static ControllerBase UnconstructedController(Type controllerType)
     {
         var controller = (ControllerBase)RuntimeHelpers.GetUninitializedObject(controllerType);
-        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
-        return controller;
+        return RegisteredValidators.On(controller);
     }
 
     private static V4BulkNaming BulkNamingOf(Type controllerType)
@@ -392,6 +395,23 @@ public class V4BulkValidationTests
     }
 
     [Fact]
+    public async Task SleepBulk_RejectsASessionWithASourceAppLongerThanItsColumn()
+    {
+        var service = new Mock<ISleepService>();
+
+        var result = await RegisteredValidators.On(Sleep(service)).CreateSessionsBulk(
+        [
+            new SleepSession { SourceApp = "health-connect" },
+            new SleepSession { SourceApp = new string('a', 201) },
+        ]);
+
+        Rejected(result.Result, "Sleep session at index 1 is invalid: SourceApp: The length of 'Source App' must be 200 characters or fewer. You entered 201 characters.");
+        service.Verify(
+            s => s.UpsertSessionAsync(It.IsAny<SleepSession>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task SleepBulk_LeavesOutASessionTheUserDeleted()
     {
         var deleted = new SleepSession { OriginalId = "sleep-deleted" };
@@ -415,7 +435,7 @@ public class V4BulkValidationTests
     {
         var repo = new Mock<ISensorGlucoseRepository>();
 
-        var result = await WithValidators(SensorGlucose(repo)).CreateBulk(
+        var result = await RegisteredValidators.On(SensorGlucose(repo)).CreateBulk(
             [new UpsertSensorGlucoseRequest { Timestamp = T0, Mgdl = -1 }]);
 
         Rejected(result.Result, "Sensor glucose at index 0 is invalid: Mgdl: Mgdl must be between 0 and 10000");
@@ -427,7 +447,7 @@ public class V4BulkValidationTests
     [Fact]
     public async Task SensorGlucoseBulk_NamesTheIndexOfTheOffendingReading()
     {
-        var result = await WithValidators(SensorGlucose()).CreateBulk(
+        var result = await RegisteredValidators.On(SensorGlucose()).CreateBulk(
         [
             new UpsertSensorGlucoseRequest { Timestamp = T0, Mgdl = 120 },
             new UpsertSensorGlucoseRequest { Timestamp = T0.AddMinutes(5), Mgdl = 115 },
@@ -444,7 +464,7 @@ public class V4BulkValidationTests
         repo.Setup(r => r.BulkCreateAsync(It.IsAny<IEnumerable<Core.Models.V4.SensorGlucose>>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IEnumerable<Core.Models.V4.SensorGlucose> models, WriteOrigin _, CancellationToken _) => [.. models]);
 
-        var result = await WithValidators(SensorGlucose(repo)).CreateBulk(
+        var result = await RegisteredValidators.On(SensorGlucose(repo)).CreateBulk(
         [
             new UpsertSensorGlucoseRequest
             {
@@ -463,45 +483,74 @@ public class V4BulkValidationTests
     }
 
     [Fact]
-    public async Task ApsSnapshotBulk_HasNoValidator_SoNothingNewRejectsIt()
+    public async Task ApsSnapshotBulk_RejectsADataSourceLongerThanItsColumn()
     {
-        Validators.GetService<IValidator<UpsertApsSnapshotRequest>>().Should().BeNull();
-        _aps.Setup(r => r.BulkCreateAsync(It.IsAny<IEnumerable<ApsSnapshot>>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IEnumerable<ApsSnapshot> models, WriteOrigin _, CancellationToken _) => [.. models]);
+        var requests = Snapshots(2);
+        requests[1].DataSource = new string('a', 257);
 
-        var result = await WithValidators(ApsController()).CreateApsSnapshots(Snapshots(3));
+        var result = await RegisteredValidators.On(ApsController()).CreateApsSnapshots(requests);
 
-        result.Result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(201);
+        Rejected(result.Result, "APS snapshot at index 1 is invalid: DataSource: The length of 'Data Source' must be 256 characters or fewer. You entered 257 characters.");
+        NothingPersisted();
+    }
+
+    [Fact]
+    public async Task HeartRateBulk_RejectsAnItemTheValidatorRefuses()
+    {
+        var service = new Mock<IHeartRateService>();
+
+        var result = await RegisteredValidators.On(HeartRates(service)).CreateHeartRates(
+            [new UpsertHeartRateRequest { Timestamp = T0, SyncIdentifier = new string('a', 257) }]);
+
+        Rejected(result.Result, "Heart rate at index 0 is invalid: SyncIdentifier: The length of 'Sync Identifier' must be 256 characters or fewer. You entered 257 characters.");
+        service.Verify(
+            s => s.CreateHeartRatesAsync(It.IsAny<IEnumerable<HeartRate>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task StepCountBulk_RejectsAnItemTheValidatorRefuses()
+    {
+        var service = new Mock<IStepCountService>();
+
+        var result = await RegisteredValidators.On(StepCounts(service)).CreateStepCounts(
+            [new UpsertStepCountRequest { Timestamp = T0, DataSource = new string('a', 257) }]);
+
+        Rejected(result.Result, "Step count at index 0 is invalid: DataSource: The length of 'Data Source' must be 256 characters or fewer. You entered 257 characters.");
+        service.Verify(
+            s => s.CreateStepCountsAsync(It.IsAny<IEnumerable<StepCount>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task BodyWeightBatch_RejectsAnItemTheValidatorRefuses()
+    {
+        var service = new Mock<IBodyWeightService>();
+
+        var result = await RegisteredValidators.On(BodyWeights(service)).CreateBodyWeights(
+            [new BodyWeight { SyncIdentifier = new string('a', 257) }]);
+
+        Rejected(result.Result, "Body weight at index 0 is invalid: SyncIdentifier: The length of 'Sync Identifier' must be 256 characters or fewer. You entered 257 characters.");
+        service.Verify(
+            s => s.CreateBodyWeightsAsync(It.IsAny<IEnumerable<BodyWeight>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ActivityBulk_RejectsAnItemTheValidatorRefuses()
+    {
+        var service = new Mock<IActivityService>();
+
+        var result = await RegisteredValidators.On(Activities(service)).CreateActivities(
+            [new UpsertActivityRequest { Type = new string('a', 101) }]);
+
+        Rejected(result.Result, "Activity at index 0 is invalid: Type: The length of 'Type' must be 100 characters or fewer. You entered 101 characters.");
+        service.Verify(
+            s => s.CreateActivitiesAsync(It.IsAny<IEnumerable<Activity>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // ── Controllers ─────────────────────────────────────────────────
-
-    /// <summary>
-    /// The validators as <c>Program</c> registers them: scanned off the API assembly, so a request
-    /// type nobody wrote a validator for resolves to nothing here too. MVC comes with them because
-    /// a request-services-bearing controller resolves its <see cref="ProblemDetailsFactory"/> from
-    /// there rather than falling back to the built-in one.
-    /// </summary>
-    private static readonly IServiceProvider Validators = BuildValidatorProvider();
-
-    private static IServiceProvider BuildValidatorProvider()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddMvcCore();
-        services.AddValidatorsFromAssemblyContaining<UpsertSensorGlucoseRequestValidator>();
-        return services.BuildServiceProvider();
-    }
-
-    private static TController WithValidators<TController>(TController controller)
-        where TController : ControllerBase
-    {
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext { RequestServices = Validators },
-        };
-        return controller;
-    }
 
     private static TRequest[] Fill<TRequest>(int count, Func<TRequest> item) =>
         [.. Enumerable.Range(0, count).Select(_ => item())];

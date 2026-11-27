@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Attributes;
 using Nocturne.API.Models.Requests.V4;
-using Nocturne.API.Validators.V4;
 using Nocturne.API.Services.Caching;
 using Nocturne.Core.Contracts.V4.Repositories;
 using Nocturne.Core.Models.Authorization;
@@ -80,8 +79,6 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     /// <param name="request">The data used to create the record.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
-    /// `Timestamp` must be set on the mapped model; requests that resolve to a default timestamp are rejected with `400 Bad Request`.
-    ///
     /// On success, responds with `201 Created` and a `Location` header containing the URL of the newly created record.
     ///
     /// A record whose `(dataSource, syncIdentifier)` is held by a record the owner deleted is
@@ -98,9 +95,6 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     public virtual async Task<ActionResult<TModel>> Create([FromBody] TCreateRequest request, CancellationToken ct = default)
     {
         var model = MapCreateToModel(request);
-
-        if (TimestampRule.IsMissing(model.Timestamp))
-            return this.TimestampRequiredProblem();
 
         if (await OnBeforeCreateAsync(model, request, ct) is { } result)
             return result;
@@ -158,7 +152,7 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
 
         var footprint = TenantCacheWriteFootprint.Of(HttpContext);
         await RecordUpsertTargetsAsync(footprint, models, ct);
-        var written = (await Repository.BulkCreateAsync(models, WriteOrigin.Live, ct)).ToArray();
+        var written = await WriteBulkAsync(requests, models, ct);
         footprint?.AddRange(written.Select(w => w.Timestamp));
         var returned = await OnAfterBulkCreateAsync(written, ct);
         await EnrichCommittedAsync(returned, ct);
@@ -174,8 +168,6 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// Returns `404 Not Found` if no record with the given <paramref name="id"/> exists.
-    ///
-    /// `Timestamp` must be set on the mapped model; requests that resolve to a default timestamp are rejected with `400 Bad Request`.
     /// </remarks>
     [HttpPut("{id:guid}")]
     [RemoteForm]
@@ -191,9 +183,6 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
             return NotFound();
 
         var model = MapUpdateToModel(id, request, existing);
-
-        if (TimestampRule.IsMissing(model.Timestamp))
-            return this.TimestampRequiredProblem();
 
         if (await OnBeforeUpdateAsync(model, request, existing, ct) is { } result)
             return result;
@@ -412,6 +401,27 @@ public abstract class V4CrudControllerBase<TModel, TCreateRequest, TUpdateReques
     protected virtual Task<ObjectResult?> OnBeforeBulkCreateAsync(
         IReadOnlyList<TModel> models, IReadOnlyList<TCreateRequest> requests, CancellationToken ct)
         => Task.FromResult<ObjectResult?>(null);
+
+    /// <summary>
+    /// Persists a validated, mapped bulk payload. The default writes every model in one
+    /// <see cref="IBulkCreateRepository{TRecord}.BulkCreateAsync"/>. Override where the items must be
+    /// written in an order of their own, or where an item is not a create.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CreateBulk"/> has already validated the payload and run <see cref="OnBeforeBulkCreateAsync"/>,
+    /// and goes on to record the write footprint, run <see cref="OnAfterBulkCreateAsync"/> and enrich the
+    /// result, so an override owns only the write.
+    /// </remarks>
+    /// <param name="requests">The inbound requests, positionally aligned with <paramref name="models"/>.</param>
+    /// <param name="models">The mapped records, one per request, whatever the request asks for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// Every record the write persisted or changed. Each one, created or changed, then runs
+    /// <see cref="OnAfterCreateAsync"/> through <see cref="OnAfterBulkCreateAsync"/>.
+    /// </returns>
+    protected virtual async Task<TModel[]> WriteBulkAsync(
+        IReadOnlyList<TCreateRequest> requests, IReadOnlyList<TModel> models, CancellationToken ct)
+        => (await Repository.BulkCreateAsync(models, WriteOrigin.Live, ct)).ToArray();
 
     /// <summary>
     /// Hook called after a bulk create. Runs <see cref="OnAfterCreateAsync"/> once per written record,

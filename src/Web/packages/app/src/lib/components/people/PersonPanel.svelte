@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getPerson } from "#lib/api/generated/myTenants.generated.remote.js";
-  import type { TenantOverviewItem } from "@nocturne/api-client";
+  import { OverviewRuleSet, type TenantOverviewItem } from "@nocturne/api-client";
   import { Button } from "#lib/components/ui/button/index.js";
   import * as Sheet from "#lib/components/ui/sheet/index.js";
   import { Key } from "@nocturne/ui/keys";
@@ -34,7 +34,9 @@
   const name = $derived(personName(person));
   const siteHref = $derived(personHref(person, baseDomain));
   const query = $derived(
-    person.tenantId ? getPerson({ tenantId: person.tenantId }) : null
+    person.tenantId
+      ? getPerson({ tenantId: person.tenantId, rules: OverviewRuleSet.All })
+      : null
   );
   // A response for another person than the open one is never shown.
   const detail = $derived.by(() => {
@@ -96,7 +98,7 @@
     {@const shown = detail.person}
     <section class="space-y-2 p-4" aria-label="Now">
       <PersonReading person={shown} />
-      <AttentionReasons person={shown} />
+      <AttentionReasons person={shown} linkTeams />
     </section>
     <section class="space-y-2 p-4">
       <div class="flex items-baseline justify-between gap-2">

@@ -76,6 +76,8 @@ public static class ScenarioConversions
                 ? new ApsDetermination(
                     Utc(determination.At)!.Value, determination.EventualMgdl, determination.CarbsRequiredGrams)
                 : null,
+            GlucoseSeries = ctx.GlucoseSeries?.Select(p => new GlucoseSeriesPoint(Utc(p.At)!.Value, p.Mgdl)).ToList()
+                ?? (IReadOnlyList<GlucoseSeriesPoint>)[],
             ActiveAlerts = ctx.ActiveAlerts?.ToDictionary(
                     a => a.AlertId,
                     a => new ActiveAlertSnapshot(a.State, Utc(a.TriggeredAt)!.Value, Utc(a.AcknowledgedAt)))
@@ -128,7 +130,11 @@ public static class ScenarioConversions
                 ?? new Dictionary<Guid, ActiveTrackerReference>(),
             SleepSessionActive = ctx.SleepSessionActive,
             SensorState = ctx.SensorState is { } sensor
-                ? new SensorStateSnapshot(ParseWireEnum<SensorState>(sensor.State)!.Value, Utc(sensor.Since), Utc(sensor.Until))
+                ? new SensorStateSnapshot(
+                    ParseWireEnum<SensorState>(sensor.State)!.Value, Utc(sensor.Since), Utc(sensor.Until),
+                    sensor.OnceLapsed is { } lapsed
+                        ? new LapsedSensorState(ParseWireEnum<SensorState>(lapsed.State)!.Value, Utc(lapsed.Since))
+                        : null)
                 : null,
         };
     }

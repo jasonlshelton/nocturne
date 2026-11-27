@@ -26,29 +26,42 @@ internal static class ModelConventions
                 .IsDescending();
         }
 
-        // The connector watermark -- V4RepositoryBase.GetLatestTimestampAsync -- asks for the
-        // newest timestamp of one tenant and one data source. With neither column leading, the
-        // planner walks ix_<table>_timestamp backwards across every other tenant's rows, so a
-        // tenant whose newest row for that source is old reads most of the table to return one
-        // value. The deleted_at filter keeps the scan index-only: soft-deleted rows left in the
-        // index have to be skipped a heap fetch at a time, which is why it is not a size saving.
-        foreach (var entity in V4WatermarkedEntities.Select(t => modelBuilder.Entity(t)))
+        // Every table SourceTimestampIndexedEntities names gets the index, whether or not a connector
+        // watermarks it. The connector watermark -- V4RepositoryBase.GetLatestTimestampAsync and
+        // ObservedHealthSeriesRepository.GetLatestTimestampAsync -- asks for the newest timestamp of
+        // one tenant and one data source. With neither column leading, the planner walks
+        // ix_<table>_timestamp backwards across every other tenant's rows, so a tenant whose newest
+        // row for that source is old reads most of the table to return one value. The deleted_at
+        // filter keeps the scan index-only: soft-deleted rows left in the index have to be skipped a
+        // heap fetch at a time, which is why it is not a size saving.
+        foreach (var entity in SourceTimestampIndexedEntities.Select(t => modelBuilder.Entity(t)))
         {
             entity.HasIndex(
                     nameof(ITenantScoped.TenantId),
-                    nameof(IV4TimeSeriesEntity.DataSource),
-                    nameof(IV4TimeSeriesEntity.Timestamp))
+                    nameof(ISourcedEntity.DataSource),
+                    nameof(IObservationTimestamped.Timestamp))
                 .HasDatabaseName($"ix_{entity.Metadata.GetTableName()}_tenant_source_timestamp")
                 .IsDescending(false, false, true)
                 .HasFilter("deleted_at IS NULL");
         }
 
-        // A source's stats (V4RecordTables.Counted) and its counts read the rows only their Device names as ranges of
-        // this index (SourceFilter.Parts). Without it each read scans the whole table, for every
-        // connector on every Connections page load. Rows a connector writes usually carry its id in
-        // both handles, so the ranges that leave out DataSource = Device are usually empty.
-        foreach (var entity in V4RecordTables.Counted
-                     .Select(t => t.Table.Entity)
+        // The DataSource = source part of a source's count (SourceFilter.Parts) on a table the
+        // source-timestamp index cannot cover: its only (tenant_id, data_source) index is the partial sync
+        // key, which a count does not imply.
+        foreach (var entity in SourceCountedWithoutTimestampEntities.Select(t => modelBuilder.Entity(t)))
+        {
+            entity.HasIndex(nameof(ITenantScoped.TenantId), nameof(ISourcedEntity.DataSource))
+                .HasDatabaseName($"ix_{entity.Metadata.GetTableName()}_tenant_source")
+                .HasFilter("deleted_at IS NULL");
+        }
+
+        // The connector page's per-source count (CountsBySourceAsync, every table in V4RecordTables.All)
+        // and the stats over V4RecordTables.Counted read the rows only their Device names as ranges
+        // of this index (SourceFilter.Parts). Without it each read goes through the tenant's rows of
+        // that table, for every connector on every page load. Rows a connector writes usually carry
+        // its id in both handles, so the ranges that leave out DataSource = Device are usually empty.
+        foreach (var entity in V4RecordTables.All
+                     .Select(t => t.Entity)
                      .Where(typeof(ISourcedEntity).IsAssignableFrom)
                      .Select(t => modelBuilder.Entity(t)))
         {

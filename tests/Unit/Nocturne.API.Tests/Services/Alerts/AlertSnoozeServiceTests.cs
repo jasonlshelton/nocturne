@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
@@ -8,10 +9,10 @@ using Nocturne.Alerts.Corpus;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Conditions;
 using Nocturne.API.Services.Realtime;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.API.Tests.Services.Alerts.Engines;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Glucose;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
@@ -19,6 +20,7 @@ using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Repositories;
 using Nocturne.Tests.Shared.Infrastructure;
+using Npgsql;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Alerts;
@@ -29,17 +31,7 @@ public class AlertSnoozeServiceTests
     private static readonly Guid Tenant = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly DateTime Now = new(2026, 9, 23, 3, 0, 0, DateTimeKind.Utc);
 
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext()
-        {
-            var ctx = TestDbContextFactory.CreateInMemoryContext(dbName);
-            ctx.TenantId = Tenant;
-            return ctx;
-        }
-    }
-
-    private readonly IDbContextFactory<NocturneDbContext> _factory = new SharedInMemoryFactory($"snooze_{Guid.NewGuid()}");
+    private readonly IDbContextFactory<NocturneDbContext> _factory = TestDbContextFactory.ForInMemoryDatabase($"snooze_{Guid.NewGuid()}", Tenant);
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(Now));
     private readonly Mock<IAlertRepository> _repository = new();
     private readonly Mock<IAlertRuleRepository> _rules = new();
@@ -74,9 +66,9 @@ public class AlertSnoozeServiceTests
             .Setup(c => c.GetLatestAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SensorGlucose { Timestamp = Now.AddMinutes(-minutesAgo), Mgdl = mgdl, TrendRate = trendRate });
 
-    private AlertSnoozeService CreateService() => new(
+    private AlertSnoozeService CreateService(ILogger<AlertSnoozeService>? logger = null) => new(
         _factory.AsNocturneFactory(),
-        Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
+        SettableTenantAccessor.Resolved(Tenant),
         _repository.Object,
         _rules.Object,
         _delivery.Object,
@@ -86,7 +78,7 @@ public class AlertSnoozeServiceTests
         _alarmRelay.Object,
         Mock.Of<IExcursionResolutionHandler>(),
         _time,
-        NullLogger<AlertSnoozeService>.Instance);
+        logger ?? NullLogger<AlertSnoozeService>.Instance);
 
     private sealed record Seeded(Guid RuleId, Guid ExcursionId, Guid InstanceId);
 
@@ -418,6 +410,33 @@ public class AlertSnoozeServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// The re-notification's context names its fresh reading, as the sweep's snooze context does, so a
+    /// windowed rule reads that reading's recent readings; a stale reading is named by neither.
+    /// </summary>
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(30, false)]
+    public async Task Resume_names_the_fresh_reading_its_recent_readings_are_read_from(double minutesAgo, bool named)
+    {
+        var seeded = await SeedAsync(lapsed: true);
+        var reading = new SensorGlucose
+        {
+            Id = Guid.NewGuid(), Timestamp = Now.AddMinutes(-minutesAgo), Mgdl = 61,
+            DataSource = "xdrip", Device = "g7", PatientDeviceId = Guid.NewGuid(),
+        };
+        _canonical.Setup(c => c.GetLatestAsync(It.IsAny<CancellationToken>())).ReturnsAsync(reading);
+        var contexts = new List<SensorContext>();
+        _enricher
+            .Setup(e => e.EnrichAsync(It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
+            .Callback<SensorContext, IEnumerable<AlertRuleSnapshot>, CancellationToken>((ctx, _, _) => contexts.Add(ctx))
+            .ReturnsAsync((SensorContext ctx, IEnumerable<AlertRuleSnapshot> _, CancellationToken _) => ctx);
+
+        (await CreateService().ResumeAsync(seeded.InstanceId, CancellationToken.None)).Should().BeTrue();
+
+        contexts.Should().ContainSingle().Which.LatestSource.Should().Be(named ? ReadingSource.Of(reading) : null);
+    }
+
     [Fact]
     public async Task Resume_carries_no_reading_when_the_newest_one_is_stale()
     {
@@ -536,13 +555,34 @@ public class AlertSnoozeServiceTests
     }
 
     [Fact]
-    public async Task Resume_still_delivers_when_the_DND_lookup_fails()
+    public async Task Resume_still_delivers_when_the_DND_lookup_cannot_read_the_store()
+    {
+        var seeded = await SeedAsync(lapsed: true);
+        var failure = new NpgsqlException("connection refused");
+        _enricher
+            .Setup(e => e.EnrichAsync(It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        var logger = new ListLogger<AlertSnoozeService>();
+
+        (await CreateService(logger).ResumeAsync(seeded.InstanceId, CancellationToken.None)).Should().BeTrue();
+
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception == failure);
+    }
+
+    [Theory]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(NullReferenceException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task Resume_lets_a_defect_in_the_DND_lookup_reach_the_caller(Type defect)
     {
         var seeded = await SeedAsync(lapsed: true);
         _enricher
             .Setup(e => e.EnrichAsync(It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("synthetic"));
+            .ThrowsAsync((Exception)Activator.CreateInstance(defect)!);
 
-        (await CreateService().ResumeAsync(seeded.InstanceId, CancellationToken.None)).Should().BeTrue();
+        var resume = () => CreateService().ResumeAsync(seeded.InstanceId, CancellationToken.None);
+
+        await resume.Should().ThrowAsync<Exception>().Where(e => e.GetType() == defect);
+        _delivery.VerifyNoOtherCalls();
     }
 }

@@ -262,21 +262,10 @@ public class AlertDeliveryTimeoutTests
             })
             .Build();
 
-        var accessor = new Mock<ITenantAccessor>();
-        accessor.Setup(a => a.Context).Returns(new TenantContext(Tenant, "acme", "Acme", true, IsDemo: false));
+        var accessor = SettableTenantAccessor.Resolved(Tenant, "acme", "Acme");
 
         return new ChatBotProvider(
-            factory.Object, configuration, accessor.Object, NullLogger<ChatBotProvider>.Instance);
-    }
-
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext()
-        {
-            var ctx = TestDbContextFactory.CreateInMemoryContext(dbName);
-            ctx.TenantId = Tenant;
-            return ctx;
-        }
+            factory.Object, configuration, accessor, NullLogger<ChatBotProvider>.Instance);
     }
 
     private sealed record Seam(AlertDeliveryService Service, Guid InstanceId, IDbContextFactory<NocturneDbContext> Db)
@@ -290,7 +279,7 @@ public class AlertDeliveryTimeoutTests
 
     private static async Task<Seam> SeamAsync(TimeSpan? webhookTimeout = null, TimeSpan? chatBotTimeout = null)
     {
-        IDbContextFactory<NocturneDbContext> db = new SharedInMemoryFactory($"delivery_timeout_{Guid.NewGuid()}");
+        IDbContextFactory<NocturneDbContext> db = TestDbContextFactory.ForInMemoryDatabase($"delivery_timeout_{Guid.NewGuid()}", Tenant);
 
         var excursion = new AlertExcursionEntity
         {
@@ -315,15 +304,11 @@ public class AlertDeliveryTimeoutTests
             .AddSingleton(ChatBot(new NeverAnswers(), chatBotTimeout))
             .BuildServiceProvider();
 
-        var service = new AlertDeliveryService(
+        var service = DeliveryServices.Build(
             db.AsNocturneFactory(),
-            Mock.Of<ITenantMembershipRepository>(),
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
-            Mock.Of<ISignalRBroadcastService>(),
-            Mock.Of<IEngineAlarmRelay>(),
-            services,
-            NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            SettableTenantAccessor.Resolved(Tenant),
+            providers: services,
+            members: Mock.Of<ITenantMembershipRepository>());
 
         return new Seam(service, instance.Id, db);
     }

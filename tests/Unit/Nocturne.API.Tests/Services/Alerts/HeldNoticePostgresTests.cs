@@ -5,7 +5,6 @@ using Moq;
 using Nocturne.API.Services.Alerts;
 using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Infrastructure.Data;
@@ -97,7 +96,7 @@ public class HeldNoticePostgresTests(HeldNoticePostgresTests.Database database)
         var enricher = new Mock<ISensorContextEnricher>();
         enricher.Setup(e => e.EnrichAsync(It.IsAny<SensorContext>(), It.IsAny<IEnumerable<AlertRuleSnapshot>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SensorContext { LatestValue = null, LatestTimestamp = null, TrendRate = null, LastReadingAt = null });
-        var tenantAccessor = Mock.Of<ITenantAccessor>(a => a.TenantId == tenant);
+        var tenantAccessor = SettableTenantAccessor.Resolved(tenant);
         return new Sent(delivery, new HeldRuleNotice(
             repository ?? Instance(tenant), rules.Object, tenantAccessor, delivery.Object, enricher.Object,
             Mock.Of<IExcursionResolutionHandler>(), TimeProvider.System, NullLogger<HeldRuleNotice>.Instance));
@@ -227,13 +226,14 @@ public class HeldNoticePostgresTests(HeldNoticePostgresTests.Database database)
             .Should().BeEmpty();
     }
 
-    /// <summary>A repository whose record of one rule's notice fails, as a broken write does.</summary>
-    private sealed class FailingFor(Guid failing, Func<NocturneDbContext> create) : AlertRepository(new SuppliedContextFactory(create))
+    /// <summary>A repository whose record of one rule's notice fails with <paramref name="failure"/>.</summary>
+    private sealed class FailingFor(Guid failing, Exception failure, Func<NocturneDbContext> create)
+        : AlertRepository(new SuppliedContextFactory(create))
     {
         public override Task<NoticeRecorded?> RecordHeldNoticeAsync(
             Guid ruleId, DateTime heldSince, DateTime at, CancellationToken ct) =>
             ruleId == failing
-                ? throw new DbUpdateException("the write failed")
+                ? throw failure
                 : base.RecordHeldNoticeAsync(ruleId, heldSince, at, ct);
     }
 
@@ -258,7 +258,8 @@ public class HeldNoticePostgresTests(HeldNoticePostgresTests.Database database)
             await db.SaveChangesAsync();
         }
 
-        var sent = Process(tenant, failing, repository: new FailingFor(failing, () => Context(tenant)));
+        var sent = Process(
+            tenant, failing, repository: new FailingFor(failing, new DbUpdateException("the write failed"), () => Context(tenant)));
         await sent.Notice.CheckAsync([Snapshot(tenant, failing), Snapshot(tenant, other)], CancellationToken.None);
 
         sent.Delivery.Verify(d => d.DispatchAsync(
@@ -266,6 +267,18 @@ public class HeldNoticePostgresTests(HeldNoticePostgresTests.Database database)
             It.IsAny<AlertPayload>(), It.IsAny<CancellationToken>()), Times.Once);
         (await Instance(tenant).GetStandingHeldNoticesAsync(other, CancellationToken.None)).Should().ContainSingle();
         (await Instance(tenant).GetStandingHeldNoticesAsync(failing, CancellationToken.None)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_defect_in_a_notice_is_not_swallowed()
+    {
+        var (tenant, failing) = await SeedAsync();
+        var defect = new InvalidOperationException("a second operation was started on this context");
+
+        var sent = Process(tenant, failing, repository: new FailingFor(failing, defect, () => Context(tenant)));
+        var check = () => sent.Notice.CheckAsync([Snapshot(tenant, failing)], CancellationToken.None);
+
+        (await check.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(defect);
     }
 
     [Fact]

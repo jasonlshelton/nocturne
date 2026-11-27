@@ -1,5 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Moq;
+using Nocturne.API.Services.Identity;
+using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models;
+using Nocturne.Core.Models.Identity;
+using Nocturne.Core.Models.V4;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Abstractions;
 using Nocturne.Infrastructure.Data.Entities;
@@ -13,6 +19,15 @@ namespace Nocturne.API.Tests.Services.Identity;
 /// </summary>
 internal static class TenantOverviewTestKit
 {
+    /// <summary>A caller in no group as staff.</summary>
+    public static Mock<ITeamRepository> InNoGroup()
+    {
+        var teams = new Mock<ITeamRepository>();
+        teams.Setup(t => t.GetFirstGroupOfPeopleAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, Guid>());
+        return teams;
+    }
+
     public static DbContextOptions<NocturneDbContext> NewOptions() =>
         new DbContextOptionsBuilder<NocturneDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -96,9 +111,67 @@ internal static class TenantOverviewTestKit
         }
     }
 
-    public sealed class InMemoryContextFactory(DbContextOptions<NocturneDbContext> options)
-        : IDbContextFactory<NocturneDbContext>
+    /// <summary>A reason a rule of the caller's, or of <paramref name="team"/>, gives, at <paramref name="level"/>.</summary>
+    public static TenantOverviewAttention RuleReason(NotificationUrgency level, TenantOverviewRuleTeam? team) =>
+        new(TenantOverviewAttentionKind.FlagRule, level)
+        {
+            Rule = new TenantOverviewRuleReason(
+                Guid.NewGuid(), team is null ? FlagRuleSource.Yours : FlagRuleSource.Team, team, "glucose_statistics",
+                "timeBelow", "Time below range", "%", "consensus",
+                6.5, FlagRuleComparison.Above, 4, 14, DateTime.UtcNow.AddDays(-14), DateTime.UtcNow, null, null),
+        };
+
+    /// <summary>
+    /// A run that gives each person the reasons scripted for them, matches the fact filters for everyone but
+    /// <see cref="FailingFilters"/>, and records what the overview passed it.
+    /// </summary>
+    public sealed class ScriptedRules : IViewerFlagRules
     {
-        public NocturneDbContext CreateDbContext() => new(options);
+        public Dictionary<Guid, IReadOnlyList<TenantOverviewAttention>> Reasons { get; } = [];
+        public HashSet<Guid> FailingFilters { get; } = [];
+        public List<IReadOnlyList<PeopleFilter>> FactsBegunFor { get; } = [];
+        public int Pending { get; init; }
+        public bool None { get; init; }
+        public IReadOnlyList<TenantOverviewRuleTeam> Teams { get; init; } = [];
+        public int Begun { get; private set; }
+        public List<Guid> Subjects { get; } = [];
+        public List<OverviewRuleSet> RuleSets { get; } = [];
+        public List<IReadOnlyList<Guid>> PeopleBegunFor { get; } = [];
+        public List<bool> CredentialLimits { get; } = [];
+        public List<(GlucoseReadTenant Person, SensorGlucose? Latest, IReadOnlyList<TrackerInstance>? Trackers, PumpSnapshot? Pump)> Judged { get; } = [];
+        public int? FinishedAfter { get; private set; }
+
+        public Task<IViewerFlagRuleRun?> BeginAsync(
+            Guid subjectId, OverviewRuleSet rules, IReadOnlyList<PeopleFilter> facts, IReadOnlyList<GlucoseReadTenant> people,
+            bool credentialLimitTo24Hours, CancellationToken ct)
+        {
+            Begun++;
+            FactsBegunFor.Add(facts);
+            Subjects.Add(subjectId);
+            RuleSets.Add(rules);
+            PeopleBegunFor.Add([.. people.Select(p => p.Tenant.Id)]);
+            CredentialLimits.Add(credentialLimitTo24Hours);
+            return Task.FromResult<IViewerFlagRuleRun?>(None ? null : new Run(this));
+        }
+
+        private sealed class Run(ScriptedRules owner) : IViewerFlagRuleRun
+        {
+            public int PeopleWithRulesPending => owner.Pending;
+
+            public IReadOnlyList<TenantOverviewRuleTeam> Teams => owner.Teams;
+
+            public Task<ViewerJudgement> JudgeAsync(
+                GlucoseReadTenant person, IServiceProvider personScope, SensorGlucose? latest,
+                IReadOnlyList<TrackerInstance>? activeTrackers, PumpSnapshot? pump, CancellationToken ct)
+            {
+                lock (owner.Judged)
+                    owner.Judged.Add((person, latest, activeTrackers, pump));
+                return Task.FromResult(new ViewerJudgement(
+                    owner.Reasons.GetValueOrDefault(person.Tenant.Id) ?? [],
+                    !owner.FailingFilters.Contains(person.Tenant.Id)));
+            }
+
+            public void Finish() => owner.FinishedAfter = owner.Judged.Count;
+        }
     }
 }

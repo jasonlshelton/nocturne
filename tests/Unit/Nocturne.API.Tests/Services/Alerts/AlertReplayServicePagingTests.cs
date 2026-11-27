@@ -39,7 +39,7 @@ public class AlertReplayServicePagingTests
     private readonly Mock<IDndWindowRepository> _dndWindows = new();
     private readonly Mock<ITenantAlertSettingsRepository> _alertSettings = new();
     private readonly Mock<ISensorGlucoseRepository> _glucoseRepository = new();
-    private readonly Mock<ITenantAccessor> _tenantAccessor = new();
+    private readonly ITenantAccessor _tenantAccessor;
     private readonly Mock<IIobCalculator> _iobCalculator = new();
     private readonly Mock<ICobCalculator> _cobCalculator = new();
     private readonly Mock<ITreatmentService> _treatmentService = new();
@@ -58,7 +58,7 @@ public class AlertReplayServicePagingTests
 
     public AlertReplayServicePagingTests()
     {
-        _tenantAccessor.Setup(t => t.TenantId).Returns(_tenantId);
+        _tenantAccessor = SettableTenantAccessor.Resolved(_tenantId);
         SetupHidden([]);
         _dndWindows
             .Setup(r => r.GetReceivedByAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -94,6 +94,7 @@ public class AlertReplayServicePagingTests
             new Mock<Nocturne.Core.Contracts.Repositories.ITrackerRepository>().Object,
             _reservoirEstimation.Object,
             Mock.Of<Nocturne.Core.Contracts.V4.Repositories.ISensorStateReportRepository>(),
+            Mock.Of<Nocturne.Core.Contracts.Glucose.ICanonicalGlucoseService>(),
             Options.Create(new AlertEvaluationOptions()));
         var enricher = new SensorContextEnricher(
             enricherDeps,
@@ -109,7 +110,7 @@ public class AlertReplayServicePagingTests
             _dndWindows.Object,
             _glucoseRepository.Object,
             enricher,
-            _tenantAccessor.Object,
+            _tenantAccessor,
             Options.Create(options),
             new RustAlertReplayEngine(new AlertEngineErrors(new Nocturne.API.Tests.Services.BackgroundServices.TestMeterFactory(), TimeProvider.System)),
             new ImportedHistory(_glucoseRepository.Object, new Mock<Nocturne.Core.Contracts.Auth.IOAuthGrantRepository>().Object, TestTenantCache.Create()),

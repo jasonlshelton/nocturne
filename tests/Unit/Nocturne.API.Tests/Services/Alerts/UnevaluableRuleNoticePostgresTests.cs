@@ -4,10 +4,9 @@ using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Engines;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Infrastructure.Data;
@@ -158,8 +157,7 @@ public sealed class UnevaluableRuleNoticePostgresTests(UnevaluableRuleNoticePost
 
         public UnevaluableRuleNotice Process(ConditionVersionLog? log = null, AlertRepository? repository = null)
         {
-            var tenant = new Mock<ITenantAccessor>();
-            tenant.SetupGet(t => t.TenantId).Returns(Tenant);
+            var tenant = SettableTenantAccessor.Resolved(Tenant);
 
             var rules = new Mock<IAlertRuleRepository>();
             rules
@@ -171,7 +169,7 @@ public sealed class UnevaluableRuleNoticePostgresTests(UnevaluableRuleNoticePost
             return new UnevaluableRuleNotice(
                 repository ?? Counting(),
                 rules.Object,
-                tenant.Object,
+                tenant,
                 Delivery.Object,
                 Enricher.Object,
                 Resolution.Object,
@@ -464,7 +462,7 @@ public sealed class UnevaluableRuleNoticePostgresTests(UnevaluableRuleNoticePost
         var notice = new UnevaluableRuleNotice(
             Mock.Of<IAlertRepository>(MockBehavior.Strict),
             Mock.Of<IAlertRuleRepository>(MockBehavior.Strict),
-            Mock.Of<ITenantAccessor>(t => t.TenantId == run.Tenant),
+            SettableTenantAccessor.Resolved(run.Tenant),
             Mock.Of<IAlertDeliveryService>(MockBehavior.Strict),
             Mock.Of<ISensorContextEnricher>(MockBehavior.Strict),
             Mock.Of<IExcursionResolutionHandler>(MockBehavior.Strict),
@@ -543,6 +541,37 @@ public sealed class UnevaluableRuleNoticePostgresTests(UnevaluableRuleNoticePost
             CancellationToken.None);
 
         run.VerifySent(Times.Once(), run.OtherRuleId);
+    }
+
+    [Fact]
+    public async Task A_defect_sending_a_notice_is_not_swallowed()
+    {
+        var run = await SeedAsync();
+        var defect = new InvalidOperationException("a second operation was started on this context");
+        run.Delivery
+            .Setup(d => d.DispatchAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<AlertRuleChannelSnapshot>>(),
+                It.IsAny<AlertPayload>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(defect);
+
+        var check = () => run.Process().CheckAsync(Enabled(run.Rule(Broken)), CancellationToken.None);
+
+        (await check.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(defect);
+    }
+
+    [Fact]
+    public async Task A_defect_resolving_a_superseded_notice_is_not_swallowed()
+    {
+        var run = await SeedAsync();
+        await run.Process().CheckAsync(Enabled(run.Rule(Broken)), CancellationToken.None);
+        var first = (await run.StandingAsync()).Single();
+        var defect = new InvalidOperationException("a second operation was started on this context");
+        run.Resolution
+            .Setup(h => h.HandleClosedAsync(It.Is<ExcursionTransition>(t => t.ExcursionId == first), run.Tenant, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(defect);
+
+        var check = () => run.Process().CheckAsync(Enabled(run.Rule(OtherBroken)), CancellationToken.None);
+
+        (await check.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(defect);
     }
 
     [Fact]

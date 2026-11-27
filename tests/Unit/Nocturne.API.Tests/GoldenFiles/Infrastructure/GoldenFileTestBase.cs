@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
@@ -14,6 +15,9 @@ namespace Nocturne.API.Tests.GoldenFiles.Infrastructure;
 /// </summary>
 public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory>, IAsyncLifetime
 {
+    /// <summary>The tenant the factory seeds and every golden request runs as.</summary>
+    protected static readonly Guid GoldenTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
     protected readonly GoldenFileWebAppFactory Factory;
     protected readonly HttpClient Client;
 
@@ -74,7 +78,7 @@ public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory
     {
         using var scope = Factory.Services.CreateScope();
         await using var db = await scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>()
-            .CreateForTenantAsync(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+            .CreateForTenantAsync(GoldenTenantId);
         db.SensorGlucose.AddRange(entities);
         await db.SaveChangesAsync();
     }
@@ -86,7 +90,7 @@ public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory
     {
         using var scope = Factory.Services.CreateScope();
         await using var db = await scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>()
-            .CreateForTenantAsync(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+            .CreateForTenantAsync(GoldenTenantId);
         db.MeterGlucose.AddRange(entities);
         await db.SaveChangesAsync();
     }
@@ -99,7 +103,7 @@ public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory
     {
         using var scope = Factory.Services.CreateScope();
         await using var db = await scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>()
-            .CreateForTenantAsync(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+            .CreateForTenantAsync(GoldenTenantId);
         db.Foods.AddRange(foods);
         await db.SaveChangesAsync();
     }
@@ -115,6 +119,68 @@ public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory
     }
 
     /// <summary>
+    /// POST a document to a v3 collection and assert the 201 envelope; returns the response for
+    /// Verify and the identifier it answered.
+    /// </summary>
+    protected async Task<(object Posted, string Identifier)> PostV3Async(string collection, object payload)
+    {
+        var post = await PostJsonAsync($"/api/v3/{collection}", payload);
+        var postBody = await post.Content.ReadAsStringAsync();
+        post.StatusCode.Should().Be(System.Net.HttpStatusCode.Created, postBody);
+
+        using var posted = System.Text.Json.JsonDocument.Parse(postBody);
+        posted.RootElement.GetProperty("status").GetInt32().Should().Be(201);
+        posted.RootElement.GetProperty("lastModified").GetInt64().Should().BeGreaterThan(0);
+        var identifier = posted.RootElement.GetProperty("identifier").GetString();
+        identifier.Should().NotBeNullOrEmpty();
+
+        return (await CaptureResponse(post), identifier!);
+    }
+
+    /// <summary>
+    /// Read a v3 document by identifier and assert the 200 envelope around the same identifier;
+    /// returns the response for Verify.
+    /// </summary>
+    protected async Task<object> GetV3Async(string collection, string identifier)
+    {
+        var get = await Client.GetAsync($"/api/v3/{collection}/{identifier}");
+        var getBody = await get.Content.ReadAsStringAsync();
+        get.StatusCode.Should().Be(System.Net.HttpStatusCode.OK, getBody);
+
+        using var fetched = System.Text.Json.JsonDocument.Parse(getBody);
+        fetched.RootElement.GetProperty("status").GetInt32().Should().Be(200);
+        fetched.RootElement.GetProperty("result").GetProperty("identifier").GetString().Should().Be(identifier);
+
+        return await CaptureResponse(get);
+    }
+
+    /// <summary>
+    /// POST a document to a v3 collection, then read it back by the identifier the POST answered.
+    /// </summary>
+    protected async Task<(object Posted, object Fetched)> PostThenGetV3Async(string collection, object payload)
+    {
+        var (posted, identifier) = await PostV3Async(collection, payload);
+        return (posted, await GetV3Async(collection, identifier));
+    }
+
+    /// <summary>
+    /// POST a document to a v3 collection, then send <paramref name="method"/> with
+    /// <paramref name="body"/> to the identifier the POST answered; returns that write's response.
+    /// </summary>
+    protected async Task<object> PostThenWriteV3Async(string collection, object payload, HttpMethod method, object body)
+    {
+        var (_, identifier) = await PostV3Async(collection, payload);
+        var request = new HttpRequestMessage(method, $"/api/v3/{collection}/{identifier}")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+        };
+        var response = await Client.SendAsync(request);
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        response.Content.Headers.LastModified.Should().NotBeNull("a v3 PUT and PATCH answer Last-Modified");
+        return await CaptureResponse(response);
+    }
+
+    /// <summary>
     /// PUT JSON to an endpoint and return the response.
     /// </summary>
     protected async Task<HttpResponseMessage> PutJsonAsync(string url, object payload)
@@ -124,13 +190,47 @@ public abstract class GoldenFileTestBase : IClassFixture<GoldenFileWebAppFactory
         return await Client.PutAsync(url, content);
     }
 
-    private Task CleanupDatabase()
+    private static readonly Type[] NonRecordTables = [typeof(FoodEntity), typeof(DeviceStatusExtrasEntity)];
+
+    /// <summary>
+    /// Empties every V4 record table and the other tables the goldens write, so a golden that writes
+    /// a new record type needs no edit here. Raw SQL on the factory's connection to the same database
+    /// bypasses EF query filters and change tracking.
+    /// </summary>
+    private async Task CleanupDatabase()
     {
-        // Raw SQL on the factory's connection to the same database bypasses EF query filters and
-        // change tracking.
+        using var scope = Factory.Services.CreateScope();
+        await using var db = await scope.ServiceProvider.GetRequiredService<INocturneDbContextFactory>()
+            .CreateForTenantAsync(GoldenTenantId);
+
+        var tables = ChildrenFirst(
+            db.Model,
+            [.. V4RecordTables.All.Select(t => t.Entity), .. NonRecordTables]);
+
         using var cmd = Factory.Connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM aps_snapshots; DELETE FROM pump_snapshots; DELETE FROM uploader_snapshots; DELETE FROM device_status_extras; DELETE FROM sensor_state_reports; DELETE FROM foods; DELETE FROM sensor_glucose; DELETE FROM meter_glucose; DELETE FROM calibrations;";
+        cmd.CommandText = string.Concat(tables.Select(t => $"DELETE FROM \"{t}\";"));
         cmd.ExecuteNonQuery();
-        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The tables of <paramref name="entities"/>, each ahead of every table its rows depend on.
+    /// </summary>
+    private static List<string> ChildrenFirst(IModel model, IReadOnlyCollection<Type> entities)
+    {
+        var types = entities.Select(e => model.FindEntityType(e)!).ToList();
+        var ordered = new List<IEntityType>();
+        var visiting = new HashSet<IEntityType>();
+
+        void Visit(IEntityType type)
+        {
+            if (ordered.Contains(type) || !visiting.Add(type))
+                return;
+            foreach (var dependent in types.Where(t => t.GetForeignKeys().Any(f => f.PrincipalEntityType == type && t != type)))
+                Visit(dependent);
+            ordered.Add(type);
+        }
+
+        types.ForEach(Visit);
+        return [.. ordered.Select(t => t.GetTableName()!)];
     }
 }

@@ -4,10 +4,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using Nocturne.Connectors.Core.Extensions;
 using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Connectors.Core.Services;
 using Nocturne.Core.Contracts.V4;
+using Nocturne.Core.Models.Services;
+using Nocturne.Tests.Shared.Connectors;
 using Xunit;
 
 namespace Nocturne.Connectors.Core.Tests.Services;
@@ -77,6 +80,254 @@ public class BaseConnectorServiceTests
         clock.Advance(TimeSpan.FromDays(31));
 
         service.CallDefaultInitialSyncFloor().Should().Be(new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc));
+    }
+
+    /// <summary>A connector whose source starts at <paramref name="historyStart"/>, recording the request its run is handed.</summary>
+    private sealed class WindowProbe(DateTime? historyStart)
+        : BaseConnectorService<TestConfig>(
+            new HttpClient(),
+            new ConnectorServerResolver<TestConfig>(null, null, null),
+            NullLogger<WindowProbe>.Instance,
+            new RecordingRetryDelayStrategy())
+    {
+        public SyncRequest? Handed { get; private set; }
+
+        protected override string ConnectorSource => "test";
+        public override string ServiceName => "Test";
+        protected override DateTime? HistoryStart => historyStart;
+
+        protected override Task<SyncResult> PerformSyncInternalAsync(
+            SyncRequest request, TestConfig config, CancellationToken cancellationToken)
+        {
+            Handed = request;
+            return Task.FromResult(new SyncResult { Success = true });
+        }
+    }
+
+    private static readonly DateTime SourceStart = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime WindowEnd = new(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    [Theory]
+    [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_ReachesTheConnectorFromItsHistoryStart(string shape)
+    {
+        var probe = new WindowProbe(SourceStart);
+
+        await probe.SyncDataAsync(NoLowerBound.Request(shape, WindowEnd), new TestConfig(), CancellationToken.None);
+
+        probe.Handed!.From.Should().Be(SourceStart);
+        probe.Handed.To.Should().Be(WindowEnd);
+    }
+
+    [Theory]
+    [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_StaysOpenForASourceReadFromAnOpenStart(string shape)
+    {
+        var probe = new WindowProbe(historyStart: null);
+
+        await probe.SyncDataAsync(NoLowerBound.Request(shape, WindowEnd), new TestConfig(), CancellationToken.None);
+
+        probe.Handed!.From.Should().BeNull("an open start is how such a source reads its whole history");
+    }
+
+    [Fact]
+    public async Task SyncDataAsync_AWindowWithALowerBound_KeepsIt()
+    {
+        var asked = SourceStart.AddDays(-10);
+        var probe = new WindowProbe(SourceStart);
+
+        await probe.SyncDataAsync(
+            new SyncRequest { From = asked, To = WindowEnd }, new TestConfig(), CancellationToken.None);
+
+        probe.Handed!.From.Should().Be(asked);
+    }
+
+    [Fact]
+    public async Task SyncDataAsync_ARequestWithNeitherBound_IsACatchUpAndGetsNoStart()
+    {
+        var probe = new WindowProbe(SourceStart);
+
+        await probe.SyncDataAsync(new SyncRequest(), new TestConfig(), CancellationToken.None);
+
+        probe.Handed!.From.Should().BeNull();
+        probe.Handed.To.Should().BeNull();
+        probe.Handed.Resume.Scheduled.Should().BeTrue("an open request runs as the scheduled catch-up");
+    }
+
+    [Fact]
+    public async Task SyncDataAsync_ARequestWithABound_IsNotACatchUp()
+    {
+        var probe = new WindowProbe(SourceStart);
+
+        await probe.SyncDataAsync(new SyncRequest { From = SourceStart }, new TestConfig(), CancellationToken.None);
+        var fromOnly = probe.Handed!;
+        await probe.SyncDataAsync(new SyncRequest { To = WindowEnd }, new TestConfig(), CancellationToken.None);
+
+        fromOnly.Resume.Scheduled.Should().BeFalse();
+        probe.Handed!.Resume.Scheduled.Should().BeFalse();
+    }
+
+    [ConnectorRegistration(
+        "Declared", "declared", "DECLARED", "Declared", "declared-source",
+        HistoryReachUnit = HistoryReachUnit.Days, HistoryReachAmount = 3)]
+    public class DeclaredReachConfig : BaseConnectorConfiguration;
+
+    private sealed class DeclaredReachProbe(TimeProvider clock)
+        : BaseConnectorService<DeclaredReachConfig>(
+            new HttpClient(),
+            new ConnectorServerResolver<DeclaredReachConfig>(null, null, null),
+            NullLogger<DeclaredReachProbe>.Instance,
+            new RecordingRetryDelayStrategy(),
+            timeProvider: clock)
+    {
+        public SyncRequest? Handed { get; private set; }
+
+        public override string ServiceName => "Declared";
+
+        protected override Task<SyncResult> PerformSyncInternalAsync(
+            SyncRequest request, DeclaredReachConfig config, CancellationToken cancellationToken)
+        {
+            Handed = request;
+            return Task.FromResult(new SyncResult { Success = true });
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_StartsAtTheReachTheRegistrationDeclares(string shape)
+    {
+        var now = new DateTimeOffset(WindowEnd, TimeSpan.Zero);
+        var probe = new DeclaredReachProbe(new FakeTimeProvider(now));
+
+        await probe.SyncDataAsync(NoLowerBound.Request(shape, WindowEnd), new DeclaredReachConfig(), CancellationToken.None);
+
+        probe.Handed!.From.Should().Be(WindowEnd.AddDays(-3));
+    }
+
+    private static readonly DateTime FirstSyncFloorDate = new(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime FirstSyncHistoryStart = new(2026, 7, 31, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>A connector with the given floor and history start, recording the resume points of its scheduled run.</summary>
+    private sealed class FirstSyncProbe(
+        DateTime? floor, DateTime? historyStart, IConnectorPublisher? publisher = null, TimeProvider? clock = null)
+        : BaseConnectorService<TestConfig>(
+            new HttpClient(),
+            new ConnectorServerResolver<TestConfig>(null, null, null),
+            NullLogger<FirstSyncProbe>.Instance,
+            new RecordingRetryDelayStrategy(),
+            publisher,
+            clock)
+    {
+        public Dictionary<ResumeFamily, DateTime?> Points { get; } = [];
+
+        public DateTime? FirstStart => FirstSyncStart;
+        public DateTime ConcreteStart => ConcreteFirstSyncStart;
+
+        protected override string ConnectorSource => "test";
+        public override string ServiceName => "Test";
+        protected override DateTime? InitialSyncFloor => floor;
+        protected override DateTime? HistoryStart => historyStart;
+
+        protected override IEnumerable<ResumeKey> ResumesFrom(SyncRequest request, TestConfig config) =>
+            [ResumeFamily.Glucose, ResumeFamily.Treatments, ResumeFamily.StateSpans,
+                ResumeFamily.DeviceStatus, ResumeFamily.Activity];
+
+        protected override Task<SyncResult> PerformSyncInternalAsync(
+            SyncRequest request, TestConfig config, CancellationToken cancellationToken)
+        {
+            foreach (var family in Enum.GetValues<ResumeFamily>())
+                Points[family] = request.Resume.Point(family);
+            return Task.FromResult(new SyncResult { Success = true });
+        }
+    }
+
+    public static TheoryData<bool, bool> FloorAndHistoryStartPresence => new()
+    {
+        { true, true },
+        { true, false },
+        { false, true },
+        { false, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(FloorAndHistoryStartPresence))]
+    public void FirstSyncStart_IsTheLaterOfTheFloorAndTheHistoryStart_AnAbsentOneLeavingTheOther(
+        bool hasFloor, bool hasHistoryStart)
+    {
+        var floor = hasFloor ? FirstSyncFloorDate : (DateTime?)null;
+        var historyStart = hasHistoryStart ? FirstSyncHistoryStart : (DateTime?)null;
+
+        var start = new FirstSyncProbe(floor, historyStart).FirstStart;
+
+        start.Should().Be((hasFloor, hasHistoryStart) switch
+        {
+            (true, true) => FirstSyncHistoryStart,
+            (true, false) => FirstSyncFloorDate,
+            (false, true) => FirstSyncHistoryStart,
+            _ => (DateTime?)null,
+        });
+    }
+
+    [Fact]
+    public void FirstSyncStart_WithTheHistoryStartBeforeTheFloor_KeepsTheFloor()
+    {
+        new FirstSyncProbe(FirstSyncHistoryStart, FirstSyncFloorDate).FirstStart.Should().Be(FirstSyncHistoryStart);
+    }
+
+    [Fact]
+    public void ConcreteFirstSyncStart_WithBothBoundsOpen_IsTheDefaultInitialSyncFloor()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 31, 9, 30, 0, TimeSpan.Zero));
+
+        new FirstSyncProbe(null, null, clock: clock).ConcreteStart.Should().Be(
+            new DateTime(2026, 2, 28, 9, 30, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void ConcreteFirstSyncStart_WithAHistoryStart_IsFirstSyncStart()
+    {
+        new FirstSyncProbe(null, FirstSyncHistoryStart).ConcreteStart.Should().Be(FirstSyncHistoryStart);
+    }
+
+    [Fact]
+    public async Task ScheduledSync_WithNothingStored_StartsEveryFamilyNoEarlierThanTheHistoryStart()
+    {
+        var publisher = new Mock<IConnectorPublisher>();
+        publisher.SetupGet(p => p.IsAvailable).Returns(true);
+        publisher.SetupGet(p => p.Glucose).Returns(Mock.Of<IGlucosePublisher>());
+        publisher.SetupGet(p => p.Treatments).Returns(Mock.Of<ITreatmentPublisher>());
+        publisher.SetupGet(p => p.Device).Returns(Mock.Of<IDevicePublisher>());
+        publisher.SetupGet(p => p.Metadata).Returns(Mock.Of<IMetadataPublisher>());
+        var probe = new FirstSyncProbe(FirstSyncFloorDate, FirstSyncHistoryStart, publisher.Object);
+
+        await probe.SyncDataAsync(new SyncRequest(), new TestConfig(), CancellationToken.None);
+
+        probe.Points.Should().Contain(new Dictionary<ResumeFamily, DateTime?>
+        {
+            [ResumeFamily.Glucose] = FirstSyncHistoryStart,
+            [ResumeFamily.Treatments] = FirstSyncHistoryStart,
+            [ResumeFamily.StateSpans] = FirstSyncHistoryStart,
+            [ResumeFamily.DeviceStatus] = FirstSyncHistoryStart,
+            [ResumeFamily.Activity] = FirstSyncHistoryStart,
+        });
+    }
+
+    [Fact]
+    public async Task ScheduledSync_WithNoHistoryStart_LeavesDeviceStatusAndActivityOpen()
+    {
+        var publisher = new Mock<IConnectorPublisher>();
+        publisher.SetupGet(p => p.IsAvailable).Returns(true);
+        publisher.SetupGet(p => p.Glucose).Returns(Mock.Of<IGlucosePublisher>());
+        publisher.SetupGet(p => p.Treatments).Returns(Mock.Of<ITreatmentPublisher>());
+        publisher.SetupGet(p => p.Device).Returns(Mock.Of<IDevicePublisher>());
+        publisher.SetupGet(p => p.Metadata).Returns(Mock.Of<IMetadataPublisher>());
+        var probe = new FirstSyncProbe(FirstSyncFloorDate, null, publisher.Object);
+
+        await probe.SyncDataAsync(new SyncRequest(), new TestConfig(), CancellationToken.None);
+
+        probe.Points[ResumeFamily.Glucose].Should().Be(FirstSyncFloorDate);
+        probe.Points[ResumeFamily.DeviceStatus].Should().BeNull();
+        probe.Points[ResumeFamily.Activity].Should().BeNull();
     }
 
     /// <summary>A connector whose run is <paramref name="run"/>, so a test can script what the run does.</summary>

@@ -4,8 +4,26 @@ namespace Nocturne.Connectors.Core.Models;
 
 public class SyncRequest
 {
+    /// <summary>
+    ///     The window's lower bound. On a request that names a <see cref="To"/> (every cursor reset,
+    ///     every ranged manual sync) a null one means from the beginning: the connector's base resolves
+    ///     it to <see cref="Services.BaseConnectorService{TConfig}.HistoryStart"/>, as far back as the
+    ///     source serves, before the connector reads it. A request with neither bound is a catch-up
+    ///     (<see cref="IsCatchUp"/>).
+    /// </summary>
     public DateTime? From { get; init; }
     public DateTime? To { get; init; }
+
+    /// <summary>
+    ///     Whether this request names no bound at all: the "Sync now" button, the Google Health managed
+    ///     backfill and the dev sync-all all send one. The base runs it as the scheduled sync does,
+    ///     each family resuming from its own point (<see cref="Resume"/>), so it reads what the next
+    ///     poll would read and never re-crawls a whole history. A connector with its own window policy
+    ///     (<c>RunScheduledAsync</c>) applies it here too.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsCatchUp => From is null && To is null;
+
     public List<SyncDataType> DataTypes { get; set; } = [];
 
     /// <summary>
@@ -24,7 +42,8 @@ public class SyncRequest
     public bool IsReset { get; private init; }
 
     /// <summary>
-    ///     A cursor reset over <paramref name="from"/> (no lower bound when null) to <paramref name="to"/>.
+    ///     A cursor reset over <paramref name="from"/> (from the beginning when null, as <see cref="From"/>
+    ///     says) to <paramref name="to"/>.
     ///     The connector clears what <see cref="Services.BaseConnectorService{TConfig}"/> says a reset
     ///     clears, inside the run once it has signed in, then fetches the window.
     /// </summary>

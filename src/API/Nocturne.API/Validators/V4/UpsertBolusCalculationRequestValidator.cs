@@ -10,7 +10,7 @@ namespace Nocturne.API.Validators.V4;
 /// <remarks>
 /// <list type="bullet">
 /// <item><description>Timestamp must be a valid non-default <see cref="DateTimeOffset"/>.</description></item>
-/// <item><description>DataSource capped at its column length (<see cref="RecordColumnLengths"/>); Device and App at 500; BloodGlucoseInputSource at 200.</description></item>
+/// <item><description>The header caps of <see cref="RecordColumnRules"/>; BloodGlucoseInputSource at <see cref="ColumnLengths.BolusCalculation.BloodGlucoseInputSource"/>.</description></item>
 /// <item><description>CarbInput and InsulinRecommendation, when provided, must be non-negative.</description></item>
 /// <item><description>CarbRatio, when provided, must be strictly positive (division denominator).</description></item>
 /// <item><description>CalculationType, when provided, must be a valid enum value.</description></item>
@@ -27,9 +27,9 @@ public class UpsertBolusCalculationRequestValidator : AbstractValidator<UpsertBo
     public UpsertBolusCalculationRequestValidator()
     {
         RuleFor(x => x.Timestamp).TimestampRequired();
-        RuleFor(x => x.Device).MaximumLength(500).When(x => x.Device is not null);
-        RuleFor(x => x.App).MaximumLength(500).When(x => x.App is not null);
-        RuleFor(x => x.DataSource).MaximumLength(RecordColumnLengths.Provenance).When(x => x.DataSource is not null);
+        RuleFor(x => x.Device).WithinProvenance();
+        RuleFor(x => x.App).WithinProvenance();
+        RuleFor(x => x.DataSource).WithinProvenance();
         RuleFor(x => x.CarbInput).GreaterThanOrEqualTo(0).When(x => x.CarbInput is not null)
             .WithMessage("CarbInput must be >= 0");
         RuleFor(x => x.CarbRatio).GreaterThan(0).When(x => x.CarbRatio is not null)
@@ -37,6 +37,6 @@ public class UpsertBolusCalculationRequestValidator : AbstractValidator<UpsertBo
         RuleFor(x => x.InsulinRecommendation).GreaterThanOrEqualTo(0).When(x => x.InsulinRecommendation is not null)
             .WithMessage("InsulinRecommendation must be >= 0");
         RuleFor(x => x.CalculationType).IsInEnum().When(x => x.CalculationType is not null);
-        RuleFor(x => x.BloodGlucoseInputSource).MaximumLength(200).When(x => x.BloodGlucoseInputSource is not null);
+        RuleFor(x => x.BloodGlucoseInputSource).MaximumLength(ColumnLengths.BolusCalculation.BloodGlucoseInputSource).When(x => x.BloodGlucoseInputSource is not null);
     }
 }

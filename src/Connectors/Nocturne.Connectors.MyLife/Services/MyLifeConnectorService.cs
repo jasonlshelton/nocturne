@@ -124,14 +124,14 @@ public class MyLifeConnectorService(
             var needRecords = treatmentSubTypes.Any(t => activeTypes.Contains(t));
             var needStateSpans = activeTypes.Contains(SyncDataType.StateSpans);
 
-            // MyLife streams the source month by month, so every bound below has to be concrete.
-            // The initial-sync floor is the fallback, and as far back as this connector reaches for
-            // a range naming no lower bound; whether the source itself holds more is unverified.
-            var floor = InitialSyncFloor ?? DefaultInitialSyncFloor();
+            // MyLife streams the source month by month, so every bound below has to be concrete: a
+            // range starts at its From, never null since HistoryStart is set, and a family with
+            // nothing stored at its first-sync start.
+            var floor = ConcreteFirstSyncStart;
             var glucoseSince = ResumeFrom(
-                request, () => request.Resume.Point(ResumeFamily.Glucose) ?? floor, floor);
+                request, () => request.Resume.Point(ResumeFamily.Glucose) ?? floor) ?? floor;
             var treatmentSince = ResumeFrom(
-                request, () => request.Resume.Point(ResumeFamily.Treatments) ?? floor, floor);
+                request, () => request.Resume.Point(ResumeFamily.Treatments) ?? floor) ?? floor;
 
             var overallSince = glucoseSince < treatmentSince ? glucoseSince : treatmentSince;
             var now = Clock.GetUtcNow().UtcDateTime;

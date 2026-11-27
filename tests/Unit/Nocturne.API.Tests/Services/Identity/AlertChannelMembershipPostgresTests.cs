@@ -11,12 +11,12 @@ using Moq;
 using Nocturne.API.Models.Requests.V4;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Providers;
+using Nocturne.API.Tests.Services.Alerts;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Chat;
 using Nocturne.API.Services.Identity;
 using Nocturne.API.Services.Realtime;
 using Nocturne.Core.Contracts.Auth;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.Authorization;
@@ -182,25 +182,20 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
                 ["INSTANCE_KEY"] = "test-instance-key",
             })
             .Build();
-        var tenantAccessor = new Mock<ITenantAccessor>();
-        tenantAccessor.Setup(a => a.TenantId).Returns(site.Tenant);
-        tenantAccessor.Setup(a => a.Context).Returns(new TenantContext(site.Tenant, site.Slug, "Site", true, IsDemo: false));
+        var tenantAccessor = SettableTenantAccessor.Resolved(site.Tenant, site.Slug, "Site");
         var http = new Mock<IHttpClientFactory>();
         http.Setup(f => f.CreateClient("ChatBot")).Returns(() => new HttpClient(site.Bot, disposeHandler: false));
 
         var services = new ServiceCollection()
-            .AddSingleton(new ChatBotProvider(http.Object, configuration, tenantAccessor.Object, NullLogger<ChatBotProvider>.Instance))
+            .AddSingleton(new ChatBotProvider(http.Object, configuration, tenantAccessor, NullLogger<ChatBotProvider>.Instance))
             .BuildServiceProvider();
 
-        return new AlertDeliveryService(
+        return DeliveryServices.Build(
             site.Contexts,
-            site.Members,
-            tenantAccessor.Object,
-            Mock.Of<ISignalRBroadcastService>(),
-            Mock.Of<IEngineAlarmRelay>(),
-            services,
-            NullLogger<AlertDeliveryService>.Instance,
-            site.Clock);
+            tenantAccessor,
+            providers: services,
+            members: site.Members,
+            clock: site.Clock);
     }
 
     private async Task<Guid> MemberIdAsync(Site site) =>
@@ -373,8 +368,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
             .ReturnsAsync(true);
         var owners = new Mock<Nocturne.Core.Contracts.Identity.ITenantOwnerResolver>();
         owners.Setup(o => o.GetOwnerSubjectIdsAsync(site.Tenant, It.IsAny<CancellationToken>())).ReturnsAsync([owner]);
-        var tenantAccessor = new Mock<ITenantAccessor>();
-        tenantAccessor.Setup(a => a.TenantId).Returns(site.Tenant);
+        var tenantAccessor = SettableTenantAccessor.Resolved(site.Tenant);
         AlertRuleSnapshot[] enabled =
         [
             .. ruleIds.Select(rule => new AlertRuleSnapshot(
@@ -383,7 +377,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
         await new AlertChannelNotice(
                 new AlertRuleRepository(site.Contexts, site.Clock), site.Members,
                 new SubjectRepository(site.Contexts, AccountLinkRoutes.Off), site.Contexts, owners.Object,
-                notifications.Object, tenantAccessor.Object, new AlertChannelNoticeLog(site.Clock),
+                notifications.Object, tenantAccessor, new AlertChannelNoticeLog(site.Clock),
                 NullLogger<AlertChannelNotice>.Instance)
             .CheckAsync(enabled, site.UtcNow, CancellationToken.None);
         return raised;

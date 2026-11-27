@@ -20,6 +20,7 @@ using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.Health;
 using Nocturne.Core.Contracts.Jobs;
+using Nocturne.Core.Contracts.Telemetry;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Platform;
 using Nocturne.Core.Contracts.Uploads;
@@ -200,6 +201,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ITenantCreationInviteRepository, TenantCreationInviteRepository>();
         services.AddTransient<IPlatformPolicyRepository, PlatformPolicyRepository>();
         services.AddTransient<ITeamRepository, TeamRepository>();
+        services.AddTransient<IFlagRuleRepository, FlagRuleRepository>();
+        services.AddTransient<IPeopleViewRepository, PeopleViewRepository>();
         services.AddTransient<ISubjectRepository, SubjectRepository>();
         services.AddTransient<ITenantRepository, TenantRepository>();
         services.AddTransient<ITenantMembershipRepository, TenantMembershipRepository>();
@@ -217,6 +220,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IConnectorResetJobRepository, ConnectorResetJobRepository>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddTransient<IJobLedger, JobLedgerRepository>();
+        services.AddTransient<ITenantUsageReader, TenantUsageReader>();
+        services.AddTransient<IPageViewCountStore, PageViewCountRepository>();
         services.AddScoped<SourceOwnedDataRepository>();
         services.AddScoped<ISourceOwnedDataReader>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());
         services.AddScoped<ISourceOwnedDataPurge>(sp => sp.GetRequiredService<SourceOwnedDataRepository>());

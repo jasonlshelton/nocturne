@@ -157,11 +157,6 @@ public class EversenseConnectorService
     }
 
     /// <summary>
-    ///     How far back a sync without a resume point looks, matching the Eversense NOW graph.
-    /// </summary>
-    internal static readonly TimeSpan DefaultHistoryWindow = TimeSpan.FromHours(4);
-
-    /// <summary>
     ///     The span of one history request. Kept to a day so a long catch-up is many small reads
     ///     rather than one the care API may refuse or truncate.
     /// </summary>
@@ -173,18 +168,19 @@ public class EversenseConnectorService
     /// </summary>
     protected override DateTime? InitialSyncFloor => Clock.GetUtcNow().UtcDateTime.AddDays(-1);
 
+    private static DateTime HistoryFloor(DateTime now) => now.AddDays(-EversenseConnectorConfiguration.MaxHistoryDays);
+
     /// <summary>
     ///     The request windows for a sync from <paramref name="from"/> to <paramref name="to"/>, oldest
     ///     first. The end runs five minutes past now, as the NOW app asks, so a reading stamped by a
     ///     transmitter clock slightly ahead is not cut off.
     /// </summary>
     internal static IReadOnlyList<(DateTime Start, DateTime End)> HistoryWindows(
-        DateTime? from, DateTime? to, DateTime now)
+        DateTime from, DateTime? to, DateTime now)
     {
         var end = to ?? now.AddMinutes(5);
-        var floor = now.AddDays(-EversenseConnectorConfiguration.MaxHistoryDays);
-        var start = from ?? now - DefaultHistoryWindow;
-        if (start < floor) start = floor;
+        var floor = HistoryFloor(now);
+        var start = from > floor ? from : floor;
 
         var windows = new List<(DateTime, DateTime)>();
         for (var windowStart = start; windowStart < end; windowStart += HistoryChunk)
@@ -233,7 +229,7 @@ public class EversenseConnectorService
 
         var dataBaseUrl = EversenseConstants.DataBaseUrl(config.Server);
         var records = new List<SensorGlucose>();
-        var from = WindowStart(request, ResumeFamily.Glucose);
+        var from = ConcreteWindowStart(request, ResumeFamily.Glucose);
         foreach (var (start, end) in HistoryWindows(from, request.To, now))
         {
             var url = $"{dataBaseUrl}{EversenseConstants.Endpoints.GetFollowingUserSensorGlucose}" +

@@ -24,6 +24,7 @@ using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 
 namespace Nocturne.API.Tests.Migration;
 
@@ -323,7 +324,7 @@ public class MigrationSourceIdentityTests
         return new MigrationController(
             service,
             Mock.Of<IConnectorConfigurationService>(),
-            Mock.Of<ITenantAccessor>(a => a.Context == tenant && a.TenantId == tenant.TenantId),
+            new SettableTenantAccessor(tenant),
             TimeProvider.System,
             NullLogger<MigrationController>.Instance)
         {

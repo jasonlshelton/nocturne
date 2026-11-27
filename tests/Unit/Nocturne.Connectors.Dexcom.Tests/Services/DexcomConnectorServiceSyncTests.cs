@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Web;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -82,14 +83,76 @@ public class DexcomConnectorServiceSyncTests
     }
 
     /// <summary>
-    /// The request asks Share for the minutes since the resume point at the service's clock: without
-    /// one, two days; with one, the gap rounded up to a whole five-minute reading.
+    /// A lower bound is asked of Share as the gap to the service's clock, rounded up to a whole
+    /// five-minute reading.
     /// </summary>
+    [Fact]
+    public async Task SyncDataAsync_AsksShareForTheWindowSinceTheLowerBound()
+    {
+        var query = await QueryAsync(new SyncRequest
+        {
+            DataTypes = [SyncDataType.Glucose],
+            From = Instant.UtcDateTime.AddMinutes(-32),
+        });
+
+        query.Should().Contain("minutes=35").And.Contain("maxCount=7");
+    }
+
+    /// <summary>
+    /// An open request is the scheduled catch-up: it asks Share from the newest stored reading less
+    /// the overlap, not from a fixed window.
+    /// </summary>
+    [Fact]
+    public async Task SyncDataAsync_AnOpenRequest_AsksShareFromTheResumePoint()
+    {
+        var glucose = new Mock<IGlucosePublisher>();
+        var publisher = new Mock<IConnectorPublisher>();
+        publisher.Setup(p => p.IsAvailable).Returns(true);
+        publisher.Setup(p => p.Glucose).Returns(glucose.Object);
+        glucose.Setup(g => g.GetLatestEntryTimestampAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Instant.UtcDateTime.AddMinutes(-30));
+
+        var query = await QueryAsync(new SyncRequest { DataTypes = [SyncDataType.Glucose] }, publisher.Object);
+
+        query.Should().Contain("minutes=35").And.Contain("maxCount=7");
+    }
+
+    /// <summary>Share serves the last day of readings, so a first scheduled sync never asks for more.</summary>
+    [Fact]
+    public async Task SyncDataAsync_AnOpenRequestWithNothingStored_AsksShareForNoMoreThanOneDay()
+    {
+        var glucose = new Mock<IGlucosePublisher>();
+        var publisher = new Mock<IConnectorPublisher>();
+        publisher.Setup(p => p.IsAvailable).Returns(true);
+        publisher.Setup(p => p.Glucose).Returns(glucose.Object);
+        glucose.Setup(g => g.GetLatestEntryTimestampAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DateTime?)null);
+
+        var query = HttpUtility.ParseQueryString(
+            await QueryAsync(new SyncRequest { DataTypes = [SyncDataType.Glucose] }, publisher.Object));
+
+        int.Parse(query["minutes"]!).Should().Be(24 * 60);
+        int.Parse(query["maxCount"]!).Should().Be(24 * 60 / 5);
+    }
+
+    private static async Task<string> QueryAsync(SyncRequest syncRequest, IConnectorPublisher? publisher = null)
+    {
+        string? query = null;
+        var service = Service((request, _) =>
+        {
+            query = request.RequestUri!.Query;
+            return Task.FromResult(Json("[]"));
+        }, publisher, new FakeTimeProvider(Instant));
+
+        await service.SyncDataAsync(syncRequest, Config(), CancellationToken.None);
+
+        return query!;
+    }
+
+    /// <summary>The beginning of Share is the last day of readings.</summary>
     [Theory]
-    [InlineData(null, 2880, 576)]
-    [InlineData(32, 35, 7)]
-    public async Task SyncDataAsync_AsksShareForTheWindowSinceTheResumePoint(
-        int? minutesSinceResume, int expectedMinutes, int expectedMaxCount)
+    [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_AsksShareFromOneDayBeforeTheClock(string shape)
     {
         var clock = new FakeTimeProvider(Instant);
         string? query = null;
@@ -98,15 +161,13 @@ public class DexcomConnectorServiceSyncTests
             query = request.RequestUri!.Query;
             return Task.FromResult(Json("[]"));
         }, clock: clock);
-        var syncRequest = new SyncRequest
-        {
-            DataTypes = [SyncDataType.Glucose],
-            From = minutesSinceResume is { } m ? Instant.UtcDateTime.AddMinutes(-m) : null,
-        };
 
-        await service.SyncDataAsync(syncRequest, Config(), CancellationToken.None);
+        await service.SyncDataAsync(
+            NoLowerBound.Request(shape, Instant.UtcDateTime, [SyncDataType.Glucose]), Config(), CancellationToken.None);
 
-        query.Should().Contain($"minutes={expectedMinutes}").And.Contain($"maxCount={expectedMaxCount}");
+        var minutes = int.Parse(HttpUtility.ParseQueryString(query!)["minutes"]!);
+        Instant.UtcDateTime.AddMinutes(-minutes).Should().BeCloseTo(
+            Instant.UtcDateTime.AddDays(-1), TimeSpan.FromMinutes(5), "the window is rounded to whole readings");
     }
 
     /// <summary>A batch is stamped with the service's clock, once, whatever time its entries carry.</summary>

@@ -12,6 +12,7 @@ using Nocturne.Core.Contracts.Jobs;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
+using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Alerts;
@@ -99,7 +100,6 @@ public class AlertSweepJobRunTests
         await using var services = new ServiceCollection()
             .AddSingleton(_repository.Object)
             .AddSingleton(Mock.Of<IAlertRuleRepository>())
-            .AddSingleton(Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant))
             .AddSingleton(Mock.Of<IAlertDeliveryService>())
             .AddSingleton(Mock.Of<ISensorContextEnricher>())
             .AddSingleton(resolution.Object)
@@ -108,9 +108,7 @@ public class AlertSweepJobRunTests
             .AddSingleton(TimeProvider.System)
             .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
             .AddScoped<IUnevaluableRuleNotice, UnevaluableRuleNotice>()
-            .AddSingleton(NoHeldRules.Notice())
-            .AddSingleton(Mock.Of<IClockAnomalyNotice>())
-            .AddSingleton(Mock.Of<IAlertChannelNotice>())
+            .AddSweepServices()
             .BuildServiceProvider();
         await new AlertSweepJob(NullLogger<AlertSweepJob>.Instance).RunAsync(services, Tenant, Now, active: true);
 
@@ -129,10 +127,7 @@ public class AlertSweepJobRunTests
             .AddSingleton(_repository.Object)
             .AddSingleton(_notice.Object)
             .AddSingleton(Mock.Of<ICanonicalGlucoseService>())
-            .AddSingleton(NoHeldRules.Notice())
-            .AddSingleton(Mock.Of<IClockAnomalyNotice>())
-            .AddSingleton(Mock.Of<IAlertChannelNotice>())
-            .AddScoped(_ => Mock.Of<ITenantAccessor>())
+            .AddSweepServices()
             .BuildServiceProvider();
         return await new AlertSweepJob(NullLogger<AlertSweepJob>.Instance).RunAsync(services, Tenant, Now, active);
     }

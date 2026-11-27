@@ -7,12 +7,12 @@ using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Engines;
 using Nocturne.API.Services.Alerts.Conditions;
 using Nocturne.API.Tests.Services.BackgroundServices;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
+using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Alerts;
@@ -168,7 +168,7 @@ public class AlertOrchestratorConditionIssueTests
         harness.Validator
             .Setup(v => v.Validate(It.IsAny<AlertConditionType>(), WizardUrgentLow, It.IsAny<bool>(),
                 It.IsAny<string?>(), It.IsAny<string?>()))
-            .Throws(new InvalidOperationException("validator failed"));
+            .Throws(new RustAlertEngineException("validator failed"));
         var first = Rule(WizardUrgentLow);
         var second = Rule("""{"direction": "below", "value": 54}""") with
         {
@@ -186,6 +186,21 @@ public class AlertOrchestratorConditionIssueTests
                 It.IsAny<AlertEngineOptions>(), It.IsAny<CancellationToken>()),
             Times.Once);
         harness.Logger.Entries.Should().Contain(e => e.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task A_defect_in_the_issue_check_is_not_swallowed()
+    {
+        var harness = new Harness();
+        var defect = new InvalidOperationException("a second operation was started on this context");
+        harness.Validator
+            .Setup(v => v.Validate(It.IsAny<AlertConditionType>(), It.IsAny<string>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>()))
+            .Throws(defect);
+
+        var act = () => harness.EvaluateAsync(Rule(WizardUrgentLow));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(defect);
     }
 
     [Fact]
@@ -298,8 +313,7 @@ public class AlertOrchestratorConditionIssueTests
                     It.IsAny<AlertEngineOptions>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new AlertEngineEvaluation());
 
-            var tenant = new Mock<ITenantAccessor>();
-            tenant.SetupGet(t => t.TenantId).Returns(Tenant);
+            var tenant = SettableTenantAccessor.Resolved(Tenant);
 
             var enricher = new Mock<ISensorContextEnricher>();
             enricher
@@ -309,7 +323,7 @@ public class AlertOrchestratorConditionIssueTests
             var notice = new UnevaluableRuleNotice(
                 NoticeRows.Object,
                 Mock.Of<IAlertRuleRepository>(),
-                tenant.Object,
+                tenant,
                 Delivery.Object,
                 enricher.Object,
                 Mock.Of<IExcursionResolutionHandler>(),
@@ -322,7 +336,7 @@ public class AlertOrchestratorConditionIssueTests
                 Engine.Object,
                 new AlertRuleEvaluationGate(),
                 new AlertRuleDecisions(TimeProvider.System),
-                tenant.Object,
+                tenant,
                 enricher.Object,
                 Mock.Of<IExcursionOpenedHandler>(),
                 Mock.Of<IExcursionResolutionHandler>(),

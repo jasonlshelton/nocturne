@@ -343,10 +343,10 @@ public class GlookoConnectorService
 
             // The request window is real-UTC; Glooko queries expect fake-UTC (local wall-clock). Pad by
             // a day each side so a non-zero offset between the two never clips edge data (dedup absorbs
-            // the overlap). A range naming no lower bound reaches back the full history floor.
+            // the overlap).
             var now = Clock.GetUtcNow().UtcDateTime;
             var from = context.TimeMapper.ToGlookoTime(
-                WindowStart(request, ResumeFamily.Glucose) ?? now.AddMonths(-GlookoConstants.FullWalkMonths)).AddDays(-1);
+                ConcreteWindowStart(request, ResumeFamily.Glucose)).AddDays(-1);
             var to = context.TimeMapper.ToGlookoTime(request.To ?? now).AddDays(1);
 
             var chunks = DateChunker.Chunk(from, to, GlookoConstants.SyncChunkSize).ToList();
@@ -414,6 +414,9 @@ public class GlookoConnectorService
         }
     }
 
+    /// <summary>Where a full walk from <paramref name="now"/> starts.</summary>
+    public static DateTime FullWalkStart(DateTime now) => now.AddMonths(-GlookoConstants.FullWalkMonths);
+
     /// <remarks>The schedule's stamps choose the window of every type a scheduled run reads.</remarks>
     protected override IReadOnlyDictionary<string, IReadOnlyCollection<SyncDataType>> ResumeStamps =>
         new Dictionary<string, IReadOnlyCollection<SyncDataType>>
@@ -438,7 +441,7 @@ public class GlookoConnectorService
     /// <remarks>
     ///     The base resumes each family from its own newest stored record. Most Glooko accounts
     ///     never store one (CGM backfill is off by default), so that resolves to the six-month
-    ///     <see cref="BaseConnectorService{TConfig}.InitialSyncFloor"/> on every run; and where one
+    ///     <see cref="BaseConnectorService{TConfig}.FirstSyncStart"/> on every run; and where one
     ///     exists it says nothing about what is still to come, because Glooko posts pump data in
     ///     batches days after the fact. The connector therefore reads <see cref="GlookoConstants.ShortWindow"/>
     ///     on most runs, the fixed <see cref="GlookoConnectorConfiguration.LookbackDays"/> once per
@@ -447,13 +450,16 @@ public class GlookoConnectorService
     ///     succeeded, so a failed one is read again next cycle. The walk is recorded only once it has
     ///     succeeded, so a run that stopped at a failed chunk is walked again — after
     ///     <see cref="GlookoConstants.FullWalkRetryInterval"/>, not on every cycle, so a persistently
-    ///     failing window cannot reinstate the per-cycle cost the schedule exists to remove.
+    ///     failing window cannot reinstate the per-cycle cost the schedule exists to remove. The
+    ///     schedule's stamps choose the window of every type, so a run narrowed to some types records
+    ///     none of them: the types it left out are still owed their walk and lookback.
     ///     <para>
     ///     SSV2 resumes every resource from its own cursor and ignores the bound on a scheduled run,
     ///     so it takes the base's points.
     ///     </para>
     /// </remarks>
     protected override async Task<SyncResult> RunScheduledAsync(
+        SyncRequest request,
         ResumePoints resume,
         Func<ResumePoints, Task<SyncResult>> run,
         GlookoConnectorConfiguration config,
@@ -466,7 +472,7 @@ public class GlookoConnectorService
         var tier = await ResolveWindowTierAsync(now, cancellationToken);
         var from = tier switch
         {
-            WindowTier.FullWalk => now.AddMonths(-GlookoConstants.FullWalkMonths),
+            WindowTier.FullWalk => FullWalkStart(now),
             WindowTier.Lookback => now.AddDays(-config.LookbackDays),
             _ => now - GlookoConstants.ShortWindow,
         };
@@ -475,12 +481,15 @@ public class GlookoConnectorService
             "[{ConnectorSource}] Scheduled sync reaches back to {From:yyyy-MM-dd} ({Mode})",
             ConnectorSource, from, tier);
 
-        if (tier == WindowTier.FullWalk)
+        var coversEveryType = ResolveActiveTypes(request, config)
+            .SetEquals(ResolveActiveTypes(new SyncRequest(), config));
+
+        if (tier == WindowTier.FullWalk && coversEveryType)
             await RecordStampAsync(GlookoConstants.FullWalkAttemptStamp, now, cancellationToken);
 
         var result = await run(resume.StartingAt(from));
 
-        if (result.Success)
+        if (result.Success && coversEveryType)
         {
             if (tier == WindowTier.FullWalk)
                 await RecordStampAsync(GlookoConstants.FullWalkStamp, now, cancellationToken);

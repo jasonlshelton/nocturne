@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Nocturne.Connectors.Core.Constants;
 using Nocturne.Connectors.Core.Extensions;
 using Nocturne.Connectors.Core.Interfaces;
 using Nocturne.Connectors.Core.Models;
@@ -118,13 +119,16 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
             async () =>
             {
                 _pendingReset = request.IsReset ? request : null;
+                using var budget = ArmBackfillBudget(request.IsCatchUp);
                 if (!await EnsureAuthenticatedAsync(config, cancellationToken))
                     return AuthenticationFailedResult();
 
                 if (SignsInBeforeSync)
                     await SignedInAsync(config, cancellationToken);
 
-                return await RunAsync(request.From, request.To, request.DataTypes, scheduled: false, config, cancellationToken);
+                var from = request.To is null ? request.From : request.From ?? HistoryStart;
+                return await RunAsync(
+                    from, request.To, request.DataTypes, scheduled: request.IsCatchUp, config, cancellationToken);
             });
     }
 
@@ -248,7 +252,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
 
     /// <summary>
     ///     The glucose family's resume point: the most recent stored entry (minus the catch-up
-    ///     overlap), or <see cref="InitialSyncFloor"/> when none is stored. Combine it with a
+    ///     overlap), or <see cref="FirstSyncStart"/> when none is stored. Combine it with a
     ///     caller's bound through <see cref="ResumeFrom(DateTime?, DateTime?)"/> rather than
     ///     choosing between the two.
     /// </summary>
@@ -262,7 +266,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
 
     /// <summary>
     ///     The treatment family's resume point: the most recent stored treatment (minus the
-    ///     catch-up overlap), or <see cref="InitialSyncFloor"/> when none is stored.
+    ///     catch-up overlap), or <see cref="FirstSyncStart"/> when none is stored.
     /// </summary>
     private async Task<DateTime?> CalculateTreatmentSinceTimestampAsync(TConfig config)
     {
@@ -274,14 +278,14 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
 
     /// <summary>
     ///     The device-status family's resume point: the most recent stored device status (minus the
-    ///     catch-up overlap), or <c>null</c> — the whole history, whatever
-    ///     <see cref="InitialSyncFloor"/> says — when none is stored.
+    ///     catch-up overlap), or, when none is stored, <see cref="HistoryStart"/>: the whole history of a
+    ///     source that serves it, whatever <see cref="InitialSyncFloor"/> says.
     /// </summary>
     private async Task<DateTime?> CalculateDeviceStatusCatchUpSinceAsync(TConfig config)
     {
         var latest = await FetchLatestWatermarkAsync(
             "device status", () => _publisher!.Device.GetLatestDeviceStatusTimestampAsync(ConnectorSource));
-        return TryCalculateCatchUpSince(latest, "device status");
+        return TryCalculateCatchUpSince(latest, "device status") ?? HistoryStart;
     }
 
     /// <summary>
@@ -292,7 +296,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     {
         var latest = await FetchLatestWatermarkAsync(
             "activity", () => _publisher!.Metadata.GetLatestActivityTimestampAsync(ConnectorSource));
-        return TryCalculateCatchUpSince(latest, "activity");
+        return TryCalculateCatchUpSince(latest, "activity") ?? HistoryStart;
     }
 
     /// <summary>
@@ -310,7 +314,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
 
     /// <summary>
     ///     The state-span family's resume point: the most recent stored state span outside the
-    ///     activity categories (minus the catch-up overlap), or <see cref="InitialSyncFloor"/> when
+    ///     activity categories (minus the catch-up overlap), or <see cref="FirstSyncStart"/> when
     ///     none is stored.
     /// </summary>
     private async Task<DateTime?> CalculateStateSpanSinceTimestampAsync(TConfig config)
@@ -324,8 +328,8 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     /// <summary>
     ///     Reads one resume watermark of <paramref name="family"/>. A failed read propagates rather than
     ///     reading as null: a null watermark means "no prior data", which triggers an initial backfill,
-    ///     unbounded for a connector with a null <see cref="InitialSyncFloor"/>, and for device status and
-    ///     activity the whole history. A transient read failure must fail this cycle (retried next
+    ///     unbounded for a connector whose <see cref="FirstSyncStart"/> is open, and for device status and
+    ///     activity one whose <see cref="HistoryStart"/> is. A transient read failure must fail this cycle (retried next
     ///     interval), not be amplified into a full-history recrawl and republish.
     /// </summary>
     private async Task<DateTime?> FetchLatestWatermarkAsync(string family, Func<Task<DateTime?>> read)
@@ -398,18 +402,36 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     }
 
     /// <summary>
-    ///     The lower bound a whole request crawls from, for a source that cannot crawl from an open
-    ///     one. An explicit range is answered as asked: it is the shape a manual re-import of one
-    ///     window sends, and widening it back to a resume point below re-crawls everything in
-    ///     between. A range naming no lower bound is asking for everything available, so it starts
-    ///     at <paramref name="historyFloor"/> — as far back as the connector reaches, which is the
-    ///     reading the reset-cursor endpoint documents and the only one under which it resets
-    ///     anything. <paramref name="resumePoint"/> is read only for an open-ended request, so the
-    ///     connector declares its points (<see cref="ResumesFrom"/>) only for one.
+    ///     <see cref="WindowStart"/> for a source that cannot read from an open start. Every run of such
+    ///     a connector has one: a range names it or resolves to <see cref="HistoryStart"/>, and a
+    ///     scheduled run's point falls back to <see cref="FirstSyncStart"/>.
     /// </summary>
-    protected static DateTime ResumeFrom(
-        SyncRequest request, Func<DateTime> resumePoint, DateTime historyFloor) =>
-        request.To is null ? ResumeFrom(request.From, resumePoint()) : request.From ?? historyFloor;
+    /// <exception cref="InvalidOperationException">
+    ///     The connector's <see cref="HistoryStart"/> or <see cref="FirstSyncStart"/> is open, so the
+    ///     run has no start.
+    /// </exception>
+    protected static DateTime ConcreteWindowStart(SyncRequest request, ResumeFamily family) =>
+        WindowStart(request, family)
+        ?? throw new InvalidOperationException("The run has no start, though this source cannot read from an open one.");
+
+    /// <summary>
+    ///     The lower bound a whole request, or one family of it, crawls from. A range is answered as
+    ///     asked, from its <see cref="SyncRequest.From"/>: widening it back to a resume point below
+    ///     re-crawls everything in between. An open-ended request goes through
+    ///     <see cref="ResumeFrom(DateTime?, DateTime?)"/> with <paramref name="resumePoint"/>, which is
+    ///     read only then, so the connector declares its points (<see cref="ResumesFrom"/>) only for one.
+    /// </summary>
+    protected static DateTime? ResumeFrom(SyncRequest request, Func<DateTime?> resumePoint) =>
+        WidensToResumePoint(request) ? ResumeFrom(request.From, resumePoint()) : request.From;
+
+    /// <summary>
+    ///     <see cref="ResumeFrom(SyncRequest, Func{DateTime?})"/>, over a resume point read
+    ///     asynchronously (<see cref="ResumePointAsync"/>).
+    /// </summary>
+    protected static async Task<DateTime?> ResumeFromAsync(SyncRequest request, Func<Task<DateTime?>> resumePoint) =>
+        WidensToResumePoint(request) ? ResumeFrom(request.From, await resumePoint()) : request.From;
+
+    private static bool WidensToResumePoint(SyncRequest request) => request.To is null;
 
     /// <summary>
     ///     Applies the catch-up overlap to a latest-record timestamp: returns the timestamp
@@ -435,7 +457,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     }
 
     /// <summary>
-    ///     When no prior data exists, falls back to <see cref="InitialSyncFloor"/>, which may be
+    ///     When no prior data exists, falls back to <see cref="FirstSyncStart"/>, which may be
     ///     <c>null</c> (no lower bound) for connectors that import the source's full history.
     /// </summary>
     private DateTime? CalculateSinceFromTimestamp(DateTime? latestTimestamp, string dataType)
@@ -444,9 +466,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
         if (catchUpSince.HasValue)
             return catchUpSince.Value;
 
-        // No prior data: this is the initial sync. Most connectors bound the first backfill to
-        // InitialSyncFloor; a null floor means "no lower bound" — import the source's full history.
-        var fallbackSince = InitialSyncFloor;
+        var fallbackSince = FirstSyncStart;
         if (fallbackSince.HasValue)
             _logger?.LogInformation(
                 "No existing {DataType} found for {ConnectorSource}, performing initial sync from {Since:yyyy-MM-dd HH:mm:ss} UTC",
@@ -464,7 +484,8 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     }
 
     /// <summary>
-    ///     Lower bound applied to an initial sync when no prior data exists for a data type.
+    ///     Lower bound applied to an initial sync when no prior data exists for a data type, read
+    ///     through <see cref="FirstSyncStart"/>.
     ///     Connectors whose source is a full data export (e.g. Nightscout) override this to return
     ///     <c>null</c> so the first backfill imports the entire history; the default bounds the
     ///     initial window to <see cref="DefaultInitialSyncFloor"/> so a first sync against a
@@ -472,8 +493,32 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
     /// </summary>
     protected virtual DateTime? InitialSyncFloor => DefaultInitialSyncFloor();
 
-    /// <summary>The default initial backfill window: six months before now.</summary>
-    protected DateTime DefaultInitialSyncFloor() => Clock.GetUtcNow().UtcDateTime.AddMonths(-6);
+    /// <summary>The default initial backfill window: <see cref="ConnectorRunLimits.DefaultInitialSyncMonths"/> before now.</summary>
+    protected DateTime DefaultInitialSyncFloor() =>
+        Clock.GetUtcNow().UtcDateTime.AddMonths(-ConnectorRunLimits.DefaultInitialSyncMonths);
+
+    /// <summary>
+    ///     Where a scheduled sync of a family with nothing stored starts: the later of
+    ///     <see cref="InitialSyncFloor"/> and <see cref="HistoryStart"/>, where <c>null</c> is
+    ///     unbounded, so one bound alone stands and two leave the start open.
+    /// </summary>
+    protected DateTime? FirstSyncStart => Later(InitialSyncFloor, HistoryStart);
+
+    /// <summary>
+    ///     <see cref="FirstSyncStart"/> for a source that cannot read from an open start, which
+    ///     begins at <see cref="DefaultInitialSyncFloor"/> when both bounds are open.
+    /// </summary>
+    protected DateTime ConcreteFirstSyncStart => FirstSyncStart ?? DefaultInitialSyncFloor();
+
+    /// <summary>
+    ///     Where a range naming no lower bound starts: the
+    ///     <see cref="ConnectorRegistrationAttribute.HistoryReach"/> the connector declares. <c>null</c> for a source that serves its whole
+    ///     history and reads from an open start; a connector whose whole history needs a concrete
+    ///     start overrides it.
+    /// </summary>
+    /// <remarks><see cref="FirstSyncStart"/> also bounds a scheduled first sync by it.</remarks>
+    protected virtual DateTime? HistoryStart =>
+        Registration?.HistoryReach.StartFrom(Clock.GetUtcNow().UtcDateTime);
 
     /// <summary>
     ///     Core synchronization logic: fetches and publishes the data types
@@ -908,7 +953,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
             "Starting background data sync for {ConnectorSource}",
             ConnectorSource
         );
-        _backfillDeadline = Clock.GetUtcNow() + BackfillBudget;
+        using var budget = ArmBackfillBudget();
         try
         {
             if (!await EnsureAuthenticatedAsync(config, cancellationToken))
@@ -959,19 +1004,17 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
                 Errors = { ex.Message }
             };
         }
-        finally
-        {
-            _backfillDeadline = null;
-        }
     }
 
     /// <summary>
     ///     The scheduled run: <paramref name="run"/> syncs with the resume points it is given. The
     ///     default runs every family from its own point. A connector with its own window policy
     ///     overrides this, and only this, to choose the window (<see cref="ResumePoints.StartingAt"/>)
-    ///     and to record what the run covered once it returns.
+    ///     and to record what the run covered once it returns. <paramref name="request"/> names the
+    ///     data types the run covers: a narrowed one covers only some of them.
     /// </summary>
     protected virtual Task<SyncResult> RunScheduledAsync(
+        SyncRequest request,
         ResumePoints resume,
         Func<ResumePoints, Task<SyncResult>> run,
         TConfig config,
@@ -1029,6 +1072,7 @@ public abstract partial class BaseConnectorService<TConfig> : IConnectorService<
 
         return scheduled
             ? await RunScheduledAsync(
+                Request(resume),
                 resume,
                 points => PerformSyncInternalAsync(Request(points), config, cancellationToken),
                 config,

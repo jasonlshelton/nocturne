@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -11,10 +11,10 @@ using Nocturne.Core.Alerts.Native;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Events;
 using Nocturne.Core.Contracts.Glucose;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.V4;
+using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
 namespace Nocturne.API.Tests.Services.Alerts;
@@ -67,7 +67,7 @@ public class CanonicalAlertEvaluatorTests
         new(_canonical.Object,
             _orchestrator.Object,
             _rules.Object,
-            Mock.Of<ITenantAccessor>(a => a.TenantId == tenantId),
+            SettableTenantAccessor.Resolved(tenantId),
             _watermark,
             decisions ?? _decisions,
             _evaluated.Object,
@@ -334,6 +334,22 @@ public class CanonicalAlertEvaluatorTests
         await act.Should().NotThrowAsync();
     }
 
+    [Theory]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task EvaluateAsync_LogsAFailureOfThePassAtError(Type failure)
+    {
+        LatestIs(Latest(Reading));
+        _orchestrator
+            .Setup(o => o.EvaluateRulesAsync(It.IsAny<IReadOnlyList<AlertRuleSnapshot>>(), It.IsAny<IReadOnlySet<Guid>>(), It.IsAny<SensorContext>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(failure)!);
+        var logger = new ListLogger<CanonicalAlertEvaluator>();
+
+        await Evaluator(Tenant, logger: logger).EvaluateAsync(GlucoseMoved);
+
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception!.GetType() == failure);
+    }
+
     [Fact]
     public async Task EvaluateAsync_LogsATimeoutInsideThePassRatherThanPassingItOnAsACancellation()
     {
@@ -545,6 +561,42 @@ public class CanonicalAlertEvaluatorTests
         await evaluator.EvaluateAsync(Moved(ContextFactWrites.Glucose, ContextFactWrites.Aps));
 
         EvaluatedRules().Should().Equal(LoopRule);
+    }
+
+    /// <summary>
+    /// A reading stored late inside a window leaves the newest reading as it was, so the watermark
+    /// skips it as a reading, but it can fill a hole in the recent readings: the rules that read them
+    /// are evaluated again.
+    /// </summary>
+    [NativeFact]
+    public async Task EvaluateAsync_ALateReadingInsideTheWindowEvaluatesTheRulesThatReadTheRecentReadings()
+    {
+        var fallRule = Rule(AlertConditionType.GlucoseChange, """{"operator":"<=","value":-30,"window_minutes":15}""");
+        LatestIs(Latest(Reading));
+        RulesAre(ReservoirRule, fallRule);
+        var evaluator = Evaluator(Tenant);
+        await evaluator.EvaluateAsync(GlucoseMoved);
+        _orchestrator.Invocations.Clear();
+
+        await evaluator.EvaluateAsync(ContextFactWrites.MovedIn(RecordsChanged.Written([typeof(SensorGlucose)])));
+
+        EvaluatedRules().Should().Equal(fallRule);
+    }
+
+    /// <summary>
+    /// The context names the newest reading and its stream, which its recent readings are read from
+    /// leaving out the reading's own duplicate copies.
+    /// </summary>
+    [Fact]
+    public void ContextFor_NamesTheNewestReadingAndItsStream()
+    {
+        var latest = Latest(Reading);
+        latest.DataSource = "carelink-connector";
+        latest.Device = "CareLink MiniMed 780G";
+        latest.PatientDeviceId = Guid.NewGuid();
+
+        CanonicalAlertEvaluator.ContextFor(latest, default).LatestSource.Should().Be(
+            new ReadingSource("carelink-connector", "CareLink MiniMed 780G", latest.PatientDeviceId, latest.Id));
     }
 
     [NativeFact]
@@ -833,6 +885,25 @@ public class CanonicalAlertEvaluatorTests
         await evaluator.Invoking(e => e.EvaluateAsync(GlucoseMoved)).Should().NotThrowAsync();
         await evaluator.EvaluateAsync(GlucoseMoved);
 
+        VerifyPasses(1);
+    }
+
+    [Theory]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task EvaluateAsync_ADefectRecordingTheReadingIsContainedAndReportsNoPass(Type defect)
+    {
+        LatestIs(Latest(Reading));
+        _evaluated
+            .Setup(e => e.RecordAsync(It.IsAny<EvaluatedReading>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(defect)!);
+        var logger = new ListLogger<CanonicalAlertEvaluator>();
+
+        var ran = await Evaluator(Tenant, logger: logger).EvaluateAsync(GlucoseMoved);
+
+        ran.Should().BeFalse();
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception!.GetType() == defect);
+        logger.Warnings.Should().BeEmpty("only a failure of the store is a quiet one");
         VerifyPasses(1);
     }
 

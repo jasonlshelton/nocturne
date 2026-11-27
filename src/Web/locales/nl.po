@@ -239,6 +239,7 @@ msgstr ""
 #: src/lib/components/people/WallLegend.svelte
 #: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
 #: src/lib/components/reports/sleep/single-night/OvernightLowsCard.svelte
 #: src/lib/components/schedule/ScheduleView.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
@@ -262,6 +263,7 @@ msgstr ""
 #: src/lib/components/people/WallLegend.svelte
 #: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/reports/TIRStackedChart.svelte
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
 #: src/lib/components/schedule/ScheduleView.svelte
 #: src/lib/components/settings/alarm-profile/AlarmGeneralTab.svelte
 #: src/lib/stores/alarm-state.svelte.ts
@@ -535,6 +537,11 @@ msgstr ""
 #: src/lib/components/patient/PatientDeviceManager.svelte
 #: src/lib/components/patient/PatientInsulinManager.svelte
 #: src/lib/components/patient/PatientInsulinManager.svelte
+#: src/lib/components/people/FlagRuleForm.svelte
+#: src/lib/components/people/FlagRuleForm.svelte
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PeopleViewsManager.svelte
 #: src/lib/components/profile/ProfileCreateDialog.svelte
 #: src/lib/components/profile/ProfileEditDialog.svelte
 #: src/lib/components/profile/ProfileSwitchDialog.svelte
@@ -650,6 +657,7 @@ msgstr ""
 #: src/lib/components/reports/sleep/single-night/Hypnogram.svelte
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 #: src/routes/(authenticated)/time-spans/+page.svelte
 msgid "Glucose"
@@ -811,6 +819,7 @@ msgstr ""
 #: src/lib/components/alerts/wizard/CheckStep.svelte
 #: src/lib/components/members/RolesSection.svelte
 #: src/lib/components/members/RolesSection.svelte
+#: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/reports/custom/workspace/SaveControl.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
 #: src/lib/components/trackers/wizard/TrackerSettingsStep.svelte
@@ -873,6 +882,7 @@ msgstr ""
 #: src/lib/components/clock-builder/ClockBuilderHeader.svelte
 #: src/lib/components/entries/EntryEditDialog.svelte
 #: src/lib/components/meals/MealBolusDialog.svelte
+#: src/lib/components/people/PeopleViewsManager.svelte
 #: src/lib/components/schedule/GlucoseScheduleEditor.svelte
 #: src/lib/components/settings/GlucoseSourceDefaultsDialog.svelte
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
@@ -2167,6 +2177,7 @@ msgstr ""
 #: ../cms/src/lib/components/edra/shadcn/components/toolbar/FontSize.svelte
 #: src/lib/components/clock-builder/TextStyleControls.svelte
 #: src/lib/components/food/GiLabel.svelte
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
 #: src/routes/(authenticated)/reports/data-quality/compression-lows/+page.svelte
 #: src/routes/(authenticated)/settings/migration/NightscoutTransitionStatus.svelte
 msgid "Medium"
@@ -2250,9 +2261,11 @@ msgstr ""
 msgid "Recent"
 msgstr ""
 
-#: src/lib/components/connectors/ConnectorDangerZone.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/constants/entry-category-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "BG checks"
 msgstr ""
 
@@ -2383,6 +2396,7 @@ msgstr ""
 #: src/lib/components/treatments/TreatmentFoodSelectorDialog.svelte
 #: src/lib/components/treatments/TreatmentFoodSelectorDialog.svelte
 #: src/lib/navigation/app-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "Food"
 msgstr ""
 
@@ -2423,19 +2437,14 @@ msgstr ""
 msgid "<0/> Offline"
 msgstr ""
 
-#. 0: selectedConnectorCapabilities.maxHistoricalDays
-#: src/lib/components/connectors/ConnectorDetailsDialog.svelte
-msgid "Recent data only (last {0} days)."
-msgstr ""
+#~ msgid "Recent data only (last {0} days)."
+#~ msgstr ""
 
-#: src/lib/components/connectors/ConnectorDetailsDialog.svelte
-msgid "Historical sync is not supported for this connector. <0/>"
-msgstr ""
+#~ msgid "Historical sync is not supported for this connector. <0/>"
+#~ msgstr ""
 
-#. 0: selectedConnectorCapabilities.maxHistoricalDays
-#: src/lib/components/connectors/ConnectorDetailsDialog.svelte
-msgid "Historical sync limited to the last {0} days."
-msgstr ""
+#~ msgid "Historical sync limited to the last {0} days."
+#~ msgstr ""
 
 #~ msgid "Connector Disabled"
 #~ msgstr ""
@@ -2525,6 +2534,7 @@ msgstr ""
 
 #: src/lib/components/connectors/ConnectorDetailsDialog.svelte
 #: src/lib/components/connectors/ManualSyncDialog.svelte
+#: src/lib/utils/sync-messages.svelte.ts
 #: src/routes/(authenticated)/settings/connectors/+page.svelte
 msgid "Sync failed"
 msgstr ""
@@ -2752,9 +2762,8 @@ msgstr ""
 msgid "Not supported"
 msgstr ""
 
-#: src/lib/components/connectors/ConnectorSetup.svelte
-msgid "Max historical days"
-msgstr ""
+#~ msgid "Max historical days"
+#~ msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
 #: src/lib/components/connectors/ConnectorSetup.svelte
@@ -3857,6 +3866,7 @@ msgstr ""
 #: src/lib/components/treatments/edit-dialog/BasalInjectionFormFields.svelte
 #: src/lib/components/treatments/edit-dialog/DeviceEventFormFields.svelte
 #: src/lib/constants/entry-category-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 msgid "Notes"
 msgstr ""
@@ -4011,6 +4021,7 @@ msgstr ""
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
 #: src/lib/constants/scope-labels.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/sleep/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-copy.svelte.ts
 msgid "Sleep"
@@ -4018,6 +4029,7 @@ msgstr ""
 
 #: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/alerts/alert-labels.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
@@ -4076,6 +4088,7 @@ msgstr ""
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
 #: src/lib/components/therapy-timeline/VersionList.svelte
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 msgid "Basal"
@@ -4216,6 +4229,7 @@ msgid "Overview"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 #: src/lib/navigation/app-navigation.svelte.ts
@@ -4806,6 +4820,7 @@ msgstr ""
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderRow.svelte
 #: src/lib/components/patient/InsulinFormFields.svelte
 msgid "min"
@@ -5204,6 +5219,9 @@ msgstr ""
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/lib/components/profile/ProfileEditDialog.svelte
 #: src/lib/components/profile/ProfileEditDialog.svelte
 #: src/lib/components/treatments/TreatmentsDataTable.svelte
@@ -5826,6 +5844,9 @@ msgstr ""
 #: src/lib/components/alerts/HistoryCheck.svelte
 #: src/lib/components/members/PublicAccessCard.svelte
 #: src/lib/components/members/TeamAccessCard.svelte
+#: src/lib/components/people/FlagRulesEditor.svelte
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/PeopleFilters.svelte
 #: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/people/PeopleWall.svelte
@@ -6781,6 +6802,7 @@ msgstr ""
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 #: src/lib/components/status-pills/IOBPill.svelte
 #: src/lib/components/therapy-timeline/TimelineStage.svelte
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-copy.svelte.ts
 msgid "Activity"
@@ -7038,6 +7060,7 @@ msgid "Info"
 msgstr ""
 
 #: src/lib/components/alerts/severityLabel.svelte.ts
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/lib/components/trackers/TrackerReservoirFields.svelte
 #: src/lib/components/trackers/TrackerReservoirFields.svelte
 #: src/lib/components/trackers/TrackerThresholdRow.svelte
@@ -7047,6 +7070,7 @@ msgstr ""
 msgid "Warning"
 msgstr ""
 
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/lib/components/trackers/TrackerReservoirFields.svelte
 #: src/lib/components/trackers/TrackerReservoirFields.svelte
 #: src/lib/components/trackers/TrackerThresholdRow.svelte
@@ -7071,6 +7095,7 @@ msgstr ""
 msgid "Add thresholds to get notified as the tracker ages"
 msgstr ""
 
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/lib/components/trackers/TrackerThresholdRow.svelte
 msgid "Level"
 msgstr ""
@@ -7103,6 +7128,7 @@ msgstr ""
 
 #: src/lib/components/alerts/factText.svelte.ts
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/lib/components/people/PersonStatusLine.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/trackers/TrackerEditorDialog.svelte
@@ -7805,6 +7831,7 @@ msgstr ""
 #~ msgid "Avg Response Time"
 #~ msgstr ""
 
+#: src/lib/components/people/PeopleFilters.svelte
 #: src/routes/(authenticated)/compatibility/+page.svelte
 #: src/routes/(authenticated)/reports/+layout.svelte
 #: src/routes/(authenticated)/reports/+layout.svelte
@@ -7986,10 +8013,8 @@ msgstr ""
 #~ msgstr ""
 
 #. 0: picked.length
-#. 0: foods.length
 #. 0: state.foods.length
 #: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
-#: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 #: src/routes/(authenticated)/food/+page.svelte
 msgid "{0} foods"
 msgstr ""
@@ -8038,12 +8063,14 @@ msgstr ""
 #. 0: idx + 1; 1: REPORTS.length
 #. 0: current; 1: total
 #. 0: r.wentBelowRange ?? 0; 1: plural(r.wentBelowRangeObserved ?? 0, ["# event", "# events"])
+#. 0: tracked; 1: nights
 #. 0: state.filteredFoods.length; 1: state.foods.length
 #. 0: s?.nightCount ?? 0; 1: s?.daysInRange ?? 0
 #. 0: filteredRows.length; 1: allRows.length
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/coach-marks/copy.svelte.ts
 #: src/lib/components/reports/loop-analysis/EventMetricsTable.svelte
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
 #: src/routes/(authenticated)/food/+page.svelte
 #: src/routes/(authenticated)/reports/sleep/+page.svelte
 #: src/routes/(authenticated)/reports/treatments/+page.svelte
@@ -9329,6 +9356,8 @@ msgstr ""
 #~ msgid "Auto Basal"
 #~ msgstr ""
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
 msgid "Percent"
 msgstr ""
@@ -9355,6 +9384,7 @@ msgid "Scheduled ({0})"
 msgstr ""
 
 #: src/lib/components/dashboard/glucose-chart/chart-labels.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
@@ -9485,6 +9515,7 @@ msgstr ""
 #~ msgstr ""
 
 #: src/lib/components/dashboard/widgets/TddWidget.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
 msgid "No insulin"
 msgstr ""
 
@@ -9515,7 +9546,9 @@ msgstr ""
 msgid "{0} days with data"
 msgstr ""
 
+#. 0: average
 #. 0: unitLabel
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
 #: src/lib/components/reports/year-overview/YearHeatmap.svelte
 msgid "avg {0}"
 msgstr ""
@@ -10424,12 +10457,10 @@ msgstr ""
 msgid "Target: ≥70%"
 msgstr ""
 
-#: src/lib/components/people/PeopleRoster.svelte
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 msgid "GMI"
 msgstr ""
 
-#: src/lib/components/people/PeopleRoster.svelte
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 msgid "CV"
 msgstr ""
@@ -10571,8 +10602,10 @@ msgstr ""
 #~ msgid "High / Low"
 #~ msgstr ""
 
-#~ msgid "temp basals"
-#~ msgstr ""
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "temp basals"
+msgstr ""
 
 #~ msgid "<0/> Basal Rate Percentile Chart"
 #~ msgstr ""
@@ -10808,7 +10841,9 @@ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/year-overview/+page.svelte
 msgid "Boluses"
 msgstr ""
@@ -11332,6 +11367,7 @@ msgstr ""
 
 #: src/lib/components/dashboard/CurrentBGDisplay.svelte
 #: src/lib/components/people/PeopleRoster.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
 #: src/lib/components/reports/AidSystemUseCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Pump"
@@ -11504,6 +11540,7 @@ msgstr ""
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/wizard/WizardProgress.svelte
 #: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/steps/+page.svelte
 #: src/routes/(authenticated)/reports/steps/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-copy.svelte.ts
@@ -11551,10 +11588,12 @@ msgstr ""
 msgid "Report generated from {0} records between {1} and {2}"
 msgstr ""
 
+#. 0: view.name
 #. 0: def.name
 #. 0: preset.name
 #. 0: report.name
 #. 0: getRowLabel(rowToDelete)
+#: src/lib/components/people/PeopleViewsManager.svelte
 #: src/lib/components/trackers/TrackerDefinitionsTab.svelte
 #: src/lib/components/trackers/TrackerPresetsTab.svelte
 #: src/routes/(authenticated)/reports/custom/+page.svelte
@@ -12744,9 +12783,8 @@ msgstr ""
 #~ msgid "<0/> Get Support"
 #~ msgstr ""
 
-#: src/routes/(authenticated)/settings/support/+page.svelte
-msgid "Need help? Here's how to reach us"
-msgstr ""
+#~ msgid "Need help? Here's how to reach us"
+#~ msgstr ""
 
 #~ msgid "<0/> Get Help on Discord <1/>"
 #~ msgstr ""
@@ -13390,6 +13428,7 @@ msgstr ""
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/app-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "Profiles"
 msgstr ""
 
@@ -14127,6 +14166,9 @@ msgstr ""
 #~ msgstr ""
 
 #: src/lib/components/alerts/DndPanel.svelte
+#: src/lib/components/people/FlagRulesEditor.svelte
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/PeopleFilters.svelte
 #: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/people/PersonPanel.svelte
 #: src/lib/components/therapy-timeline/ChangeDetail.svelte
@@ -14440,6 +14482,7 @@ msgstr ""
 #~ msgstr ""
 
 #: src/lib/components/alerts/RuleBuilderAddPicker.svelte
+#: src/lib/components/people/PeopleFilters.svelte
 msgid "Group"
 msgstr ""
 
@@ -14473,6 +14516,7 @@ msgstr ""
 #~ msgid "no data for ≥"
 #~ msgstr ""
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -15424,7 +15468,6 @@ msgstr ""
 #. 0: bg(bounds.urgentLow); 1: bg(bounds.low)
 #. 0: bg(bounds.low); 1: bg(bounds.high)
 #. 0: bg(bounds.high); 1: bg(bounds.urgentHigh)
-#. 0: span.from; 1: span.to
 #. 0: from; 1: to
 #. 0: relativeMinutes(slotMinute(minutes, slot)); 1: relativeMinutes(slotMinute(minutes, slot + 1))
 #. 0: mFrom; 1: mTo
@@ -15432,7 +15475,6 @@ msgstr ""
 #: src/lib/components/people/WallLegend.svelte
 #: src/lib/components/people/WallLegend.svelte
 #: src/lib/components/people/WallLegend.svelte
-#: src/lib/components/reports/custom/workspace/report.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 #: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
 #: src/routes/(authenticated)/settings/audit/+page.svelte
@@ -16925,6 +16967,7 @@ msgstr ""
 msgid "This report is for informational purposes. Always consult your healthcare provider for medical decisions."
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/routes/(authenticated)/reports/steps/+page.svelte
 msgid "steps"
@@ -19850,6 +19893,7 @@ msgstr ""
 
 #: ../portal/src/lib/components/features/ReportsDemo.svelte
 #: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/components/people/PeopleRoster.svelte
 #: src/lib/components/people/PersonRow.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/trackers/TrackerCoversField.svelte
@@ -20944,15 +20988,11 @@ msgstr ""
 msgid "Horizontal: {0} ({1})"
 msgstr ""
 
-#. 0: week.totalHypoCount ?? 0; 1: week.totalHypoCount === 1 ? "" \\: "s"
-#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
-msgid "{0} low{1}"
-msgstr ""
+#~ msgid "{0} low{1}"
+#~ msgstr ""
 
-#. 0: week.nightCount; 1: week.daysInRange; 2: week.daysInRange === 1 ? "" \\: "s"; 3: statsParts(week).join(" · ")
-#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
-msgid "{0} of {1} night{2} · {3}"
-msgstr ""
+#~ msgid "{0} of {1} night{2} · {3}"
+#~ msgstr ""
 
 #: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
 msgid "No nights tracked"
@@ -22105,7 +22145,7 @@ msgstr ""
 #. 0: perm
 #. 0: food.current?.name ?? 'food'
 #. 0: layer.name
-#. 0: signalLabel(id)
+#. 0: signalPhrase(id)
 #. 0: member.displayName
 #. 0: manager.displayName
 #. 0: item.l
@@ -22306,6 +22346,7 @@ msgstr ""
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/constants/scope-labels.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/heart-rate/+page.svelte
 #: src/routes/(authenticated)/reports/heart-rate/+page.svelte
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-copy.svelte.ts
@@ -22785,10 +22826,12 @@ msgstr ""
 msgid "Low episodes"
 msgstr ""
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 msgid "Lowest"
 msgstr ""
 
+#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/routes/(authenticated)/reports/executive-summary/+page.svelte
 msgid "Highest"
 msgstr ""
@@ -23032,6 +23075,9 @@ msgstr ""
 #~ msgid "Compare patterns across days"
 #~ msgstr ""
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -23586,11 +23632,13 @@ msgstr ""
 msgid "In range"
 msgstr ""
 
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/routes/(authenticated)/reports/hourly-stats/+page.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
 msgid "Below"
 msgstr ""
 
+#: src/lib/components/people/FlagRuleForm.svelte
 #: src/routes/(authenticated)/reports/hourly-stats/+page.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
 msgid "Above"
@@ -24232,7 +24280,7 @@ msgstr "Serverconnector voor gezondheids- en fitnessgegevens"
 msgid "The import could not be completed."
 msgstr "Het importeren kon niet worden voltooid."
 
-#. 0: status.errorDataTypes?.length ? ` · ${status.errorDataTypes.join(", ")}` \\: ""
+#. 0: status.errorDataTypes?.length ? ` · ${formatList(status.errorDataTypes.map((key) => dataTypeLabel(key)), "unit")}` \\: ""
 #: src/routes/(authenticated)/settings/connectors/google-health/google-health-page.svelte
 msgid "Technical code: <0/> {0}"
 msgstr "Technische code: <0/> {0}"
@@ -25749,7 +25797,7 @@ msgid "The switch was not recorded."
 msgstr ""
 
 #. 0: profileName
-#. 0: lensLabel(lens)
+#. 0: lensPhrase(lens)
 #: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/reports/custom/workspace/SignalCatalogue.svelte
 msgid "Switch to {0}"
@@ -26552,7 +26600,7 @@ msgstr ""
 #~ msgid "This report cannot calculate the total steps for each local day."
 #~ msgstr ""
 
-#. 0: days.map(weekdayLabel).join(", ")
+#. 0: formatList(days.map(weekdayLabel))
 #: src/lib/components/reports/loop-analysis/AppliedFiltersSummary.svelte
 msgid "Days: {0}."
 msgstr ""
@@ -26562,7 +26610,7 @@ msgstr ""
 msgid "Profile: {0}."
 msgstr ""
 
-#. 0: excluded.join(", ")
+#. 0: formatList(excluded)
 #: src/lib/components/reports/loop-analysis/AppliedFiltersSummary.svelte
 msgid "Time not used: {0}."
 msgstr ""
@@ -26571,6 +26619,7 @@ msgstr ""
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 #: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/people/attention-phrases.svelte.ts
+#: src/lib/components/people/flag-rule-text.svelte.ts
 #: src/lib/components/reports/loop-analysis/AggregateReadout.svelte
 #: src/lib/components/reports/loop-analysis/DailyProfileBody.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
@@ -26995,10 +27044,8 @@ msgstr ""
 #~ msgid "Open in Day in Review"
 #~ msgstr ""
 
-#. 0: (event.cohorts ?? []) .map((n) => cohorts.find((c) => c.cohort === n)) .filter((c) => c != null) .map((c) => cohortLabel(c)) .join("\; ")
-#: src/lib/components/reports/loop-analysis/EventList.svelte
-msgid ", in {0}"
-msgstr ""
+#~ msgid ", in {0}"
+#~ msgstr ""
 
 #: src/lib/components/reports/loop-analysis/EventList.svelte
 #: src/routes/(unauthenticated)/setup/(guided)/alerts/AlertSetup.svelte
@@ -27083,23 +27130,20 @@ msgstr[1] ""
 msgid "The figures are medians, with the middle half of events below each median. Faded figures have too few events to show a pattern. These figures are observations of what occurred, not settings to change."
 msgstr ""
 
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "# not included because of another event in its window"
-msgid_plural "# not included because of another event in their window"
-msgstr[0] ""
-msgstr[1] ""
+#~ msgid "# not included because of another event in its window"
+#~ msgid_plural "# not included because of another event in their window"
+#~ msgstr[0] ""
+#~ msgstr[1] ""
 
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "# without a glucose reading at the time"
-msgid_plural "# without a glucose reading at the time"
-msgstr[0] ""
-msgstr[1] ""
+#~ msgid "# without a glucose reading at the time"
+#~ msgid_plural "# without a glucose reading at the time"
+#~ msgstr[0] ""
+#~ msgstr[1] ""
 
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "# not included because the time before it is outside the history that you can see"
-msgid_plural "# not included because the time before them is outside the history that you can see"
-msgstr[0] ""
-msgstr[1] ""
+#~ msgid "# not included because the time before it is outside the history that you can see"
+#~ msgid_plural "# not included because the time before them is outside the history that you can see"
+#~ msgstr[0] ""
+#~ msgstr[1] ""
 
 #: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
 msgid "Glucose change from the event"
@@ -27113,15 +27157,11 @@ msgstr ""
 msgid "Net insulin above schedule since the event"
 msgstr ""
 
-#. 0: label; 1: panel.format(value.p50 ?? 0); 2: plural(value.n ?? 0, ["# event", "# events"])
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "{0}: median {1}, {2}"
-msgstr ""
+#~ msgid "{0}: median {1}, {2}"
+#~ msgstr ""
 
-#. 0: label
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "{0}: no data"
-msgstr ""
+#~ msgid "{0}: no data"
+#~ msgstr ""
 
 #: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
 msgid "No data recorded near these events"
@@ -27273,12 +27313,12 @@ msgstr ""
 msgid "A settings signal. At this horizon, the loop has not yet acted on the prediction."
 msgstr ""
 
-#. 0: noAccess.map(ignoredFilterLabel).join(", ")
+#. 0: formatList(noAccess.map(ignoredFilterLabel))
 #: src/lib/components/reports/loop-analysis/IgnoredFiltersNotice.svelte
 msgid "Your access does not include the data for these filters, so the report did not use them: {0}."
 msgstr ""
 
-#. 0: outOfLimits.map(ignoredFilterLabel).join(", ")
+#. 0: formatList(outOfLimits.map(ignoredFilterLabel))
 #: src/lib/components/reports/loop-analysis/IgnoredFiltersNotice.svelte
 msgid "These values are outside the limits of the report, so the report used its default values: {0}."
 msgstr ""
@@ -27387,7 +27427,7 @@ msgid_plural "# h"
 msgstr[0] ""
 msgstr[1] ""
 
-#. 0: compared ?? "–"
+#. 0: value
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
 msgid "Compared: {0}"
 msgstr ""
@@ -27774,7 +27814,7 @@ msgid_plural "These curves are hidden"
 msgstr[0] ""
 msgstr[1] ""
 
-#. 0: plural(hiddenCurves.length, ["This curve is hidden", "These curves are hidden"]); 1: hiddenCurves.map(curveLabel).join(", ")
+#. 0: plural(hiddenCurves.length, ["This curve is hidden", "These curves are hidden"]); 1: formatList(hiddenCurves.map(curveLabel))
 #: src/lib/components/reports/loop-analysis/PredictionAccuracyBody.svelte
 msgid "<0/> {0}: {1}. The report reads each curve only in the contexts where the algorithm uses it. These contexts come from treatments, and your access does not include treatments."
 msgstr ""
@@ -28233,11 +28273,13 @@ msgid "Use the left and right arrows to move along the axis. Use Home and End to
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 #: src/routes/(authenticated)/reports/insulin-delivery/+page.svelte
 msgid "Correction boluses"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "Sensor starts"
@@ -28264,7 +28306,7 @@ msgstr ""
 msgid "{0}–{1} g"
 msgstr ""
 
-#. 0: cohort.cohort; 1: filters.join(", ")
+#. 0: cohort.cohort; 1: described
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "Cohort {0}: {1}"
 msgstr ""
@@ -28367,6 +28409,7 @@ msgstr ""
 msgid "{0} g/U"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
@@ -30179,6 +30222,7 @@ msgid "(not applied to the schedules shown)"
 msgstr ""
 
 #: src/lib/components/treatments/TreatmentStatsCard.svelte
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "# bolus"
 msgid_plural "# boluses"
 msgstr[0] ""
@@ -30635,6 +30679,7 @@ msgid "Behavior"
 msgstr ""
 
 #: src/lib/components/alerts/factText.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "State spans"
 msgstr ""
 
@@ -31467,9 +31512,8 @@ msgstr ""
 msgid "{0} already has a Nightscout site. Copy {1}'s history across without changing that site."
 msgstr ""
 
-#: src/routes/(unauthenticated)/setup/steps/PathChoice.svelte
-msgid "There's already a Nightscout site. Copy its history across without changing that site."
-msgstr ""
+#~ msgid "There's already a Nightscout site. Copy its history across without changing that site."
+#~ msgstr ""
 
 #: src/routes/(unauthenticated)/setup/steps/PathChoice.svelte
 msgid "Point at the existing Nightscout address"
@@ -31591,9 +31635,8 @@ msgstr ""
 msgid "We will use your answer to word the rest of setup, so it talks about the right person."
 msgstr ""
 
-#: src/routes/(unauthenticated)/setup/steps/WhoFor.svelte
-msgid "What's their name?"
-msgstr ""
+#~ msgid "What's their name?"
+#~ msgstr ""
 
 #: src/routes/(unauthenticated)/setup/steps/WhoFor.svelte
 msgid "Setup will say things like “Sam's glucose”. It is saved as their preferred name, and you can change it later in Settings."
@@ -31923,22 +31966,17 @@ msgstr ""
 msgid "{0}: typically worn for {1} days and {2} hours"
 msgstr ""
 
-#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
-msgid "Looking at what's connected..."
-msgstr ""
+#~ msgid "Looking at what's connected..."
+#~ msgstr ""
 
-#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
-msgid "We looked at what's connected and think you use these. Is that right?"
-msgstr ""
+#~ msgid "We looked at what's connected and think you use these. Is that right?"
+#~ msgstr ""
 
-#. 0: voice.name
-#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
-msgid "We looked at what's connected and think {0} uses these. Is that right?"
-msgstr ""
+#~ msgid "We looked at what's connected and think {0} uses these. Is that right?"
+#~ msgstr ""
 
-#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
-msgid "We looked at what's connected and think these are in use. Is that right?"
-msgstr ""
+#~ msgid "We looked at what's connected and think these are in use. Is that right?"
+#~ msgstr ""
 
 #: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
 msgid "Pick the sensor and pump you use."
@@ -31996,9 +32034,8 @@ msgstr ""
 msgid "Automated insulin delivery (AID) app"
 msgstr ""
 
-#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
-msgid "That's right"
-msgstr ""
+#~ msgid "That's right"
+#~ msgstr ""
 
 #: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
 msgid "Use this one"
@@ -32432,6 +32469,7 @@ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/constants/scope-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "Device status"
 msgstr ""
 
@@ -32859,9 +32897,8 @@ msgstr ""
 msgid "Privacy policy"
 msgstr ""
 
-#: src/routes/(legal)/privacy/+page.svelte
-msgid "2. Data we DON'T collect"
-msgstr ""
+#~ msgid "2. Data we DON'T collect"
+#~ msgstr ""
 
 #: src/routes/(legal)/privacy/+page.svelte
 msgid "4. Third-party services and connectors"
@@ -33976,6 +34013,7 @@ msgstr ""
 
 #: src/lib/components/reports/AidSystemUseCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "Site changes"
 msgstr ""
@@ -34539,6 +34577,7 @@ msgid "Update & add"
 msgstr ""
 
 #: src/lib/components/treatments/TreatmentsDataTable.svelte
+#: src/lib/utils/data-type-labels.svelte.ts
 #: src/routes/(authenticated)/reports/day-in-review/+page.svelte
 #: src/routes/(authenticated)/reports/treatments/+page.svelte
 msgid "Carb intake"
@@ -36669,12 +36708,16 @@ msgstr ""
 msgid "The owner turned off tracker pills."
 msgstr ""
 
+#. 0: view.name
 #. 0: LABELS[id]
+#: src/lib/components/people/PeopleViewsManager.svelte
 #: src/lib/components/settings/DashboardRailConfigurator.svelte
 msgid "Move {0} up"
 msgstr ""
 
+#. 0: view.name
 #. 0: LABELS[id]
+#: src/lib/components/people/PeopleViewsManager.svelte
 #: src/lib/components/settings/DashboardRailConfigurator.svelte
 msgid "Move {0} down"
 msgstr ""
@@ -38496,9 +38539,8 @@ msgstr ""
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr ""
 
-#: src/lib/forms/submit-messages.svelte.ts
-msgid "That item no longer exists. Refresh the page to see what's there now."
-msgstr ""
+#~ msgid "That item no longer exists. Refresh the page to see what's there now."
+#~ msgstr ""
 
 #: src/lib/components/oauth/DeviceCodeApproval.svelte
 msgid "Device authorized successfully."
@@ -39408,6 +39450,7 @@ msgid "{0} average"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/therapy-timeline/ChangeDetail.svelte
 msgid "time in range"
 msgstr ""
@@ -39565,6 +39608,7 @@ msgid "Transmitter / Sensor Insert"
 msgstr ""
 
 #: src/lib/constants/entry-category-labels.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "Device events"
 msgstr ""
 
@@ -42447,17 +42491,15 @@ msgstr ""
 msgid "Isolated events have no other meal, correction bolus or unannounced rise in their window. A window across midnight, for example 22:00 to 02:00, continues into the next day. A food filter uses only meals with a food record. Meals with only carbs are not included, and the page shows how many there are."
 msgstr ""
 
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "# meal with a food record"
-msgid_plural "# meals with a food record"
-msgstr[0] ""
-msgstr[1] ""
+#~ msgid "# meal with a food record"
+#~ msgid_plural "# meals with a food record"
+#~ msgstr[0] ""
+#~ msgstr[1] ""
 
-#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
-msgid "# meal with only carbs not included because the food filter cannot apply to it"
-msgid_plural "# meals with only carbs not included because the food filter cannot apply to them"
-msgstr[0] ""
-msgstr[1] ""
+#~ msgid "# meal with only carbs not included because the food filter cannot apply to it"
+#~ msgid_plural "# meals with only carbs not included because the food filter cannot apply to them"
+#~ msgstr[0] ""
+#~ msgstr[1] ""
 
 #: src/lib/components/reports/loop-analysis/HistoryClampNote.svelte
 msgid "The range that you selected ends before the last hour. You can see only the last hour, so this page has no data for this range."
@@ -42471,7 +42513,7 @@ msgid_plural "This page uses only the data from the last # hours in each range t
 msgstr[0] ""
 msgstr[1] ""
 
-#. 0: food.map(ignoredFilterLabel).join(", ")
+#. 0: formatList(food.map(ignoredFilterLabel))
 #: src/lib/components/reports/loop-analysis/IgnoredFiltersNotice.svelte
 msgid "Your access does not include food data, so these cohorts show no events: {0}."
 msgstr ""
@@ -42484,10 +42526,12 @@ msgstr ""
 msgid "High starts"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "Sleep starts"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "Wake-ups"
 msgstr ""
@@ -42878,7 +42922,7 @@ msgstr ""
 msgid "Leave out"
 msgstr ""
 
-#. 0: ws.leaveOutMisses.map((id) => signalLabel(id)).join(", ")
+#. 0: formatList(ws.leaveOutMisses.map((id) => signalLabel(id)), "unit")
 #: src/lib/components/reports/custom/workspace/ChartOptions.svelte
 msgid "{0}: all time is shown. These signals cannot leave time out."
 msgstr ""
@@ -42985,12 +43029,12 @@ msgstr ""
 msgid "The saved title is \"{0}\". Your title is \"{1}\"."
 msgstr ""
 
-#. 0: onlyTheirs.join(", ")
+#. 0: formatList(onlyTheirs, "unit")
 #: src/lib/components/reports/custom/workspace/DraftConflict.svelte
 msgid "Only the saved report has these blocks: {0}."
 msgstr ""
 
-#. 0: onlyMine.join(", ")
+#. 0: formatList(onlyMine, "unit")
 #: src/lib/components/reports/custom/workspace/DraftConflict.svelte
 msgid "Only your changes have these blocks: {0}."
 msgstr ""
@@ -43163,7 +43207,9 @@ msgid "Insulin on board at the event: not set"
 msgstr ""
 
 #. 0: anchorPhrase(moment.what)
+#. 0: anchorPhrase(moment.what)
 #: src/lib/components/reports/custom/workspace/EventGroups.svelte
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "All other {0}"
 msgstr ""
 
@@ -43172,7 +43218,7 @@ msgstr ""
 msgid "Events: {0}"
 msgstr ""
 
-#. 0: label( kind ).toLowerCase(); 1: LETTERS[i]
+#. 0: phrase(kind); 1: LETTERS[i]
 #: src/lib/components/reports/custom/workspace/EventGroups.svelte
 msgid "Remove {0} from group {1}"
 msgstr ""
@@ -43366,10 +43412,8 @@ msgstr ""
 msgid "Nocturne removed \"{0}\"."
 msgstr ""
 
-#. 0: KIND_NAMES[shownKind(block)].toLowerCase()
-#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
-msgid "Nocturne removed the {0}."
-msgstr ""
+#~ msgid "Nocturne removed the {0}."
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
 msgid "Chart"
@@ -43487,12 +43531,12 @@ msgstr ""
 msgid "Up to {0}"
 msgstr ""
 
-#. 0: lenses.map((l) => lensLabel(l)).join(", ")
+#. 0: formatList(lenses.map((l) => lensLabel(l)), "unit")
 #: src/lib/components/reports/custom/workspace/SignalCatalogue.svelte
 msgid "Views: {0}"
 msgstr ""
 
-#. 0: signalLabel(id)
+#. 0: signalPhrase(id)
 #: src/lib/components/reports/custom/workspace/SignalCatalogue.svelte
 msgid "Star {0}"
 msgstr ""
@@ -43567,8 +43611,8 @@ msgstr ""
 msgid "Recently used"
 msgstr ""
 
-#. 0: signalLabel(id)
-#. 0: signalLabel(id)
+#. 0: signalPhrase(id)
+#. 0: signalPhrase(id)
 #: src/lib/components/reports/custom/workspace/SignalChips.svelte
 #: src/lib/components/reports/custom/workspace/SignalRail.svelte
 msgid "Nocturne removed {0} from the chart."
@@ -43645,12 +43689,12 @@ msgstr ""
 msgid "95% confidence interval of the trend"
 msgstr ""
 
-#. 0: lowerFirst(signalLabel(other))
+#. 0: signalPhrase(other)
 #: src/lib/components/reports/custom/workspace/SignalChips.svelte
 msgid "Subtract {0}"
 msgstr ""
 
-#. 0: lowerFirst(signalLabel(other))
+#. 0: signalPhrase(other)
 #: src/lib/components/reports/custom/workspace/SignalChips.svelte
 msgid "Divide by {0}"
 msgstr ""
@@ -43708,8 +43752,8 @@ msgstr ""
 msgid "End"
 msgstr ""
 
-#. 0: minuteLabel(from); 1: minuteLabel(end)
-#: src/lib/components/reports/custom/workspace/TimeOfDayEditor.svelte
+#. 0: from; 1: to
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} to {1}, past midnight"
 msgstr ""
 
@@ -43761,7 +43805,7 @@ msgstr ""
 msgid "Options: {0}"
 msgstr ""
 
-#. 0: ws.title.trim() || "Untitled chart"; 1: lowerFirst(report.blockRanges(block).find((o) => o.id === report.blockRangeId(block))?.label ?? "")
+#. 0: ws.title.trim() || "Untitled chart"; 1: report.blockRangePhrase(block)
 #: src/lib/components/reports/custom/workspace/WorkspaceView.svelte
 msgid "Title and range: {0}, {1}"
 msgstr ""
@@ -43776,24 +43820,16 @@ msgid "Calculated signal"
 msgstr ""
 
 #. 0: a; 1: b
-#. 0: a; 1: b
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} minus {1}"
 msgstr ""
 
 #. 0: a; 1: b
-#. 0: a; 1: b
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} divided by {1}"
 msgstr ""
 
-#. 0: b; 1: a
-#. 0: this.dates(block.a); 1: this.dates(block.b)
 #. 0: a; 1: b
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
-#: src/lib/components/reports/custom/workspace/report.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} against {1}"
 msgstr ""
@@ -43893,7 +43929,7 @@ msgstr ""
 msgid "A report has at most {0} comparisons."
 msgstr ""
 
-#. 0: upperFirst(sourceLabel(source)); 1: days; 2: rangeText(hours, this.#vocab.rangePresets).replace(/^over /, "")
+#. 0: sourceLabel(source); 1: days; 2: lastRangeText(hours, this.#vocab.rangePresets)
 #: src/lib/components/reports/custom/workspace/report.svelte.ts
 msgid "{0} covers at most {1}, so this block shows {2}."
 msgstr ""
@@ -43910,12 +43946,12 @@ msgstr ""
 msgid "You cannot read the data for a comparison."
 msgstr ""
 
-#. 0: upperFirst(signalLabel(id)); 1: daysText(limit); 2: rangeText(own, this.#vocab.rangePresets).replace(/^over /, "")
+#. 0: signalLabel(id); 1: daysText(limit); 2: lastRangeText(own, this.#vocab.rangePresets)
 #: src/lib/components/reports/custom/workspace/report.svelte.ts
 msgid "{0} covers at most {1}, so this chart shows {2}."
 msgstr ""
 
-#. 0: upperFirst(this.blockTitle(block).trim() || this.caption(block)); 1: daysText(max)
+#. 0: this.blockTitle(block).trim() || this.caption(block); 1: daysText(max)
 #. 0: this.sourceLabel(block); 1: daysText(dataset.maxRangeHours)
 #. 0: signalLabel(limit.by); 1: daysText(limit.hours)
 #: src/lib/components/reports/custom/workspace/report.svelte.ts
@@ -43951,12 +43987,10 @@ msgstr ""
 msgid "No signals yet"
 msgstr ""
 
-#. 0: this.sourceLabel(block); 1: labels.length; 2: range
-#: src/lib/components/reports/custom/workspace/report.svelte.ts
-msgid "{0}: {1} figures {2}"
-msgstr ""
+#~ msgid "{0}: {1} figures {2}"
+#~ msgstr ""
 
-#. 0: upperFirst(texts.join(" against ")); 1: range
+#. 0: groups; 1: range
 #: src/lib/components/reports/custom/workspace/report.svelte.ts
 msgid "{0}, one row for each event {1}"
 msgstr ""
@@ -44075,6 +44109,7 @@ msgid "Basal rate in data and profile"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "ISF in data and profile"
 msgstr ""
 
@@ -44132,6 +44167,7 @@ msgid "Heart rate each night"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "HRV each night"
 msgstr ""
 
@@ -44147,6 +44183,7 @@ msgstr ""
 msgid "Heart rate in sleep"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "HRV in sleep"
 msgstr ""
@@ -44587,17 +44624,21 @@ msgid "Two signals as points, each 15 minutes, one along each axis."
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Rises with no carbs"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Lows"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Highs"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Carbs taken in a low"
 msgstr ""
@@ -44917,7 +44958,7 @@ msgstr ""
 msgid "Glucose from 1 hour before to 8 hours after each site change."
 msgstr ""
 
-#. 0: formatList(words, "disjunction")
+#. 0: eitherScope
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "Your access cannot read {0}, which this needs."
 msgstr ""
@@ -44983,6 +45024,8 @@ msgid "From the event to {0} after"
 msgstr ""
 
 #. 0: minutesText(before); 1: minutesText(after)
+#. 0: minutesText(before); 1: minutesText(after)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} before to {1} after"
 msgstr ""
@@ -45149,12 +45192,12 @@ msgstr ""
 msgid "Choose one of the windows given."
 msgstr ""
 
-#. 0: phrase; 1: lowerFirst(outcomeLabel(this.figure))
+#. 0: phrase; 1: outcomePhrase(this.figure)
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "How many {0} had each {1}"
 msgstr ""
 
-#. 0: lowerFirst(dayFilterText(s.dayFilter, this.clock))
+#. 0: dayFilterPhrase(s.dayFilter, this.clock)
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "{0} against all other days"
 msgstr ""
@@ -45895,6 +45938,8 @@ msgid "correction boluses"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "boluses"
 msgstr ""
 
@@ -45914,6 +45959,7 @@ msgstr ""
 msgid "carbs taken in a low"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
@@ -45937,9 +45983,13 @@ msgid "site changes"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "overrides"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "temporary targets"
 msgstr ""
@@ -45993,6 +46043,8 @@ msgstr ""
 msgid "glucose.read"
 msgstr ""
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "glucose"
 msgstr ""
@@ -46010,6 +46062,7 @@ msgid "food.read"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "food"
@@ -46036,6 +46089,7 @@ msgid "heartrate.read"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "heart rate"
 msgstr ""
 
@@ -46043,6 +46097,7 @@ msgstr ""
 msgid "sleep.read"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "sleep"
 msgstr ""
@@ -46242,6 +46297,7 @@ msgid "override"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "illness"
 msgstr ""
 
@@ -46327,9 +46383,11 @@ msgid "lab"
 msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "weight"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "body fat"
 msgstr ""
@@ -46346,6 +46404,7 @@ msgstr ""
 msgid "DND"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "do not disturb"
 msgstr ""
@@ -46429,12 +46488,16 @@ msgid "everything else"
 msgstr ""
 
 #. 0: g.min
+#. 0: cohort.minGrams
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+#: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "at least {0} g"
 msgstr ""
 
 #. 0: g.max
+#. 0: cohort.maxGrams
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+#: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
 msgid "at most {0} g"
 msgstr ""
 
@@ -46442,7 +46505,7 @@ msgstr ""
 msgid "with a food"
 msgstr ""
 
-#. 0: formatList(moment.foods.map((f) => f.name), "disjunction")
+#. 0: foods
 #. 0: moment.foodCategory.trim()
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
@@ -46544,6 +46607,7 @@ msgstr ""
 msgid "over a typical day"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "day by day"
 msgstr ""
@@ -46571,9 +46635,8 @@ msgstr ""
 msgid "only while {0} was active"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
-msgid "disjunction"
-msgstr ""
+#~ msgid "disjunction"
+#~ msgstr ""
 
 #. 0: member.name
 #: src/lib/components/members/MemberCard.svelte
@@ -46764,7 +46827,7 @@ msgstr ""
 msgid "You do not follow anyone."
 msgstr ""
 
-#. 0: time(lastRead.at)
+#. 0: time(kept.at)
 #: src/lib/components/people/PeopleWall.svelte
 msgid "Connection lost. Showing readings from {0}."
 msgstr ""
@@ -46963,9 +47026,8 @@ msgstr ""
 msgid "Minutes until a glucose reading counts as missing"
 msgstr ""
 
-#: src/lib/components/alerts/AdvancedSection.svelte
-msgid "The rule counts a glucose reading as missing when Nocturne received it more than this number of minutes ago. This applies to conditions on the glucose value, rate of change, trend and glucose range. It does not apply to signal loss, data age, predicted glucose or Smart snooze conditions. <0/>"
-msgstr ""
+#~ msgid "The rule counts a glucose reading as missing when Nocturne received it more than this number of minutes ago. This applies to conditions on the glucose value, rate of change, trend and glucose range. It does not apply to signal loss, data age, predicted glucose or Smart snooze conditions. <0/>"
+#~ msgstr ""
 
 #: src/lib/components/alerts/AdvancedSection.svelte
 msgid "Use the default"
@@ -47546,9 +47608,8 @@ msgstr ""
 msgid "A clear margin must be a number, 0 or more."
 msgstr ""
 
-#: src/lib/components/alerts/conditionIssues.svelte.ts
-msgid "A clear margin on a rate of change cannot be more than the rate."
-msgstr ""
+#~ msgid "A clear margin on a rate of change cannot be more than the rate."
+#~ msgstr ""
 
 #: src/lib/components/alerts/conditionIssues.svelte.ts
 msgid "A condition inside “for at least” cannot have a clear margin. Remove the margin or the “for at least”."
@@ -47746,6 +47807,7 @@ msgstr ""
 msgid "Could not delete the team. Try again."
 msgstr ""
 
+#: src/lib/components/people/PeopleFilters.svelte
 #: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
 msgid "Team"
 msgstr ""
@@ -48499,6 +48561,7 @@ msgstr ""
 msgid "If your profile has no target range, this condition does not know if it is true."
 msgstr ""
 
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/alert-labels.svelte.ts
 msgid "Number"
 msgstr ""
@@ -48614,6 +48677,7 @@ msgstr ""
 msgid "percentiles"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
 msgid "target range"
 msgstr ""
@@ -48676,6 +48740,7 @@ msgid "heatmap"
 msgstr ""
 
 #: src/lib/navigation/report-navigation.svelte.ts
+#: src/lib/utils/data-type-labels.svelte.ts
 msgid "glucose readings"
 msgstr ""
 
@@ -48722,6 +48787,8 @@ msgstr ""
 msgid "hourly"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
 msgid "time of day"
 msgstr ""
@@ -48764,6 +48831,8 @@ msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
 msgid "carbs"
 msgstr ""
@@ -48813,6 +48882,7 @@ msgstr ""
 msgid "dose adjustment"
 msgstr ""
 
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/navigation/report-navigation.svelte.ts
 msgid "pump battery"
 msgstr ""
@@ -49154,6 +49224,7 @@ msgid "Quick settings"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "insulin on board"
 msgstr ""
 
@@ -49162,6 +49233,7 @@ msgid "active insulin"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "carbs on board"
 msgstr ""
 
@@ -49260,6 +49332,7 @@ msgid "profile changes"
 msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "trackers"
 msgstr ""
 
@@ -51217,4 +51290,1590 @@ msgstr ""
 
 #: ../portal/src/routes/docs/installation/docker-compose/+page.svelte
 msgid "Keep the old server and its volume until the new server is verified. Do not start the old stack again after the new server takes new data. Then the two databases are different, and you cannot merge them. When the new server is verified, delete <0/> on both servers. It holds your whole database."
+msgstr ""
+
+#: src/lib/forms/submit-messages.svelte.ts
+msgid "That item no longer exists. Refresh the page to see what is there now."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/support/+page.svelte
+msgid "Need help? Here is how to reach us"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/steps/PathChoice.svelte
+msgid "There is already a Nightscout site. Copy its history across without changing that site."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/steps/WhoFor.svelte
+msgid "What is their name?"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
+msgid "Looking at what is connected..."
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
+msgid "We looked at what is connected and think you use these. Is that right?"
+msgstr ""
+
+#. 0: voice.name
+#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
+msgid "We looked at what is connected and think {0} uses these. Is that right?"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
+msgid "We looked at what is connected and think these are in use. Is that right?"
+msgstr ""
+
+#: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
+msgid "Yes, this one"
+msgstr ""
+
+#: src/lib/components/people/TabFallback.svelte
+msgid "You are not in that group. The list shows everyone you follow."
+msgstr ""
+
+#: src/lib/components/people/TabFallback.svelte
+msgid "Your groups did not load. The list shows everyone you follow."
+msgstr ""
+
+#: src/lib/components/people/HiddenInGroup.svelte
+msgid "You cannot see # person in this group."
+msgid_plural "You cannot see # people in this group."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "You cannot see anyone in this group"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Each person's site decides who on the team can see them."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "You can see no people in this group"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "A manager of the team chooses the people in each group."
+msgstr ""
+
+#: src/lib/components/people/PeopleTabs.svelte
+msgid "Lists of people"
+msgstr ""
+
+#: src/lib/components/people/PeopleTabs.svelte
+msgid "Everyone"
+msgstr ""
+
+#: src/routes/(legal)/privacy/+page.svelte
+msgid "2. Data we do not collect"
+msgstr ""
+
+#: src/lib/components/people/PeopleWall.svelte
+msgid "You cannot see anyone in this group."
+msgstr ""
+
+#: src/lib/components/people/PeopleWall.svelte
+msgid "You can see no people in this group."
+msgstr ""
+
+#: src/lib/components/people/PeopleWall.svelte
+msgid "Flagged by Nocturne's fixed rules."
+msgstr ""
+
+#: src/lib/components/people/WallGroupHeading.svelte
+msgid "Not in your groups"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Consensus range"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Own range"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Information"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Choose a fact"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Fact"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "More facts"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Suggested rules"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Last number of days"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Flag when the value is"
+msgstr ""
+
+#~ msgid "<0/> Save rule"
+#~ msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "You have the maximum number of flag rules. Delete a rule to add a new rule."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Could not add the rule. Try again."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Could not change the rule. Try again."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Could not delete the rule. Try again."
+msgstr ""
+
+#: src/routes/(authenticated)/people/rules/+page.svelte
+msgid "Your flag rules - Nocturne"
+msgstr ""
+
+#: src/routes/(authenticated)/people/rules/+page.svelte
+msgid "Your flag rules"
+msgstr ""
+
+#: src/routes/(authenticated)/people/rules/+page.svelte
+msgid "A person who meets one of your rules shows in Flagged on the People page. Only you see your rules."
+msgstr ""
+
+#: src/routes/(authenticated)/people/rules/+page.svelte
+msgid "<0/> People"
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Your flag rules did not load."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "You have no flag rules."
+msgstr ""
+
+#. 0: summary.cannotCheckCount
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Cannot be checked for {0} of the people you follow"
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Edit rule"
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Delete rule"
+msgstr ""
+
+#. 0: limit
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "You have {0} rules, the maximum. Delete a rule to add a new rule."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "<0/> Add a rule"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "<0/> Your flag rules"
+msgstr ""
+
+#. 0: label; 1: value; 2: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} (your rule: below {2})"
+msgstr ""
+
+#. 0: label; 1: value; 2: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} (your rule: above {2})"
+msgstr ""
+
+#. 0: label; 1: value; 2: period; 3: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} in the last {2} (your rule: below {3})"
+msgstr ""
+
+#. 0: label; 1: value; 2: period; 3: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} in the last {2} (your rule: above {3})"
+msgstr ""
+
+#. 0: range
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "Own range {0}, varies by time of day"
+msgstr ""
+
+#. 0: range
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "Own range {0}"
+msgstr ""
+
+#. 0: worn
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "Sensor worn {0}% of the time"
+msgstr ""
+
+#. 0: label; 1: value
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0} is below {1}"
+msgstr ""
+
+#. 0: label; 1: value
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0} is above {1}"
+msgstr ""
+
+#. 0: label; 1: period; 2: value
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0} in the last {1} is below {2}"
+msgstr ""
+
+#. 0: label; 1: period; 2: value
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0} in the last {1} is above {2}"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Manual BG"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Calibrations"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Basal injections"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Bolus calculations"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Body weight"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Entries (Legacy)"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "Treatments (Legacy)"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "manual BG readings"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "calibrations"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "basal injections"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "carb intakes"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "bolus calculations"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "notes"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "device events"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "state spans"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "profile records"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "device status records"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "activity records"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "food records"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "step counts"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "heart rate readings"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "body weights"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "sleep sessions"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "legacy entries"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "legacy treatments"
+msgstr ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# glucose reading"
+msgid_plural "# glucose readings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# manual BG reading"
+msgid_plural "# manual BG readings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# calibration"
+msgid_plural "# calibrations"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# basal injection"
+msgid_plural "# basal injections"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# carb intake"
+msgid_plural "# carb intakes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# temp basal"
+msgid_plural "# temp basals"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# BG check"
+msgid_plural "# BG checks"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# bolus calculation"
+msgid_plural "# bolus calculations"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# note"
+msgid_plural "# notes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# device event"
+msgid_plural "# device events"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# state span"
+msgid_plural "# state spans"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# profile record"
+msgid_plural "# profile records"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# device status record"
+msgid_plural "# device status records"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# activity record"
+msgid_plural "# activity records"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# food record"
+msgid_plural "# food records"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# step count"
+msgid_plural "# step counts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# heart rate reading"
+msgid_plural "# heart rate readings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# body weight"
+msgid_plural "# body weights"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# sleep session"
+msgid_plural "# sleep sessions"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# legacy entry"
+msgid_plural "# legacy entries"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/data-type-labels.svelte.ts
+msgid "# legacy treatment"
+msgid_plural "# legacy treatments"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/utils/sync-messages.svelte.ts
+msgid "Authenticating..."
+msgstr ""
+
+#. 0: from; 1: to
+#: src/lib/utils/sync-messages.svelte.ts
+msgid "Fetching data from {0} to {1}..."
+msgstr ""
+
+#. 0: dataType
+#: src/lib/utils/sync-messages.svelte.ts
+msgid "Processing {0}..."
+msgstr ""
+
+#. 0: dataType
+#. 0: dataTypeCount(dataTypeKey, count)
+#: src/lib/utils/sync-messages.svelte.ts
+#: src/lib/utils/sync-messages.svelte.ts
+msgid "Publishing {0}..."
+msgstr ""
+
+#: src/lib/utils/sync-messages.svelte.ts
+msgid "Sync complete"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+msgid "days of the week"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+msgid "food category"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+msgid "meal size"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time since the last carbs"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose at the event"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/EventGroups.svelte
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "insulin on board at the event"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Nocturne removed the chart."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Nocturne removed the figures."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Nocturne removed the table."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Nocturne removed the comparison."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Change the chart first. The report engine cannot run its settings."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Change the figures first. The report engine cannot run its settings."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Change the table first. The report engine cannot run its settings."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
+msgid "Change the comparison first. The report engine cannot run its settings."
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/report.svelte.ts
+msgid "same as the report"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/report.svelte.ts
+msgid "# figure"
+msgid_plural "# figures"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: this.sourceLabel(block); 1: figures; 2: range
+#: src/lib/components/reports/custom/workspace/report.svelte.ts
+msgid "{0}: {1} {2}"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose, 10 to 90 percent"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "mean glucose"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time below range"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time above range"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time in each range"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "readings"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "basal delivered"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "basal scheduled"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "long-acting injections"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "insulin the loop added or removed"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "total insulin"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "total bolus"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "total basal"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "reservoir"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "uploader battery"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "basal rate in data and profile"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "carb ratio in data and profile"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "pump modes"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "profiles"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "activities"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "meter readings from the pump"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose rate of change"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "lows and highs"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "lab HbA1c"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sensor changes"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "site and insulin changes"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "pump events"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "pump connection"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep stages"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep score"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sleep efficiency"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time to fall asleep"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "restless periods"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "heart rate each night"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "blood oxygen each night"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "breathing rate each night"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "heart rate in sleep"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "blood oxygen in sleep"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "breathing rate in sleep"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "motion"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "lean mass"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "alert periods"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "alerts raised"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "device alarms"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "data left out"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "compression lows"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "sensor noise"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "timeline"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "typical day"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "around an event"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "one against another"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "manual mode"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "peak rise"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time to peak"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time back to the start value"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "lowest reading"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "drop"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "time to the lowest reading"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "glucose 2 hours after"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "net insulin"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "carbs for each unit"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days with exercise"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days with illness"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days with a low"
+msgstr ""
+
+#. 0: clock(0); 1: clock(360)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days with a low from {0} to {1}"
+msgstr ""
+
+#. 0: b
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days with {0} of carbs"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "days by total carbs"
+msgstr ""
+
+#. 0: minutesText(after)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "from the event to {0} after"
+msgstr ""
+
+#. 0: anchorPhrase(moment.what)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "All {0}"
+msgstr ""
+
+#~ msgid "{0} {1}"
+#~ msgstr ""
+
+#. 0: beforeText(b.min)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "No carbs in the {0} before"
+msgstr ""
+
+#. 0: beforeText(b.max)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "Carbs in the {0} before"
+msgstr ""
+
+#. 0: minutesText(b.min); 1: minutesText(b.max)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "The last carbs {0} to {1} before"
+msgstr ""
+
+#. 0: rangeLabel(preset.id)
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "the last {0}"
+msgstr ""
+
+#. 0: hours / 24
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "the last {0} days"
+msgstr ""
+
+#. 0: hours
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgid "the last {0} hours"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectorDetailsDialog.svelte
+msgid "Historical sync is not supported for this connector."
+msgstr ""
+
+#: src/lib/components/connectors/HistoryReach.svelte
+msgid "A date range with no start date gets the last # hour of data."
+msgid_plural "A date range with no start date gets the last # hours of data."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/connectors/HistoryReach.svelte
+msgid "A date range with no start date gets the last # day of data."
+msgid_plural "A date range with no start date gets the last # days of data."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/connectors/HistoryReach.svelte
+msgid "A date range with no start date gets the last # month of data."
+msgid_plural "A date range with no start date gets the last # months of data."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/connectors/HistoryReach.svelte
+msgid "A date range with no start date gets all of the history."
+msgstr ""
+
+#. 0: team.name
+#. 0: team.name
+#: src/lib/components/people/AttentionReasons.svelte
+#: src/lib/components/people/AttentionReasons.svelte
+msgid "Team: {0}"
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "This team has the maximum number of flag rules. Delete a rule to add a new rule."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "The flag rules of this team did not load."
+msgstr ""
+
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "This team has no flag rules."
+msgstr ""
+
+#. 0: summary.cannotCheckCount
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "Cannot be checked for {0} of the people this team follows that you can see"
+msgstr ""
+
+#. 0: limit
+#: src/lib/components/people/FlagRulesEditor.svelte
+msgid "This team has {0} rules, the maximum. Delete a rule to add a new rule."
+msgstr ""
+
+#. 0: ruleTeams[0].name
+#: src/lib/components/people/PeopleWall.svelte
+msgid "Flagged by Nocturne's fixed rules and {0}'s rules."
+msgstr ""
+
+#. 0: ruleTeams.length; 1: formatList( ruleTeams.map((team) => team.name ?? "") )
+#: src/lib/components/people/PeopleWall.svelte
+msgid "Flagged by Nocturne's fixed rules and the rules of {0} teams: {1}."
+msgstr ""
+
+#. 0: label; 1: value; 2: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} (team rule: below {2})"
+msgstr ""
+
+#. 0: label; 1: value; 2: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} (team rule: above {2})"
+msgstr ""
+
+#. 0: label; 1: value; 2: period; 3: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} in the last {2} (team rule: below {3})"
+msgstr ""
+
+#. 0: label; 1: value; 2: period; 3: threshold
+#: src/lib/components/people/flag-rule-text.svelte.ts
+msgid "{0}: {1} in the last {2} (team rule: above {3})"
+msgstr ""
+
+#: src/lib/components/teams/TeamFlagRulesSection.svelte
+msgid "The staff of this team see a person who meets one of these rules in Flagged, on the People page and on the wall."
+msgstr ""
+
+#: src/lib/components/teams/TeamFlagRulesSection.svelte
+msgid "You see a person who meets one of these rules in Flagged, on the People page and on the wall. Only a manager can change the rules."
+msgstr ""
+
+#: src/lib/components/teams/TeamFlagRulesSection.svelte
+msgid "Flag rules"
+msgstr ""
+
+#: src/lib/components/alerts/AdvancedSection.svelte
+msgid "The rule counts a glucose reading as missing when Nocturne received it more than this number of minutes ago. This applies to conditions on the glucose value, rate of change, trend, glucose range and time windows. It does not apply to signal loss, data age, predicted glucose or Smart snooze conditions. In a time window, a gap in the readings that is longer than this can leave the condition unknown. <0/>"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Window minutes"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "in"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "The time window ends at the newest reading."
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "The time window ends at the newest reading. The change is the newest reading minus the oldest reading in the window. A fall is a negative number."
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Lowest or highest"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Number or percent"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Reading comparison"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Reading value"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "Number of readings"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "of readings"
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A clear margin on a rate of change or a glucose change cannot be more than the rate or the change."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A reading count condition can compare a number of readings or a percent of readings, not both."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A reading count condition needs a number of readings or a percent of readings, with a comparison and a value."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A number of readings needs a comparison and a whole number, 0 or more."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A percent of readings needs a comparison and a number from 0 to 100."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A reading count condition needs a comparison and a glucose level for each reading."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A time window must be from 5 to 180 minutes."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A condition on a time window needs the window in minutes."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A time window must be a whole number of minutes, from 5 to 180."
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "Glucose change"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "Lowest or highest glucose"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "Reading count"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The change from the oldest to the newest reading in a time window"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The lowest or highest reading in a time window is above or below a level"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The number or percent of readings in a time window that are above or below a level"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "Recent glucose readings"
+msgstr ""
+
+#. 0: formatMinutes(p.window_minutes ?? 0); 1: opSymbol(p.operator); 2: bgDelta(p.value ?? 0); 3: bgLabel()
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose change in {0} {1} {2} {3}"
+msgstr ""
+
+#. 0: minutes; 1: limit
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Highest glucose in {0} {1}"
+msgstr ""
+
+#. 0: minutes; 1: limit
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Lowest glucose in {0} {1}"
+msgstr ""
+
+#. 0: reading; 1: minutes; 2: opSymbol(p.percent?.operator); 3: p.percent?.value ?? 0
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Percent of readings {0} in {1} {2} {3}%"
+msgstr ""
+
+#. 0: reading; 1: minutes; 2: opSymbol(p.count?.operator); 3: p.count?.value ?? 0
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Number of readings {0} in {1} {2} {3}"
+msgstr ""
+
+#. 0: label
+#: src/lib/components/reports/loop-analysis/EventList.svelte
+msgid "In {0}."
+msgstr ""
+
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "# meal with a food record."
+msgid_plural "# meals with a food record."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "# meal with only carbs not included because the food filter cannot apply to it."
+msgid_plural "# meals with only carbs not included because the food filter cannot apply to them."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "# not included because of another event in its window."
+msgid_plural "# not included because of another event in their window."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "# without a glucose reading at the time."
+msgid_plural "# without a glucose reading at the time."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "# not included because the time before it is outside the history that you can see."
+msgid_plural "# not included because the time before them is outside the history that you can see."
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: label
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "{0}: no data."
+msgstr ""
+
+#. 0: label; 1: median; 2: events
+#: src/lib/components/reports/loop-analysis/EventResponseBody.svelte
+msgid "{0}: median {1}, {2}."
+msgstr ""
+
+#. 0: head; 1: range
+#: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
+msgctxt "cohort-anchor-and-times"
+msgid "{0} {1}"
+msgstr ""
+
+#: src/lib/components/reports/loop-analysis/event-labels.svelte.ts
+msgid "# food"
+msgid_plural "# foods"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
+msgid "# reversal"
+msgid_plural "# reversals"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: percent
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
+msgid "{0}% incoherent"
+msgstr ""
+
+#. 0: step
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
+msgid "{0} single-step change"
+msgstr ""
+
+#. 0: d.chainSize
+#: src/lib/components/reports/sensor-integrity/format.svelte.ts
+msgid "part of a {0}-window run"
+msgstr ""
+
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
+msgid "# night"
+msgid_plural "# nights"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: score
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
+msgid "score {0}"
+msgstr ""
+
+#. 0: tir
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
+msgid "TIR {0}%"
+msgstr ""
+
+#: src/lib/components/reports/sleep/SleepWeeklyBreakdown.svelte
+msgid "# low"
+msgid_plural "# lows"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: source; 1: range
+#: src/lib/components/reports/custom/workspace/report.svelte.ts
+msgctxt "table-block-caption"
+msgid "{0} {1}"
+msgstr ""
+
+#. 0: phrase; 1: narrowings
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "moment-in-sentence"
+msgid "{0} {1}"
+msgstr ""
+
+#. 0: anchorHeading(moment.what); 1: narrowings
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "moment-heading"
+msgid "{0} {1}"
+msgstr ""
+
+#. 0: when; 1: axis
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "when-caption"
+msgid "{0}, {1}"
+msgstr ""
+
+#. 0: around; 1: window
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "around-window-caption"
+msgid "{0}, {1}"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Suggested filters"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Show people whose value is"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Add filter"
+msgstr ""
+
+#: src/lib/components/people/FlagRuleForm.svelte
+msgid "Save rule"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Could not save the view. Try again."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Updating the list…"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "This view has an \"In a group\" filter for a group you are no longer in. That filter matches no one."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "This view has a \"Followed through a team\" filter. You follow no one through that team, so that filter matches no one."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "You changed this view. The changes are not saved."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Save view"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Save as new view"
+msgstr ""
+
+#. 0: viewLimit
+#. 0: limit
+#: src/lib/components/people/PeoplePage.svelte
+#: src/lib/components/people/people-views.svelte.ts
+msgid "You have {0} views, the maximum. Delete a view to save a new view."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Still checking # person. The list may grow."
+msgid_plural "Still checking # people. The list may grow."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "No people match"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "Change the search or the filters to see more people."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "<0/> Manage views"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "The view keeps the search, the filters, the sort and the lens. Only you see your views."
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "A view starts from everyone you follow, not only this group. To keep to this group, add the filter \"In a group\"."
+msgstr ""
+
+#: src/lib/components/people/PeopleRoster.svelte
+msgid "Columns"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "A figure of their data"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Age at least"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Age at most"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Therapy type"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Flagged only"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Followed directly"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Followed through a team"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "In a group"
+msgstr ""
+
+#. 0: sentence
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Remove the filter: {0}"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "In the group <0/>"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "The list of figures did not load. The data filters show no values."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Choose a filter"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Filter by"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "The list of figures did not load."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Age in years"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Therapy type, any of"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Your teams did not load."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "You are not in a team."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Choose a team"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "You are not in a group."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Choose a group"
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "Filters combine with AND: the list shows a person only if the person matches all the filters."
+msgstr ""
+
+#. 0: MAX_FILTERS
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "You have {0} filters, the maximum. Remove a filter to add a new filter."
+msgstr ""
+
+#: src/lib/components/people/PeopleFilters.svelte
+msgid "<0/> Add a filter"
+msgstr ""
+
+#: src/lib/components/people/PeopleSearch.svelte
+#: src/lib/components/people/PeopleSearch.svelte
+msgid "Search by name"
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Could not rename the view. Try again."
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Could not move the view. Try again."
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Could not delete the view. Try again."
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Your views"
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Only you see your views. The tabs show them in this order."
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "You have no views."
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Name of the view"
+msgstr ""
+
+#. 0: view.name
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Rename {0}"
+msgstr ""
+
+#. 0: pendingDelete?.name
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Delete the view {0}?"
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "Delete view"
+msgstr ""
+
+#: src/lib/components/people/PeopleViewsManager.svelte
+msgid "The tab of this view goes away. The people in it and their data do not change."
+msgstr ""
+
+#: src/lib/components/people/PeopleTabs.svelte
+msgid "Group gone, no one through team"
+msgstr ""
+
+#: src/lib/components/people/PeopleTabs.svelte
+msgid "Group gone"
+msgstr ""
+
+#: src/lib/components/people/PeopleTabs.svelte
+msgid "No one through team"
+msgstr ""
+
+#: src/lib/components/people/PeopleWall.svelte
+msgid "No people match."
+msgstr ""
+
+#: src/lib/components/people/TabFallback.svelte
+msgid "You have no view with that link. The list shows everyone you follow."
+msgstr ""
+
+#: src/lib/components/people/TabFallback.svelte
+msgid "Your views did not load. The list shows everyone you follow."
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Automated delivery"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Injections"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "A filter by a figure of their data"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Loading the data filter…"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Age is at least # year"
+msgid_plural "Age is at least # years"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Age is at most # year"
+msgid_plural "Age is at most # years"
+msgstr[0] ""
+msgstr[1] ""
+
+#. 0: formatList((filter.therapyTypes ?? []).map(therapyLabel), "disjunction")
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Therapy type: {0}"
+msgstr ""
+
+#. 0: names.teamName
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Followed through {0}"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "Followed through a team that is not one of your teams"
+msgstr ""
+
+#. 0: names.group.name; 1: names.group.teamName
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "In the group {0}, {1}"
+msgstr ""
+
+#. 0: names.group.name
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "In the group {0}"
+msgstr ""
+
+#: src/lib/components/people/people-filter-text.svelte.ts
+msgid "In a group you are no longer in"
+msgstr ""
+
+#: src/lib/components/people/people-views.svelte.ts
+msgid "You have a view with this name. Use a different name."
+msgstr ""
+
+#: src/lib/components/people/people-views.svelte.ts
+msgid "Your views changed. Try again."
 msgstr ""

@@ -27,6 +27,39 @@ public interface ITeamRepository
     /// </summary>
     Task<TeamDetail?> GetAsync(Guid teamId, Guid callerSubjectId, DateTime now, CancellationToken ct);
 
+    /// <summary>
+    /// The groups <paramref name="subjectId"/> is in as staff of a team, while their end has not passed at
+    /// <paramref name="now"/>, by name, ignoring case, then id. Reads on a context pinned to the subject.
+    /// </summary>
+    Task<IReadOnlyList<StaffGroup>> GetGroupsOfStaffAsync(Guid subjectId, DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// The sites in the group whose team's access has not ended at <paramref name="now"/>; null when
+    /// <paramref name="subjectId"/> is not in the group as staff whose end has not passed. Reads on a context
+    /// pinned to the subject.
+    /// </summary>
+    Task<IReadOnlySet<Guid>?> GetPeopleOfStaffGroupAsync(Guid groupId, Guid subjectId, DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// Each site that <see cref="GetPeopleOfStaffGroupAsync"/> lists for one of the groups
+    /// <see cref="GetGroupsOfStaffAsync"/> returns, keyed to the first of those groups, in that order, that holds
+    /// it. Reads on a context pinned to the subject.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, Guid>> GetFirstGroupOfPeopleAsync(Guid subjectId, DateTime now, CancellationToken ct);
+
+    /// <summary>
+    /// The teams <paramref name="subjectId"/> is a member of whose end has not passed at <paramref name="now"/>, by
+    /// name, ignoring case, then id, each with the people the team follows: the sites whose access it has that has
+    /// not ended. Reads on a context pinned to the subject.
+    /// </summary>
+    /// <remarks>
+    /// These are the team's people, not the people the subject follows through the team: a site's block or decline
+    /// of the subject and the groups that narrow the subject are not applied. A team's flag rules apply to the team's
+    /// people for every staff member of the team; whether a staff member sees a person is decided by their own
+    /// access.
+    /// </remarks>
+    Task<IReadOnlyList<TeamAndItsPeople>> GetTeamsAndTheirPeopleAsync(Guid subjectId, DateTime now, CancellationToken ct);
+
     /// <summary>Renames the team and returns the name it had; null when the caller is not a manager of it.</summary>
     Task<string?> RenameAsync(Guid teamId, Guid callerSubjectId, string name, CancellationToken ct);
 

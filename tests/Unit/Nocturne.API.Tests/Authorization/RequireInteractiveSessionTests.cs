@@ -76,6 +76,22 @@ public class RequireInteractiveSessionTests
         { typeof(RecoveryEmailController), nameof(RecoveryEmailController.SetRecoveryEmail) },
         { typeof(RecoveryEmailController), nameof(RecoveryEmailController.DeleteRecoveryEmail) },
 
+        // A person's own flag rules, set from their own sign-in.
+        { typeof(FlagRulesController), nameof(FlagRulesController.GetFlagRules) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.GetFlagRuleFacts) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.CreateFlagRule) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.UpdateFlagRule) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.DeleteFlagRule) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.GetTeamFlagRules) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.CreateTeamFlagRule) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.UpdateTeamFlagRule) },
+        { typeof(FlagRulesController), nameof(FlagRulesController.DeleteTeamFlagRule) },
+        { typeof(PeopleViewsController), nameof(PeopleViewsController.GetPeopleViews) },
+        { typeof(PeopleViewsController), nameof(PeopleViewsController.CreatePeopleView) },
+        { typeof(PeopleViewsController), nameof(PeopleViewsController.UpdatePeopleView) },
+        { typeof(PeopleViewsController), nameof(PeopleViewsController.DeletePeopleView) },
+        { typeof(PeopleViewsController), nameof(PeopleViewsController.ReorderPeopleViews) },
+
         // A team is run by a person, never by a key or a device token.
         { typeof(TeamsController), nameof(TeamsController.GetMyTeams) },
         { typeof(TeamsController), nameof(TeamsController.CreateTeam) },

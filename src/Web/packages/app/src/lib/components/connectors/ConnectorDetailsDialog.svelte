@@ -16,7 +16,7 @@
   import { Badge } from "#lib/components/ui/badge/index.js";
   import { Separator } from "#lib/components/ui/separator/index.js";
   import * as Tooltip from "#lib/components/ui/tooltip/index.js";
-  import { getDataTypeLabel } from "#lib/utils/data-type-labels.js";
+  import { dataTypeLabel } from "#lib/utils/data-type-labels.svelte.js";
   import { triggerConnectorSync } from "#lib/api/generated/services.generated.remote.js";
   import { describeSubmitError } from "#lib/forms/submit-error.js";
   import { canSetUpConnectors } from "#lib/authorization/connector-setup.js";
@@ -39,6 +39,7 @@
   import type { SyncRequestInput } from "@nocturne/api-client/schemas";
   import { formatNumber } from "#lib/utils/formatting.js";
   import ConnectionTime from "./ConnectionTime.svelte";
+  import HistoryReach from "./HistoryReach.svelte";
   import { SkippedRecordsNote } from "#lib/components/shared/index.js";
 
   interface Props {
@@ -236,15 +237,10 @@
               class="rounded-lg border border-info/30 bg-info/10 p-3 text-xs text-info"
             >
               Historical sync is not supported for this connector.
-              {#if selectedConnectorCapabilities.maxHistoricalDays}
-                Recent data only (last {selectedConnectorCapabilities.maxHistoricalDays}
-                days).
-              {/if}
             </div>
-          {:else if selectedConnectorCapabilities.maxHistoricalDays}
+          {:else if selectedConnectorCapabilities.supportsHistoricalSync}
             <div class="text-xs text-muted-foreground">
-              Historical sync limited to the last {selectedConnectorCapabilities.maxHistoricalDays}
-              days.
+              <HistoryReach reach={selectedConnectorCapabilities.historyReach} />
             </div>
           {/if}
         {/if}
@@ -309,7 +305,7 @@
                       </div>
                       {#each Object.entries(selectedConnector.totalItemsBreakdown) as [type, count] (type)}
                         <div class="flex justify-between gap-4 text-xs">
-                          <span>{getDataTypeLabel(type)}</span>
+                          <span>{dataTypeLabel(type)}</span>
                           <span class="font-mono">
                             {formatNumber(count)}
                           </span>
@@ -345,7 +341,7 @@
                       </div>
                       {#each Object.entries(selectedConnector.itemsLast24HoursBreakdown) as [type, count] (type)}
                         <div class="flex justify-between gap-4 text-xs">
-                          <span>{getDataTypeLabel(type)}</span>
+                          <span>{dataTypeLabel(type)}</span>
                           <span class="font-mono">
                             {formatNumber(count)}
                           </span>

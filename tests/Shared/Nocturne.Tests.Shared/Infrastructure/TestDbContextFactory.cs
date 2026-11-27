@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Reflection;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -32,6 +31,26 @@ public static class TestDbContextFactory
         context.Database.EnsureCreated();
         return context;
     }
+
+    /// <summary>
+    /// A factory over the named InMemory database, for a service that opens a context per operation
+    /// and a test that seeds and reads the same store; each context is pinned to <paramref name="tenantId"/>
+    /// (<see cref="Guid.Empty"/> by default, never unpinned).
+    /// </summary>
+    public static TestNocturneDbContextFactory ForInMemoryDatabase(string databaseName, Guid tenantId = default)
+    {
+        var seed = CreateInMemoryContext(databaseName);
+        seed.TenantId = tenantId;
+        return new TestNocturneDbContextFactory(seed);
+    }
+
+    /// <summary>
+    /// A factory handing out a fresh context over <paramref name="options"/> per call, pinned to
+    /// <paramref name="tenantId"/> (<see cref="Guid.Empty"/> by default, never unpinned).
+    /// </summary>
+    public static TestNocturneDbContextFactory ForOptions(
+        DbContextOptions<NocturneDbContext> options, Guid tenantId = default) =>
+        new(new NocturneDbContext(options) { TenantId = tenantId });
 
     /// <summary>
     /// Creates an empty SQLite-backed schema with no tenant seeded; contexts it creates carry
@@ -75,14 +94,14 @@ public sealed class SqliteTestDatabase : IDisposable
 
         Connection = new SqliteConnection("DataSource=:memory:");
         Connection.Open();
-        Connection.CreateFunction<string?, string?, int?>(ArrayPositionFunction, ArrayPosition, isDeterministic: true);
+        SqliteNpgsqlCompat.Define(Connection);
 
         var builder = new DbContextOptionsBuilder<NocturneDbContext>()
             .UseSqlite(Connection)
             .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .AddInterceptors(interceptors)
             .EnableSensitiveDataLogging();
-        SqliteNpgsqlJson.Translate(builder);
+        SqliteNpgsqlCompat.Apply(builder);
         configure?.Invoke(builder);
         Options = builder.Options;
 
@@ -107,29 +126,6 @@ public sealed class SqliteTestDatabase : IDisposable
         seed.SaveChanges();
     }
 
-    /// <summary>
-    /// PostgreSQL's <c>array_position</c> over the JSON array a parameter array is bound as here: the
-    /// one-based position of the first element equal to the value, or null. Elements are compared as text.
-    /// </summary>
-    public const string ArrayPositionFunction = "array_position";
-
-    private static int? ArrayPosition(string? array, string? value)
-    {
-        if (array is null || value is null)
-            return null;
-
-        using var json = JsonDocument.Parse(array);
-        var position = 1;
-        foreach (var element in json.RootElement.EnumerateArray())
-        {
-            if ((element.ValueKind == JsonValueKind.String ? element.GetString() : element.GetRawText()) == value)
-                return position;
-            position++;
-        }
-
-        return null;
-    }
-
     public SqliteConnection Connection { get; }
 
     public DbContextOptions<NocturneDbContext> Options { get; }
@@ -145,7 +141,24 @@ public sealed class SqliteTestDatabase : IDisposable
 
     public NocturneDbContext CreateContext() => CreateContext(TenantId);
 
-    public NocturneDbContext CreateContext(Guid tenantId) => new(Options) { TenantId = tenantId };
+    public NocturneDbContext CreateContext(Guid tenantId) =>
+        new(Options) { TenantId = tenantId, Clock = Clock };
+
+    /// <summary>
+    /// The clock every context this database creates stamps rows from, the system clock unless
+    /// <see cref="WithClock"/> replaced it.
+    /// </summary>
+    public TimeProvider Clock { get; private set; } = TimeProvider.System;
+
+    /// <summary>
+    /// Makes every context created from here on stamp rows from <paramref name="clock"/>, so a service
+    /// on that clock and the stamps it compares read one time.
+    /// </summary>
+    public SqliteTestDatabase WithClock(TimeProvider clock)
+    {
+        Clock = clock;
+        return this;
+    }
 
     /// <summary>
     /// Registers this database the way the request pipeline resolves it: <see cref="ContextFactory"/>

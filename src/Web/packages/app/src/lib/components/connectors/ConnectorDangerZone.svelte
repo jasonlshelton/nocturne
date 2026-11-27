@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatNumber } from "#lib/utils/formatting.js";
+  import { dataTypeCount } from "#lib/utils/data-type-labels.svelte.js";
   import type { ConnectorDataSummary } from "@nocturne/api-client";
   import { deleteConfiguration } from "#lib/api/generated/configurations.generated.remote.js";
   import { deleteConnectorData } from "#lib/api/generated/services.generated.remote.js";
@@ -55,31 +56,6 @@
       page.data.refusedAsDemoSubject
     )
   );
-
-  const recordCountLabels: Record<string, string> = {
-    Glucose: "glucose readings",
-    ManualBG: "manual BG readings",
-    Calibrations: "calibrations",
-    Boluses: "boluses",
-    CarbIntake: "carb intakes",
-    BGChecks: "BG checks",
-    BolusCalculations: "bolus calculations",
-    Notes: "notes",
-    DeviceEvents: "device events",
-    StateSpans: "state spans",
-    DeviceStatus: "device status records",
-    TempBasals: "temp basals",
-    BasalInjections: "basal injections",
-    HeartRate: "heart rate readings",
-    Steps: "step counts",
-    BodyWeight: "body weights",
-    Sleep: "sleep sessions",
-    Profiles: "profile records",
-  };
-
-  function formatCountLabel(key: string): string {
-    return recordCountLabels[key] ?? key;
-  }
 
   let showDeleteConfigDialog = $state(false);
   let deleteConfigResult = $state<{
@@ -201,8 +177,7 @@
                 {#each Object.entries(dataSummary.recordCounts ?? {}) as [key, count], i (key)}
                   <span class="flex items-center gap-1">
                     {#if i === 0}<Database class="h-3 w-3" />{/if}
-                    {formatNumber(count)}
-                    {formatCountLabel(key)}
+                    {dataTypeCount(key, count)}
                   </span>
                 {/each}
               </div>
@@ -306,7 +281,7 @@
           <p class="text-sm font-medium mb-2">Data to be deleted:</p>
           <ul class="text-sm text-muted-foreground space-y-1">
             {#each Object.entries(dataSummary.recordCounts ?? {}) as [key, count] (key)}
-              <li>{formatNumber(count)} {formatCountLabel(key)}</li>
+              <li>{dataTypeCount(key, count)}</li>
             {/each}
           </ul>
           <p class="text-sm font-medium mt-2">
@@ -332,7 +307,7 @@
               class="text-sm text-success mt-2 space-y-1"
             >
               {#each Object.entries(deleteDataResult.deletedCounts ?? {}) as [key, count] (key)}
-                <li>{formatNumber(count)} {formatCountLabel(key)}</li>
+                <li>{dataTypeCount(key, count)}</li>
               {/each}
             </ul>
             <p

@@ -8,12 +8,11 @@ using Moq;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Alerts.Providers;
 using Nocturne.API.Services.Realtime;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.ClientDevices;
-using Nocturne.API.Tests.TestDoubles;
+using Nocturne.Tests.Shared.Logging;
 using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Tests.Shared.Infrastructure;
@@ -33,18 +32,8 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
     private static readonly Guid Tenant = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
     private static readonly Guid Member = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext()
-        {
-            var ctx = TestDbContextFactory.CreateInMemoryContext(dbName);
-            ctx.TenantId = Tenant;
-            return ctx;
-        }
-    }
-
     private readonly IDbContextFactory<NocturneDbContext> _factory =
-        new SharedInMemoryFactory($"delivery_outcome_{Guid.NewGuid()}");
+        TestDbContextFactory.ForInMemoryDatabase($"delivery_outcome_{Guid.NewGuid()}", Tenant);
     private readonly Mock<ISignalRBroadcastService> _broadcast = new();
     private readonly Mock<IInAppNotificationService> _inApp = new();
     private readonly List<ServiceProvider> _providers = [];
@@ -68,15 +57,12 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);
 
-        return new AlertDeliveryService(
+        return DeliveryServices.Build(
             _factory.AsNocturneFactory(),
-            new TenantMembershipRepository(_factory.AsNocturneFactory(), AccountLinkRoutes.Off),
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
-            _broadcast.Object,
-            Mock.Of<IEngineAlarmRelay>(),
-            provider,
-            logger ?? NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            SettableTenantAccessor.Resolved(Tenant),
+            providers: provider,
+            broadcast: _broadcast.Object,
+            logger: logger);
     }
 
     private async Task<Guid> SeedInstanceAsync()
@@ -213,6 +199,79 @@ public class AlertDeliveryServiceOutcomeTests : IDisposable
         _inApp.Verify(n => n.CreateNotificationAsync(
             Member.ToString(),
             InAppProvider.NotificationType,
+            It.IsAny<string>(),
+            It.IsAny<NotificationCategory?>(),
+            It.IsAny<NotificationUrgency?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<List<NotificationActionDto>?>(),
+            It.IsAny<ResolutionConditions?>(),
+            It.IsAny<Dictionary<string, object>?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private void ACompanionSendHitsADefect(Exception defect) =>
+        _broadcast.Setup(b => b.BroadcastDeviceActionAsync(It.IsAny<DeviceActionIntent>())).ThrowsAsync(defect);
+
+    private async Task<AlertRuleChannelSnapshot[]> ADefectiveChannelThenAMemberAsync()
+    {
+        await AddMemberAsync(Tenant, Member);
+        return [Channel(ChannelType.DeviceAction, DeviceKinds.Companion), Channel(ChannelType.InApp, Member.ToString())];
+    }
+
+    [Theory]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(NullReferenceException))]
+    public async Task A_defect_sending_one_channel_is_logged_at_error_recorded_on_its_row_and_the_next_channel_still_goes(Type defect)
+    {
+        var failure = (Exception)Activator.CreateInstance(defect)!;
+        ACompanionSendHitsADefect(failure);
+        var channels = await ADefectiveChannelThenAMemberAsync();
+        var logger = new ListLogger<AlertDeliveryService>();
+        var instanceId = await SeedInstanceAsync();
+
+        await CreateService(logger).DispatchAsync(instanceId, channels, Payload(instanceId), CancellationToken.None);
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var rows = await db.AlertDeliveries.IgnoreQueryFilters().ToDictionaryAsync(d => d.ChannelType);
+        rows[ChannelType.DeviceAction].Should().Match<AlertDeliveryEntity>(d => d.Status == "failed" && d.LastError == failure.Message);
+        rows[ChannelType.InApp].Status.Should().Be("delivered");
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception == failure);
+    }
+
+    [Fact]
+    public async Task A_defect_sending_one_channel_of_a_test_fire_is_logged_at_error_and_the_next_channel_still_goes()
+    {
+        var failure = new NullReferenceException();
+        ACompanionSendHitsADefect(failure);
+        var channels = await ADefectiveChannelThenAMemberAsync();
+        var logger = new ListLogger<AlertDeliveryService>();
+
+        await CreateService(logger).TestFireAsync(Guid.NewGuid(), channels, Payload(Guid.Empty), CancellationToken.None);
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var rows = await db.AlertDeliveries.IgnoreQueryFilters().ToDictionaryAsync(d => d.ChannelType);
+        rows[ChannelType.DeviceAction].Status.Should().Be("failed");
+        rows[ChannelType.InApp].Status.Should().Be("delivered");
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception == failure);
+    }
+
+    [Fact]
+    public async Task A_defect_sending_one_channel_of_a_dry_run_is_logged_at_error_and_the_next_channel_still_goes()
+    {
+        var failure = new NullReferenceException();
+        ACompanionSendHitsADefect(failure);
+        var channels = await ADefectiveChannelThenAMemberAsync();
+        var logger = new ListLogger<AlertDeliveryService>();
+
+        await CreateService(logger).TestFireDryRunAsync(channels, Payload(Guid.Empty), CancellationToken.None);
+
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception == failure);
+        _inApp.Verify(n => n.CreateNotificationAsync(
+            Member.ToString(),
+            It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<NotificationCategory?>(),
             It.IsAny<NotificationUrgency?>(),

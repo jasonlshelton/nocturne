@@ -123,6 +123,27 @@ public class NightscoutConnectorServiceCatchUpBoundsTests
     }
 
     /// <summary>
+    /// An open request, the tenant's "Sync now", is the scheduled catch-up: glucose resumes from its
+    /// newest stored reading rather than crawling the whole source.
+    /// </summary>
+    [Fact]
+    public async Task SyncDataAsync_AnOpenRequestForGlucose_ResumesFromTheNewestStoredReading()
+    {
+        var latest = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var handler = new CollectingHandler();
+        var service = NewService(handler, watermarks: null, latestGlucose: latest);
+
+        await service.SyncDataAsync(
+            new SyncRequest { DataTypes = [SyncDataType.Glucose] }, NewConfig(), CancellationToken.None);
+
+        var lowerBound = handler.RequestsTo("entries").Select(r => r.Split("find[date][$gte]=")).Where(p => p.Length > 1)
+            .Select(p => long.Parse(p[1].Split('&')[0])).Should().ContainSingle().Subject;
+        lowerBound.Should().BeInRange(
+            (latest - TimeSpan.FromDays(1)).ToMills(), latest.ToMills(),
+            "the crawl starts at the newest stored reading, not at the start of the source");
+    }
+
+    /// <summary>
     /// An explicit range is answered as asked, resume points and all: it is the shape a manual
     /// re-import of one window sends, and a bound widened back to the watermark re-crawls
     /// everything between — the whole source, for a family that has stored nothing.
@@ -276,6 +297,40 @@ public class NightscoutConnectorServiceCatchUpBoundsTests
         handler.CrawlOf("devicestatus").Should().Contain(LowerBound(askedFrom));
     }
 
+    public static TheoryData<string, SyncDataType, string> NoLowerBoundFamilies()
+    {
+        var data = new TheoryData<string, SyncDataType, string>();
+        foreach (var shape in new[] { NoLowerBound.Reset, NoLowerBound.RangedSync })
+        foreach (var (type, collection) in new[]
+                 {
+                     (SyncDataType.Glucose, "entries"), (SyncDataType.Boluses, "treatments"),
+                     (SyncDataType.DeviceStatus, "devicestatus"), (SyncDataType.Activity, "activity"),
+                 })
+            data.Add(shape, type, collection);
+        return data;
+    }
+
+    /// <summary>
+    /// A window naming no lower bound reads the whole source: past every family's resume point and
+    /// past the history limit, which bounds only an open-ended sync.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(NoLowerBoundFamilies))]
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_CrawlsTheWholeSource(
+        string shape, SyncDataType dataType, string collection)
+    {
+        var handler = new CollectingHandler();
+        var service = NewService(handler, watermarks: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        await service.SyncDataAsync(
+            NoLowerBound.Request(shape, DateTime.UtcNow, [dataType]),
+            NewConfig(historyDays: 30),
+            CancellationToken.None);
+
+        handler.RequestsTo(collection).Where(r => r.Contains("$lte", StringComparison.Ordinal))
+            .Should().NotBeEmpty().And.OnlyContain(r => !r.Contains("$gte", StringComparison.Ordinal));
+    }
+
     private static DateTime LowerBoundOf(string request)
     {
         const string marker = "find[created_at][$gte]=";
@@ -389,8 +444,10 @@ public class NightscoutConnectorServiceCatchUpBoundsTests
         /// The crawl request for <paramref name="collection"/>, as the source reads it. A treatments
         /// catch-up follows it with a re-read of the recent window, which is not the crawl.
         /// </summary>
-        internal string CrawlOf(string collection) =>
-            _requests.First(u => u.Contains($"/api/v1/{collection}.json", StringComparison.Ordinal));
+        internal string CrawlOf(string collection) => RequestsTo(collection).First();
+
+        internal IEnumerable<string> RequestsTo(string collection) =>
+            _requests.Where(u => u.Contains($"/api/v1/{collection}.json", StringComparison.Ordinal));
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)

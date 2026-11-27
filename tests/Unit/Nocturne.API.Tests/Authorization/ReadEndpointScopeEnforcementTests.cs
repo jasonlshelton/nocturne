@@ -112,6 +112,10 @@ public class ReadEndpointScopeEnforcementTests
             ["ChatIdentityController.GetPending"] = V4Reason.CapabilityToken,
             ["BackupSignInPromptController.GetBackupSignInPrompt"] = V4Reason.OwnData,
             ["RecoveryEmailController.GetRecoveryEmail"] = V4Reason.OwnDataInteractiveOnly,
+            ["FlagRulesController.GetFlagRules"] = V4Reason.OwnDataInteractiveOnly,
+            ["FlagRulesController.GetFlagRuleFacts"] = V4Reason.OwnDataInteractiveOnly,
+            ["FlagRulesController.GetTeamFlagRules"] = V4Reason.OwnDataInteractiveOnly,
+            ["PeopleViewsController.GetPeopleViews"] = V4Reason.OwnDataInteractiveOnly,
             ["RecoveryEmailPromptController.GetRecoveryEmailPrompt"] = V4Reason.OwnData,
             ["MembershipRequestController.GetMyRequest"] = V4Reason.OwnData,
             ["MyPermissionsController.GetMyPermissions"] = V4Reason.OwnData,
@@ -121,9 +125,8 @@ public class ReadEndpointScopeEnforcementTests
             ["TeamsController.GetInviteInfo"] = V4Reason.CapabilityToken,
             ["TeamsController.GetStaffInviteInfo"] = V4Reason.CapabilityToken,
             ["TeamsController.GetAccessLinkInfo"] = V4Reason.CapabilityToken,
-            ["MyTenantsController.GetOverview"] = V4Reason.ActionChecksAccess,
-            ["MyTenantsController.GetReview"] = V4Reason.ActionChecksAccess,
             ["MyTenantsController.GetPerson"] = V4Reason.ActionChecksAccess,
+            ["MyTenantsController.GetGroups"] = V4Reason.OwnData,
             ["OverviewAdmissionController.GetOverviewAdmission"] = V4Reason.ActionChecksAccess,
             ["PlatformController.GetTenants"] = V4Reason.OwnData,
             ["FoodsController.GetFavorites"] = V4Reason.OwnData,
@@ -159,8 +162,10 @@ public class ReadEndpointScopeEnforcementTests
 
             ["DatabaseCapacityController.Get"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["JobLedgerController.List"] = V4ScopeGuardExemptions.PlatformAdminRole,
+            ["PageCountsAdminController.GetPageCounts"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["TenantCreationInviteAdminController.GetOverview"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["PlatformPolicyController.GetPolicy"] = V4ScopeGuardExemptions.PlatformAdminRole,
+            ["TenantUsageController.Get"] = V4ScopeGuardExemptions.PlatformAdminRole,
 
             ["WebhookSettingsController.GetWebhookSettings"] = V4Reason.NotStored,
 

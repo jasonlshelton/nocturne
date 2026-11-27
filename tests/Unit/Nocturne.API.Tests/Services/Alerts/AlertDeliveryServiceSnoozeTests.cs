@@ -34,17 +34,7 @@ public class AlertDeliveryServiceSnoozeTests : IDisposable
 {
     private static readonly Guid Tenant = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext()
-        {
-            var ctx = TestDbContextFactory.CreateInMemoryContext(dbName);
-            ctx.TenantId = Tenant;
-            return ctx;
-        }
-    }
-
-    private readonly IDbContextFactory<NocturneDbContext> _factory = new SharedInMemoryFactory($"delivery_snooze_{Guid.NewGuid()}");
+    private readonly IDbContextFactory<NocturneDbContext> _factory = TestDbContextFactory.ForInMemoryDatabase($"delivery_snooze_{Guid.NewGuid()}", Tenant);
     private readonly Mock<ISignalRBroadcastService> _broadcast = new();
     private readonly Mock<IEngineAlarmRelay> _alarmRelay = new();
     private readonly Mock<IInAppNotificationService> _inApp = new();
@@ -65,7 +55,7 @@ public class AlertDeliveryServiceSnoozeTests : IDisposable
         services.AddSingleton(_httpClientFactory.Object);
         services.AddSingleton(_haHub.Object);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-        services.AddSingleton(Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant));
+        services.AddSingleton<ITenantAccessor>(SettableTenantAccessor.Resolved(Tenant));
         services.AddSingleton<IMemoryCache>(_ => new MemoryCache(new MemoryCacheOptions()));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddSingleton<InAppProvider>();
@@ -78,15 +68,12 @@ public class AlertDeliveryServiceSnoozeTests : IDisposable
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);
 
-        return new AlertDeliveryService(
+        return DeliveryServices.Build(
             _factory.AsNocturneFactory(),
-            new TenantMembershipRepository(_factory.AsNocturneFactory(), AccountLinkRoutes.Off),
-            Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant),
-            _broadcast.Object,
-            _alarmRelay.Object,
-            provider,
-            NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            SettableTenantAccessor.Resolved(Tenant),
+            providers: provider,
+            broadcast: _broadcast.Object,
+            alarmRelay: _alarmRelay.Object);
     }
 
     private async Task<Guid> SeedInstanceAsync(DateTime? snoozedUntil)

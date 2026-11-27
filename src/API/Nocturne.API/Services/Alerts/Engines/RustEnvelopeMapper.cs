@@ -176,6 +176,9 @@ internal static class RustEnvelopeMapper
                 ? new WireApsDetermination(
                     Utc(determination.At)!.Value, determination.EventualMgdl, determination.CarbsRequiredGrams)
                 : null,
+            GlucoseSeries = ctx.GlucoseSeries.Count == 0
+                ? null
+                : ctx.GlucoseSeries.Select(p => new WireSeriesPoint(Utc(p.At)!.Value, p.Mgdl)).ToList(),
             ActiveAlerts = ctx.ActiveAlerts.Count == 0
                 ? null
                 : ctx.ActiveAlerts
@@ -237,7 +240,11 @@ internal static class RustEnvelopeMapper
                     .ToList(),
             SleepSessionActive = ctx.SleepSessionActive,
             SensorState = ctx.SensorState is { } sensor
-                ? new WireSensorState(WireEnum(sensor.State), Utc(sensor.Since), Utc(sensor.Until))
+                ? new WireSensorState(
+                    WireEnum(sensor.State), Utc(sensor.Since), Utc(sensor.Until),
+                    sensor.OnceLapsed is { } lapsed
+                        ? new WireLapsedSensorState(WireEnum(lapsed.State), Utc(lapsed.Since))
+                        : null)
                 : null,
         };
 
@@ -372,6 +379,7 @@ internal static class RustEnvelopeMapper
         [JsonPropertyName("predictions")] public List<WirePrediction>? Predictions { get; init; }
         [JsonPropertyName("prediction_curves")] public Dictionary<string, List<WirePrediction>>? PredictionCurves { get; init; }
         [JsonPropertyName("aps_determination")] public WireApsDetermination? ApsDetermination { get; init; }
+        [JsonPropertyName("glucose_series")] public List<WireSeriesPoint>? GlucoseSeries { get; init; }
         [JsonPropertyName("active_alerts")] public List<WireActiveAlert>? ActiveAlerts { get; init; }
         [JsonPropertyName("last_aps_cycle_at")] public DateTime? LastApsCycleAt { get; init; }
         [JsonPropertyName("last_aps_enacted_at")] public DateTime? LastApsEnactedAt { get; init; }
@@ -406,12 +414,21 @@ internal static class RustEnvelopeMapper
     private sealed record WireSensorState(
         [property: JsonPropertyName("state")] string State,
         [property: JsonPropertyName("since")] DateTime? Since,
-        [property: JsonPropertyName("until")] DateTime? Until);
+        [property: JsonPropertyName("until")] DateTime? Until,
+        [property: JsonPropertyName("once_lapsed")] WireLapsedSensorState? OnceLapsed);
+
+    private sealed record WireLapsedSensorState(
+        [property: JsonPropertyName("state")] string State,
+        [property: JsonPropertyName("since")] DateTime? Since);
 
     private sealed record WireApsDetermination(
         [property: JsonPropertyName("at")] DateTime At,
         [property: JsonPropertyName("eventual_mgdl")] decimal? EventualMgdl,
         [property: JsonPropertyName("carbs_required_grams")] decimal? CarbsRequiredGrams);
+
+    private sealed record WireSeriesPoint(
+        [property: JsonPropertyName("at")] DateTime At,
+        [property: JsonPropertyName("mgdl")] decimal Mgdl);
 
     private sealed record WirePrediction(
         [property: JsonPropertyName("offset_minutes")] int OffsetMinutes,

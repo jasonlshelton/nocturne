@@ -61,6 +61,14 @@ pub struct PredictedPoint {
     pub mgdl: Decimal,
 }
 
+/// A reading of the newest reading's stream with a glucose value: when it
+/// was taken, and its value in mg/dL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeriesPoint {
+    pub at: DateTime<Utc>,
+    pub mgdl: Decimal,
+}
+
 /// The newest determination of the user's loop (an oref or Loop cycle) at or
 /// before `now`: when it was made, and what it said.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +109,9 @@ pub struct SensorContext {
     /// none of is absent.
     pub prediction_curves: BTreeMap<ForecastCurve, Vec<PredictedPoint>>,
     pub aps_determination: Option<ApsDetermination>,
+    /// The recent readings a windowed leaf reads (engine-semantics.md §4,
+    /// recent readings), in any order; empty when the host sent none.
+    pub glucose_series: Vec<SeriesPoint>,
     pub active_alerts: HashMap<Uuid, ActiveAlertSnapshot>,
     pub last_aps_cycle_at: Option<DateTime<Utc>>,
     pub last_aps_enacted_at: Option<DateTime<Utc>>,
@@ -158,6 +169,17 @@ pub struct SensorStateSnapshot {
     /// is at or before `now` is no state (engine-semantics.md §4). `None`
     /// counts for as long as the host sends it, as `no_value` does.
     pub until: Option<DateTime<Utc>>,
+    /// The state that holds once `until` has passed, which the host sends when
+    /// the context carries one it knows beyond the report: a reading with no
+    /// value is `no_value` from the start it has had (engine-semantics.md §4).
+    pub once_lapsed: Option<LapsedSensorState>,
+}
+
+/// The sensor's state once a reported one has lapsed. It does not lapse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LapsedSensorState {
+    pub state: Option<SensorState>,
+    pub since: Option<DateTime<Utc>>,
 }
 
 impl SensorContext {
@@ -173,13 +195,22 @@ impl SensorContext {
         }
     }
 
-    /// The sensor's state at `now`: none when it is absent or its report has
-    /// lapsed. The engine owns the lapse, so a host that evaluates late
-    /// cannot keep a state its own bound has ended.
+    /// The sensor's state at `now`: none when it is absent, or its report has
+    /// lapsed and the host named no state to fall back to. The engine owns the
+    /// lapse, so a host that evaluates late cannot keep a state its own bound
+    /// has ended.
     #[must_use]
     pub fn sensor_state_at(&self, now: DateTime<Utc>) -> Option<SensorStateSnapshot> {
-        self.sensor_state
-            .filter(|s| s.until.is_none_or(|until| until > now))
+        let reported = self.sensor_state?;
+        if reported.until.is_none_or(|until| until > now) {
+            return Some(reported);
+        }
+        reported.once_lapsed.map(|lapsed| SensorStateSnapshot {
+            state: lapsed.state,
+            since: lapsed.since,
+            until: None,
+            once_lapsed: None,
+        })
     }
 
     /// When the sensor's state lapses, if that is after `now`.
@@ -253,6 +284,8 @@ struct WireContext {
     #[serde(default)]
     aps_determination: Option<WireApsDetermination>,
     #[serde(default)]
+    glucose_series: Option<Vec<WireSeriesPoint>>,
+    #[serde(default)]
     active_alerts: Option<Vec<WireAlert>>,
     #[serde(default)]
     last_aps_cycle_at: Option<DateTime<Utc>>,
@@ -319,12 +352,39 @@ struct WireSensorState {
     since: Option<DateTime<Utc>>,
     #[serde(default)]
     until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    once_lapsed: Option<WireLapsedSensorState>,
+}
+
+#[derive(Deserialize)]
+struct WireLapsedSensorState {
+    state: String,
+    #[serde(default)]
+    since: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
 struct WirePrediction {
     offset_minutes: i32,
     mgdl: Number,
+}
+
+#[derive(Deserialize)]
+struct WireSeriesPoint {
+    at: DateTime<Utc>,
+    mgdl: Number,
+}
+
+fn series(wire: Option<Vec<WireSeriesPoint>>) -> Result<Vec<SeriesPoint>, String> {
+    wire.unwrap_or_default()
+        .iter()
+        .map(|p| {
+            Ok(SeriesPoint {
+                at: check_timestamp(p.at, "glucose_series.at")?,
+                mgdl: dec(&p.mgdl, "glucose_series.mgdl")?,
+            })
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -539,6 +599,7 @@ impl SensorContext {
             last_sensor_start_at: opt_ts(w.last_sensor_start_at, "last_sensor_start_at")?,
             predictions: points(&w.predictions.unwrap_or_default())?,
             prediction_curves: named_curves(w.prediction_curves)?,
+            glucose_series: series(w.glucose_series)?,
             aps_determination: w
                 .aps_determination
                 .map(|d| {
@@ -617,6 +678,15 @@ impl SensorContext {
                         state: SensorState::from_name(&s.state),
                         since: opt_ts(s.since, "sensor_state.since")?,
                         until: opt_ts(s.until, "sensor_state.until")?,
+                        once_lapsed: s
+                            .once_lapsed
+                            .map(|l| {
+                                Ok::<_, String>(LapsedSensorState {
+                                    state: SensorState::from_name(&l.state),
+                                    since: opt_ts(l.since, "sensor_state.once_lapsed.since")?,
+                                })
+                            })
+                            .transpose()?,
                     })
                 })
                 .transpose()?,
@@ -720,6 +790,7 @@ mod tests {
                 state: Some(SensorState::WarmingUp),
                 since: Some(at.parse().expect("an instant")),
                 until: None,
+                once_lapsed: None,
             })
         );
         assert_eq!(
@@ -728,7 +799,46 @@ mod tests {
                 state: None,
                 since: None,
                 until: None,
+                once_lapsed: None,
             })
         );
+    }
+
+    /// A reported state counts until its `until`; from then the state the host
+    /// named to fall back to holds, from the start it sent, and with none named
+    /// the sensor has no state.
+    #[test]
+    fn a_lapsed_state_falls_back_to_the_state_the_host_named() {
+        let since: DateTime<Utc> = "2026-01-05T11:50:00Z".parse().expect("an instant");
+        let until: DateTime<Utc> = "2026-01-05T12:11:00Z".parse().expect("an instant");
+        let ctx = read(json!({
+            "sensor_state": {
+                "state": "error",
+                "until": until,
+                "once_lapsed": { "state": "no_value", "since": since }
+            }
+        }));
+        let before = until - chrono::TimeDelta::seconds(1);
+
+        assert_eq!(
+            ctx.sensor_state_at(before).map(|s| s.state),
+            Some(Some(SensorState::Error))
+        );
+        for now in [until, until + chrono::TimeDelta::minutes(30)] {
+            assert_eq!(
+                ctx.sensor_state_at(now),
+                Some(SensorStateSnapshot {
+                    state: Some(SensorState::NoValue),
+                    since: Some(since),
+                    until: None,
+                    once_lapsed: None,
+                })
+            );
+        }
+        assert_eq!(ctx.sensor_state_lapses(before), Some(until));
+        assert_eq!(ctx.sensor_state_lapses(until), None);
+
+        let unnamed = read(json!({ "sensor_state": { "state": "error", "until": until } }));
+        assert_eq!(unnamed.sensor_state_at(until), None);
     }
 }

@@ -14,6 +14,7 @@ using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Tests.Shared.Infrastructure;
 using Npgsql;
 using Xunit;
+using Nocturne.Tests.Shared.Logging;
 
 namespace Nocturne.Infrastructure.Data.Tests.Repositories;
 
@@ -226,6 +227,28 @@ public class MembershipReasonLapsePostgresTests(MembershipReasonLapsePostgresTes
         (await LapseAsync(site, bad.Member)).Should().Be(CampEnds);
     }
 
+    [Theory]
+    [InlineData("""{"not":"a list"}""")]
+    [InlineData("[1,2]")]
+    [InlineData("[[\"a\"]]")]
+    [InlineData("\"text\"")]
+    [InlineData("5")]
+    [InlineData("null")]
+    public async Task A_direct_permissions_value_that_is_not_a_list_of_strings_fails_the_recompute_as_a_membership_failure(string malformed)
+    {
+        var site = await SiteAsync("malformed");
+        var bad = await LapsingAsync(site, "malformed-bad");
+        await NpgsqlTestCommands.ExecuteAsync(site.Migrator, $$"""
+            UPDATE tenant_member_reasons SET direct_permissions = '{{malformed}}'::jsonb
+             WHERE tenant_member_id = '{{bad.Member}}' AND kind = 'direct';
+            """);
+
+        var act = () => MembershipReasons.RecomputeAsync(site.Factory, site.Tenant, bad.Subject, After, Ct);
+
+        var failure = (await act.Should().ThrowAsync<Exception>()).Which;
+        MembershipReasons.IsMembershipFailure(failure).Should().BeTrue();
+    }
+
     [Fact]
     public async Task Recompute_is_idempotent()
     {
@@ -341,7 +364,7 @@ public class MembershipReasonLapsePostgresTests(MembershipReasonLapsePostgresTes
         var site = await SiteAsync("startup", (fresh.AppConnectionString, fresh.MigratorConnectionString));
         var lapsing = await LapsingAsync(site, "startup-member");
 
-        var logger = new RecordingLogger();
+        var logger = new ListLogger();
         await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(site.Migrator, After, TeamWrites.Apply(After), logger, Ct);
 
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information && e.Message.Contains("Recomputed 1 memberships"));
@@ -361,7 +384,7 @@ public class MembershipReasonLapsePostgresTests(MembershipReasonLapsePostgresTes
         var member = (await site.Members.FindMemberAsync(site.Tenant, subject, Ct))!.Id;
         await AddReasonAsync(site, member, site.CaretakerRole, endsAt: null);
 
-        var logger = new RecordingLogger();
+        var logger = new ListLogger();
         await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(site.Migrator, T0, TeamWrites.Apply(T0), logger, Ct);
 
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(member.ToString()));
@@ -442,7 +465,7 @@ public class MembershipReasonLapsePostgresTests(MembershipReasonLapsePostgresTes
         (await site.Members.SetLimitTo24HoursAsync(site.Tenant, written, false, T0, Ct)).Should().BeTrue();
         (await LapseAsync(site, written)).Should().BeNull();
 
-        var logger = new RecordingLogger();
+        var logger = new ListLogger();
         await DatabaseInitializationExtensions.ReconcileMembershipReasonsAsync(site.Migrator, T0, TeamWrites.Apply(T0), logger, Ct);
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(started.ToString()));
         (await LapseAsync(site, started)).Should().BeNull();
@@ -512,18 +535,5 @@ public class MembershipReasonLapsePostgresTests(MembershipReasonLapsePostgresTes
         (await site.Members.AddMemberAsync(new NewTenantMember(site.Tenant, subject, [site.ViewerRole]) { How = MembershipJoinHow.Direct, By = null }, Ct))
             .Should().BeTrue();
         return (await site.Members.FindMemberAsync(site.Tenant, subject, Ct))!.Id;
-    }
-
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

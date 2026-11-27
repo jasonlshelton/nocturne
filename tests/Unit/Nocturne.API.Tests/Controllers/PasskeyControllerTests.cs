@@ -30,21 +30,12 @@ using Nocturne.Tests.Shared.Infrastructure;
 using Xunit;
 
 using Nocturne.Infrastructure.Data.Repositories;
+using Npgsql;
 
 namespace Nocturne.API.Tests.Controllers;
 
 public class PasskeyControllerTests : IDisposable
 {
-    /// <summary>
-    /// Hands out contexts over the test's own SQLite connection, so the real
-    /// <see cref="TenantMemberService"/> sees the seeded rows.
-    /// </summary>
-    private sealed class SharedSqliteFactory(DbContextOptions<NocturneDbContext> options)
-        : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext() => new(options);
-    }
-
     private readonly SqliteTestDatabase _db;
     private readonly NocturneDbContext _dbContext;
     private readonly Mock<IPasskeyService> _passkeyService;
@@ -92,9 +83,9 @@ public class PasskeyControllerTests : IDisposable
         // Login codes are tenant-scoped, so the session's contexts are on the request's tenant, as
         // the request pipeline hands them out.
         _recoverySession = new RecoverySession(
-            new SharedSqliteFactory(_db.Options).AsNocturneFactory(_tenantId), _loginCodes,
+            _db.ContextFactory.AsNocturneFactory(_tenantId), _loginCodes,
             new TenantMemberService(
-                new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(_tenantId), AccountLinkRoutes.Off), TimeProvider.System),
+                new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(_tenantId), AccountLinkRoutes.Off), TimeProvider.System),
             oidcOptions, NullLogger<RecoverySession>.Instance);
 
         _tenantService = new Mock<ITenantService>();
@@ -103,7 +94,7 @@ public class PasskeyControllerTests : IDisposable
             _passkeyService.Object,
             new SignInCompletion(
                 _totpService.Object,
-                new TenantMemberService(new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System),
+                new TenantMemberService(new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System),
                 _sessionService.Object,
                 _subjectService.Object,
                 _auditService.Object),
@@ -116,11 +107,11 @@ public class PasskeyControllerTests : IDisposable
             _tenantService.Object,
             // The real service, not a mock: the enrolment probe's cross-tenant reach is the
             // property under test, and a mock would assert the mock.
-            new TenantMemberService(new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System),
-            new SubjectRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off),
-            new TenantRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory()),
-            new TenantMembershipRepository((new SharedSqliteFactory(_db.Options)).AsNocturneFactory(), AccountLinkRoutes.Off),
-            (new SharedSqliteFactory(_db.Options)).AsNocturneFactory(),
+            new TenantMemberService(new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System),
+            new SubjectRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off),
+            new TenantRepository(_db.ContextFactory.AsNocturneFactory()),
+            new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off),
+            _db.ContextFactory.AsNocturneFactory(),
             oidcOptions,
             _logger.Object,
             TimeProvider.System);
@@ -807,7 +798,7 @@ public class PasskeyControllerTests : IDisposable
     }
 
     private MemberRecoveryEligibility Eligibility() =>
-        new(new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System), Delivery(configured: false));
+        new(new TenantMemberService(new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System), Delivery(configured: false));
 
     private Task<ActionResult<RecoveryModeRedeemResponse>> RedeemAsync(
         Mock<ILoginCodeService> loginCodes, string code = "issued-code") =>
@@ -968,7 +959,7 @@ public class PasskeyControllerTests : IDisposable
 
         // Login codes are tenant-scoped, so this needs contexts on the request's tenant, as the
         // request pipeline hands out.
-        var tenantContexts = new SharedSqliteFactory(_db.Options).AsNocturneFactory(_tenantId);
+        var tenantContexts = _db.ContextFactory.AsNocturneFactory(_tenantId);
         var controller = new PasskeyController(
             _passkeyService.Object,
             new SignInCompletion(_totpService.Object, new TenantMemberService(new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off), TimeProvider.System),
@@ -1007,7 +998,7 @@ public class PasskeyControllerTests : IDisposable
         var failingContexts = new Mock<INocturneDbContextFactory>();
         failingContexts
             .Setup(f => f.CreateAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+            .ThrowsAsync(new NpgsqlException("database unavailable"));
         var controller = new PasskeyController(
             _passkeyService.Object,
             new SignInCompletion(_totpService.Object, new TenantMemberService(new TenantMembershipRepository(failingContexts.Object, AccountLinkRoutes.Off), TimeProvider.System),
@@ -1029,6 +1020,87 @@ public class PasskeyControllerTests : IDisposable
         });
 
         result.Result.Should().BeOfType<OkObjectResult>("the passkey was saved");
+    }
+
+    [Fact]
+    public async Task RegisterComplete_WhenSignedInAndVoidingRecoveryCodesHitsADefect_ReachesTheErrorHandlerNotARefusal()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        Authenticate(subjectId);
+        StubRegistration(subjectId);
+        var controller = ControllerWhereVoidingFails(new InvalidOperationException("defect"));
+
+        var act = () => controller.RegisterComplete(RegisterCompleteRequest());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("defect");
+    }
+
+    [Fact]
+    public async Task RegisterComplete_WhenARecoverySessionEnrolsAndVoidingRecoveryCodesHitsADefect_ReachesTheErrorHandlerNotARefusal()
+    {
+        var subjectId = await SeedMemberAsync("owner", withPasskey: true);
+        await GiveRecoverySessionAsync(subjectId);
+        StubRegistration(subjectId);
+        var controller = ControllerWhereVoidingFails(new InvalidOperationException("defect"));
+
+        var act = () => controller.RegisterComplete(RegisterCompleteRequest());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("defect");
+    }
+
+    private static PasskeyRegisterCompleteRequest RegisterCompleteRequest() => new()
+    {
+        AttestationResponseJson = "{}",
+        ChallengeToken = "token",
+    };
+
+    private PasskeyController ControllerWhereVoidingFails(Exception failure)
+    {
+        var tenantContexts = _db.ContextFactory.AsNocturneFactory(_tenantId);
+        var recoverySession = new RecoverySession(
+            tenantContexts, new VoidFailsLoginCodes(_loginCodes, failure),
+            new TenantMemberService(new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off), TimeProvider.System),
+            Options.Create(FixtureCookieOptions()), NullLogger<RecoverySession>.Instance);
+        return new PasskeyController(
+            _passkeyService.Object,
+            new SignInCompletion(_totpService.Object, new TenantMemberService(new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off), TimeProvider.System),
+                _sessionService.Object, _subjectService.Object, new Mock<IAuthAuditService>().Object),
+            _trustedDevices.Object, _recoveryCodeService.Object, recoverySession,
+            _subjectService.Object, new Mock<IAuthAuditService>().Object,
+            _tenantAccessor, _tenantService.Object, new TenantMemberService(new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off), TimeProvider.System),
+            new SubjectRepository(tenantContexts, AccountLinkRoutes.Off), new TenantRepository(tenantContexts), new TenantMembershipRepository(tenantContexts, AccountLinkRoutes.Off),
+            tenantContexts, Options.Create(new OidcOptions()), new Mock<ILogger<PasskeyController>>().Object, TimeProvider.System)
+        {
+            ControllerContext = _controller.ControllerContext,
+        };
+    }
+
+    private sealed class VoidFailsLoginCodes(ILoginCodeService inner, Exception failure) : ILoginCodeService
+    {
+        public Task<LoginCode> IssueAsync(
+            NocturneDbContext dbContext, Guid subjectId, LoginCodePurpose purpose, string? ipAddress, string? userAgent,
+            AuthAuditActor actor, CancellationToken ct = default) =>
+            inner.IssueAsync(dbContext, subjectId, purpose, ipAddress, userAgent, actor, ct);
+
+        public Task<LoginCode?> IssueEmailedAsync(
+            NocturneDbContext dbContext, Guid subjectId, LoginCodePurpose purpose, string email, string? ipAddress,
+            string? userAgent, AuthAuditActor actor, CancellationToken ct = default) =>
+            inner.IssueEmailedAsync(dbContext, subjectId, purpose, email, ipAddress, userAgent, actor, ct);
+
+        public Task<RedeemedLoginCode?> FindLiveAsync(
+            NocturneDbContext dbContext, string code, IReadOnlyCollection<LoginCodePurpose> purposes,
+            Func<RedeemedLoginCode, CancellationToken, Task<bool>>? admits = null, CancellationToken ct = default) =>
+            inner.FindLiveAsync(dbContext, code, purposes, admits, ct);
+
+        public Task<RedeemedLoginCode?> RedeemAsync(
+            NocturneDbContext dbContext, string code, IReadOnlyCollection<LoginCodePurpose> purposes,
+            Func<RedeemedLoginCode, CancellationToken, Task<bool>>? admits,
+            Func<RedeemedLoginCode, CancellationToken, Task>? withSpend, string? ipAddress, string? userAgent,
+            CancellationToken ct = default) =>
+            inner.RedeemAsync(dbContext, code, purposes, admits, withSpend, ipAddress, userAgent, ct);
+
+        public Task VoidRecoveryCodesAsync(NocturneDbContext dbContext, Guid subjectId, CancellationToken ct = default) =>
+            Task.FromException(failure);
     }
 
     private async Task SeedMembershipAsync(Guid subjectId, Guid tenantId)
@@ -1470,7 +1542,7 @@ public class PasskeyControllerTests : IDisposable
             .Success.Should().BeTrue();
 
         (await _dbContext.Subjects.AsNoTracking().SingleAsync(s => s.Id == requestorId)).IsActive.Should().BeTrue();
-        (await new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System)
+        (await new TenantMemberService(new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System)
             .IsMemberAsync(requestorId, _tenantId)).Should().BeTrue();
     }
 
@@ -1497,7 +1569,7 @@ public class PasskeyControllerTests : IDisposable
         var owner = await SeedOwnerAsync("owner");
         var ownerRole = (await _dbContext.TenantMemberRoles.AsNoTracking().FirstAsync()).TenantRoleId;
         var requestorId = await RequestAccessAsync("Sam Smith", "I am the school nurse");
-        var members = new TenantMemberService(new TenantMembershipRepository(new SharedSqliteFactory(_db.Options).AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System);
+        var members = new TenantMemberService(new TenantMembershipRepository(_db.ContextFactory.AsNocturneFactory(), AccountLinkRoutes.Off), TimeProvider.System);
         (await members.IsMemberAsync(requestorId, _tenantId)).Should().BeFalse();
 
         var request = (await MembershipRequests().GetPendingRequestsAsync(_tenantId)).Should().ContainSingle().Which;
@@ -2203,7 +2275,7 @@ public class PasskeyControllerTests : IDisposable
     /// <summary>The service owners decide requests through, over this test's database.</summary>
     private MembershipRequestService MembershipRequests()
     {
-        var contexts = new SharedSqliteFactory(_db.Options).AsNocturneFactory();
+        var contexts = _db.ContextFactory.AsNocturneFactory();
         return new MembershipRequestService(
             new TenantRepository(contexts),
             new TenantMembershipRepository(contexts, AccountLinkRoutes.Off),

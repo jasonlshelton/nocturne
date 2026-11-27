@@ -1,12 +1,12 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
-using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Nocturne.API.Controllers.V4.Base;
 using Nocturne.API.Controllers.V4.Treatments;
 using Nocturne.API.Models.Requests.V4;
+using Nocturne.API.Services.Caching;
+using Nocturne.API.Tests.Controllers.V4.Base;
 using Nocturne.API.Validators.V4;
 using Nocturne.Core.Contracts.Devices;
 using Nocturne.Core.Contracts.V4;
@@ -41,17 +41,6 @@ public class TempBasalControllerTests
             .ReturnsAsync((TempBasal m, WriteOrigin _, CancellationToken _) => m);
         _repo.Setup(r => r.UpdateAsync(It.IsAny<Guid>(), It.IsAny<TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid _, TempBasal m, WriteOrigin _, CancellationToken _) => m);
-    }
-
-    private static readonly IServiceProvider Validators = BuildValidatorProvider();
-
-    private static IServiceProvider BuildValidatorProvider()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddMvcCore();
-        services.AddValidatorsFromAssemblyContaining<CreateTempBasalRequestValidator>();
-        return services.BuildServiceProvider();
     }
 
     private static CreateTempBasalRequest Request(
@@ -205,14 +194,61 @@ public class TempBasalControllerTests
     }
 
     [Fact]
+    public async Task CreateBulk_RecordsTheRowsItMovesAndTheSpansItWritesOrTruncates()
+    {
+        var footprint = TenantCacheWriteFootprint.Open(_controller.HttpContext);
+        var storedBefore = T0.UtcDateTime.AddDays(-30);
+        var truncatedStart = T0.UtcDateTime.AddMinutes(-10);
+        _repo.Setup(r => r.GetUpsertTargetTimestampsAsync(It.IsAny<IReadOnlyCollection<TempBasal>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([storedBefore]);
+        _repo.Setup(r => r.GetActiveAtAsync(T0.UtcDateTime.AddMinutes(5), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TempBasal { Id = Guid.NewGuid(), StartTimestamp = truncatedStart, Rate = 1.0 });
+
+        await _controller.CreateBulk(
+            [Request(isCancel: true, timestamp: T0.AddMinutes(5)), Request(timestamp: T0)], CancellationToken.None);
+
+        footprint.Timestamps.Should().Equal(storedBefore, T0.UtcDateTime, truncatedStart);
+    }
+
+    [Fact]
+    public async Task CreateBulk_RunsTheBeforeAndAfterHooksTheBaseGivesEveryBulk()
+    {
+        var controller = new HookedTempBasalController(_repo.Object, _stamper.Object)
+        {
+            ControllerContext = _controller.ControllerContext,
+        };
+        _repo.Setup(r => r.GetActiveAtAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TempBasal { Id = Guid.NewGuid(), StartTimestamp = T0.UtcDateTime.AddMinutes(-10) });
+        CreateTempBasalRequest[] payload = [Request(timestamp: T0), Request(isCancel: true, timestamp: T0.AddMinutes(5))];
+
+        await controller.CreateBulk(payload, CancellationToken.None);
+
+        controller.BeforeBulkItems.Should().Be(2, "a cancel is mapped with the rest");
+        controller.AfterCreateCalls.Should().Be(2, "the span and the truncated span are both written records");
+
+        controller.RejectBeforeBulk = true;
+        _repo.Invocations.Clear();
+
+        var result = await controller.CreateBulk(payload, CancellationToken.None);
+
+        ((ObjectResult)result.Result!).StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        _repo.Verify(r => r.CreateAsync(It.IsAny<TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(r => r.UpdateAsync(It.IsAny<Guid>(), It.IsAny<TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateBulk_RejectsSyncIdentifierWithoutDataSource()
     {
         var request = Request();
         request.DataSource = null;
+        RegisteredValidators.On(_controller);
 
         var result = await _controller.CreateBulk([request], CancellationToken.None);
 
-        ((ObjectResult)result.Result!).StatusCode.Should().Be(400);
+        var objectResult = result.Result.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(400);
+        objectResult.Value.Should().BeOfType<ProblemDetails>().Which.Detail
+            .Should().Be("Temp basal at index 0 is invalid: DataSource: DataSource is required when SyncIdentifier is supplied.");
         _repo.Verify(r => r.CreateAsync(It.IsAny<TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -290,10 +326,7 @@ public class TempBasalControllerTests
     [InlineData(1.0, -5.0, "DurationMinutes: DurationMinutes must be >= 0")]
     public async Task CreateBulk_RejectsANegativeRateOrDurationWithoutWriting(double rate, double duration, string message)
     {
-        _controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext { RequestServices = Validators },
-        };
+        RegisteredValidators.On(_controller);
 
         var result = await _controller.CreateBulk([Request(rate: rate, durationMinutes: duration)], CancellationToken.None);
 
@@ -454,15 +487,11 @@ public class TempBasalControllerTests
     }
 
     [Fact]
-    public async Task Update_NoTimestamp_ReturnsBadRequestWithoutWriting()
+    public void UpdateValidator_RejectsAMissingTimestamp()
     {
-        var id = Guid.NewGuid();
-        _repo.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(new TempBasal { Id = id, StartTimestamp = T0.UtcDateTime });
+        var result = new UpdateTempBasalRequestValidator().Validate(new UpdateTempBasalRequest());
 
-        var result = await _controller.Update(id, new UpdateTempBasalRequest(), CancellationToken.None);
-
-        ((ObjectResult)result.Result!).StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        _repo.Verify(r => r.UpdateAsync(It.IsAny<Guid>(), It.IsAny<TempBasal>(), It.IsAny<WriteOrigin>(), It.IsAny<CancellationToken>()), Times.Never);
+        result.Errors.Should().ContainSingle().Which.ErrorMessage.Should().Be("Timestamp is required");
     }
 
     [Fact]
@@ -601,4 +630,28 @@ public class TempBasalControllerTests
 
     private void VerifyFetched(int limit, int offset) =>
         ListOf(_repo).Verify(r => r.GetAsync(null, null, null, null, limit, offset, true, It.IsAny<CancellationToken>()), Times.Once);
+
+    private sealed class HookedTempBasalController(ITempBasalRepository repo, IPatientDeviceStamper stamper)
+        : TempBasalController(repo, stamper)
+    {
+        public bool RejectBeforeBulk { get; set; }
+
+        public int BeforeBulkItems { get; private set; }
+
+        public int AfterCreateCalls { get; private set; }
+
+        protected override Task<ObjectResult?> OnBeforeBulkCreateAsync(
+            IReadOnlyList<TempBasal> models, IReadOnlyList<CreateTempBasalRequest> requests, CancellationToken ct)
+        {
+            BeforeBulkItems = models.Count;
+            return Task.FromResult<ObjectResult?>(
+                RejectBeforeBulk ? Problem(detail: "rejected", statusCode: 400, title: "Bad Request") : null);
+        }
+
+        protected override Task<TempBasal> OnAfterCreateAsync(TempBasal created, CancellationToken ct)
+        {
+            AfterCreateCalls++;
+            return Task.FromResult(created);
+        }
+    }
 }

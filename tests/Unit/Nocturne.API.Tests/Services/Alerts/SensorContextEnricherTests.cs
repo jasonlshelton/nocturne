@@ -58,6 +58,7 @@ public class SensorContextEnricherTests
     private readonly Mock<IPredictionService> _predictionService = new();
     private readonly Mock<IReservoirEstimationService> _reservoirEstimator = new();
     private readonly Mock<ISensorStateReportRepository> _sensorStates = new();
+    private readonly Mock<ICanonicalGlucoseService> _canonicalGlucose = new();
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 3, 22, 12, 0, 0, TimeSpan.Zero));
     private readonly Guid _tenantId = Guid.NewGuid();
 
@@ -80,8 +81,7 @@ public class SensorContextEnricherTests
     private void NewestIs(ReadingSource source, ArrivedSensorStateReport newest) =>
         _sensorStates
             .Setup(r => r.GetNewestAsync(
-                source.Device!, source.DataSource!, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(),
-                It.IsAny<CancellationToken>()))
+                source.Device!, source.DataSource!, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(newest);
 
     /// <summary>
@@ -120,8 +120,7 @@ public class SensorContextEnricherTests
         enriched.SensorState.Should().BeNull();
         _sensorStates.Verify(
             r => r.GetNewestAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -151,13 +150,12 @@ public class SensorContextEnricherTests
 
         _sensorStates.Verify(
             r => r.GetNewestAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
     [Fact]
-    public async Task The_read_asks_for_the_reports_of_the_readings_device_and_source_within_the_bound()
+    public async Task The_read_asks_for_the_reports_of_the_readings_device_and_source_that_arrived_within_the_age_limit()
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
 
@@ -165,8 +163,7 @@ public class SensorContextEnricherTests
 
         _sensorStates.Verify(
             r => r.GetNewestAsync(
-                "CareLink MiniMed 780G", "carelink-connector", now - SensorStateReports.MaxAge, now, AlertReadings.Bound(now),
-                It.IsAny<CancellationToken>()),
+                "CareLink MiniMed 780G", "carelink-connector", now - SensorStateReports.MaxAge, now, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -211,8 +208,7 @@ public class SensorContextEnricherTests
         replay.SensorState.Should().NotBeNull().And.Be(live.SensorState);
         _sensorStates.Verify(
             r => r.GetNewestAsync(
-                CareLink.Device!, CareLink.DataSource!, at - SensorStateReports.MaxAge, at, AlertReadings.Bound(at),
-                It.IsAny<CancellationToken>()),
+                CareLink.Device!, CareLink.DataSource!, at - SensorStateReports.MaxAge, at, It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
 
@@ -232,6 +228,35 @@ public class SensorContextEnricherTests
         var enriched = await BuildEnricher().EnrichAsync(noValue, [rule], CancellationToken.None);
 
         enriched.SensorState!.State.Should().Be(expected);
+    }
+
+    [NativeFact]
+    public async Task A_reported_state_that_lapses_over_a_reading_with_no_value_reads_no_value_from_its_original_start()
+    {
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        NewestIs(CareLink, Newest(4, SensorState.Error));
+        var noValue = ReadingOf(CareLink) with
+        {
+            LatestValue = null,
+            TrendRate = null,
+            SensorState = new SensorStateSnapshot(SensorState.NoValue, now.AddMinutes(-10)),
+        };
+        var noValueFor15 = MakeRule(AlertConditionType.SensorState, """{"states":["no_value"],"for_minutes":15}""");
+        var error = MakeRule(AlertConditionType.SensorState, """{"states":["error"]}""");
+        var enriched = await BuildEnricher().EnrichAsync(noValue, [noValueFor15, error], CancellationToken.None);
+
+        enriched.SensorState.Should().Be(new SensorStateSnapshot(
+            SensorState.Error, Since: null, now.AddMinutes(7), OnceLapsed: new LapsedSensorState(SensorState.NoValue, now.AddMinutes(-10))));
+        var whileReported = await EvaluatedAsync(error, enriched);
+        _timeProvider.Advance(TimeSpan.FromMinutes(8));
+        var noValueRead = await EvaluatedAsync(noValueFor15, enriched);
+        var errorRead = await EvaluatedAsync(error, enriched);
+
+        whileReported.ConditionMet.Should().BeTrue("the report counts for 7 more minutes");
+        noValueRead.ConditionUnknown.Should().BeFalse("the lapsed report falls back to the reading's no_value");
+        noValueRead.ConditionMet.Should().BeTrue("no_value began 10 minutes before the report was read, so it has lasted 18");
+        errorRead.ConditionUnknown.Should().BeFalse();
+        errorRead.ConditionMet.Should().BeFalse("the lapsed error is no longer the sensor's state");
     }
 
     [Fact]
@@ -1509,6 +1534,7 @@ public class SensorContextEnricherTests
             _trackerRepository.Object,
             _reservoirEstimator.Object,
             _sensorStates.Object,
+            _canonicalGlucose.Object,
             Options.Create(new AlertEvaluationOptions()));
         var enricher2 = new SensorContextEnricher(
             deps2,
@@ -2249,6 +2275,159 @@ public class SensorContextEnricherTests
             It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    private static readonly AlertRuleSnapshot FallRule =
+        MakeRule(AlertConditionType.GlucoseChange, """{"operator":"<=","value":-30,"window_minutes":15}""");
+
+    private DateTime Now => _timeProvider.GetUtcNow().UtcDateTime;
+
+    private static SensorGlucose Glucose(DateTime at, double mgdl, ReadingSource source) => new()
+    {
+        Id = Guid.NewGuid(),
+        Timestamp = at,
+        Mgdl = mgdl,
+        DataSource = source.DataSource,
+        Device = source.Device,
+        PatientDeviceId = source.PatientDeviceId,
+    };
+
+    private static readonly Guid NewestId = Guid.NewGuid();
+
+    /// <summary>The readings the stream's series read returns, whatever it is asked for.</summary>
+    private void StreamSeriesHolds(params SensorGlucose[] readings) =>
+        _canonicalGlucose
+            .Setup(c => c.GetStreamSeriesAsync(It.IsAny<SensorGlucose>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(readings.OrderBy(r => r.Timestamp).Select(r => (r, (Guid?)null)).ToList());
+
+    private Task<SensorContext> EnrichSeries(ReadingSource source) =>
+        BuildEnricher().EnrichAsync(ReadingOf(source with { ReadingId = NewestId }), [FallRule], CancellationToken.None);
+
+    private void VerifyNoSeriesRead() =>
+        _canonicalGlucose.Verify(
+            c => c.GetStreamSeriesAsync(It.IsAny<SensorGlucose>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+    /// <summary>
+    /// The series is the newest reading's stream and uploader: another uploader of the same device,
+    /// another device of the same uploader and a reading with no value are left out, and the newest
+    /// reading itself is in it (docs/alerts/engine-semantics.md §4, recent readings).
+    /// </summary>
+    [Fact]
+    public async Task The_series_holds_the_valued_readings_of_the_newest_readings_stream_and_uploader()
+    {
+        var xdrip = CareLink with { DataSource = "xdrip" };
+        var otherPump = CareLink with { Device = "CareLink MiniMed 770G" };
+        StreamSeriesHolds(
+            Glucose(Now, 110, CareLink),
+            Glucose(Now.AddMinutes(-3), 112, xdrip),
+            Glucose(Now.AddMinutes(-4), 114, otherPump),
+            Glucose(Now.AddMinutes(-5), 120, CareLink),
+            Glucose(Now.AddMinutes(-10), 0, CareLink),
+            Glucose(Now.AddMinutes(-15), 140, CareLink));
+
+        var enriched = await EnrichSeries(CareLink);
+
+        enriched.GlucoseSeries.Should().Equal(
+            new GlucoseSeriesPoint(Now.AddMinutes(-15), 140m),
+            new GlucoseSeriesPoint(Now.AddMinutes(-5), 120m),
+            new GlucoseSeriesPoint(Now, 110m));
+    }
+
+    /// <summary>A registered device is its own stream, whatever device name its readings carry.</summary>
+    [Fact]
+    public async Task A_registered_devices_series_is_its_own_readings_from_its_uploader()
+    {
+        var device = Guid.NewGuid();
+        var registered = CareLink with { PatientDeviceId = device };
+        StreamSeriesHolds(
+            Glucose(Now, 110, registered),
+            Glucose(Now.AddMinutes(-5), 120, registered with { Device = "renamed" }),
+            Glucose(Now.AddMinutes(-6), 121, registered with { DataSource = "xdrip" }),
+            Glucose(Now.AddMinutes(-7), 122, CareLink),
+            Glucose(Now.AddMinutes(-8), 123, CareLink with { PatientDeviceId = Guid.NewGuid() }));
+
+        var enriched = await EnrichSeries(registered);
+
+        enriched.GlucoseSeries.Should().Equal(
+            new GlucoseSeriesPoint(Now.AddMinutes(-5), 120m),
+            new GlucoseSeriesPoint(Now, 110m));
+    }
+
+    /// <summary>
+    /// The stream's read is asked for the newest reading, whose own duplicate copies it leaves out,
+    /// over the 180 minutes before it, the longest window. A reading dated outside that range is not
+    /// in the series.
+    /// </summary>
+    [Fact]
+    public async Task The_series_runs_from_180_minutes_before_the_newest_reading_to_it()
+    {
+        var newestAt = Now.AddMinutes(-2);
+        StreamSeriesHolds(
+            Glucose(Now.AddMinutes(10), 90, CareLink),
+            Glucose(newestAt, 110, CareLink),
+            Glucose(newestAt.AddMinutes(-180), 150, CareLink),
+            Glucose(newestAt.AddMinutes(-180).AddTicks(-1), 151, CareLink));
+
+        var enriched = await BuildEnricher().EnrichAsync(
+            ReadingOf(CareLink with { ReadingId = NewestId }) with { LatestTimestamp = newestAt },
+            [FallRule], CancellationToken.None);
+
+        enriched.GlucoseSeries.Should().Equal(
+            new GlucoseSeriesPoint(newestAt.AddMinutes(-180), 150m),
+            new GlucoseSeriesPoint(newestAt, 110m));
+        _canonicalGlucose.Verify(
+            c => c.GetStreamSeriesAsync(
+                It.Is<SensorGlucose>(r => r.Id == NewestId && r.Timestamp == newestAt
+                    && r.DataSource == CareLink.DataSource && r.Device == CareLink.Device && r.PatientDeviceId == null),
+                newestAt.AddMinutes(-180), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Replay selects each tick's series from the readings it walks, by the same rule, so the
+    /// enricher reads none as of a tick and keeps the one the tick carries: no reading stored after
+    /// the tick reaches it.
+    /// </summary>
+    [Fact]
+    public async Task A_replay_tick_keeps_its_own_series_and_reads_none()
+    {
+        var tick = Now.AddHours(-3);
+        IReadOnlyList<GlucoseSeriesPoint> walked = [new(tick.AddMinutes(-5), 130m), new(tick, 120m)];
+
+        var enriched = await BuildEnricher().EnrichAsOfAsync(
+            ReadingOf(CareLink with { ReadingId = NewestId }) with { LatestTimestamp = tick, GlucoseSeries = walked },
+            [FallRule], tick, CancellationToken.None);
+
+        enriched.GlucoseSeries.Should().Equal(walked);
+        VerifyNoSeriesRead();
+    }
+
+    [Fact]
+    public async Task A_rule_that_reads_no_series_does_not_fetch_one()
+    {
+        var enriched = await BuildEnricher().EnrichAsync(
+            ReadingOf(CareLink with { ReadingId = NewestId }), [LowRule()], CancellationToken.None);
+
+        enriched.GlucoseSeries.Should().BeEmpty();
+        VerifyNoSeriesRead();
+    }
+
+    /// <summary>
+    /// A context that does not name its newest reading has no stream to read, nor a duplicate group
+    /// to leave out.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_context_that_does_not_name_its_newest_reading_reads_no_series(bool withSource)
+    {
+        var context = withSource ? ReadingOf(CareLink) : BaseContext();
+
+        var enriched = await BuildEnricher().EnrichAsync(context, [FallRule], CancellationToken.None);
+
+        enriched.GlucoseSeries.Should().BeEmpty();
+        VerifyNoSeriesRead();
+    }
+
     private static string TryResolve(string ianaId, string windowsId)
     {
         try { TimeZoneInfo.FindSystemTimeZoneById(ianaId); return ianaId; }
@@ -2293,6 +2472,7 @@ public class SensorContextEnricherTests
             _trackerRepository.Object,
             _reservoirEstimator.Object,
             _sensorStates.Object,
+            _canonicalGlucose.Object,
             Options.Create(options ?? new AlertEvaluationOptions()));
 
         return new SensorContextEnricher(

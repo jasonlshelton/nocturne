@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Nocturne.API.Services.Alerts;
 using Nocturne.API.Services.Realtime;
-using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Core.Models.ClientDevices;
@@ -27,28 +26,18 @@ public class AlertDeliveryServiceTestFireTests
 {
     private static readonly Guid Tenant = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
-    private sealed class SharedInMemoryFactory(string dbName) : IDbContextFactory<NocturneDbContext>
-    {
-        public NocturneDbContext CreateDbContext() =>
-            TestDbContextFactory.CreateInMemoryContext(dbName);
-    }
-
     private static (AlertDeliveryService service, IDbContextFactory<NocturneDbContext> factory) CreateService(
         IEngineAlarmRelay? alarmRelay = null)
     {
-        var factory = new SharedInMemoryFactory($"test_fire_{Guid.NewGuid()}");
-        var tenantAccessor = Mock.Of<ITenantAccessor>(a => a.TenantId == Tenant);
+        var factory = TestDbContextFactory.ForInMemoryDatabase($"test_fire_{Guid.NewGuid()}");
+        var tenantAccessor = SettableTenantAccessor.Resolved(Tenant);
         // Empty provider: every channel provider resolves to null, so dispatch is a no-op.
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var service = new AlertDeliveryService(
+        var service = DeliveryServices.Build(
             factory.AsNocturneFactory(),
-            new TenantMembershipRepository(factory.AsNocturneFactory(), AccountLinkRoutes.Off),
             tenantAccessor,
-            Mock.Of<ISignalRBroadcastService>(),
-            alarmRelay ?? Mock.Of<IEngineAlarmRelay>(),
-            serviceProvider,
-            NullLogger<AlertDeliveryService>.Instance,
-            TimeProvider.System);
+            providers: serviceProvider,
+            alarmRelay: alarmRelay);
         return (service, factory);
     }
 

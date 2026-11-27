@@ -42,10 +42,12 @@ internal sealed class DeviceStatusDataset : IReportDataset
 
     private static readonly IReadOnlyList<ReportField> TileFields =
     [
-        new("reservoir", "Reservoir", ReportFieldKind.Number, "U", "The latest reservoir in the range."),
-        new("pumpBattery", "Pump battery", ReportFieldKind.Percent, "%", "The latest pump battery in the range."),
-        new("uploaderBattery", "Uploader battery", ReportFieldKind.Percent, "%", "The latest uploader battery in the range."),
-        new("sensorAgeHours", "Sensor age now", ReportFieldKind.Number, "h", "Hours since the latest sensor start or change, now."),
+        new("reservoir", "Reservoir", ReportFieldKind.Number, "U", "The latest reservoir in the range.") { FlagFact = ReportFlagFact.Live },
+        new("pumpBattery", "Pump battery", ReportFieldKind.Percent, "%", "The latest pump battery in the range.") { FlagFact = ReportFlagFact.Live },
+        new("uploaderBattery", "Uploader battery", ReportFieldKind.Percent, "%", "The latest uploader battery in the range.")
+            { FlagFact = ReportFlagFact.Live },
+        new("sensorAgeHours", "Sensor age now", ReportFieldKind.Number, "h", "Hours since the latest sensor start or change, now.")
+            { FlagFact = ReportFlagFact.Live },
     ];
 
     public IReadOnlyList<ReportField> Fields { get; } = [.. SeriesFields, TileFields[^1]];
@@ -102,10 +104,8 @@ internal sealed class DeviceStatusDataset : IReportDataset
         {
             rows =
             [
-                new Dictionary<string, object?>
+                new Dictionary<string, object?>(PumpTiles(latestPump))
                 {
-                    ["reservoir"] = latestPump?.Reservoir is { } r ? ScaledRounding.Round(r, 1) : null,
-                    ["pumpBattery"] = latestPump?.BatteryPercent,
                     ["uploaderBattery"] = latestUploader?.Battery,
                     ["sensorAgeHours"] = sensor?.Age,
                 },
@@ -150,6 +150,32 @@ internal sealed class DeviceStatusDataset : IReportDataset
             Resolution = new ReportResolution(1, interval, sourceRows, rows.Count, rows.Count < sourceRows),
         };
     }
+
+    /// <summary>The stat tiles' fields a pump snapshot holds.</summary>
+    internal static readonly IReadOnlySet<string> PumpFields = new HashSet<string>(StringComparer.Ordinal) { "reservoir", "pumpBattery" };
+
+    /// <summary>
+    /// The stat tiles' <see cref="PumpFields"/> for a range from <paramref name="from"/> to <paramref name="now"/>, from
+    /// the newest pump snapshot read with no range, or null when that snapshot cannot say what the tiles hold: it is
+    /// dated after <paramref name="now"/>, or it holds neither figure, so an older one in the range may. The People
+    /// overview reads that snapshot for each person, so it judges these facts on its own read.
+    /// </summary>
+    internal static Dictionary<string, object?>? PumpRowOf(PumpSnapshot? newest, DateTimeOffset from, DateTimeOffset now, ReportReadLog readLog)
+    {
+        if (newest is null || newest.Timestamp < from.UtcDateTime)
+            return PumpTiles(null);
+        if (newest.Timestamp > now.UtcDateTime || (newest.Reservoir is null && newest.BatteryPercent is null))
+            return null;
+
+        readLog.Record("device_status", 1);
+        return PumpTiles(newest);
+    }
+
+    private static Dictionary<string, object?> PumpTiles(PumpSnapshot? latest) => new()
+    {
+        ["reservoir"] = latest?.Reservoir is { } r ? ScaledRounding.Round(r, 1) : null,
+        ["pumpBattery"] = latest?.BatteryPercent,
+    };
 
     /// <summary>The first snapshot in each slot of <paramref name="intervalMinutes"/>: real reports, none averaged.</summary>
     internal static IEnumerable<T> Thin<T>(IReadOnlyList<T> snapshots, Func<T, long> mills, long fromMills, int intervalMinutes)

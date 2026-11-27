@@ -5,6 +5,7 @@ using Nocturne.Core.Contracts.Glucose;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
+using Nocturne.Infrastructure.Data;
 using Nocturne.Infrastructure.Data.Services;
 using Nocturne.Infrastructure.Data.Entities;
 using Nocturne.Infrastructure.Data.Extensions;
@@ -130,18 +131,19 @@ internal sealed class AlertSnoozeService(
             TrendRate = trend.Rate,
             TrendBucket = trend.Bucket,
             LastReadingAt = latest?.Timestamp,
+            LatestSource = fresh is null ? null : ReadingSource.Of(fresh),
         };
 
         var rule = AlertRuleMapper.ToSnapshot(ruleEntity);
 
-        // The enricher is only consulted for the active DND scopes. If it fails the alert is
-        // delivered: missing a still-standing alert is the worse error.
+        // The enricher is only consulted for the active DND scopes. If the store cannot be read the
+        // alert is delivered: missing a still-standing alert is the worse error.
         var context = baseContext;
         try
         {
             context = await contextEnricher.EnrichAsync(baseContext, [rule], ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex) when (StoreFailure.Is(ex))
         {
             logger.LogError(ex,
                 "Failed to enrich context for snooze resume of instance {InstanceId}; delivering without DND check",
