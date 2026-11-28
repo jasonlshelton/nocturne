@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Nocturne.API.Reports.Derived;
+using Nocturne.Core.Models;
 
 namespace Nocturne.API.Reports;
 
@@ -35,7 +36,7 @@ internal sealed partial class ReportSpecValidator
 
     internal static string ReadKey(
         IReportDataset dataset, ReportDatasetParameters parameters, ReportRange range, ReportPanelKind kind, string? x, ReportReadShape shape) =>
-        $"{parameters.DatasetName}|{JsonSerializer.Serialize(parameters, parameters.GetType(), KeyOptions)}|{JsonSerializer.Serialize(range, KeyOptions)}|{ReportWire.Name(kind)}|{x}"
+        $"{parameters.DatasetName}|{JsonSerializer.Serialize(parameters, parameters.GetType(), KeyOptions)}|{JsonSerializer.Serialize(range, KeyOptions)}|{EnumWireNames<ReportPanelKind>.Of(kind)}|{x}"
         + (dataset.ReadVariant(shape) is { } variant ? $"|{variant}" : "");
 
     /// <summary>One dataset read a layer makes: for the layer itself, or for one of its sources.</summary>
@@ -192,9 +193,9 @@ internal sealed partial class ReportSpecValidator
 
         ReportPanelKind? kind = null;
         if (!panel.TryGetProperty("kind", out var k) || k.ValueKind != JsonValueKind.String)
-            Error($"{at}.kind", $"Missing. Send one of: {ReportWire.List(Enum.GetValues<ReportPanelKind>())}.");
-        else if (ReportWire.Parse<ReportPanelKind>(k.GetString()) is not { } parsed)
-            Error($"{at}.kind", $"'{Shorten(k.GetString()!)}' is not a kind of panel. Send one of: {ReportWire.List(Enum.GetValues<ReportPanelKind>())}.");
+            Error($"{at}.kind", $"Missing. Send one of: {EnumWireNames<ReportPanelKind>.Join(Enum.GetValues<ReportPanelKind>())}.");
+        else if (EnumWireNames<ReportPanelKind>.Parse(k.GetString()) is not { } parsed)
+            Error($"{at}.kind", $"'{Shorten(k.GetString()!)}' is not a kind of panel. Send one of: {EnumWireNames<ReportPanelKind>.Join(Enum.GetValues<ReportPanelKind>())}.");
         else
             kind = parsed;
 
@@ -579,12 +580,12 @@ internal sealed partial class ReportSpecValidator
         ReportMark? mark = marks[0];
         if (layer.TryGetProperty("mark", out var m) && m.ValueKind != JsonValueKind.Null)
         {
-            mark = m.ValueKind == JsonValueKind.String ? ReportWire.Parse<ReportMark>(m.GetString()) : null;
+            mark = m.ValueKind == JsonValueKind.String ? EnumWireNames<ReportMark>.Parse(m.GetString()) : null;
             if (mark is null)
-                Error($"{at}.mark", $"Send one of: {ReportWire.List(marks)}.");
+                Error($"{at}.mark", $"Send one of: {EnumWireNames<ReportMark>.Join(marks)}.");
             else if (!marks.Contains(mark.Value))
             {
-                Error($"{at}.mark", $"{label} cannot be drawn as {ReportMarks.Label(mark.Value).ToLowerInvariant()}. Send one of: {ReportWire.List(marks)}.");
+                Error($"{at}.mark", $"{label} cannot be drawn as {ReportMarks.Label(mark.Value).ToLowerInvariant()}. Send one of: {EnumWireNames<ReportMark>.Join(marks)}.");
                 mark = null;
             }
         }
@@ -932,7 +933,7 @@ internal sealed partial class ReportSpecValidator
                 if (name is null)
                     Error($"{at}.{key}", $"Missing. Send a field of kind {SlotOf(key).Accepts[0]}.");
                 else if (Field(key, name) is { } field && !ReportMarks.Accepts(SlotOf(key), field))
-                    Error($"{at}.{key}", $"'{name}' is a {ReportWire.Name(field.Kind)} field. Send a field of kind {SlotOf(key).Accepts[0]}.");
+                    Error($"{at}.{key}", $"'{name}' is a {EnumWireNames<ReportFieldKind>.Of(field.Kind)} field. Send a field of kind {SlotOf(key).Accepts[0]}.");
             }
             if (failed)
                 return null;
@@ -982,7 +983,7 @@ internal sealed partial class ReportSpecValidator
             if (!ReportMarks.Accepts(ySlot, field))
                 Error($"{at}.y", mark == ReportMark.Markers
                     ? $"'{field.Label}' has no marker. Send one of: {string.Join(", ", fields.Where(f => f.Marker is not null).Select(f => f.Name))}."
-                    : $"'{field.Label}' is a {ReportWire.Name(field.Kind)} field. A layer of {markWords} needs number fields.");
+                    : $"'{field.Label}' is a {EnumWireNames<ReportFieldKind>.Of(field.Kind)} field. A layer of {markWords} needs number fields.");
             else
                 drawn.Add(field);
         }
@@ -1003,7 +1004,7 @@ internal sealed partial class ReportSpecValidator
                     if (Field("edges", name) is { } field)
                     {
                         if (!field.IsNumber)
-                            Error($"{at}.edges", $"'{field.Label}' is a {ReportWire.Name(field.Kind)} field. An edge needs a number field.");
+                            Error($"{at}.edges", $"'{field.Label}' is a {EnumWireNames<ReportFieldKind>.Of(field.Kind)} field. An edge needs a number field.");
                         else
                             edgeFields.Add(field);
                     }
@@ -1023,7 +1024,7 @@ internal sealed partial class ReportSpecValidator
         }
 
         if (series is not null && Field("series", series) is { } seriesField && seriesField.Kind != ReportFieldKind.Category)
-            Error($"{at}.series", $"'{seriesField.Label}' is a {ReportWire.Name(seriesField.Kind)} field. Send a category field.");
+            Error($"{at}.series", $"'{seriesField.Label}' is a {EnumWireNames<ReportFieldKind>.Of(seriesField.Kind)} field. Send a category field.");
 
         bool? stacked = null;
         ReportBarOrientation? orientation = null;
@@ -1042,7 +1043,7 @@ internal sealed partial class ReportSpecValidator
             if (Sent("orientation"))
             {
                 orientation = element.GetProperty("orientation") is { ValueKind: JsonValueKind.String } o
-                    ? ReportWire.Parse<ReportBarOrientation>(o.GetString())
+                    ? EnumWireNames<ReportBarOrientation>.Parse(o.GetString())
                     : null;
                 if (orientation is null)
                     Error($"{at}.orientation", "Send \"vertical\" or \"horizontal\".");

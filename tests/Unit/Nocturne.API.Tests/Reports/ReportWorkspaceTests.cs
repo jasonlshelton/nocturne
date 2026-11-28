@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Nocturne.API.Reports;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Xunit;
 
@@ -170,7 +171,7 @@ public class ReportWorkspaceTests
             .SelectMany(c => c.Marks.Concat(c.FromStartMarks ?? []).Select(m => (Cell: c, Mark: m)))
             .Where(d => d.Mark.Mark is not ("markers" or "spans"))
             .Select(d => (d.Cell, Layer: ReportTextureTests.Layer($"{d.Cell.Signal}-{d.Mark.Word}", d.Cell.Dataset,
-                ReportWire.Parse<ReportMark>(d.Mark.Mark)!.Value, new ReportLayerBindings
+                EnumWireNames<ReportMark>.Parse(d.Mark.Mark)!.Value, new ReportLayerBindings
                 {
                     X = d.Mark.Bindings.X, Y = d.Mark.Bindings.Y, Edges = d.Mark.Bindings.Edges, Series = d.Mark.Bindings.Series,
                     Stacked = d.Mark.Bindings.Stacked,
@@ -186,7 +187,7 @@ public class ReportWorkspaceTests
                     (layer.Bindings.Y is { Count: > 0 } y ? y : (layer.Bindings.Edges ?? []).Take(1))
                     .Select(name => layer.Fields.FirstOrDefault(f => f.Name == name)).OfType<ReportField>()
                     .Select(f => (Layer: layer.Id, Field: f.Name,
-                        Look: (layer.Color is { } hue ? ReportWire.Name(hue) : f.GlucoseScale ? "glucose" : f.Color is { } c ? ReportWire.Name(c) : "foreground",
+                        Look: (layer.Color is { } hue ? EnumWireNames<ChartColor>.Of(hue) : f.GlucoseScale ? "glucose" : f.Color is { } c ? EnumWireNames<ChartColor>.Of(c) : "foreground",
                             layer.Mark, f.Texture))))
                 .ToList())
             .Where(series => series.Select(s => s.Look).Distinct().Count() != series.Count)
@@ -214,7 +215,7 @@ public class ReportWorkspaceTests
             var colored = ReportWorkspace.Table.Where(c => c.Signal == signal.Id)
                 .Select(c => ReportWorkspace.LeadColor(c, registry)).OfType<Nocturne.Core.Models.ChartColor>().ToList();
             if (colored.Count > 0)
-                signal.Color.Should().Be(ReportWire.Name(colored[0]), signal.Id);
+                signal.Color.Should().Be(EnumWireNames<ChartColor>.Of(colored[0]), signal.Id);
         }
         workspace.Signals.Single(s => s.Id == "sleep").Color.Should().Be("activity-sleep");
     }

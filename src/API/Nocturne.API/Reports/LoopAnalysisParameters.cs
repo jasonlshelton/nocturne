@@ -1,8 +1,10 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using Nocturne.API.Controllers.V4.Analytics;
 using Nocturne.API.Models.Requests.V4;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.LoopAnalysis;
 
@@ -95,7 +97,7 @@ internal static class ReportNames
             _ => (null, null),
         };
         var week = weekdays is { Count: > 0 and < 7 }
-            ? string.Join(' ', weekdays.Order().Select(d => ReportWire.Name(d)))
+            ? EnumWireNames<ReportWeekday>.Join(weekdays.Order(), " ")
             : null;
         return (days?.Name(), week) switch
         {
@@ -136,13 +138,13 @@ internal static class ReportNames
 [JsonConverter(typeof(JsonStringEnumConverter<ReportWeekday>))]
 internal enum ReportWeekday
 {
-    [JsonStringEnumMemberName("Mon")] Mon,
-    [JsonStringEnumMemberName("Tue")] Tue,
-    [JsonStringEnumMemberName("Wed")] Wed,
-    [JsonStringEnumMemberName("Thu")] Thu,
-    [JsonStringEnumMemberName("Fri")] Fri,
-    [JsonStringEnumMemberName("Sat")] Sat,
-    [JsonStringEnumMemberName("Sun")] Sun,
+    [EnumMember(Value = "Mon"), JsonStringEnumMemberName("Mon")] Mon,
+    [EnumMember(Value = "Tue"), JsonStringEnumMemberName("Tue")] Tue,
+    [EnumMember(Value = "Wed"), JsonStringEnumMemberName("Wed")] Wed,
+    [EnumMember(Value = "Thu"), JsonStringEnumMemberName("Thu")] Thu,
+    [EnumMember(Value = "Fri"), JsonStringEnumMemberName("Fri")] Fri,
+    [EnumMember(Value = "Sat"), JsonStringEnumMemberName("Sat")] Sat,
+    [EnumMember(Value = "Sun"), JsonStringEnumMemberName("Sun")] Sun,
 }
 
 internal static class ReportWeekdays
@@ -164,11 +166,11 @@ internal static class ReportWeekdays
 [JsonConverter(typeof(JsonStringEnumConverter<ReportDayKind>))]
 internal enum ReportDayKind
 {
-    [JsonStringEnumMemberName("exercise")] Exercise,
-    [JsonStringEnumMemberName("illness")] Illness,
-    [JsonStringEnumMemberName("low")] [Description("A low")] Low,
-    [JsonStringEnumMemberName("lowOvernight")] [Description("A low between 00:00 and 06:00")] LowOvernight,
-    [JsonStringEnumMemberName("carbs")] [Description("Carbs in a range")] Carbs,
+    [EnumMember(Value = "exercise"), JsonStringEnumMemberName("exercise")] Exercise,
+    [EnumMember(Value = "illness"), JsonStringEnumMemberName("illness")] Illness,
+    [EnumMember(Value = "low"), JsonStringEnumMemberName("low")] [Description("A low")] Low,
+    [EnumMember(Value = "lowOvernight"), JsonStringEnumMemberName("lowOvernight")] [Description("A low between 00:00 and 06:00")] LowOvernight,
+    [EnumMember(Value = "carbs"), JsonStringEnumMemberName("carbs")] [Description("Carbs in a range")] Carbs,
 }
 
 [Description(
@@ -639,16 +641,16 @@ internal sealed record EventOutcomesParameters : EventListParameters
 [JsonConverter(typeof(JsonStringEnumConverter<EventOutcome>))]
 internal enum EventOutcome
 {
-    [JsonStringEnumMemberName("peakRise")] PeakRise,
-    [JsonStringEnumMemberName("minutesToPeak")] MinutesToPeak,
-    [JsonStringEnumMemberName("minutesBackToStart")] MinutesBackToStart,
-    [JsonStringEnumMemberName("drop")] Drop,
-    [JsonStringEnumMemberName("nadir")] [Description("Lowest reading")] Nadir,
-    [JsonStringEnumMemberName("minutesToNadir")] [Description("Minutes to lowest")] MinutesToNadir,
-    [JsonStringEnumMemberName("glucoseAt2Hours")] [Description("Glucose 2 hours after")] GlucoseAt2Hours,
-    [JsonStringEnumMemberName("startGlucose")] [Description("Glucose at the event")] StartGlucose,
-    [JsonStringEnumMemberName("netInsulin")] NetInsulin,
-    [JsonStringEnumMemberName("gramsPerUnit")] [Description("Carbs per unit")] GramsPerUnit,
+    [EnumMember(Value = "peakRise"), JsonStringEnumMemberName("peakRise")] PeakRise,
+    [EnumMember(Value = "minutesToPeak"), JsonStringEnumMemberName("minutesToPeak")] MinutesToPeak,
+    [EnumMember(Value = "minutesBackToStart"), JsonStringEnumMemberName("minutesBackToStart")] MinutesBackToStart,
+    [EnumMember(Value = "drop"), JsonStringEnumMemberName("drop")] Drop,
+    [EnumMember(Value = "nadir"), JsonStringEnumMemberName("nadir")] [Description("Lowest reading")] Nadir,
+    [EnumMember(Value = "minutesToNadir"), JsonStringEnumMemberName("minutesToNadir")] [Description("Minutes to lowest")] MinutesToNadir,
+    [EnumMember(Value = "glucoseAt2Hours"), JsonStringEnumMemberName("glucoseAt2Hours")] [Description("Glucose 2 hours after")] GlucoseAt2Hours,
+    [EnumMember(Value = "startGlucose"), JsonStringEnumMemberName("startGlucose")] [Description("Glucose at the event")] StartGlucose,
+    [EnumMember(Value = "netInsulin"), JsonStringEnumMemberName("netInsulin")] NetInsulin,
+    [EnumMember(Value = "gramsPerUnit"), JsonStringEnumMemberName("gramsPerUnit")] [Description("Carbs per unit")] GramsPerUnit,
 }
 
 [Description(
@@ -683,10 +685,10 @@ internal sealed record EventOccurrenceParameters : EventListParameters
 [JsonConverter(typeof(JsonStringEnumConverter<SettingsEvidenceSetting>))]
 internal enum SettingsEvidenceSetting
 {
-    [JsonStringEnumMemberName("basal")] Basal,
+    [EnumMember(Value = "basal"), JsonStringEnumMemberName("basal")] Basal,
     [Description("ISF")]
-    [JsonStringEnumMemberName("isf")] Isf,
-    [JsonStringEnumMemberName("carb_ratio")] CarbRatio,
+    [EnumMember(Value = "isf"), JsonStringEnumMemberName("isf")] Isf,
+    [EnumMember(Value = "carb_ratio"), JsonStringEnumMemberName("carb_ratio")] CarbRatio,
 }
 
 [Description(

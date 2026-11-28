@@ -1,3 +1,5 @@
+using Nocturne.Core.Models;
+
 namespace Nocturne.API.Reports;
 
 /// <summary>One binding a mark takes: its key, its words, what it takes and the field kinds it accepts.</summary>
@@ -42,7 +44,7 @@ internal static class ReportMarks
     public static bool HasAxis(ReportMark mark) => mark is not (ReportMark.Markers or ReportMark.Spans);
 
     private static IReadOnlyList<string> Axis(ReportMark mark) =>
-        [.. XKinds(mark).Select(k => ReportWire.Name(Derived.ReportDerivedOps.FieldKindOf(k))).Distinct()];
+        [.. XKinds(mark).Select(k => EnumWireNames<ReportFieldKind>.Of(Derived.ReportDerivedOps.FieldKindOf(k))).Distinct()];
 
     public static IReadOnlyList<ReportMarkSlot> Slots(ReportMark mark) => mark switch
     {
@@ -94,5 +96,5 @@ internal static class ReportMarks
     /// <summary>Whether <paramref name="field"/> may fill <paramref name="slot"/>.</summary>
     public static bool Accepts(ReportMarkSlot slot, ReportField field) =>
         !field.Companion
-        && (slot.Accepts.Contains("marker") ? field.Marker is not null : slot.Accepts.Contains(ReportWire.Name(field.Kind)));
+        && (slot.Accepts.Contains("marker") ? field.Marker is not null : slot.Accepts.Contains(EnumWireNames<ReportFieldKind>.Of(field.Kind)));
 }

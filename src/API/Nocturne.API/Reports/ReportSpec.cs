@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using Nocturne.API.Controllers.V4.Base;
 using Nocturne.API.Reports.Derived;
 using System.Text.Json;
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 
 namespace Nocturne.API.Reports;
@@ -165,17 +166,17 @@ internal sealed record ReportPanelSpec
 internal enum ReportPanelKind
 {
     /// <summary>Tracks of layers over one horizontal axis.</summary>
-    [JsonStringEnumMemberName("chart")]
+    [EnumMember(Value = "chart"), JsonStringEnumMemberName("chart")]
     Chart,
 
-    [JsonStringEnumMemberName("stat_tiles")]
+    [EnumMember(Value = "stat_tiles"), JsonStringEnumMemberName("stat_tiles")]
     StatTiles,
 
-    [JsonStringEnumMemberName("table")]
+    [EnumMember(Value = "table"), JsonStringEnumMemberName("table")]
     Table,
 
     /// <summary>Two periods side by side: each one's time in range bar, then each figure's two values and the change.</summary>
-    [JsonStringEnumMemberName("comparison")]
+    [EnumMember(Value = "comparison"), JsonStringEnumMemberName("comparison")]
     Comparison,
 }
 
@@ -301,10 +302,10 @@ internal sealed record ReportBindings
 [JsonConverter(typeof(JsonStringEnumConverter<ReportBarOrientation>))]
 internal enum ReportBarOrientation
 {
-    [JsonStringEnumMemberName("vertical")]
+    [EnumMember(Value = "vertical"), JsonStringEnumMemberName("vertical")]
     Vertical,
 
-    [JsonStringEnumMemberName("horizontal")]
+    [EnumMember(Value = "horizontal"), JsonStringEnumMemberName("horizontal")]
     Horizontal,
 }
 
@@ -312,29 +313,29 @@ internal enum ReportBarOrientation
 [JsonConverter(typeof(JsonStringEnumConverter<ReportMark>))]
 internal enum ReportMark
 {
-    [JsonStringEnumMemberName("line")]
+    [EnumMember(Value = "line"), JsonStringEnumMemberName("line")]
     Line,
 
     /// <summary>A line with a fill to zero.</summary>
-    [JsonStringEnumMemberName("area")]
+    [EnumMember(Value = "area"), JsonStringEnumMemberName("area")]
     Area,
 
     /// <summary>A shaded range between two edges, or two ranges between four, with an optional middle line.</summary>
-    [JsonStringEnumMemberName("band")]
+    [EnumMember(Value = "band"), JsonStringEnumMemberName("band")]
     Band,
 
-    [JsonStringEnumMemberName("bars")]
+    [EnumMember(Value = "bars"), JsonStringEnumMemberName("bars")]
     Bars,
 
-    [JsonStringEnumMemberName("points")]
+    [EnumMember(Value = "points"), JsonStringEnumMemberName("points")]
     Points,
 
     /// <summary>The dashboard's bolus, carb, BG check and injection glyphs at their amounts; no axis.</summary>
-    [JsonStringEnumMemberName("markers")]
+    [EnumMember(Value = "markers"), JsonStringEnumMemberName("markers")]
     Markers,
 
     /// <summary>State spans in a lane, each from its start to its end, named by its category; no axis.</summary>
-    [JsonStringEnumMemberName("spans")]
+    [EnumMember(Value = "spans"), JsonStringEnumMemberName("spans")]
     Spans,
 }
 
@@ -343,30 +344,30 @@ internal enum ReportMark
 internal enum ReportXKind
 {
     /// <summary>An instant, Unix milliseconds.</summary>
-    [JsonStringEnumMemberName("time")]
+    [EnumMember(Value = "time"), JsonStringEnumMemberName("time")]
     Time,
 
     /// <summary>Minutes from an event's anchor.</summary>
-    [JsonStringEnumMemberName("offset")]
+    [EnumMember(Value = "offset"), JsonStringEnumMemberName("offset")]
     Offset,
 
     /// <summary>Minutes after local midnight.</summary>
-    [JsonStringEnumMemberName("time_of_day")]
+    [EnumMember(Value = "time_of_day"), JsonStringEnumMemberName("time_of_day")]
     TimeOfDay,
 
     /// <summary>A local calendar day, its midnight in Unix milliseconds.</summary>
-    [JsonStringEnumMemberName("day")]
+    [EnumMember(Value = "day"), JsonStringEnumMemberName("day")]
     Day,
 
-    [JsonStringEnumMemberName("category")]
+    [EnumMember(Value = "category"), JsonStringEnumMemberName("category")]
     Category,
 
     /// <summary>A value of a scatter's first source, in its unit.</summary>
-    [JsonStringEnumMemberName("value")]
+    [EnumMember(Value = "value"), JsonStringEnumMemberName("value")]
     Value,
 
     /// <summary>Minutes one source is shifted against the other.</summary>
-    [JsonStringEnumMemberName("lag")]
+    [EnumMember(Value = "lag"), JsonStringEnumMemberName("lag")]
     Lag,
 }
 
@@ -392,18 +393,6 @@ internal static class ReportAxes
     public static ReportXKind Of(ReportTrackSpec track) => Of(track.Layers.Select(l => l.XKind));
 
     private static bool Calendar(ReportXKind kind) => kind is ReportXKind.Time or ReportXKind.Day;
-}
-
-/// <summary>Enum values as a spec writes them.</summary>
-internal static class ReportWire
-{
-    public static string Name<T>(T value) where T : struct, Enum =>
-        JsonSerializer.Serialize(value).Trim('"');
-
-    public static T? Parse<T>(string? name) where T : struct, Enum =>
-        name is null ? null : Enum.GetValues<T>().Cast<T?>().FirstOrDefault(v => Name(v!.Value) == name);
-
-    public static string List<T>(IEnumerable<T> values) where T : struct, Enum => string.Join(", ", values.Select(Name));
 }
 
 /// <summary>
@@ -469,16 +458,16 @@ internal sealed record GlucoseSeriesParameters : ReportDatasetParameters
 [JsonConverter(typeof(JsonStringEnumConverter<ReportMarkerKind>))]
 internal enum ReportMarkerKind
 {
-    [JsonStringEnumMemberName("bolus")]
+    [EnumMember(Value = "bolus"), JsonStringEnumMemberName("bolus")]
     Bolus,
 
-    [JsonStringEnumMemberName("carbs")]
+    [EnumMember(Value = "carbs"), JsonStringEnumMemberName("carbs")]
     Carbs,
 
-    [JsonStringEnumMemberName("bg_check")]
+    [EnumMember(Value = "bg_check"), JsonStringEnumMemberName("bg_check")]
     BgCheck,
 
-    [JsonStringEnumMemberName("basal_injection")]
+    [EnumMember(Value = "basal_injection"), JsonStringEnumMemberName("basal_injection")]
     BasalInjection,
 }
 

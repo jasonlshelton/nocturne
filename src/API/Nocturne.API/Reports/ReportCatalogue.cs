@@ -5,6 +5,7 @@ using Nocturne.API.Extensions;
 using Nocturne.API.Reports.Derived;
 using Nocturne.API.Services.Auth;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using MvcJsonOptions = Microsoft.AspNetCore.Mvc.JsonOptions;
 using Nocturne.API.Services.Identity;
@@ -260,12 +261,12 @@ internal sealed class ReportCatalogue(
         ReportSpec.MaxRangeHours,
         ReportSpecStore.MaxNameLength,
         ReportGrid.MaxMinutes,
-        [.. Enum.GetValues<ReportPanelKind>().Select(k => new CustomReportPanelKind(ReportWire.Name(k), PanelKindLabel(k)))],
+        [.. Enum.GetValues<ReportPanelKind>().Select(k => new CustomReportPanelKind(EnumWireNames<ReportPanelKind>.Of(k), PanelKindLabel(k)))],
         [.. ReportMarks.All.Select(m => new CustomReportMark(
-            ReportWire.Name(m),
+            EnumWireNames<ReportMark>.Of(m),
             ReportMarks.Label(m),
             ReportMarks.HasAxis(m),
-            [.. ReportMarks.XKinds(m).Select(ReportWire.Name)],
+            [.. ReportMarks.XKinds(m).Select(EnumWireNames<ReportXKind>.Of)],
             [.. ReportMarks.Slots(m).Select(s => new CustomReportMarkSlot(s.Key, s.Label, s.Input, s.Accepts, s.Counts, s.Required))]))],
         [.. ReportDerivedOps.All.Select(Op)],
         [.. registry.All.Select(dataset => Describe(dataset, grantedScopes, useMmol))],
@@ -280,8 +281,8 @@ internal sealed class ReportCatalogue(
         [.. registry.All.SelectMany(dataset => FlagFacts.Of(dataset).Select(field => new CustomReportFlagFact(
             dataset.Name,
             Field(field.ResolveUnit(useMmol: false), dataset, grantedScopes),
-            ReportWire.Name(field.FlagFact!.Kind),
-            field.FlagFact.Range == ReportRangeFamily.None ? null : ReportWire.Name(field.FlagFact.Range),
+            EnumWireNames<ReportFlagFactKind>.Of(field.FlagFact!.Kind),
+            field.FlagFact.Range == ReportRangeFamily.None ? null : EnumWireNames<ReportRangeFamily>.Of(field.FlagFact.Range),
             FlagFacts.Scopes(dataset, field),
             field.FlagFact.Kind == ReportFlagFactKind.Period ? FlagFacts.MaxDays : null)))];
 
@@ -309,10 +310,10 @@ internal sealed class ReportCatalogue(
             ReportParametersSchema.ForOp(op.SpecType),
             op.XRule,
             op.UnitRule,
-            [.. op.SourceXKinds.Select(ReportWire.Name)],
-            [.. op.SourceXKinds.Select(k => ReportWire.Name(op.OutputXKind(k)))],
+            [.. op.SourceXKinds.Select(EnumWireNames<ReportXKind>.Of)],
+            [.. op.SourceXKinds.Select(k => EnumWireNames<ReportXKind>.Of(op.OutputXKind(k)))],
             ["number", "percent"],
-            [.. op.Marks(spec).Select(m => new CustomReportOpMark(ReportWire.Name(m), Wire(op.DefaultBindings(m, spec))))]);
+            [.. op.Marks(spec).Select(m => new CustomReportOpMark(EnumWireNames<ReportMark>.Of(m), Wire(op.DefaultBindings(m, spec))))]);
     }
 
     private CustomReportDataset Describe(IReportDataset dataset, IReadOnlySet<string> granted, bool useMmol)
@@ -328,10 +329,10 @@ internal sealed class ReportCatalogue(
             ReportParametersSchema.For(dataset.ParametersType),
             [.. dataset.Fields.Select(f => Field(f.ResolveUnit(useMmol), dataset, granted))],
             [.. dataset.Marks.SelectMany(ReportMarks.XKinds).Distinct()
-                .Where(k => chartFields.Any(f => f.AxisKind == k)).Select(ReportWire.Name)],
+                .Where(k => chartFields.Any(f => f.AxisKind == k)).Select(EnumWireNames<ReportXKind>.Of)],
             [.. dataset.PanelKinds.Select(k => new CustomReportDatasetPanelKind(
-                ReportWire.Name(k), [.. dataset.FieldsFor(k).Where(f => !f.Companion).Select(f => f.Name)]))],
-            [.. dataset.Marks.Select(m => new CustomReportDatasetMark(ReportWire.Name(m), DefaultBindings(dataset, m, useMmol), Slots(dataset, m)))],
+                EnumWireNames<ReportPanelKind>.Of(k), [.. dataset.FieldsFor(k).Where(f => !f.Companion).Select(f => f.Name)]))],
+            [.. dataset.Marks.Select(m => new CustomReportDatasetMark(EnumWireNames<ReportMark>.Of(m), DefaultBindings(dataset, m, useMmol), Slots(dataset, m)))],
             dataset.DefaultRange.TotalHours,
             dataset.MaxRange.TotalHours,
             $"This data covers at most {ReportSpecValidator.Describe(dataset.MaxRange)}.",
@@ -342,10 +343,10 @@ internal sealed class ReportCatalogue(
     }
 
     private static CustomReportField Field(ReportField f, IReportDataset dataset, IReadOnlySet<string> granted) => new(
-        f.Name, f.Label, ReportWire.Name(f.Kind), f.Unit, f.Description, f.Scope,
+        f.Name, f.Label, EnumWireNames<ReportFieldKind>.Of(f.Kind), f.Unit, f.Description, f.Scope,
         Scope.Satisfies(granted, dataset.RequiredScope) && (f.Scope is null || Scope.Satisfies(granted, f.Scope)),
-        f.Aggregate is { } aggregate ? ReportWire.Name(aggregate) : null,
-        f.Marker is { } marker ? ReportWire.Name(marker) : null,
+        f.Aggregate is { } aggregate ? EnumWireNames<ReportAggregate>.Of(aggregate) : null,
+        f.Marker is { } marker ? EnumWireNames<ReportMarkerKind>.Of(marker) : null,
         f.Setting != ReportSetting.None);
 
     /// <summary>The bindings a new layer of <paramref name="dataset"/> drawn as <paramref name="mark"/> starts with, normalised by the validator.</summary>
@@ -363,7 +364,7 @@ internal sealed class ReportCatalogue(
                     ["range"] = new { hours },
                     ["tracks"] = new object[]
                     {
-                        new { layers = new object[] { new { dataset = new { name = dataset.Name }, mark = ReportWire.Name(mark) } } },
+                        new { layers = new object[] { new { dataset = new { name = dataset.Name }, mark = EnumWireNames<ReportMark>.Of(mark) } } },
                     },
                 },
             },
@@ -371,13 +372,13 @@ internal sealed class ReportCatalogue(
         var validation = validator.Validate(JsonSerializer.SerializeToElement(spec), useMmol);
         var normalised = validation.Spec?.Panels[0].Tracks?[0].Layers[0].Bindings
             ?? throw new InvalidOperationException(
-                $"{dataset.Name} as {ReportWire.Name(mark)} has no default bindings: " + string.Join("; ", validation.Errors));
+                $"{dataset.Name} as {EnumWireNames<ReportMark>.Of(mark)} has no default bindings: " + string.Join("; ", validation.Errors));
         return Wire(normalised);
     }
 
     internal static CustomReportLayerBindings Wire(ReportLayerBindings b) => new(
         b.X, b.Y, b.Edges, b.Series, b.Fit, b.Stacked,
-        b.Orientation is { } o ? ReportWire.Name(o) : null,
+        b.Orientation is { } o ? EnumWireNames<ReportBarOrientation>.Of(o) : null,
         b.Start, b.End, b.Category);
 
     /// <summary>The bindings <paramref name="mark"/> takes over <paramref name="dataset"/>, as the validator checks them.</summary>

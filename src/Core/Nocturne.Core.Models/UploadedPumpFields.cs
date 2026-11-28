@@ -20,7 +20,7 @@ public static class UploadedPumpFields
     private const string PumpId = "pumpId";
 
     public static Dictionary<string, object?>? Keep(Dictionary<string, object?>? record, Treatment treatment) =>
-        KeepIdentity(KeptField.Add(record, Type, treatment.BolusType), treatment, keepEmpty: true);
+        KeepIdentity(KeptField.Add(record, Type, treatment.BolusType), treatment);
 
     public static void Restore(Treatment treatment, IReadOnlyDictionary<string, object?>? record, string? pumpRecordId)
     {
@@ -35,12 +35,12 @@ public static class UploadedPumpFields
     /// <summary>
     /// Keeps <c>isValid</c>, <c>pumpType</c>, <c>pumpSerial</c> and the <c>pumpId</c> in the metadata of the
     /// state span or profile activation the treatment is stored as, with no <c>type</c>. An empty
-    /// <c>pumpType</c> or <c>pumpSerial</c> is not kept there, unlike a record, which keeps it as <c>""</c>.
+    /// <c>pumpType</c> or <c>pumpSerial</c> is kept as <c>""</c>, as a record keeps it.
     /// </summary>
     public static void KeepInMetadata(IDictionary<string, object> metadata, Treatment treatment) =>
         KeptField.CopyInto(
             metadata,
-            KeptField.Add(KeepIdentity(null, treatment, keepEmpty: false), PumpId, treatment.PumpId));
+            KeptField.Add(KeepIdentity(null, treatment), PumpId, treatment.PumpId));
 
     /// <summary>Serves what <see cref="KeepInMetadata"/> kept; the <c>pumpId</c> is served whatever else was kept.</summary>
     public static void RestoreFromMetadata(Treatment treatment, IDictionary<string, object>? metadata)
@@ -49,15 +49,12 @@ public static class UploadedPumpFields
         treatment.PumpId = (long?)metadata.TryReadDecimal(PumpId);
     }
 
-    private static Dictionary<string, object?>? KeepIdentity(
-        Dictionary<string, object?>? record, Treatment treatment, bool keepEmpty)
+    private static Dictionary<string, object?>? KeepIdentity(Dictionary<string, object?>? record, Treatment treatment)
     {
         record = KeptField.Add(record, IsValid, treatment.IsValid is true ? true : null);
-        record = KeptField.Add(record, PumpType, Kept(treatment.PumpType, keepEmpty));
-        return KeptField.Add(record, PumpSerial, Kept(treatment.PumpSerial, keepEmpty));
+        record = KeptField.Add(record, PumpType, treatment.PumpType);
+        return KeptField.Add(record, PumpSerial, treatment.PumpSerial);
     }
-
-    private static string? Kept(string? value, bool keepEmpty) => keepEmpty || value is not "" ? value : null;
 
     private static void RestoreIdentity(Treatment treatment, IReadOnlyDictionary<string, object?>? record)
     {

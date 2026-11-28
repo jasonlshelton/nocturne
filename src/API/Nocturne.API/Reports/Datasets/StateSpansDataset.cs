@@ -157,7 +157,7 @@ internal sealed class StateSpansDataset : IReportDataset
             ["label"] = s.Label,
             ["start"] = s.Start,
             ["end"] = s.End,
-            ["color"] = ReportWire.Name(s.Color),
+            ["color"] = EnumWireNames<ChartColor>.Of(s.Color),
         }).ToList();
 
         var counts = kinds.Where(k => !withheld.Contains(k))

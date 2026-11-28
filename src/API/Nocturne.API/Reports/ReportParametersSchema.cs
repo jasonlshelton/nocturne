@@ -7,6 +7,7 @@ using System.Text.Json.Schema;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
+using Nocturne.Core.Models;
 
 namespace Nocturne.API.Reports;
 
@@ -170,8 +171,7 @@ internal static partial class ReportParametersSchema
     /// <summary>An enum value's words: the member's <see cref="DescriptionAttribute"/>, else its name in words.</summary>
     private static string EnumLabel(Type type, string? wire)
     {
-        var member = type.GetFields(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(f =>
-            (f.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name ?? f.Name) == wire);
+        var member = EnumWireNames.Parse(type, wire) is { } value ? type.GetField(Enum.GetName(type, value)!) : null;
         return member?.GetCustomAttribute<DescriptionAttribute>()?.Description ?? Words(member?.Name ?? wire ?? string.Empty);
     }
 

@@ -1105,6 +1105,26 @@ public class StateSpanTreatmentReadsIntegrationTests : ApiIntegrationTestBase
 
     [Theory]
     [MemberData(nameof(EventTypes))]
+    public async Task A_state_span_treatment_uploaded_with_an_empty_pump_type_and_serial_is_served_them_empty(
+        string eventType)
+    {
+        var client = CreateAuthenticatedClient();
+        var upload = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(Upload(eventType)))!.AsObject();
+        upload["pumpType"] = "";
+        upload["pumpSerial"] = "";
+        await PostAsync(client, upload);
+
+        var v1 = (await GetArrayAsync(client, "/api/v1/treatments")).Should().ContainSingle().Subject!;
+        var v3 = (await GetV3ResultAsync(client, "/api/v3/treatments")).Should().ContainSingle().Subject!;
+        foreach (var served in new[] { v1, v3 })
+        {
+            served["pumpType"]!.GetValue<string>().Should().BeEmpty();
+            served["pumpSerial"]!.GetValue<string>().Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(EventTypes))]
     public async Task A_state_span_treatment_uploaded_without_validity_or_pump_record_is_served_without_them(
         string eventType)
     {

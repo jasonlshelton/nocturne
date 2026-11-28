@@ -18,22 +18,19 @@ public static class TreatmentClientId
     public const string Field = "id";
 
     public static Dictionary<string, object?>? ToRecord(Treatment treatment) =>
-        KeptField.Add(null, Field, KeptField.Value(treatment.AdditionalProperties, Field));
+        KeptField.Add(null, Field, KeptField.Value(KeptField.Nullable(treatment.AdditionalProperties), Field));
 
     public static Dictionary<string, object>? ToTreatment(IReadOnlyDictionary<string, object?>? record) =>
         KeptField.Value(record, Field) is { } id
             ? new() { [Field] = id }
             : null;
 
-    public static void KeepInMetadata(Dictionary<string, object> metadata, Treatment treatment)
-    {
-        if (KeptField.Value(treatment.AdditionalProperties, Field) is { } id)
-            metadata[Field] = id;
-    }
+    public static void KeepInMetadata(IDictionary<string, object> metadata, Treatment treatment) =>
+        KeptField.CopyInto(metadata, ToRecord(treatment));
 
     public static void RestoreFromMetadata(Treatment treatment, IDictionary<string, object>? metadata)
     {
-        if (metadata is not null && metadata.TryGetValue(Field, out var stored) && KeptField.Present(stored) is { } id)
+        if (KeptField.Value(KeptField.OfMetadata(metadata), Field) is { } id)
             (treatment.AdditionalProperties ??= new())[Field] = id;
     }
 
@@ -49,7 +46,7 @@ public static class TreatmentClientId
 
     /// <summary>The client id <paramref name="treatment"/> carries, or null.</summary>
     public static string? Of(Treatment treatment) =>
-        KeptField.AnyKindAsText(treatment.AdditionalProperties, Field);
+        KeptField.AnyKindAsText(KeptField.Nullable(treatment.AdditionalProperties), Field);
 
     /// <summary>The client id inside a serialized additional-properties object, or null.</summary>
     public static string? Of(string? additionalPropertiesJson)

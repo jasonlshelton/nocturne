@@ -21,9 +21,6 @@ internal static class AlertConditionTypeNames
     public const string AutoResolvePathRoot = "auto_resolve";
     public const string SnoozePathRoot = "snooze";
 
-    private static readonly Dictionary<string, AlertConditionType> FromWire = Enum.GetValues<AlertConditionType>()
-        .ToDictionary(EnumWireNames<AlertConditionType>.Of, type => type, StringComparer.Ordinal);
-
     /// <summary>
     /// Returns the snake_case wire string for the given <paramref name="type"/>.
     /// </summary>
@@ -32,6 +29,5 @@ internal static class AlertConditionTypeNames
     /// <summary>
     /// The <see cref="AlertConditionType"/> whose wire string is exactly <paramref name="wire"/>, or null.
     /// </summary>
-    public static AlertConditionType? FromWireString(string wire) =>
-        FromWire.TryGetValue(wire, out var t) ? t : null;
+    public static AlertConditionType? FromWireString(string wire) => EnumWireNames<AlertConditionType>.Parse(wire);
 }

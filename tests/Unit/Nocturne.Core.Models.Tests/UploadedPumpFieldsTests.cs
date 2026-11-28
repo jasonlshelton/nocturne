@@ -61,11 +61,29 @@ public class UploadedPumpFieldsTests
     }
 
     [Fact]
-    public void A_span_keeps_no_type_and_no_empty_pump_type_or_serial()
+    public void A_span_keeps_no_type()
     {
-        var metadata = Kept(new Treatment { BolusType = "NORMAL", PumpType = "", PumpSerial = "" });
+        var metadata = Kept(new Treatment { BolusType = "NORMAL" });
 
         metadata.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_span_and_a_record_serve_an_empty_pump_type_and_serial_as_uploaded(bool readBack)
+    {
+        var uploaded = new Treatment { PumpType = "", PumpSerial = "" };
+
+        var metadata = Kept(uploaded);
+        var fromSpan = Served(readBack ? AsStored(metadata) : metadata);
+
+        var fromRecord = new Treatment();
+        UploadedPumpFields.Restore(fromRecord, UploadedPumpFields.Keep(null, uploaded), pumpRecordId: null);
+
+        fromSpan.PumpType.Should().BeEmpty();
+        fromSpan.PumpSerial.Should().BeEmpty();
+        (fromSpan.PumpType, fromSpan.PumpSerial).Should().Be((fromRecord.PumpType, fromRecord.PumpSerial));
     }
 
     [Fact]

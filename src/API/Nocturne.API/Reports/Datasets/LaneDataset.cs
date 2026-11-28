@@ -138,7 +138,7 @@ internal abstract class LaneDataset : IReportDataset
                 ["label"] = s.Label,
                 ["start"] = s.Start,
                 ["end"] = s.End,
-                ["color"] = ReportWire.Name(s.Color),
+                ["color"] = EnumWireNames<ChartColor>.Of(s.Color),
             })],
             Summary = string.Join('\n', lines),
             Facts = [.. lanes.Take(ReportFacts.Max).Select(l => ReportFacts.Count(l.Lane, l.Count).Of("start", "end"))],

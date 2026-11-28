@@ -1,5 +1,4 @@
 using System.Linq.Expressions;
-using System.Reflection;
 using Nocturne.Core.Models;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -27,18 +26,22 @@ internal sealed class EnumMemberValueConverter<TEnum>(bool tolerant = false)
     /// </summary>
     public static readonly TEnum Unreadable = (TEnum)Enum.ToObject(typeof(TEnum), -1);
 
-    private static readonly Dictionary<string, TEnum> FromStringMap = BuildFromStringMap();
+    private static readonly Dictionary<string, TEnum> ByMemberName = BuildByMemberName();
 
-    private static Dictionary<string, TEnum> BuildFromStringMap()
+    private static Dictionary<string, TEnum> BuildByMemberName()
     {
         var map = new Dictionary<string, TEnum>(StringComparer.OrdinalIgnoreCase);
-        foreach (var field in typeof(TEnum).GetFields(BindingFlags.Public | BindingFlags.Static))
-        {
-            var value = (TEnum)field.GetValue(null)!;
-            map.TryAdd(field.Name, value);
-            map.TryAdd(EnumWireNames<TEnum>.Of(value), value);
-        }
+        foreach (var name in Enum.GetNames<TEnum>())
+            map.TryAdd(name, Enum.Parse<TEnum>(name));
         return map;
+    }
+
+    private static TEnum? Find(string value)
+    {
+        if (EnumWireNames<TEnum>.Parse(value, ignoreCase: true) is { } byWireName)
+            return byWireName;
+
+        return ByMemberName.TryGetValue(value, out var byMemberName) ? byMemberName : null;
     }
 
     private static string ToProvider(TEnum value) => EnumWireNames<TEnum>.Of(value);
@@ -48,11 +51,9 @@ internal sealed class EnumMemberValueConverter<TEnum>(bool tolerant = false)
     private static Expression<Func<string, TEnum>> Reader(bool tolerant) =>
         tolerant ? v => ReadOrUnreadable(v) : v => FromProvider(v);
 
-    private static TEnum FromProvider(string value) =>
-        FromStringMap.TryGetValue(value, out var e) ? e : Enum.Parse<TEnum>(value, ignoreCase: true);
+    private static TEnum FromProvider(string value) => Find(value) ?? Enum.Parse<TEnum>(value, ignoreCase: true);
 
-    private static TEnum ReadOrUnreadable(string value) =>
-        FromStringMap.TryGetValue(value, out var e) ? e : Unreadable;
+    private static TEnum ReadOrUnreadable(string value) => Find(value) ?? Unreadable;
 }
 
 /// <summary>A converter that can read a stored value as one no member has.</summary>

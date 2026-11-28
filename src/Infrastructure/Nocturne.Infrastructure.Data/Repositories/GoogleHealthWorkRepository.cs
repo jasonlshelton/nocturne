@@ -13,9 +13,6 @@ namespace Nocturne.Infrastructure.Data.Repositories;
 /// </summary>
 public class GoogleHealthWorkRepository(INocturneDbContextFactory contexts) : IGoogleHealthWorkStore
 {
-    private static readonly IReadOnlyDictionary<string, GoogleHealthSyncPhase> Phases =
-        Enum.GetValues<GoogleHealthSyncPhase>().ToDictionary(EnumWireNames<GoogleHealthSyncPhase>.Of, phase => phase, StringComparer.Ordinal);
-
     /// <inheritdoc />
     /// <remarks>A phase that is not one of <see cref="GoogleHealthSyncPhase"/>'s names reads as no progress.</remarks>
     public async Task<GoogleHealthWork> GetAsync(CancellationToken ct)
@@ -26,7 +23,7 @@ public class GoogleHealthWorkRepository(INocturneDbContextFactory contexts) : IG
             return GoogleHealthWork.None;
 
         return new GoogleHealthWork(
-            row.ProgressPhase is { } name && Phases.TryGetValue(name, out var phase)
+            EnumWireNames<GoogleHealthSyncPhase>.Parse(row.ProgressPhase) is { } phase
                 ? new GoogleHealthSyncProgress(phase, row.ProgressDataType, row.ProgressCompletedDataTypes,
                     row.ProgressTotalDataTypes, row.ProgressPagesRead, row.ProgressWorkerOwned)
                 : null,

@@ -97,7 +97,7 @@ internal sealed class ViewerFlagRules(
                 rule.Field,
                 condition.Field.Label,
                 condition.Field.Unit,
-                range == ReportRangeFamily.None ? null : ReportWire.Name(range),
+                range == ReportRangeFamily.None ? null : EnumWireNames<ReportRangeFamily>.Of(range),
                 value,
                 rule.Comparison,
                 rule.Value,
