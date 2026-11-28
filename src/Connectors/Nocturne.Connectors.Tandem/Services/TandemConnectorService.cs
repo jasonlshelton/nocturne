@@ -228,7 +228,7 @@ public class TandemConnectorService
         var ceiling = ParseWallClockUtc(device.MaxDateOfEvents, time) ?? now;
         var end = request.To is { } until && until < ceiling ? until : ceiling;
 
-        var start = ResolveStart(request, device, time);
+        var start = ResolveStart(request, device, time, config);
         if (start >= end)
         {
             _logger.LogInformation(
@@ -315,12 +315,6 @@ public class TandemConnectorService
     /// <summary>The oldest event the pump still holds, or <c>null</c> when it does not say.</summary>
     private static DateTime? FirstEvent(TandemBffPump device, TandemTimeResolver time) =>
         ParseWallClockUtc(device.AvailableDataRange?.Start, time);
-
-    private static DateTime Later(DateTime value, DateTime? floor) =>
-        floor is { } bound && bound > value ? bound : value;
-
-    private static DateTime Earlier(DateTime value, DateTime ceiling) =>
-        value < ceiling ? value : ceiling;
 
     /// <returns>What the run has to say about a span it could not close, or <c>null</c>.</returns>
     private async Task<string?> PublishEventsAsync(
@@ -412,13 +406,14 @@ public class TandemConnectorService
     /// missed — never earlier than the pump's first event, which is where <see cref="ClampNotice"/>
     /// reports a caller's bound below.
     /// </summary>
-    private DateTime ResolveStart(SyncRequest request, TandemBffPump device, TandemTimeResolver time)
+    private DateTime ResolveStart(
+        SyncRequest request, TandemBffPump device, TandemTimeResolver time, TandemConnectorConfiguration config)
     {
         DateTime? ResumePoint()
         {
             var candidates = new[] { request.Resume.Point(ResumeFamily.Glucose), request.Resume.Point(ResumeFamily.Treatments) }
                 .Where(d => d.HasValue).Select(d => d!.Value).ToList();
-            return candidates.Count > 0 ? candidates.Min() : ConcreteFirstSyncStart;
+            return candidates.Count > 0 ? candidates.Min() : ConcreteFirstSyncStart(config);
         }
 
         // The pump's own range is how far back this source goes, so an open start begins at its

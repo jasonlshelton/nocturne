@@ -11,7 +11,7 @@ namespace Nocturne.API.Reports.Datasets;
 /// <summary>One figure of each event: its field, words and unit, and how it is read off the event in the display unit.</summary>
 internal sealed record EventOutcomeInfo(EventOutcome Outcome, string Label, string Unit, string Description, Func<EventMetrics, double?> Get, bool Insulin = false)
 {
-    public string Name => ReportWire.Name(Outcome);
+    public string Name => EnumWireNames<EventOutcome>.Of(Outcome);
 
     public bool IsGlucose => Unit == ReportField.GlucoseUnit;
 

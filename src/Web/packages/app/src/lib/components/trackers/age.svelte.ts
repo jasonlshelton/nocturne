@@ -1,4 +1,5 @@
 // A .svelte.ts module so wuchale extracts its strings; it holds no runes.
+import { plural } from "#lib/utils/plural.js";
 
 /**
  * Hours elapsed from a server timestamp to `now`, so an age moves on the same clock as the
@@ -23,7 +24,12 @@ export function formatAge(hours: number | undefined | null): string {
 /** A lifespan in hours, in whole days from one day up. */
 export function formatLifespan(hours: number | undefined | null): string {
   if (hours === undefined || hours === null) return "Not set";
-  if (hours < 24) return `${hours} hours`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? "1 day" : `${days} days`;
+  if (hours < 24) return plural(hours, ["# hour", "# hours"]);
+  return plural(Math.floor(hours / 24), ["# day", "# days"]);
+}
+
+/** Hours to a tracker's expected end, as a clock shows them: time left, or how late it is. */
+export function formatTimeLeft(hours: number | undefined | null): string {
+  if (hours === undefined || hours === null) return "";
+  return hours >= 0 ? `${formatAge(hours)} left` : `${formatAge(-hours)} late`;
 }

@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text.Json;
 using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Contracts.Auth;
 using Nocturne.Core.Contracts.Identity;
@@ -33,7 +32,7 @@ namespace Nocturne.API.Services.Alerts;
 /// </para>
 /// <para>
 /// Deleting an account removes the notices that name the person
-/// (<see cref="NotificationSubjectNaming.AlertChannelNotSending"/>) but keeps their channels, which then
+/// (<see cref="InAppNotificationType.AlertChannelNotSending"/>) but keeps their channels, which then
 /// do not send. A notice raised for such a channel still tells the owner, but names no member or
 /// adder whose subject is gone, and leaves out the channel's label, which can name them too. A channel
 /// that goes to a member it cannot name keeps no label either: a direct message saved before its
@@ -102,18 +101,19 @@ internal sealed class AlertChannelNotice(
         foreach (var owner in await ownerResolver.GetOwnerSubjectIdsAsync(tenantId, ct))
         {
             var standing = (await notifications.GetActiveNotificationsAsync(owner, ct))
-                .Where(n => n.Type == NotificationSubjectNaming.AlertChannelNotSending && n.SourceId is not null)
+                .Where(n => n.Type == InAppNotificationType.AlertChannelNotSending.ToWireString() && n.SourceId is not null)
                 .Select(n => n.SourceId!)
                 .ToHashSet(StringComparer.Ordinal);
 
             foreach (var (sourceId, (channel, verdict)) in notSending.Where(c => !standing.Contains(c.Key)))
             {
                 existing ??= await ExistingSubjectsAsync(notSending.Values, ct);
+                var (title, subtitle) = Labels(verdict.State);
                 if (await notifications.CreateNotificationUnlessActiveAsync(
-                        owner, NotificationSubjectNaming.AlertChannelNotSending, TitleKey(verdict.State), sourceId,
+                        owner, InAppNotificationType.AlertChannelNotSending.ToWireString(), title.ToWireString(), sourceId,
                         category: NotificationCategory.Alert,
                         source: NotificationSource,
-                        subtitle: TitleKey(verdict.State) + "_subtitle",
+                        subtitle: subtitle.ToWireString(),
                         metadata: Metadata(channel, verdict, names.GetValueOrDefault(channel.AlertRuleId), existing),
                         cancellationToken: ct))
                     logger.LogWarning(
@@ -123,14 +123,16 @@ internal sealed class AlertChannelNotice(
 
             foreach (var sourceId in standing.Where(s => !notSending.ContainsKey(s)))
                 await notifications.ArchiveBySourceAsync(
-                    owner, NotificationSubjectNaming.AlertChannelNotSending, sourceId, NotificationArchiveReason.ConditionMet, ct);
+                    owner, InAppNotificationType.AlertChannelNotSending.ToWireString(), sourceId, NotificationArchiveReason.ConditionMet, ct);
         }
 
         log.Record(tenantId, keys);
     }
 
-    private static string TitleKey(AlertChannelState state) =>
-        state == AlertChannelState.Stopped ? "alert_channel_stopped" : "alert_channel_no_recipient";
+    private static (NotificationLabel Title, NotificationLabel Subtitle) Labels(AlertChannelState state) =>
+        state == AlertChannelState.Stopped
+            ? (NotificationLabel.AlertChannelStopped, NotificationLabel.AlertChannelStoppedSubtitle)
+            : (NotificationLabel.AlertChannelNoRecipient, NotificationLabel.AlertChannelNoRecipientSubtitle);
 
     /// <summary>Which of the members and adders the <paramref name="notSending"/> channels name still have a subject.</summary>
     private async Task<IReadOnlySet<Guid>> ExistingSubjectsAsync(
@@ -160,8 +162,8 @@ internal sealed class AlertChannelNotice(
         {
             ["alertRuleId"] = channel.AlertRuleId.ToString(),
             ["channelId"] = channel.Id.ToString(),
-            ["channelType"] = JsonSerializer.Serialize(channel.ChannelType).Trim('"'),
-            ["state"] = JsonSerializer.Serialize(verdict.State).Trim('"'),
+            ["channelType"] = EnumWireNames<ChannelType>.Of(channel.ChannelType),
+            ["state"] = EnumWireNames<AlertChannelState>.Of(verdict.State),
         };
         if (ruleName is not null)
             metadata["alertRuleName"] = ruleName;

@@ -1,3 +1,4 @@
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using Nocturne.Core.Models;
 
@@ -44,19 +45,19 @@ internal sealed record ReportResult
 internal enum ReportPanelStatus
 {
     /// <summary>Read and resolved.</summary>
-    [JsonStringEnumMemberName("ok")]
+    [EnumMember(Value = "ok"), JsonStringEnumMemberName("ok")]
     Ok,
 
     /// <summary>Not read: the token lacks the scope of the dataset, or of a field or a source the layer needs.</summary>
-    [JsonStringEnumMemberName("not_permitted")]
+    [EnumMember(Value = "not_permitted"), JsonStringEnumMemberName("not_permitted")]
     NotPermitted,
 
     /// <summary>Not finished within the report's time limit.</summary>
-    [JsonStringEnumMemberName("timed_out")]
+    [EnumMember(Value = "timed_out"), JsonStringEnumMemberName("timed_out")]
     TimedOut,
 
     /// <summary>The dataset failed; the other panels and layers are still drawn.</summary>
-    [JsonStringEnumMemberName("failed")]
+    [EnumMember(Value = "failed"), JsonStringEnumMemberName("failed")]
     Failed,
 }
 
@@ -151,14 +152,14 @@ internal sealed record ReportTrackResult(string Id, string? Title, double Height
 [JsonConverter(typeof(JsonStringEnumConverter<ReportAxisSide>))]
 internal enum ReportAxisSide
 {
-    [JsonStringEnumMemberName("left")]
+    [EnumMember(Value = "left"), JsonStringEnumMemberName("left")]
     Left,
 
-    [JsonStringEnumMemberName("right")]
+    [EnumMember(Value = "right"), JsonStringEnumMemberName("right")]
     Right,
 
     /// <summary>Markers and spans: drawn with no axis.</summary>
-    [JsonStringEnumMemberName("none")]
+    [EnumMember(Value = "none"), JsonStringEnumMemberName("none")]
     None,
 }
 

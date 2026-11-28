@@ -1,13 +1,12 @@
 using System.Linq.Expressions;
-using System.Reflection;
-using System.Runtime.Serialization;
+using Nocturne.Core.Models;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Nocturne.Infrastructure.Data.Converters;
 
 /// <summary>
 /// EF Core value converter that maps enum values to/from their
-/// <see cref="EnumMemberAttribute.Value"/> strings. Falls back to
+/// <see cref="System.Runtime.Serialization.EnumMemberAttribute.Value"/> strings. Falls back to
 /// <c>ToString()</c> if the attribute is missing.
 /// </summary>
 /// <param name="tolerant">
@@ -27,54 +26,34 @@ internal sealed class EnumMemberValueConverter<TEnum>(bool tolerant = false)
     /// </summary>
     public static readonly TEnum Unreadable = (TEnum)Enum.ToObject(typeof(TEnum), -1);
 
-    private static readonly Dictionary<TEnum, string> ToStringMap = BuildToStringMap();
-    private static readonly Dictionary<string, TEnum> FromStringMap = BuildFromStringMap();
+    private static readonly Dictionary<string, TEnum> ByMemberName = BuildByMemberName();
 
-    private static Dictionary<TEnum, string> BuildToStringMap()
-    {
-        var map = new Dictionary<TEnum, string>();
-        foreach (var field in typeof(TEnum).GetFields(BindingFlags.Public | BindingFlags.Static))
-        {
-            var value = (TEnum)field.GetValue(null)!;
-            var attr = field.GetCustomAttribute<EnumMemberAttribute>();
-            map[value] = attr?.Value ?? value.ToString();
-        }
-        return map;
-    }
-
-    private static Dictionary<string, TEnum> BuildFromStringMap()
+    private static Dictionary<string, TEnum> BuildByMemberName()
     {
         var map = new Dictionary<string, TEnum>(StringComparer.OrdinalIgnoreCase);
-        foreach (var field in typeof(TEnum).GetFields(BindingFlags.Public | BindingFlags.Static))
-        {
-            var value = (TEnum)field.GetValue(null)!;
-            // Add both the member name and the EnumMember value so lookups
-            // succeed even when attribute reflection fails at runtime.
-            map.TryAdd(field.Name, value);
-            var attr = field.GetCustomAttribute<EnumMemberAttribute>();
-            if (attr?.Value is { } attrValue)
-                map.TryAdd(attrValue, value);
-        }
-        // Also include whatever ToStringMap resolved (covers edge cases where
-        // ToStringMap and FromStringMap disagree about attribute availability).
-        foreach (var kv in ToStringMap)
-            map.TryAdd(kv.Value, kv.Key);
+        foreach (var name in Enum.GetNames<TEnum>())
+            map.TryAdd(name, Enum.Parse<TEnum>(name));
         return map;
     }
 
-    private static string ToProvider(TEnum value) =>
-        ToStringMap.TryGetValue(value, out var s) ? s : value.ToString();
+    private static TEnum? Find(string value)
+    {
+        if (EnumWireNames<TEnum>.Parse(value, ignoreCase: true) is { } byWireName)
+            return byWireName;
+
+        return ByMemberName.TryGetValue(value, out var byMemberName) ? byMemberName : null;
+    }
+
+    private static string ToProvider(TEnum value) => EnumWireNames<TEnum>.Of(value);
 
     public bool IsUnreadable(object? value) => tolerant && value is TEnum e && !Enum.IsDefined(e);
 
     private static Expression<Func<string, TEnum>> Reader(bool tolerant) =>
         tolerant ? v => ReadOrUnreadable(v) : v => FromProvider(v);
 
-    private static TEnum FromProvider(string value) =>
-        FromStringMap.TryGetValue(value, out var e) ? e : Enum.Parse<TEnum>(value, ignoreCase: true);
+    private static TEnum FromProvider(string value) => Find(value) ?? Enum.Parse<TEnum>(value, ignoreCase: true);
 
-    private static TEnum ReadOrUnreadable(string value) =>
-        FromStringMap.TryGetValue(value, out var e) ? e : Unreadable;
+    private static TEnum ReadOrUnreadable(string value) => Find(value) ?? Unreadable;
 }
 
 /// <summary>A converter that can read a stored value as one no member has.</summary>

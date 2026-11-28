@@ -246,15 +246,15 @@ internal static class ReportWorkspace
         new(Timeline, signal, GlucoseSeriesParameters.Name, null, field, [Line("time", field), Area("time", field)], TimeSmooth, true, Combine: true);
 
     private static CellSpec Treatments(string signal, ReportTreatmentType type, string field) =>
-        new(Timeline, signal, TreatmentsParameters.Name, new Dictionary<string, object> { ["types"] = new[] { ReportWire.Name(type) } }, field,
+        new(Timeline, signal, TreatmentsParameters.Name, new Dictionary<string, object> { ["types"] = new[] { EnumWireNames<ReportTreatmentType>.Of(type) } }, field,
             [Markers(field), Bars("time", field)], [], false);
 
     private static CellSpec Device(string signal, string field) =>
         new(Timeline, signal, DeviceStatusParameters.Name, null, field, [Line("time", field), Points("time", field)], TimeSmooth, true);
 
     private static CellSpec Span(string signal, ReportSpanKind kind) =>
-        new(Timeline, signal, StateSpansParameters.Name, new Dictionary<string, object> { ["kinds"] = new[] { ReportWire.Name(kind) } }, null,
-            [Spans], [], false, SpanKind: ReportWire.Name(kind), Scopes: [StateSpansDataset.ScopeOf(kind)]);
+        new(Timeline, signal, StateSpansParameters.Name, new Dictionary<string, object> { ["kinds"] = new[] { EnumWireNames<ReportSpanKind>.Of(kind) } }, null,
+            [Spans], [], false, SpanKind: EnumWireNames<ReportSpanKind>.Of(kind), Scopes: [StateSpansDataset.ScopeOf(kind)]);
 
     private static CellSpec Profile(string signal, string? field, params CustomReportWorkspaceMark[] marks) =>
         new(TypicalDay, signal, DailyProfileParameters.Name, null, field,
@@ -262,7 +262,7 @@ internal static class ReportWorkspace
             FoldSmooth, true, Combine: true);
 
     private static CellSpec Setting(string signal, SettingsEvidenceSetting setting, string observed, string inProfile) =>
-        new(TypicalDay, signal, SettingsEvidenceParameters.Name, new Dictionary<string, object> { ["setting"] = ReportWire.Name(setting) }, observed,
+        new(TypicalDay, signal, SettingsEvidenceParameters.Name, new Dictionary<string, object> { ["setting"] = EnumWireNames<SettingsEvidenceSetting>.Of(setting) }, observed,
             [Lines("startMinute", [observed, inProfile]), Points("startMinute", observed, inProfile)], [], false);
 
     private static CellSpec Day(string signal, string field, bool barsFirst) =>
@@ -394,7 +394,7 @@ internal static class ReportWorkspace
     /// <summary>A timeline cell of a lane dataset (<see cref="LaneDataset"/>), narrowed to one group of device events where one is named.</summary>
     private static CellSpec Lanes(string signal, string dataset, ReportDeviceEventGroup? group = null) =>
         new(Timeline, signal, dataset,
-            group is { } g ? new Dictionary<string, object> { ["groups"] = new[] { ReportWire.Name(g) } } : null,
+            group is { } g ? new Dictionary<string, object> { ["groups"] = new[] { EnumWireNames<ReportDeviceEventGroup>.Of(g) } } : null,
             null, [Spans], [], false);
 
     /// <summary>A daily cell of one sleep session's figure, along the night it ended.</summary>
@@ -573,7 +573,7 @@ internal static class ReportWorkspace
                 var own = cells.Where(c => c.Signal == s.Id).ToList();
                 var lenses = new[] { Timeline, TypicalDay, Event, Daily, Against }.Where(l => own.Any(c => c.Lens == l)).ToList();
                 return new CustomReportWorkspaceSignal(s.Id, s.Family, s.Lane,
-                    Table.Where(c => c.Signal == s.Id).Select(c => LeadColor(c, registry)).OfType<ChartColor>().Select(ReportWire.Name).FirstOrDefault(s.Color),
+                    Table.Where(c => c.Signal == s.Id).Select(c => LeadColor(c, registry)).OfType<ChartColor>().Select(EnumWireNames<ChartColor>.Of).FirstOrDefault(s.Color),
                     own.Any(c => c.Permitted),
                     s.Section, s.Group,
                     own.Select(c => c.Unit).FirstOrDefault(u => u is not null),
@@ -592,9 +592,9 @@ internal static class ReportWorkspace
             [.. Enum.GetValues<ReportDayKind>().Select(k =>
             {
                 IReadOnlyList<string> scopes = new ReportDayFilter { Kind = k }.NeedsTreatments ? [Scope.TreatmentsRead] : [];
-                return new CustomReportWorkspaceDayKind(ReportWire.Name(k), scopes, Holds(scopes));
+                return new CustomReportWorkspaceDayKind(EnumWireNames<ReportDayKind>.Of(k), scopes, Holds(scopes));
             })],
-            [.. DayGroupTable.Select(p => new CustomReportWorkspaceDayGroupPreset(p.Id, [.. p.Groups.Select(g => (IReadOnlyList<string>)[.. g.Select(ReportWire.Name)])]))],
+            [.. DayGroupTable.Select(p => new CustomReportWorkspaceDayGroupPreset(p.Id, [.. p.Groups.Select(g => (IReadOnlyList<string>)[.. g.Select(EnumWireNames<ReportWeekday>.Of)])]))],
             [.. LeaveOutTable.Select(l => new CustomReportWorkspaceLeaveOut(
                 l.Id, ParameterOf(l.Property), LeaveOutScopes(l.Property), Holds(LeaveOutScopes(l.Property))))],
             [.. RangeTable.Select(r => new CustomReportWorkspaceRangePreset(r.Id, r.Hours))],

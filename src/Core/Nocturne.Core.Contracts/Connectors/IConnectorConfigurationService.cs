@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.Configuration;
+using Nocturne.Core.Models.Services;
 
 namespace Nocturne.Core.Contracts.Connectors;
 
@@ -225,10 +226,17 @@ public interface IConnectorConfigurationService
 
     /// <summary>
     /// The values a running connector actually uses, including those resolved from environment
-    /// variables.
+    /// variables. Secrets are left out, and an address is in its shown form only.
     /// </summary>
     /// <returns>Dictionary of property names to effective values, or null if connector is not reachable</returns>
     Task<Dictionary<string, object?>?> GetEffectiveConfigurationAsync(string connectorName, CancellationToken ct = default);
+
+    /// <summary>
+    /// How far back the connector's source serves records under the tenant's stored configuration,
+    /// bound over the instance's settings as a run binds it. Null when the tenant stores none or the
+    /// connector is unknown.
+    /// </summary>
+    Task<ConnectorHistoryReach?> GetHistoryReachAsync(string connectorName, CancellationToken ct = default);
 
     /// <returns>The health state, or null if the connector is not found</returns>
     Task<ConnectorHealthStateDto?> GetHealthStateAsync(

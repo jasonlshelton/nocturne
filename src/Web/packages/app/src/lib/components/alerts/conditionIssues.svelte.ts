@@ -5,6 +5,23 @@ const MALFORMED = "Part of this rule's conditions is malformed, so it cannot be 
 const STORED_MALFORMED = "Part of this rule's conditions is malformed, so the rule cannot run as set. Edit its conditions and save it.";
 
 /**
+ * Sentences for a stored issue in a tree other than the rule's own conditions, by the issue's
+ * scope, so the person knows which part to open. The rule still sends alerts.
+ */
+const PART_SENTENCES: Record<string, { lead: string; oldFormat: string; malformed: string }> = {
+	auto_resolve: {
+		lead: "The auto-resolve conditions of this rule cannot run as set.",
+		oldFormat: "The auto-resolve conditions of this rule were saved in an old format. Check them and save the rule again.",
+		malformed: "Edit the auto-resolve conditions and save the rule.",
+	},
+	snooze: {
+		lead: "The smart snooze conditions of this rule cannot run as set.",
+		oldFormat: "The smart snooze conditions of this rule were saved in an old format. Check them and save the rule again.",
+		malformed: "Edit the smart snooze conditions and save the rule.",
+	},
+};
+
+/**
  * Sentences for the reason codes a rule save is rejected with
  * (docs/alerts/engine-semantics.md §1.4). A code arrives with a field or
  * without one; the field-specific form wins.
@@ -13,8 +30,6 @@ const ISSUE_MESSAGES: Record<string, string> = {
 	"list_empty:conditions": "Every group needs at least one condition.",
 	"field_missing:operator": "A condition has no comparison chosen. Pick one and save again.",
 	"unknown_value:operator": "A condition has a comparison that is not recognized. Pick one from the list and save again.",
-	"field_missing:direction": "A glucose condition needs a direction: above or below, rising or falling.",
-	"unknown_value:direction": "A glucose condition needs a direction: above or below, rising or falling.",
 	"field_missing:state": "An alert-state condition needs a state: firing, unacknowledged or acknowledged.",
 	"unknown_value:state": "An alert-state condition needs a state: firing, unacknowledged or acknowledged.",
 	"invalid_field:alert_id": "An alert-state condition needs a rule chosen.",
@@ -24,6 +39,8 @@ const ISSUE_MESSAGES: Record<string, string> = {
 	"minutes_not_positive:timeout_minutes": "A signal loss condition needs a time without readings of 1 minute or more.",
 	"minutes_not_positive:within_minutes": "A predicted glucose condition needs to look ahead 1 minute or more.",
 	minutes_negative: "A condition compares a time since something against a negative number of minutes, so it would be the same every time it is checked. Use 0 or more.",
+	"invalid_field:minutes": "A time in a condition must be a whole number of minutes, 0 or more.",
+	unsupported_schema: "This rule's conditions were saved in an old format. Check the conditions and save the rule again.",
 	"field_missing:child": "A NOT or “for at least” wrapper has nothing inside it.",
 	field_missing: "A condition is missing a setting it needs. Fill it in and save again.",
 	"field_missing:alert_id": "An alert-state condition needs a rule chosen.",
@@ -99,7 +116,17 @@ export function storedConditionIssuesMessage(
 	issues: RustValidationIssue[] | undefined
 ): string | null {
 	if (issues === undefined || issues.length === 0) return null;
-	return distinct(issues.map((issue) => sentenceFor(issue) ?? STORED_MALFORMED)).join(" ");
+	return distinct(issues.flatMap(storedSentences)).join(" ");
+}
+
+function storedSentences(issue: RustValidationIssue): string[] {
+	const part =
+		issue.scope !== undefined && Object.hasOwn(PART_SENTENCES, issue.scope)
+			? PART_SENTENCES[issue.scope]
+			: undefined;
+	if (part === undefined) return [sentenceFor(issue) ?? STORED_MALFORMED];
+	if (issue.reason === "unsupported_schema") return [part.oldFormat];
+	return [part.lead, sentenceFor(issue) ?? part.malformed];
 }
 
 /** The sentence for one reason code, and the field it is on when there is one. */

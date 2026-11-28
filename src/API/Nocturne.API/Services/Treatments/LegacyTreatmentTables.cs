@@ -281,7 +281,7 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
     Func<LegacyTreatmentRepositories, IReadOnlyCollection<Guid>, CancellationToken, Task<IEnumerable<TRecord>>>? correlated = null
 ) : ILegacyKeyedTreatmentTable
     where TRecord : class, IV4Record
-    where TEntity : class, ISystemTimestamped, IDuplicateFlagged, ISoftDeletable, IObservationTimestamped
+    where TEntity : class, ISystemTimestamped, IDuplicateFlagged, ISoftDeletable, IObservationTimestamped, ITenantScoped, IIdentified, IWriterStamped
 {
     /// <inheritdoc />
     public string RecordType { get; } = typeof(TRecord).Name;
@@ -350,11 +350,10 @@ internal sealed class LegacyTreatmentTable<TRecord, TEntity>(
 
     private IQueryable<TEntity> At(NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
     {
-        var at = instants.ToList();
         return table(context)
             .AsNoTracking()
             .ExcludeDuplicates()
-            .Where(e => at.Contains(e.Timestamp))
+            .AtInstants(instants)
             .InObservationOrder(descending: true);
     }
 
@@ -524,8 +523,7 @@ internal sealed class LegacyStateSpanTable(
 
     private IQueryable<StateSpanEntity> At(NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
     {
-        var at = instants.ToList();
-        return InStartOrder(Visible(context).Where(s => at.Contains(s.StartTimestamp)), descending: true);
+        return InStartOrder(Visible(context).AtInstants(instants), descending: true);
     }
 
     private static IOrderedQueryable<StateSpanEntity> InStartOrder(IQueryable<StateSpanEntity> spans, bool descending) =>
@@ -698,8 +696,7 @@ internal sealed class LegacyProfileActivationTable : ILegacyKeyedTreatmentTable
     private static IQueryable<ProfileActivationEntity> At(
         NocturneDbContext context, IReadOnlyCollection<DateTime> instants)
     {
-        var at = instants.ToList();
-        return InStartOrder(Rows(context).Where(a => at.Contains(a.Timestamp)), descending: true);
+        return InStartOrder(Rows(context).AtInstants(instants), descending: true);
     }
 
     private static IOrderedQueryable<ProfileActivationEntity> InStartOrder(
@@ -756,24 +753,6 @@ internal sealed class LegacyProfileActivationTable : ILegacyKeyedTreatmentTable
 /// </summary>
 internal static class LegacyTreatmentTables
 {
-    // DeviceEventType → legacy Nightscout eventType string (reverse of TreatmentTypeMaps.DeviceEventTypeMap)
-    private static readonly Dictionary<DeviceEventType, string> DeviceEventTypeToString =
-        new()
-        {
-            [DeviceEventType.SensorStart] = TreatmentTypes.SensorStart,
-            [DeviceEventType.SensorChange] = TreatmentTypes.SensorChange,
-            [DeviceEventType.SensorStop] = TreatmentTypes.SensorStop,
-            [DeviceEventType.SiteChange] = TreatmentTypes.SiteChange,
-            [DeviceEventType.InsulinChange] = TreatmentTypes.InsulinChange,
-            [DeviceEventType.PumpBatteryChange] = TreatmentTypes.PumpBatteryChange,
-            [DeviceEventType.PodChange] = TreatmentTypes.PodChange,
-            [DeviceEventType.PodActivated] = TreatmentTypes.PodActivated,
-            [DeviceEventType.PodDeactivated] = TreatmentTypes.PodDeactivated,
-            [DeviceEventType.ReservoirChange] = TreatmentTypes.ReservoirChange,
-            [DeviceEventType.CannulaChange] = TreatmentTypes.CannulaChange,
-            [DeviceEventType.TransmitterSensorInsert] = TreatmentTypes.TransmitterSensorInsert,
-        };
-
     /// <summary>
     /// Loop override fields with no <see cref="Treatment"/> property, kept and served with their JSON
     /// type. NightscoutKit and LoopFollow read <c>correctionRange</c> as a number array, and LoopFollow
@@ -1054,9 +1033,6 @@ internal static class LegacyTreatmentTables
             };
         }
 
-        if (span.App is { } app)
-            treatment.AdditionalProperties = new Dictionary<string, object> { [ProfileSpanMetadata.AppKey] = app };
-
         treatment.Id = activation.Id.ToString();
         treatment.LegacyId = activation.LegacyId;
         treatment.RecordId = activation.Id;
@@ -1073,12 +1049,12 @@ internal static class LegacyTreatmentTables
     internal static void RestoreServedFields(Treatment treatment, IDictionary<string, object>? metadata)
     {
         treatment.RawTimestamp ??= TreatmentUploadedTimestamp.OfSpan(metadata);
-        treatment.EnteredBy = metadata.TryReadString(ProfileActivationLegacyFields.EnteredByKey);
+        UploadedAppFields.RestoreFromMetadata(treatment, metadata);
         treatment.Notes = metadata.TryReadString(NotesKey);
         treatment.SyncIdentifier = metadata.TryReadString(SyncIdentifierKey);
         treatment.InsulinType = metadata.TryReadString(InsulinTypeKey);
         treatment.UtcOffset = (int?)metadata.TryReadDecimal(StateSpanMetadataExtensions.UtcOffsetKey);
-        SpanUploadedFields.Restore(treatment, metadata);
+        UploadedPumpFields.RestoreFromMetadata(treatment, metadata);
         TreatmentClientId.RestoreFromMetadata(treatment, metadata);
     }
 
@@ -1337,7 +1313,6 @@ internal static class LegacyTreatmentTables
             Protein = DeriveTotalProtein(foods),
             AbsorptionTime = carb.AbsorptionTime,
             CarbTime = carb.CarbTime.HasValue ? (int?)((int)carb.CarbTime.Value) : null,
-            EnteredBy = bolus.Device,
             DataSource = bolus.DataSource,
             SyncIdentifier = bolus.SyncIdentifier,
             InsulinType = bolus.InsulinType,
@@ -1361,7 +1336,6 @@ internal static class LegacyTreatmentTables
             Mills = bolus.Mills,
             Insulin = bolus.Insulin,
             PreBolus = TreatmentUploadedPreBolus.Of(bolus.AdditionalProperties),
-            EnteredBy = bolus.Device,
             DataSource = bolus.DataSource,
             SyncIdentifier = bolus.SyncIdentifier,
             InsulinType = bolus.InsulinType,
@@ -1376,8 +1350,9 @@ internal static class LegacyTreatmentTables
         return treatment;
     }
 
-    private static Treatment ProjectCarbCorrection(CarbIntake carb, List<TreatmentFood> foods) =>
-        new()
+    private static Treatment ProjectCarbCorrection(CarbIntake carb, List<TreatmentFood> foods)
+    {
+        var treatment = new Treatment
         {
             Id = carb.Id.ToString(),
             LegacyId = carb.LegacyId,
@@ -1393,11 +1368,13 @@ internal static class LegacyTreatmentTables
             Protein = DeriveTotalProtein(foods),
             AbsorptionTime = carb.AbsorptionTime,
             CarbTime = carb.CarbTime.HasValue ? (int?)((int)carb.CarbTime.Value) : null,
-            EnteredBy = carb.Device,
             DataSource = carb.DataSource,
             SyncIdentifier = carb.SyncIdentifier,
             UtcOffset = carb.UtcOffset,
         };
+        UploadedAppFields.RestoreAll(treatment, carb.AdditionalProperties, carb.App, carb.Device);
+        return treatment;
+    }
 
     private static double? DeriveTotalFat(List<TreatmentFood> foods)
     {
@@ -1415,8 +1392,9 @@ internal static class LegacyTreatmentTables
         return sum > 0 ? sum : null;
     }
 
-    private static Treatment ProjectBgCheck(BGCheck bgCheck) =>
-        new()
+    private static Treatment ProjectBgCheck(BGCheck bgCheck)
+    {
+        var treatment = new Treatment
         {
             Id = bgCheck.Id.ToString(),
             LegacyId = bgCheck.LegacyId,
@@ -1430,14 +1408,17 @@ internal static class LegacyTreatmentTables
             Mmol = bgCheck.Mmol,
             GlucoseType = bgCheck.GlucoseType?.ToString(),
             Units = bgCheck.Units == GlucoseUnit.Mmol ? "mmol" : "mg/dl",
-            EnteredBy = bgCheck.Device,
             DataSource = bgCheck.DataSource,
             SyncIdentifier = bgCheck.SyncIdentifier,
             UtcOffset = bgCheck.UtcOffset,
         };
+        UploadedAppFields.RestoreAll(treatment, bgCheck.AdditionalProperties, bgCheck.App, bgCheck.Device);
+        return treatment;
+    }
 
-    private static Treatment ProjectNote(Note note) =>
-        new()
+    private static Treatment ProjectNote(Note note)
+    {
+        var treatment = new Treatment
         {
             Id = note.Id.ToString(),
             LegacyId = note.LegacyId,
@@ -1448,16 +1429,18 @@ internal static class LegacyTreatmentTables
             Mills = note.Mills,
             Notes = note.Text,
             IsAnnouncement = note.IsAnnouncement,
-            EnteredBy = note.Device,
             DataSource = note.DataSource,
             SyncIdentifier = note.SyncIdentifier,
             UtcOffset = note.UtcOffset,
         };
+        UploadedAppFields.RestoreAll(treatment, note.AdditionalProperties, note.App, note.Device);
+        return treatment;
+    }
 
     private static Treatment ProjectDeviceEvent(DeviceEvent deviceEvent)
     {
-        DeviceEventTypeToString.TryGetValue(deviceEvent.EventType, out var eventTypeString);
-        return new Treatment
+        TreatmentTypeMaps.DeviceEventTypeNames.TryGetValue(deviceEvent.EventType, out var eventTypeString);
+        var treatment = new Treatment
         {
             Id = deviceEvent.Id.ToString(),
             LegacyId = deviceEvent.LegacyId,
@@ -1467,15 +1450,17 @@ internal static class LegacyTreatmentTables
             EventType = eventTypeString ?? deviceEvent.EventType.ToString(),
             Mills = deviceEvent.Mills,
             Notes = deviceEvent.Notes,
-            EnteredBy = deviceEvent.Device,
             DataSource = deviceEvent.DataSource,
             SyncIdentifier = deviceEvent.SyncIdentifier,
             UtcOffset = deviceEvent.UtcOffset,
         };
+        UploadedAppFields.RestoreAll(treatment, deviceEvent.AdditionalProperties, deviceEvent.App, deviceEvent.Device);
+        return treatment;
     }
 
-    private static Treatment ProjectBolusCalculation(BolusCalculation bc) =>
-        new()
+    private static Treatment ProjectBolusCalculation(BolusCalculation bc)
+    {
+        var treatment = new Treatment
         {
             Id = bc.Id.ToString(),
             LegacyId = bc.LegacyId,
@@ -1499,8 +1484,10 @@ internal static class LegacyTreatmentTables
             SplitNow = bc.SplitNow,
             SplitExt = bc.SplitExt,
             PreBolus = bc.PreBolus,
-            EnteredBy = bc.Device,
             DataSource = bc.DataSource,
             UtcOffset = bc.UtcOffset,
         };
+        UploadedAppFields.RestoreAll(treatment, bc.AdditionalProperties, bc.App, bc.Device);
+        return treatment;
+    }
 }

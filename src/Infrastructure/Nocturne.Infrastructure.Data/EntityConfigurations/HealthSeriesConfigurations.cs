@@ -9,19 +9,8 @@ internal sealed class StepCountEntityConfiguration : IEntityTypeConfiguration<St
     public void Configure(EntityTypeBuilder<StepCountEntity> entity)
     {
         entity
-            .HasIndex(s => s.Timestamp)
-            .HasDatabaseName("ix_step_counts_timestamp")
-            .IsDescending();
-
-        entity
             .HasIndex(s => s.SysCreatedAt)
             .HasDatabaseName("ix_step_counts_sys_created_at");
-
-        // Non-filtered tenant+time index — covers the tenant FK (the filtered sync-id unique
-        // index cannot) and serves tenant-scoped range reads.
-        entity
-            .HasIndex(s => new { s.TenantId, s.Timestamp })
-            .HasDatabaseName("ix_step_counts_tenant_timestamp");
 
         // The activity id a heart rate or step count was decomposed from, read (tombstones included)
         // on every activity write and connector reconcile.
@@ -44,17 +33,8 @@ internal sealed class HeartRateEntityConfiguration : IEntityTypeConfiguration<He
             .HasFilter("original_id IS NOT NULL");
 
         entity
-            .HasIndex(h => h.Timestamp)
-            .HasDatabaseName("ix_heart_rates_timestamp")
-            .IsDescending();
-
-        entity
             .HasIndex(h => h.SysCreatedAt)
             .HasDatabaseName("ix_heart_rates_sys_created_at");
-
-        entity
-            .HasIndex(h => new { h.TenantId, h.Timestamp })
-            .HasDatabaseName("ix_heart_rates_tenant_timestamp");
 
         NocturneDbContext.ScopeKeyToTenant(entity);
     }

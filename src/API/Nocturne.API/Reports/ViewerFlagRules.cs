@@ -97,7 +97,7 @@ internal sealed class ViewerFlagRules(
                 rule.Field,
                 condition.Field.Label,
                 condition.Field.Unit,
-                range == ReportRangeFamily.None ? null : ReportWire.Name(range),
+                range == ReportRangeFamily.None ? null : EnumWireNames<ReportRangeFamily>.Of(range),
                 value,
                 rule.Comparison,
                 rule.Value,
@@ -148,6 +148,7 @@ internal sealed class ViewerFlagRules(
             SensorGlucose? latest,
             IReadOnlyList<TrackerInstance>? activeTrackers,
             PumpSnapshot? pump,
+            OnBoardFigures? onBoard,
             CancellationToken ct)
         {
             var ruled = Enumerable.Range(0, held.Count)
@@ -159,7 +160,7 @@ internal sealed class ViewerFlagRules(
                 return new ViewerJudgement([], checkable);
 
             var judged = await judging.JudgeAsync(
-                person, personScope, new FlagLiveReads(latest, activeTrackers, pump), [.. ruled, .. filtered], ct);
+                person, personScope, new FlagLiveReads(latest, activeTrackers, pump, onBoard), [.. ruled, .. filtered], ct);
             if (judged.State != FlagPersonState.Judged)
                 return new ViewerJudgement([], filters.Count == 0);
 

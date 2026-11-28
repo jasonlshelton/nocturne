@@ -43,7 +43,7 @@ public class EventListDatasetTests
         var validation = Layer("""{ "name": "event_outcomes", "group": 1 }""", "points", $$""", "bindings": { "x": "{{x}}", "y": ["{{y}}"] {{line}} }""");
 
         validation.Errors.Should().BeEmpty();
-        ReportWire.Name(validation.Spec!.Panels[0].Tracks![0].Layers[0].XKind).Should().Be(kind);
+        EnumWireNames<ReportXKind>.Of(validation.Spec!.Panels[0].Tracks![0].Layers[0].XKind).Should().Be(kind);
     }
 
     [Fact]

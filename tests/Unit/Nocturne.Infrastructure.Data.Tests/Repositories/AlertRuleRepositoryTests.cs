@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Time.Testing;
+using Nocturne.Core.Contracts.Alerts;
 using Nocturne.Core.Models;
 using Nocturne.Core.Models.Alerts;
 using Nocturne.Infrastructure.Data.Entities;
@@ -34,7 +35,7 @@ public class AlertRuleRepositoryTests
     private AlertRuleRepository Repository(NocturneDbContext seed) =>
         new(new TestNocturneDbContextFactory(seed), _clock);
 
-    private static AlertRuleWrite Low(string body = """{"direction":"below","value":70}""") => new(
+    private static AlertRuleWrite Low(string body = """{"schema_version":2,"operator":"<","value":70}""") => new(
         "Low", "desc", AlertConditionType.Threshold, body, RuleScopeClass.Low, AlertRuleSeverity.Warning,
         IsEnabled: true, SortOrder: 3, AllowThroughDnd: false, AutoResolveEnabled: false,
         AutoResolveParams: null, ClientConfiguration: "{}");
@@ -428,7 +429,8 @@ public class AlertRuleRepositoryTests
         await using var seed = Db();
         await using var unit = await DbUnitOfWork.OpenAsync(new TestNocturneDbContextFactory(seed));
 
-        var act = () => new AlertRuleRepository(unit, _clock).SetScopeClassAsync(Tenant, RuleScopeClass.Low, [Guid.NewGuid()], CancellationToken.None);
+        var act = () => new AlertRuleRepository(unit, _clock).SetScopeClassAsync(
+            Tenant, RuleScopeClass.Low, [new ClassifiedRule(Guid.NewGuid(), AlertConditionType.Threshold, "{}")], CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }

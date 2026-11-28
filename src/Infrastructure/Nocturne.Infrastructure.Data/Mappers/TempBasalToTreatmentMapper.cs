@@ -49,7 +49,6 @@ public static class TempBasalToTreatmentMapper
             DeliveredRate = rate,
             Percent = tempBasal.Percent,
             Temp = relative ? null : "absolute",
-            EnteredBy = tempBasal.App,
             UtcOffset = tempBasal.UtcOffset,
             DataSource = tempBasal.DataSource,
             Automatic = TempBasalAutomaticFlag.Of(tempBasal.AdditionalProperties),
@@ -57,7 +56,7 @@ public static class TempBasalToTreatmentMapper
             RawTimestamp = TreatmentUploadedTimestamp.Of(tempBasal.AdditionalProperties),
         };
 
-        TempBasalUploadedFields.Restore(treatment, tempBasal.AdditionalProperties, tempBasal.PumpRecordId);
+        TempBasalUploadedFields.Restore(treatment, tempBasal);
 
         // TreatmentDecomposer reads the origin and its evidence back when an edit re-decomposes;
         // the rest is for display
@@ -67,8 +66,6 @@ public static class TempBasalToTreatmentMapper
             TempBasalOriginProvenance.EvidenceOf(tempBasal).ToString();
         if (tempBasal.ScheduledRate.HasValue)
             treatment.AdditionalProperties["scheduledRate"] = tempBasal.ScheduledRate.Value;
-        if (!string.IsNullOrEmpty(tempBasal.Device))
-            treatment.AdditionalProperties["device"] = tempBasal.Device;
 
         return treatment;
     }

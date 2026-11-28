@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.V4;
 using Xunit;
 
 namespace Nocturne.Core.Models.Tests;
@@ -18,10 +19,10 @@ public class UploadedIsValidTests
     public void A_span_keeps_isValid_only_when_true(bool? uploaded, bool? kept)
     {
         var metadata = new Dictionary<string, object>();
-        SpanUploadedFields.Keep(metadata, new Treatment { IsValid = uploaded });
+        UploadedPumpFields.KeepInMetadata(metadata, new Treatment { IsValid = uploaded });
 
         var served = new Treatment();
-        SpanUploadedFields.Restore(served, metadata);
+        UploadedPumpFields.RestoreFromMetadata(served, metadata);
 
         served.IsValid.Should().Be(kept);
     }
@@ -35,7 +36,7 @@ public class UploadedIsValidTests
         var record = TempBasalUploadedFields.Keep(null, new Treatment { IsValid = uploaded });
 
         var served = new Treatment();
-        TempBasalUploadedFields.Restore(served, record, pumpRecordId: null);
+        TempBasalUploadedFields.Restore(served, new TempBasal { AdditionalProperties = record });
 
         served.IsValid.Should().Be(kept);
     }

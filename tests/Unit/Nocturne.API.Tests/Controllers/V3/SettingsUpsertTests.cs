@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Nocturne.Core.Contracts.Effects;
 using Nocturne.API.Configuration;
 using Nocturne.API.Controllers.V3;
 using Nocturne.Core.Contracts.Legacy;
@@ -41,7 +40,6 @@ public class SettingsUpsertTests : IDisposable
         _context.TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         _controller = new SettingsController(
             new SettingsRepository(_context.AsFactory()),
-            Mock.Of<IWriteSideEffects>(),
             Mock.Of<IDocumentProcessingService>(),
             NullLogger<SettingsController>.Instance)
         {
@@ -165,6 +163,39 @@ public class SettingsUpsertTests : IDisposable
         deleted.Should().BeAssignableTo<ObjectResult>().Which.StatusCode.Should().Be(200);
         var read = await _controller.GetSettingsById(offer);
         read.Should().BeAssignableTo<ObjectResult>().Which.StatusCode.Should().Be(404);
+    }
+
+    [Fact]
+    public async Task A_document_key_that_is_not_a_string_is_kept_and_read_back_under_key()
+    {
+        const string answer = "aaps_clientcontrol_key_ba1fb19e-e5d2-4c5d-92bc-4dbf683f0a88";
+        await _controller.UpdateSettings(
+            answer,
+            Json(AapsDocument("{}", extra: "\"schemaVersion\":1,\"key\":{\"masterPublicKey\":\"BAx\",\"signature\":\"c2ln\"}")));
+
+        var stored = await Read(answer);
+        stored.GetProperty("identifier").GetString().Should().Be(answer);
+        stored.GetProperty("key").GetProperty("masterPublicKey").GetString().Should().Be("BAx");
+        stored.GetProperty("key").GetProperty("signature").GetString().Should().Be("c2ln");
+        stored.GetProperty("schemaVersion").GetInt32().Should().Be(1);
+
+        var search = Serialize(((ObjectResult)await _controller.GetSettings()).Value);
+        var found = search.GetProperty("result").EnumerateArray()
+            .Single(d => d.GetProperty("identifier").GetString() == answer);
+        found.GetProperty("key").GetProperty("masterPublicKey").GetString().Should().Be("BAx");
+    }
+
+    [Fact]
+    public async Task A_replacement_without_a_document_key_reads_back_the_settings_key_again()
+    {
+        const string answer = "aaps_clientcontrol_key_ba1fb19e-e5d2-4c5d-92bc-4dbf683f0a88";
+        await _controller.UpdateSettings(answer, Json(AapsDocument("{}", extra: "\"key\":{\"masterPublicKey\":\"BAx\"}")));
+
+        await _controller.UpdateSettings(answer, Json(AapsDocument("{}")));
+
+        var stored = await Read(answer);
+        stored.GetProperty("key").GetString().Should().Be(answer);
+        stored.GetProperty("identifier").GetString().Should().Be(answer);
     }
 
     [Fact]

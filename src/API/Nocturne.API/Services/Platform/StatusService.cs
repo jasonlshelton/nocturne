@@ -179,13 +179,19 @@ public class StatusService : IStatusService
         // reset-time lookup; every other tenant answers from the context alone.
         bool? isDemo = null;
         DateTime? nextResetAt = null;
+        DateTime? nextVisitorResetAt = null;
+        string? demoKind = null;
 
         var tenantContext = _tenantAccessor.Context;
         if (tenantContext is { IsDemo: true })
         {
             isDemo = true;
 
-            nextResetAt = (await _tenantRepository.GetAsync(tenantContext.TenantId, CancellationToken.None))?.DemoConfig?.NextResetAt;
+            var demoConfig = (await _tenantRepository.GetAsync(tenantContext.TenantId, CancellationToken.None))?.DemoConfig;
+            nextResetAt = demoConfig?.NextResetAt;
+            demoKind = demoConfig?.Kind;
+            // Nothing clears the recorded time when visitor resets stop, so a past one would be a countdown to nothing.
+            nextVisitorResetAt = demoConfig?.NextVisitorResetAt is { } visitorReset && visitorReset > serverTime ? visitorReset : null;
         }
 
         // Resolve whether this tenant grants anonymous read access (its public subject carries a
@@ -225,6 +231,8 @@ public class StatusService : IStatusService
             RuntimeState = _demoModeService.IsEnabled ? "demo" : "loaded",
             IsDemo = isDemo,
             NextResetAt = nextResetAt,
+            NextVisitorResetAt = nextVisitorResetAt,
+            DemoKind = demoKind,
             AnonymousReadAccess = anonymousReadAccess,
         };
 

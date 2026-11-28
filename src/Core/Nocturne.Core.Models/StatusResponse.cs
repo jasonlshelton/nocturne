@@ -103,6 +103,22 @@ public class StatusResponse
     public DateTime? NextResetAt { get; set; }
 
     /// <summary>
+    /// When the demo clinic persona's saved views and flag rules next go back to their seeds (null if those resets
+    /// are off or not a demo).
+    /// </summary>
+    [JsonPropertyName("nextVisitorResetAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? NextVisitorResetAt { get; set; }
+
+    /// <summary>
+    /// What this demo tenant is to the demo, a <see cref="Demo.DemoTenantKind"/> value: only the host serves demo sessions
+    /// (null if not a demo).
+    /// </summary>
+    [JsonPropertyName("demoKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DemoKind { get; set; }
+
+    /// <summary>
     /// Whether this tenant grants read access to anonymous (unauthenticated) callers —
     /// i.e. the tenant's public subject carries a read permission. The web app uses this
     /// per-tenant signal to decide whether an anonymous visitor may view the dashboard or

@@ -1004,8 +1004,8 @@ msgstr ""
 #~ msgid "Defines what unauthenticated users can access"
 #~ msgstr ""
 
-#. 0: (team.roles ?? []).map((r) => r.name).join(", ")
-#. 0: (site.roleNames ?? []).join(", ")
+#. 0: formatList((team.roles ?? []).flatMap((r) => r.name ?? []))
+#. 0: formatList(site.roleNames ?? [])
 #: src/lib/components/members/TeamAccessCard.svelte
 #: src/lib/components/teams/TeamSitesSection.svelte
 msgid "Roles: {0}"
@@ -1122,6 +1122,8 @@ msgid "Started"
 msgstr ""
 
 #: src/lib/components/alerts/AlertHistoryCard.svelte
+#: src/lib/components/alerts/DurationInput.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/profile/ProfileSwitchDialog.svelte
 #: src/lib/components/reports/sensor-integrity/ClusterTable.svelte
 msgid "Duration"
@@ -1198,10 +1200,8 @@ msgstr ""
 
 #. 0: mins
 #. 0: minutes
-#. 0: minutes
 #. 0: toleranceMinutes
 #: src/lib/components/alerts/DndPanel.svelte
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 #: src/routes/(authenticated)/reports/data-quality/cgm-comparison/+page.svelte
 msgid "{0} minutes"
@@ -1926,9 +1926,8 @@ msgstr ""
 #~ msgid "Add Element"
 #~ msgstr ""
 
-#: src/lib/components/clock-builder/ClockElementPreview.svelte
-msgid "Select tracker"
-msgstr ""
+#~ msgid "Select tracker"
+#~ msgstr ""
 
 #~ msgid "2d 4h"
 #~ msgstr ""
@@ -1969,7 +1968,6 @@ msgstr ""
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/wizard/SettingsStep.svelte
 #: src/lib/components/clock-builder/ElementInspector.svelte
-#: src/lib/components/clock/ClockFaceRenderer.svelte
 #: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/status-pills/TrackerPill.svelte
 #: src/lib/components/trackers/TrackerStartDialog.svelte
@@ -2107,6 +2105,7 @@ msgstr ""
 msgid "Always show"
 msgstr ""
 
+#: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/clock-builder/ElementInspector.svelte
 #: src/lib/components/members/GuestLinksSection.svelte
 #: src/lib/components/reports/custom/workspace/WorkspaceView.svelte
@@ -3558,6 +3557,7 @@ msgstr ""
 msgid "Portion"
 msgstr ""
 
+#: src/lib/components/alerts/DurationInput.svelte
 #: src/lib/components/food/FoodFields.svelte
 #: src/lib/components/trackers/TrackerThresholdRow.svelte
 msgid "Unit"
@@ -4217,6 +4217,7 @@ msgstr ""
 msgid "Reports"
 msgstr ""
 
+#: src/lib/components/alerts/receipts.svelte.ts
 #: src/lib/components/dashboard/widgets/ClockWidget.svelte
 #: src/lib/navigation/app-navigation.svelte.ts
 msgid "Clock"
@@ -4820,7 +4821,6 @@ msgstr ""
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderRow.svelte
 #: src/lib/components/patient/InsulinFormFields.svelte
 msgid "min"
@@ -5213,7 +5213,6 @@ msgstr ""
 msgid "<0/> Add"
 msgstr ""
 
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
@@ -10307,6 +10306,7 @@ msgstr ""
 #~ msgstr ""
 
 #: src/lib/components/reports/ApsStateCard.svelte
+#: src/lib/components/status-pills/LoopPill.svelte
 #: src/routes/(authenticated)/compatibility/[id]/+page.svelte
 #: src/routes/(authenticated)/reports/data-quality/rejected-uploads/+page.svelte
 msgid "Reason"
@@ -10412,10 +10412,8 @@ msgid "Summary <0/>"
 msgstr ""
 
 #. 0: expiresInDays
-#. 0: minutes / 1440
 #. 0: days
 #. 0: minutes / 1440
-#. 0: days
 #. 0: days
 #. 0: days
 #. 0: dayCount
@@ -10423,10 +10421,8 @@ msgstr ""
 #. 0: dayCount
 #. 0: dayCount
 #: src/lib/components/members/CreateInviteCard.svelte
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
-#: src/lib/components/trackers/age.svelte.ts
 #: src/lib/components/ui/duration-input/duration-input.svelte
 #: src/lib/components/ui/duration-input/duration-input.svelte
 #: src/routes/(authenticated)/reports/agp/+page.svelte
@@ -11428,8 +11424,9 @@ msgstr ""
 #~ msgid "Average Sleep"
 #~ msgstr ""
 
-#~ msgid "per night"
-#~ msgstr ""
+#: src/routes/(authenticated)/reports/sleep/+page.svelte
+msgid "per night"
+msgstr ""
 
 #~ msgid "Recorded Nights"
 #~ msgstr ""
@@ -12032,17 +12029,13 @@ msgid "Default chart range"
 msgstr ""
 
 #. 0: minutes / 60
-#. 0: minutes / 60
 #. 0: Math.abs(hoursUntil).toFixed(1)
-#. 0: hours
 #. 0: absHours
 #. 0: focusHours
 #. 0: therapy.dia ?? "-"
 #. 0: therapy.dia ?? "-"
-#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 #: src/lib/components/trackers/TrackerStartDialog.svelte
-#: src/lib/components/trackers/age.svelte.ts
 #: src/lib/components/ui/duration-input/duration-input.svelte
 #: src/routes/(authenticated)/settings/appearance/+page.svelte
 #: src/routes/(authenticated)/settings/profile/+page.svelte
@@ -13571,6 +13564,7 @@ msgstr ""
 #~ msgstr ""
 
 #: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
+#: src/lib/components/status-pills/LoopPill.svelte
 msgid "Eventual BG"
 msgstr ""
 
@@ -15659,10 +15653,8 @@ msgstr ""
 msgid "{0} within"
 msgstr ""
 
-#. 0: bgLabel()
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
-msgid "{0}/min"
-msgstr ""
+#~ msgid "{0}/min"
+#~ msgstr ""
 
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 msgid "Select a tracker"
@@ -16003,9 +15995,8 @@ msgstr ""
 msgid "Resets in {0}m"
 msgstr ""
 
-#: src/lib/components/layout/DemoBanner.svelte
-msgid "Demo instance with synthetic data"
-msgstr ""
+#~ msgid "Demo instance with synthetic data"
+#~ msgstr ""
 
 #. 0: hours; 1: minutes
 #: src/lib/components/layout/GuestBanner.svelte
@@ -17884,7 +17875,9 @@ msgstr ""
 msgid "Drop Rate ({0}/min)"
 msgstr ""
 
+#. 0: units
 #. 0: formatInsulinDisplay(bolusInsulin)
+#: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 #: src/lib/components/dashboard/glucose-chart/dialogs/TreatmentInspectionDialog.svelte
 msgid "{0}U bolus"
 msgstr ""
@@ -19343,9 +19336,8 @@ msgstr ""
 msgid "A full Nocturne instance you can explore and change: add treatments, edit settings, browse reports. It runs on made-up data, not anyone's real readings, and it resets on a schedule, so you can click anything."
 msgstr ""
 
-#: ../portal/src/routes/demo/+page.svelte
-msgid "Open the demo <0/>"
-msgstr ""
+#~ msgid "Open the demo <0/>"
+#~ msgstr ""
 
 #: ../portal/src/routes/demo/+page.svelte
 msgid "Everyone shares the same demo instance, so you may see changes other visitors have made."
@@ -22281,10 +22273,8 @@ msgstr ""
 msgid "<0/> Changed during this period"
 msgstr ""
 
-#. 0: printFilters.join("\; ")
-#: src/lib/components/treatments/TreatmentsDataTable.svelte
-msgid "Filtered by {0}"
-msgstr ""
+#~ msgid "Filtered by {0}"
+#~ msgstr ""
 
 #~ msgid "<0>The shaded band</0> ({0}) is the consensus target range. The consensus target is at least 70% of time in this zone."
 #~ msgstr ""
@@ -23090,6 +23080,8 @@ msgstr ""
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/reports/custom/workspace/ReportWorkspace.svelte
 #: src/lib/navigation/report-navigation.svelte.ts
 msgid "Comparison"
@@ -23208,10 +23200,8 @@ msgstr ""
 #~ msgid "A condition has a comparison that isn't recognised. Pick one from the list and save again."
 #~ msgstr ""
 
-#: src/lib/components/alerts/conditionIssues.svelte.ts
-#: src/lib/components/alerts/conditionIssues.svelte.ts
-msgid "A glucose condition needs a direction: above or below, rising or falling."
-msgstr ""
+#~ msgid "A glucose condition needs a direction: above or below, rising or falling."
+#~ msgstr ""
 
 #: src/lib/components/alerts/conditionIssues.svelte.ts
 #: src/lib/components/alerts/conditionIssues.svelte.ts
@@ -23791,7 +23781,7 @@ msgstr ""
 #~ msgid "Alerting"
 #~ msgstr ""
 
-#. 0: issues[index].map(describeIssue).join(", ")
+#. 0: formatList(issues[index].map(describeIssue))
 #: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
 msgid "A save would be refused: this rule needs {0}."
 msgstr ""
@@ -23844,7 +23834,6 @@ msgstr ""
 msgid "Rate"
 msgstr ""
 
-#: ../portal/src/lib/components/docs/alert-simulator/ConditionEditor.svelte
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 msgid "at least"
 msgstr ""
@@ -25648,9 +25637,8 @@ msgstr ""
 #~ msgid "Telegram webhook calls are refused until one is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>), save it here with the bot enabled, then register the webhook again with the same value:"
 #~ msgstr ""
 
-#: src/lib/components/admin/IntegrationsTabContent.svelte
-msgid "A webhook secret token is required"
-msgstr ""
+#~ msgid "A webhook secret token is required"
+#~ msgstr ""
 
 #: src/lib/components/auth/DeviceAppClaimNotice.svelte
 msgid "This request says it is from <0/>, but a device sign-in cannot prove which app started it. Only approve if you started this sign-in yourself on a device you trust."
@@ -26623,11 +26611,17 @@ msgstr ""
 #: src/lib/components/people/PeoplePage.svelte
 #: src/lib/components/people/attention-phrases.svelte.ts
 #: src/lib/components/people/flag-rule-text.svelte.ts
+#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/loop-analysis/AggregateReadout.svelte
 #: src/lib/components/reports/loop-analysis/DailyProfileBody.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
+#: src/lib/components/trackers/age.svelte.ts
+#: src/lib/teams/link-expiry.svelte.ts
+#: src/lib/teams/link-expiry.svelte.ts
+#: src/lib/teams/link-expiry.svelte.ts
+#: src/lib/teams/link-expiry.svelte.ts
 msgid "# day"
 msgid_plural "# days"
 msgstr[0] ""
@@ -27588,6 +27582,7 @@ msgstr ""
 
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 #: src/lib/components/alerts/wizard/templates.svelte.ts
+#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/loop-analysis/LoopHealthBody.svelte
 msgid "# minute"
 msgid_plural "# minutes"
@@ -28559,10 +28554,11 @@ msgid "This page compares your profile settings with observations from your data
 msgstr ""
 
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 #: src/lib/components/alerts/wizard/templates.svelte.ts
+#: src/lib/components/reports/custom/workspace/given.svelte.ts
 #: src/lib/components/reports/loop-analysis/settings-evidence-labels.svelte.ts
+#: src/lib/components/trackers/age.svelte.ts
 msgid "# hour"
 msgid_plural "# hours"
 msgstr[0] ""
@@ -32077,7 +32073,7 @@ msgstr ""
 msgid "Already on record. Change it in patient settings."
 msgstr ""
 
-#. 0: (setup.otherInsulins ?? []).map((i) => i.name).join(", ")
+#. 0: formatList((setup.otherInsulins ?? []).flatMap((i) => i.name ?? []))
 #: src/routes/(unauthenticated)/setup/(guided)/devices/DeviceSetupItem.svelte
 msgid "Also on record: {0}"
 msgstr ""
@@ -33046,9 +33042,8 @@ msgstr ""
 #~ msgid "Resend (email)"
 #~ msgstr ""
 
-#: src/lib/components/admin/IntegrationsTabContent.svelte
-msgid "Telegram webhook calls are refused until one is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>). Save it here with the bot enabled. Then register the webhook again with the same value:"
-msgstr ""
+#~ msgid "Telegram webhook calls are refused until one is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>). Save it here with the bot enabled. Then register the webhook again with the same value:"
+#~ msgstr ""
 
 #: src/lib/components/admin/OidcProviderDialog.svelte
 msgid "Edit identity provider"
@@ -37140,22 +37135,20 @@ msgstr ""
 msgid "{0} {1} per minute"
 msgstr ""
 
-#. 0: rate
+#. 0: ratePerMinuteText(-value)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Glucose falling at least {0}"
 msgstr ""
 
-#. 0: rate
+#. 0: ratePerMinuteText(value)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Glucose rising at least {0}"
 msgstr ""
 
-#. 0: rate
-#: src/lib/components/alerts/summarizeCondition.svelte.ts
-msgid "Glucose changing at least {0}"
-msgstr ""
+#~ msgid "Glucose changing at least {0}"
+#~ msgstr ""
 
-#. 0: opSymbol(p.operator); 1: formatMinutes(p.value ?? 0)
+#. 0: opSymbol(p.operator); 1: formatDuration(p.minutes ?? 0)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Sensor data age {0} {1}"
 msgstr ""
@@ -37183,12 +37176,12 @@ msgstr ""
 msgid "Reservoir {0} {1} U"
 msgstr ""
 
-#. 0: opSymbol(p.operator); 1: formatHours(p.value ?? 0)
+#. 0: opSymbol(p.operator); 1: formatDuration(p.minutes ?? 0)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Site age {0} {1}"
 msgstr ""
 
-#. 0: opSymbol(p.operator); 1: formatDays(p.value ?? 0)
+#. 0: opSymbol(p.operator); 1: formatDuration(p.minutes ?? 0)
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Sensor age {0} {1}"
 msgstr ""
@@ -37500,11 +37493,9 @@ msgid "Falling fast"
 msgstr ""
 
 #: src/lib/components/alerts/alert-labels.svelte.ts
-#: src/lib/components/alerts/alert-labels.svelte.ts
 msgid "Falling"
 msgstr ""
 
-#: src/lib/components/alerts/alert-labels.svelte.ts
 #: src/lib/components/alerts/alert-labels.svelte.ts
 msgid "Rising"
 msgstr ""
@@ -41214,6 +41205,10 @@ msgid "Alert when glucose decreases this fast, or faster"
 msgstr ""
 
 #. 0: bgLabel()
+#. 0: bgLabel()
+#. 0: bgLabel()
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/alerts/wizard/SettingsStep.svelte
 msgid "{0} per minute"
 msgstr ""
@@ -41572,10 +41567,8 @@ msgstr ""
 msgid "One condition in the group is enough"
 msgstr ""
 
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
-#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
-msgid "Direction"
-msgstr ""
+#~ msgid "Direction"
+#~ msgstr ""
 
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 msgid "Trend"
@@ -41675,13 +41668,11 @@ msgstr ""
 msgid "The units of insulin left in the pump"
 msgstr ""
 
-#: src/lib/components/alerts/factText.svelte.ts
-msgid "The hours since the last infusion site change"
-msgstr ""
+#~ msgid "The hours since the last infusion site change"
+#~ msgstr ""
 
-#: src/lib/components/alerts/factText.svelte.ts
-msgid "The days since the sensor started"
-msgstr ""
+#~ msgid "The days since the sensor started"
+#~ msgstr ""
 
 #: src/lib/components/alerts/factText.svelte.ts
 msgid "The battery level of the pump"
@@ -43143,7 +43134,7 @@ msgstr ""
 msgid "Insulin on board at the event"
 msgstr ""
 
-#. 0: SCOPE_WORDS[omitted.scope] ?? omitted.scope
+#. 0: scopeWord(omitted.scope)
 #: src/lib/components/reports/custom/workspace/EventGroups.svelte
 msgid "Not shown: your access does not include {0}."
 msgstr ""
@@ -46009,6 +46000,7 @@ msgstr ""
 msgid "7d"
 msgstr ""
 
+#: src/lib/components/members/CreateInviteCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "7 days"
 msgstr ""
@@ -46017,6 +46009,7 @@ msgstr ""
 msgid "14d"
 msgstr ""
 
+#: src/lib/components/members/CreateInviteCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "14 days"
 msgstr ""
@@ -46033,18 +46026,19 @@ msgstr ""
 msgid "90d"
 msgstr ""
 
+#: src/lib/components/members/CreateInviteCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "90 days"
 msgstr ""
 
+#: src/lib/components/members/CreateInviteCard.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/workspace.svelte.ts
 msgid "1 day"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "glucose.read"
-msgstr ""
+#~ msgid "glucose.read"
+#~ msgstr ""
 
 #: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
@@ -46052,17 +46046,15 @@ msgstr ""
 msgid "glucose"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "treatments.read"
-msgstr ""
+#~ msgid "treatments.read"
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "treatments"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "food.read"
-msgstr ""
+#~ msgid "food.read"
+#~ msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
 #: src/lib/components/reports/custom/workspace/EventGroups.svelte
@@ -46071,47 +46063,41 @@ msgstr ""
 msgid "food"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "therapy.read"
-msgstr ""
+#~ msgid "therapy.read"
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "therapy settings"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "devices.read"
-msgstr ""
+#~ msgid "devices.read"
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "devices"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "heartrate.read"
-msgstr ""
+#~ msgid "heartrate.read"
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "heart rate"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "sleep.read"
-msgstr ""
+#~ msgid "sleep.read"
+#~ msgstr ""
 
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 #: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
 msgid "sleep"
 msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "stepcount.read"
-msgstr ""
+#~ msgid "stepcount.read"
+#~ msgstr ""
 
-#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
-msgid "alerts.read"
-msgstr ""
+#~ msgid "alerts.read"
+#~ msgstr ""
 
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
 #: src/lib/components/command-palette/command-palette-items.svelte.ts
@@ -48597,12 +48583,12 @@ msgstr ""
 msgid "A glucose condition compares with a value, but no value is chosen. Choose one from the list and save again."
 msgstr ""
 
-#. 0: limitPhrase(p)
+#. 0: limit
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Glucose below {0}"
 msgstr ""
 
-#. 0: limitPhrase(p)
+#. 0: limit
 #: src/lib/components/alerts/summarizeCondition.svelte.ts
 msgid "Glucose above {0}"
 msgstr ""
@@ -50200,7 +50186,7 @@ msgstr ""
 msgid "You cannot give a team any role of this site, so you cannot change this access."
 msgstr ""
 
-#. 0: heldNotOffered.map((r) => r.name).join(", ")
+#. 0: formatList(heldNotOffered.flatMap((r) => r.name ?? []))
 #: src/lib/components/members/TeamAccessEditForm.svelte
 msgid "The team has roles that you cannot give: {0}. If you save, the team loses them."
 msgstr ""
@@ -50375,12 +50361,12 @@ msgstr ""
 msgid "An owner of this site approves each staff member of this team."
 msgstr ""
 
-#. 0: ratePerMinuteText(leaf?.rate_of_change?.rate ?? 0)
+#. 0: ratePerMinuteText(rateMagnitude(leaf?.rate_of_change))
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 msgid "Falling fast: {0}"
 msgstr ""
 
-#. 0: ratePerMinuteText(leaf?.rate_of_change?.rate ?? 0)
+#. 0: ratePerMinuteText(rateMagnitude(leaf?.rate_of_change))
 #: src/lib/components/alerts/wizard/templates.svelte.ts
 msgid "Rising fast: {0}"
 msgstr ""
@@ -52879,4 +52865,503 @@ msgstr ""
 
 #: src/lib/components/people/people-views.svelte.ts
 msgid "Your views changed. Try again."
+msgstr ""
+
+#: ../portal/src/lib/components/docs/alert-simulator/ConditionEditor.svelte
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "A fall is a negative number."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "A time in a condition must be a whole number of minutes, 0 or more."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "This rule's conditions were saved in an old format. Check the conditions and save the rule again."
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The time since the last infusion site change"
+msgstr ""
+
+#: src/lib/components/alerts/factText.svelte.ts
+msgid "The time since the sensor started"
+msgstr ""
+
+#. 0: opSymbol(operator); 1: limit
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose {0} {1}"
+msgstr ""
+
+#. 0: ratePerMinuteText(-value)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose falling more than {0}"
+msgstr ""
+
+#. 0: ratePerMinuteText(value)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Glucose rising more than {0}"
+msgstr ""
+
+#. 0: opSymbol(operator); 1: ratePerMinuteText(value)
+#: src/lib/components/alerts/summarizeCondition.svelte.ts
+msgid "Rate of change {0} {1}"
+msgstr ""
+
+#: src/lib/components/alerts/DurationInput.svelte
+msgid "Enter a whole number of minutes, 0 or more."
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+layout.svelte
+msgid "Report"
+msgstr ""
+
+#: src/routes/(authenticated)/reports/+page.svelte
+msgid "your schedule"
+msgstr ""
+
+#: src/routes/(authenticated)/time-spans/+page.svelte
+msgid "# version"
+msgid_plural "# versions"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/routes/(authenticated)/time-spans/+page.svelte
+msgid "# change"
+msgid_plural "# changes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/alerts/OperatorToggle.svelte
+msgctxt "operator-toggle"
+msgid "all"
+msgstr ""
+
+#: src/lib/components/alerts/OperatorToggle.svelte
+msgctxt "operator-toggle"
+msgid "all of"
+msgstr ""
+
+#: src/lib/components/alerts/OperatorToggle.svelte
+msgctxt "operator-toggle"
+msgid "any"
+msgstr ""
+
+#: src/lib/components/alerts/OperatorToggle.svelte
+msgctxt "operator-toggle"
+msgid "any of"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "one curve"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "lowest of"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "highest of"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "more than"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "at most"
+msgstr ""
+
+#: src/lib/components/alerts/RuleBuilderLeafEditor.svelte
+msgid "less than"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "target low"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "target high"
+msgstr ""
+
+#: src/lib/components/alerts/alert-labels.svelte.ts
+msgid "latest glucose"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "missing"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "too old"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "has a time in the future"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "has a value that Nocturne does not know"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "not exact"
+msgstr ""
+
+#: src/lib/components/alerts/holdText.svelte.ts
+msgid "not OK, so Nocturne does not use the glucose value"
+msgstr ""
+
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "Public link"
+msgstr ""
+
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "Guest"
+msgstr ""
+
+#. 0: receipt.actorLabel || "Guest"
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "{0} (guest link)"
+msgstr ""
+
+#. 0: receipt.actorLabel || "Clock"
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "{0} (clock)"
+msgstr ""
+
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "A member"
+msgstr ""
+
+#. 0: formatList(receipts.map(receiptActor))
+#: src/lib/components/alerts/receipts.svelte.ts
+msgid "Seen by {0}"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+msgid "set on this connection"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+msgid "offset set on this connection"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+msgid "from your Timezone setting"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+msgid "from your Timezone history"
+msgstr ""
+
+#: src/lib/components/connectors/ConnectionDetailDialog.svelte
+msgid "no time zone is set"
+msgstr ""
+
+#: src/lib/components/layout/ReportsFilterSidebar.svelte
+msgid "3 Days"
+msgstr ""
+
+#: src/lib/components/layout/ReportsFilterSidebar.svelte
+msgid "7 Days"
+msgstr ""
+
+#: src/lib/components/layout/ReportsFilterSidebar.svelte
+msgid "14 Days"
+msgstr ""
+
+#: src/lib/components/layout/ReportsFilterSidebar.svelte
+msgid "30 Days"
+msgstr ""
+
+#: src/lib/components/layout/ReportsFilterSidebar.svelte
+msgid "90 Days"
+msgstr ""
+
+#: src/lib/components/members/CreateInviteCard.svelte
+msgid "30 days"
+msgstr ""
+
+#: src/lib/components/members/InviteSummary.svelte
+msgid "this site"
+msgstr ""
+
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+#: src/lib/components/members/MemberHistoryEntryRow.svelte
+msgid "a deleted member"
+msgstr ""
+
+#: src/lib/components/members/PublicAccessCard.svelte
+msgid "your entire history"
+msgstr ""
+
+#: src/lib/components/members/PublicAccessCard.svelte
+msgid "the last 24 hours"
+msgstr ""
+
+#: src/lib/components/members/PublicAccessCard.svelte
+msgid "never"
+msgstr ""
+
+#. 0: enacted.bolusVolume
+#: src/lib/components/status-pills/LoopPill.svelte
+msgid "{0}U (temp basal canceled)"
+msgstr ""
+
+#. 0: enacted.rate.toFixed(2); 1: enacted.duration
+#: src/lib/components/status-pills/LoopPill.svelte
+msgid "{0}U/h for {1} mins"
+msgstr ""
+
+#: src/lib/components/status-pills/LoopPill.svelte
+msgctxt "loop-status"
+msgid "enacted"
+msgstr ""
+
+#: src/lib/components/status-pills/LoopPill.svelte
+msgctxt "loop-status"
+msgid "suggested"
+msgstr ""
+
+#: src/lib/components/status-pills/LoopPill.svelte
+msgctxt "loop-status"
+msgid "looping"
+msgstr ""
+
+#: src/lib/components/status-pills/LoopPill.svelte
+msgctxt "loop-status"
+msgid "error"
+msgstr ""
+
+#: src/lib/components/status-pills/LoopPill.svelte
+msgctxt "loop-status"
+msgid "not recent"
+msgstr ""
+
+#: src/lib/components/therapy-timeline/ChangeDetail.svelte
+msgid "7 days before"
+msgstr ""
+
+#: src/lib/components/therapy-timeline/ChangeDetail.svelte
+msgid "7 days after"
+msgstr ""
+
+#. 0: globalFilter.trim()
+#: src/lib/components/treatments/TreatmentsDataTable.svelte
+msgid "Filtered by search \"{0}\"."
+msgstr ""
+
+#. 0: formatList(selectedTypes.map((t) => (typeFilterOptions.find((o) => o.value === t)?.label ?? t)))
+#: src/lib/components/treatments/TreatmentsDataTable.svelte
+msgid "Filtered by type: {0}."
+msgstr ""
+
+#. 0: formatList(selectedSources)
+#: src/lib/components/treatments/TreatmentsDataTable.svelte
+msgid "Filtered by source: {0}."
+msgstr ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgctxt "threshold-unit"
+msgid "day"
+msgid_plural "days"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgctxt "threshold-unit"
+msgid "hour"
+msgid_plural "hours"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgid "before the date"
+msgstr ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgid "after the date"
+msgstr ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgid "before it ends"
+msgstr ""
+
+#: src/lib/components/trackers/TrackerThresholdRow.svelte
+msgid "after it starts"
+msgstr ""
+
+#: src/routes/(authenticated)/reports/sleep/+page.svelte
+msgid "overnight average"
+msgstr ""
+
+#: src/lib/components/reports/loop-analysis/EventCohortBuilder.svelte
+msgid "1 food"
+msgstr ""
+
+#: src/lib/components/reports/sensor-integrity/DataQualityHeadline.svelte
+msgid "physiologically implausible patterns"
+msgstr ""
+
+#: src/lib/components/reports/sensor-integrity/DataQualityHeadline.svelte
+msgid "of the flagged windows"
+msgstr ""
+
+#: src/lib/components/reports/sensor-integrity/DataQualityHeadline.svelte
+msgid "a low within 3 h of a window"
+msgstr ""
+
+#: src/lib/components/reports/sensor-integrity/DataQualityHeadline.svelte
+msgid "of those hypos, overnight"
+msgstr ""
+
+#: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
+msgid "a time of at least 1 minute"
+msgstr ""
+
+#: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
+msgid "a time window that opens: from and to cannot be the same"
+msgstr ""
+
+#: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
+msgid "times written as HH:mm"
+msgstr ""
+
+#: ../portal/src/lib/components/docs/alert-simulator/AlertSimulator.svelte
+msgid "at least one condition in every group"
+msgstr ""
+
+#: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
+msgid "0% (nominal)"
+msgstr ""
+
+#. 0: prefix
+#: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
+msgid "{0} (more sensitive)"
+msgstr ""
+
+#. 0: prefix
+#: src/lib/components/dashboard/glucose-chart/dialogs/DeliveryInspectionDialog.svelte
+msgid "{0} (less sensitive)"
+msgstr ""
+
+#: src/lib/components/reports/custom/workspace/vocabulary-words.svelte.ts
+msgid "10 to 90 percent"
+msgstr ""
+
+#. 0: signals; 1: lens; 2: range
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "caption-clause"
+msgid "{0} {1} {2}"
+msgstr ""
+
+#. 0: lens; 1: range
+#: src/lib/components/reports/custom/workspace/workspace.svelte.ts
+msgctxt "caption-clause-without-signals"
+msgid "{0} {1}"
+msgstr ""
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "Telegram webhook calls are refused until a webhook secret token is set. Choose a random value of letters, digits, <0/> or <1/> (for example from <2/>). Save it here with the bot enabled. Then register the webhook with the same value:"
+msgstr ""
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "Register the webhook with the same webhook secret token that is saved here:"
+msgstr ""
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "The bot gets Telegram messages only through a webhook. Nocturne does not support long polling. The bot gets no messages until you register the webhook."
+msgstr ""
+
+#: src/lib/components/admin/IntegrationsTabContent.svelte
+msgid "Register the webhook"
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The auto-resolve conditions of this rule cannot run as set."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The auto-resolve conditions of this rule were saved in an old format. Check them and save the rule again."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "Edit the auto-resolve conditions and save the rule."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The smart snooze conditions of this rule cannot run as set."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "The smart snooze conditions of this rule were saved in an old format. Check them and save the rule again."
+msgstr ""
+
+#: src/lib/components/alerts/conditionIssues.svelte.ts
+msgid "Edit the smart snooze conditions and save the rule."
+msgstr ""
+
+#. 0: Math.round(percent)
+#: src/lib/components/clock/clock-face-data.svelte.ts
+msgid "{0}% in range"
+msgstr ""
+
+#. 0: label
+#: src/lib/components/clock/clock-face-data.svelte.ts
+msgid "You need the \"{0}\" permission."
+msgstr ""
+
+#. 0: formatAge(hours)
+#: src/lib/components/trackers/age.svelte.ts
+msgid "{0} left"
+msgstr ""
+
+#. 0: formatAge(-hours)
+#: src/lib/components/trackers/age.svelte.ts
+msgid "{0} late"
+msgstr ""
+
+#: ../portal/src/routes/demo/+page.svelte
+msgid "Try it as a person"
+msgstr ""
+
+#: ../portal/src/routes/demo/+page.svelte
+msgid "See the dashboard of one person with diabetes: glucose, treatments, reports and settings."
+msgstr ""
+
+#: ../portal/src/routes/demo/+page.svelte
+msgid "Try it as a clinic"
+msgstr ""
+
+#: ../portal/src/routes/demo/+page.svelte
+msgid "See the People page of a clinic that follows eleven people, with the ones that need attention flagged."
+msgstr ""
+
+#: src/lib/components/layout/DemoBanner.svelte
+msgid "See it as a person"
+msgstr ""
+
+#: src/lib/components/layout/DemoBanner.svelte
+msgid "See it as a clinic"
+msgstr ""
+
+#: src/lib/components/layout/DemoBanner.svelte
+msgid "Demo, Demotown Diabetes Clinic, synthetic data"
+msgstr ""
+
+#: src/lib/components/layout/DemoBanner.svelte
+msgid "Demo, synthetic data"
+msgstr ""
+
+#: src/lib/components/people/PeoplePage.svelte
+msgid "You cannot save views in the demo."
+msgstr ""
+
+#: src/routes/(authenticated)/people/rules/+page.svelte
+msgid "You cannot change flag rules in the demo."
+msgstr ""
+
+#: src/routes/(authenticated)/settings/teams/[teamId]/+page.svelte
+msgid "You cannot leave a team in the demo."
 msgstr ""

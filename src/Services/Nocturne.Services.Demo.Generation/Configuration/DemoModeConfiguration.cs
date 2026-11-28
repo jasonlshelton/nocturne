@@ -23,6 +23,12 @@ public class DemoModeConfiguration
     public int ResetIntervalMinutes { get; set; } = 0;
 
     /// <summary>
+    /// Interval in minutes between visitor resets, which return the clinic persona's saved views and flag rules to
+    /// their seeds. Set to 0 to disable.
+    /// </summary>
+    public int VisitorResetIntervalMinutes { get; set; } = 60;
+
+    /// <summary>
     /// Initial glucose value in mg/dL.
     /// </summary>
     public int InitialGlucose { get; set; } = 120;
@@ -57,6 +63,13 @@ public class DemoModeConfiguration
     /// the running demo, where each start should differ.
     /// </summary>
     public int? RandomSeed { get; set; }
+
+    /// <summary>
+    /// The person the generator shapes its data for, with its own seed, scenario weights, therapy and
+    /// behaviour (<see cref="Nocturne.Services.Demo.Services.DemoArchetype.ConfigurationFor"/> sets the rest
+    /// of this configuration to match). Null for the demo host.
+    /// </summary>
+    public Nocturne.Services.Demo.Services.DemoArchetype? Archetype { get; set; }
 
     /// <summary>
     /// Base basal rate for insulin calculations (U/hr).

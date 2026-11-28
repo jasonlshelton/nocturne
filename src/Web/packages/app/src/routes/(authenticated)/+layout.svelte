@@ -31,6 +31,7 @@
   import { Button } from "#lib/components/ui/button/index.js";
   import AlertSurfaces from "#lib/components/alerts/AlertSurfaces.svelte";
   import { satisfiesScope } from "#lib/authorization/scopes.js";
+  import { demoSubjectAccess } from "#lib/authorization/demo-subject.js";
   import DemoBanner from "#lib/components/layout/DemoBanner.svelte";
   import InitialReadsPrefetch from "#lib/components/layout/InitialReadsPrefetch.svelte";
   import GuestBanner from "#lib/components/layout/GuestBanner.svelte";
@@ -233,8 +234,8 @@
    * current reading as well as {@link deferredWatercolour}, then for idle.
    *
    * Resolves false where there is no GPU, which needs no handling: that is the case the baked
-   * and static paths exist for. Artwork that needs the engine sooner boots it on demand; the
-   * unauthenticated pages render theirs on mount, so a warm-up there would gain nothing.
+   * and static paths exist for. Artwork mounted before it draws its still and keeps it; the
+   * unauthenticated pages warm the engine through `RevealArtwork` instead.
    */
   const engineWarmDeferral = deferredWatercolour();
   let engineWarmScheduled = false;
@@ -344,7 +345,12 @@
         bind:offsetHeight={bannerStripHeight}
       >
           {#if data.isDemo}
-            <DemoBanner nextResetAt={data.nextResetAt} />
+            <DemoBanner
+              persona={demoSubjectAccess(data).persona ?? "personal"}
+              nextResetAt={data.nextResetAt}
+              nextVisitorResetAt={data.nextVisitorResetAt}
+              canSwitch={data.demoKind !== "person"}
+            />
           {/if}
           {#if data.isGuestSession && data.guestExpiresAt}
             <div {@attach coachmark(coachFor("guest-tour.access"))}>

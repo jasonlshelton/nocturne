@@ -112,7 +112,7 @@ public class SignalDatasetTests
         all.Rows.Select(r => ((string)r["kind"]!, (string)r["label"]!)).Should().Equal(
             ("Site and insulin", "Site change"), ("Sensor", "Sensor start (found from a gap)"), ("Pump", "Pump suspend"));
         all.Rows.Should().OnlyContain(r => Equals(r["start"], r["end"]), "an event is one instant");
-        all.Rows[0]["color"].Should().Be(ReportWire.Name(Nocturne.API.Helpers.ChartColorMapper.FromDeviceEvent(DeviceEventType.SiteChange)));
+        all.Rows[0]["color"].Should().Be(EnumWireNames<ChartColor>.Of(Nocturne.API.Helpers.ChartColorMapper.FromDeviceEvent(DeviceEventType.SiteChange)));
         all.Sentence.Should().Be("3 events in this period.");
         all.Summary.Should().Contain("Latest: Pump suspend at 2026-10-28 19:00 Etc/UTC.");
         sensor.Rows.Should().ContainSingle().Which["label"].Should().Be("Sensor start (found from a gap)");
@@ -173,7 +173,7 @@ public class SignalDatasetTests
             CancellationToken.None);
 
         output.Rows.Select(r => (string)r["kind"]!).Should().Equal("Awake", "REM", "Light", "Deep");
-        output.Rows[^1]["color"].Should().Be(ReportWire.Name(ChartColor.Chart3));
+        output.Rows[^1]["color"].Should().Be(EnumWireNames<ChartColor>.Of(ChartColor.Chart3));
     }
 
     [Fact]

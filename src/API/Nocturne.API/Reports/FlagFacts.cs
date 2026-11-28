@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 
 namespace Nocturne.API.Reports;
@@ -114,7 +115,7 @@ internal sealed record FlagFactCondition
 
         var panel = new JsonObject
         {
-            ["kind"] = ReportWire.Name(ReportPanelKind.StatTiles),
+            ["kind"] = EnumWireNames<ReportPanelKind>.Of(ReportPanelKind.StatTiles),
             ["dataset"] = condition.Dataset.ValueKind == JsonValueKind.Undefined ? null : JsonNode.Parse(condition.Dataset.GetRawText()),
             ["bindings"] = new JsonObject { ["columns"] = new JsonArray(condition.Field) },
         };

@@ -306,7 +306,7 @@ internal sealed class SleepDataset : IReportDataset
             ["start"] = Mills(s.StartTime),
             ["end"] = Mills(s.EndTime),
             ["kind"] = KindWords(s.Type),
-            ["color"] = ReportWire.Name(s.Type == SleepSessionType.Overnight ? ChartColor.ActivitySleep : ChartColor.MutedForeground),
+            ["color"] = EnumWireNames<ChartColor>.Of(s.Type == SleepSessionType.Overnight ? ChartColor.ActivitySleep : ChartColor.MutedForeground),
             ["night"] = Night(s.EndTime),
             ["totalSleep"] = Hours(s.TotalSleepMs),
             ["deepSleep"] = Hours(s.DeepSleepMs),

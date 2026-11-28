@@ -124,7 +124,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
         return await new AlertRuleRepository(site.Contexts, site.Clock).CreateAsync(
             new NewAlertRule(
                 new AlertRuleWrite(
-                    "Urgent low", null, AlertConditionType.Threshold, """{"direction":"below","value":55}""",
+                    "Urgent low", null, AlertConditionType.Threshold, """{"schema_version":2,"operator":"<","value":55}""",
                     RuleScopeClass.Low, AlertRuleSeverity.Critical, IsEnabled: true, SortOrder: 0,
                     AllowThroughDnd: true, AutoResolveEnabled: false, AutoResolveParams: null, ClientConfiguration: "{}"),
                 channels),
@@ -360,7 +360,7 @@ public class AlertChannelMembershipPostgresTests(AlertChannelMembershipPostgresT
         var notifications = new Mock<Nocturne.Core.Contracts.Notifications.IInAppNotificationService>();
         notifications.Setup(n => n.GetActiveNotificationsAsync(owner, It.IsAny<CancellationToken>())).ReturnsAsync([]);
         notifications.Setup(n => n.CreateNotificationUnlessActiveAsync(
-                owner, NotificationSubjectNaming.AlertChannelNotSending, It.IsAny<string>(), It.IsAny<string>(),
+                owner, InAppNotificationType.AlertChannelNotSending.ToWireString(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Nocturne.Core.Models.NotificationCategory?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<Dictionary<string, object>?>(), It.IsAny<CancellationToken>()))
             .Callback((string _, string _, string _, string sourceId, Nocturne.Core.Models.NotificationCategory? _, string? _,

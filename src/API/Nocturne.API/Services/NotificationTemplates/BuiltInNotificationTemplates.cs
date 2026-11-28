@@ -1,6 +1,5 @@
 using Nocturne.API.Middleware.Handlers;
 using Nocturne.API.Services.Alerts;
-using Nocturne.API.Services.Alerts.Providers;
 using Nocturne.API.Services.Auth;
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Identity;
@@ -28,7 +27,7 @@ public static class BuiltInNotificationTemplates
     {
         registry.Register(new NotificationTemplate
         {
-            Type = "tracker.unconfigured",
+            Type = InAppNotificationType.TrackerUnconfigured.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -38,7 +37,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = "tracker.alert",
+            Type = InAppNotificationType.TrackerAlert.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Warn,
@@ -48,7 +47,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = "system.statistics_summary",
+            Type = InAppNotificationType.SystemStatisticsSummary.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -58,7 +57,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = "system.help_response",
+            Type = InAppNotificationType.SystemHelpResponse.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -68,7 +67,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = NotificationSubjectNaming.AnonymousLoginRequest,
+            Type = InAppNotificationType.PasskeyAnonymousLoginRequest.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = true,
             DefaultUrgency = NotificationUrgency.Info,
@@ -78,7 +77,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = "glucose.predicted_low",
+            Type = InAppNotificationType.GlucosePredictedLow.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Urgent,
@@ -88,7 +87,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = IMealMatchingService.SuggestedMatchNotificationType,
+            Type = InAppNotificationType.MealMatchingSuggestedMatch.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -98,7 +97,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = CompressionLowDetectionService.NotificationType,
+            Type = InAppNotificationType.GlucoseCompressionLowReview.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -108,7 +107,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = NotificationSubjectNaming.MembershipRequested,
+            Type = InAppNotificationType.MembershipRequested.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = true,
             DefaultUrgency = NotificationUrgency.Info,
@@ -118,7 +117,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = MembershipRequestService.ApprovedNotificationType,
+            Type = InAppNotificationType.MembershipApproved.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -128,7 +127,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = ShareLinkRotatedNotifier.NotificationType,
+            Type = InAppNotificationType.SharingLinkRotated.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -138,7 +137,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = TeamRenameAnnouncer.NotificationType,
+            Type = InAppNotificationType.TeamRenamed.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -148,8 +147,8 @@ public static class BuiltInNotificationTemplates
 
         foreach (var (type, source) in new[]
                  {
-                     (TeamStaffAnnouncer.WaitingType, TeamStaffAnnouncer.WaitingSource),
-                     (TeamStaffAnnouncer.JoinedType, TeamStaffAnnouncer.JoinedSource),
+                     (InAppNotificationType.TeamStaffWaiting.ToWireString(), TeamStaffAnnouncer.WaitingSource),
+                     (InAppNotificationType.TeamStaffJoined.ToWireString(), TeamStaffAnnouncer.JoinedSource),
                  })
         {
             registry.Register(new NotificationTemplate
@@ -165,7 +164,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = RawMmolProfileNotifier.NotificationType,
+            Type = InAppNotificationType.ProfileRawMmolValues.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Warn,
@@ -175,7 +174,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = MembershipRequestService.DeniedNotificationType,
+            Type = InAppNotificationType.MembershipDenied.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -183,7 +182,7 @@ public static class BuiltInNotificationTemplates
             Source = "membership"
         });
 
-        foreach (var type in new[] { ExternalNotificationSender.OperatorType, ExternalNotificationSender.AppType })
+        foreach (var type in new[] { InAppNotificationType.ExternalOperator.ToWireString(), InAppNotificationType.ExternalApp.ToWireString() })
         {
             registry.Register(new NotificationTemplate
             {
@@ -197,7 +196,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = ReleaseNoticeJob.UpdateAvailableType,
+            Type = InAppNotificationType.SystemUpdateAvailable.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -208,7 +207,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = ReleaseNoticeJob.ReleaseInstalledType,
+            Type = InAppNotificationType.SystemReleaseInstalled.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Info,
@@ -219,7 +218,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = InstanceKeyChangeService.TenantNoticeType,
+            Type = InAppNotificationType.SystemInstanceKeyChanged.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Warn,
@@ -229,7 +228,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = InstanceKeyChangeService.PlatformNoticeType,
+            Type = InAppNotificationType.SystemInstanceKeyChangedPlatform.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             DefaultUrgency = NotificationUrgency.Warn,
@@ -240,7 +239,7 @@ public static class BuiltInNotificationTemplates
                 new NotificationActionDto
                 {
                     ActionId = InstanceKeyChangeService.OpenPlatformSettingsActionId,
-                    Label = InstanceKeyChangeService.OpenPlatformSettingsActionId,
+                    Label = NotificationLabel.OpenPlatformSettings.ToWireString(),
                     Icon = "key-round",
                     Variant = "default"
                 }
@@ -249,7 +248,7 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = ApiKeyHandler.RotationNudgeType,
+            Type = InAppNotificationType.ApiKeyRotation.ToWireString(),
             Category = NotificationCategory.ActionRequired,
             NamesSubject = false,
             Icon = "key"
@@ -257,56 +256,56 @@ public static class BuiltInNotificationTemplates
 
         registry.Register(new NotificationTemplate
         {
-            Type = NotificationSubjectNaming.AlertChannelNotSending,
+            Type = InAppNotificationType.AlertChannelNotSending.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = true
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = ClockAnomalyNotice.NotificationType,
+            Type = InAppNotificationType.AlertsDeviceClockAhead.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = InAppProvider.NotificationType,
+            Type = InAppNotificationType.AlertFiring.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = InAppProvider.UnevaluableNotificationType,
+            Type = InAppNotificationType.AlertUnevaluable.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = InAppProvider.HeldNotificationType,
+            Type = InAppNotificationType.AlertHeld.ToWireString(),
             Category = NotificationCategory.Alert,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = DeviceClockService.SegmentNotificationType,
+            Type = InAppNotificationType.ConnectorDeviceClockDeviation.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = DeviceClockService.ZoneChangeNotificationType,
+            Type = InAppNotificationType.ConnectorDeclaredZoneChanged.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false
         });
 
         registry.Register(new NotificationTemplate
         {
-            Type = RejectedUploadRecorder.NotificationType,
+            Type = InAppNotificationType.DataRejectedUploads.ToWireString(),
             Category = NotificationCategory.Informational,
             NamesSubject = false
         });
@@ -317,7 +316,7 @@ public static class BuiltInNotificationTemplates
     private static NotificationActionDto ReleaseNotesAction() => new()
     {
         ActionId = ReleaseNoticeJob.ReleaseNotesActionId,
-        Label = "release_notes",
+        Label = NotificationLabel.ReleaseNotes.ToWireString(),
         Icon = "info",
         Variant = "default"
     };

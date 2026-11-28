@@ -48,18 +48,34 @@ public class ModelConventionTests
         NocturneDbContext.V4ProfileNamedEntities.Should().BeEquivalentTo(Marked<IProfileScopedEntity>(mapped));
     }
 
+    /// <summary>
+    /// The family is read off the model's timestamped tables, not off the registry it is derived from,
+    /// so a timestamped table the registry lacks is reported here rather than left without its index.
+    /// </summary>
     [Fact]
-    public void TheTimestampIndexedRecords_AreEveryV4RecordButTheTwoSpanTables() =>
-        NocturneDbContext.V4TimeSeriesRecordEntities.Should().BeEquivalentTo(
-            NocturneDbContext.V4LegacyIdRecordEntities.Except([typeof(TempBasalEntity), typeof(ProfileActivationEntity)]),
-            "a new V4 record table gets its legacy id index by its marker, and has to be listed here to get its timestamp index");
+    public void TheTimestampIndexedRecords_AreEveryTimestampedRecordButTheTwoSpanTables()
+    {
+        var timestamped = Marked<IObservationTimestamped>(Model().GetEntityTypes().Select(e => e.ClrType));
+
+        NocturneDbContext.TimestampIndexedEntities.Should().BeEquivalentTo(
+            timestamped.Except([typeof(TempBasalEntity), typeof(ProfileActivationEntity)]),
+            "a timestamped record table gets its timestamp index by its marker, and only a span table is left without it");
+
+        NocturneDbContext.TimestampIndexedEntities.Should().Contain(
+            [typeof(HeartRateEntity), typeof(StepCountEntity), typeof(TherapySettingsEntity), typeof(SensorGlucoseEntity)],
+            "the health series are timestamped records outside the V4 marker, and the profile tables are not event series");
+
+        NocturneDbContext.TimestampIndexedEntities.Should().NotContain(
+            [typeof(TempBasalEntity), typeof(ProfileActivationEntity), typeof(StateSpanEntity), typeof(BodyWeightEntity)],
+            "a span table is indexed on its start, and a table with no observation timestamp has no such column");
+    }
 
     [Fact]
-    public void EveryV4RecordTable_HasANewestFirstTimestampIndex() =>
+    public void EveryTimestampIndexedRecord_HasANewestFirstTimestampIndex() =>
         AssertFamily(
-            NocturneDbContext.V4TimeSeriesRecordEntities,
+            NocturneDbContext.TimestampIndexedEntities,
             "_timestamp",
-            i => Columns(i).SequenceEqual([nameof(IV4TimeSeriesEntity.Timestamp)])
+            i => Columns(i).SequenceEqual([nameof(IObservationTimestamped.Timestamp)])
                 && !i.IsUnique
                 && i.IsDescending is { Count: 0 }
                 && i.GetFilter() is null);
@@ -202,6 +218,53 @@ public class ModelConventionTests
             .Where(e => e is null || !e.GetIndexes().Any(i => IsDeletedInclusiveWindowIndex(e, i)))
             .Select(e => e?.ShortName() ?? "<unmapped>")
             .Should().BeEmpty("a window read over deleted rows needs a tenant-led timestamp index that holds them");
+    }
+
+    [Fact]
+    public void TheTenantTimestampIndexedTables_AreTheTimestampedRecordsWithoutAListIndex()
+    {
+        NocturneDbContext.TenantTimestampIndexedEntities.Should().BeEquivalentTo(
+            new[]
+            {
+                typeof(SensorGlucoseEntity), typeof(BolusEntity), typeof(CarbIntakeEntity),
+                typeof(BolusCalculationEntity), typeof(DeviceEventEntity), typeof(BGCheckEntity),
+                typeof(NoteEntity), typeof(TempBasalEntity), typeof(ProfileActivationEntity),
+                typeof(HeartRateEntity), typeof(StepCountEntity), typeof(TherapySettingsEntity),
+                typeof(DeviceStatusExtrasEntity),
+            },
+            "a timestamped record table that takes no list index gets the unfiltered index by the registry, not by where its author declared it");
+
+        NocturneDbContext.TenantTimestampIndexedEntities.Should().NotContain(
+            NocturneDbContext.V4SortedListEntities,
+            "a table with a list index takes the list index's columns in its _id_any twin");
+
+        NocturneDbContext.TenantTimestampAscending.Keys.Should().BeEquivalentTo(
+            [typeof(HeartRateEntity), typeof(StepCountEntity)]);
+    }
+
+    [Fact]
+    public void EveryTenantTimestampIndexedTable_HasTheUnfilteredTenantTimestampIndex()
+    {
+        NocturneDbContext.TenantTimestampIndexedEntities.Should().NotBeEmpty();
+        var model = Model();
+
+        NocturneDbContext.TenantTimestampIndexedEntities.Select(model.FindEntityType)
+            .Where(e => e is null || !e.GetIndexes().Any(i => IsTenantTimestampIndex(e, i)))
+            .Select(e => e?.ShortName() ?? "<unmapped>")
+            .Should().BeEmpty("each is named for its timestamp column, newest first unless listed ascending");
+    }
+
+    private static bool IsTenantTimestampIndex(IEntityType entity, IIndex index)
+    {
+        var column = entity.FindProperty(nameof(IObservationTimestamped.Timestamp))!.GetColumnName();
+        var ascending = NocturneDbContext.TenantTimestampAscending.ContainsKey(entity.ClrType);
+        return index.GetDatabaseName() == $"ix_{entity.GetTableName()}_tenant_{column}"
+            && Columns(index).SequenceEqual([nameof(ITenantScoped.TenantId), nameof(IObservationTimestamped.Timestamp)])
+            && !index.IsUnique
+            && index.GetFilter() is null
+            && (ascending
+                ? index.IsDescending is not { Count: > 0 }
+                : index.IsDescending is not null && index.IsDescending.SequenceEqual([false, true]));
     }
 
     /// <summary>

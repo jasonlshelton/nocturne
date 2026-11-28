@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Nocturne.API.Reports;
 using Nocturne.API.Reports.Derived;
 using Nocturne.API.Tests.Infrastructure;
+using Nocturne.Core.Models;
 using Nocturne.Core.Models.Authorization;
 using Nocturne.Core.Models.LoopAnalysis;
 using Xunit;
@@ -81,7 +82,7 @@ public class ReportCatalogueTests(AuthenticationTestFactory factory) : IClassFix
             dataset.Fields.Select(f => f.Name).Should().OnlyHaveUniqueItems(dataset.Name);
             dataset.Fields.Should().OnlyContain(f => f.Label.Length > 0 && f.Description.Length > 0, dataset.Name);
             (dataset.Marks.Count + dataset.PanelKinds.Count).Should().BePositive(dataset.Name);
-            dataset.Marks.Select(m => m.Name).Should().OnlyContain(m => ReportWire.Parse<ReportMark>(m) != null);
+            dataset.Marks.Select(m => m.Name).Should().OnlyContain(m => EnumWireNames<ReportMark>.Parse(m) != null);
             (dataset.Marks.Count == 0 || dataset.XKinds.Count > 0).Should().BeTrue($"{dataset.Name} names the axes its layers lie along");
             dataset.RangeLimit.Should().StartWith("This data covers at most");
         }

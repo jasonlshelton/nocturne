@@ -1,3 +1,4 @@
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using Nocturne.API.Extensions;
 using Nocturne.Core.Constants;
@@ -10,36 +11,36 @@ namespace Nocturne.API.Reports;
 [JsonConverter(typeof(JsonStringEnumConverter<ReportFieldKind>))]
 internal enum ReportFieldKind
 {
-    [JsonStringEnumMemberName("time")]
+    [EnumMember(Value = "time"), JsonStringEnumMemberName("time")]
     Time,
 
-    [JsonStringEnumMemberName("number")]
+    [EnumMember(Value = "number"), JsonStringEnumMemberName("number")]
     Number,
 
-    [JsonStringEnumMemberName("category")]
+    [EnumMember(Value = "category"), JsonStringEnumMemberName("category")]
     Category,
 
-    [JsonStringEnumMemberName("percent")]
+    [EnumMember(Value = "percent"), JsonStringEnumMemberName("percent")]
     Percent,
 
     /// <summary>Minutes from an event's anchor, negative before it.</summary>
-    [JsonStringEnumMemberName("offset")]
+    [EnumMember(Value = "offset"), JsonStringEnumMemberName("offset")]
     Offset,
 
     /// <summary>Minutes after local midnight.</summary>
-    [JsonStringEnumMemberName("time_of_day")]
+    [EnumMember(Value = "time_of_day"), JsonStringEnumMemberName("time_of_day")]
     TimeOfDay,
 
     /// <summary>A local calendar day: its midnight, Unix milliseconds.</summary>
-    [JsonStringEnumMemberName("day")]
+    [EnumMember(Value = "day"), JsonStringEnumMemberName("day")]
     Day,
 
     /// <summary>A value of a scatter's first source, along its horizontal axis.</summary>
-    [JsonStringEnumMemberName("value")]
+    [EnumMember(Value = "value"), JsonStringEnumMemberName("value")]
     Value,
 
     /// <summary>Minutes one source is shifted against another.</summary>
-    [JsonStringEnumMemberName("lag")]
+    [EnumMember(Value = "lag"), JsonStringEnumMemberName("lag")]
     Lag,
 }
 
@@ -48,22 +49,22 @@ internal enum ReportFieldKind
 internal enum ReportAggregate
 {
     /// <summary>Amounts given in the slot: a bolus, carbs, an injection.</summary>
-    [JsonStringEnumMemberName("sum")]
+    [EnumMember(Value = "sum"), JsonStringEnumMemberName("sum")]
     Sum,
 
     /// <summary>A value that holds until the next one: a basal rate, a reservoir, a battery. Carried into a slot with none.</summary>
-    [JsonStringEnumMemberName("last")]
+    [EnumMember(Value = "last"), JsonStringEnumMemberName("last")]
     Last,
 
     /// <summary>Samples of a level: glucose, insulin on board.</summary>
-    [JsonStringEnumMemberName("mean")]
+    [EnumMember(Value = "mean"), JsonStringEnumMemberName("mean")]
     Mean,
 
-    [JsonStringEnumMemberName("max")]
+    [EnumMember(Value = "max"), JsonStringEnumMemberName("max")]
     Max,
 
     /// <summary>The lowest value in the slot: a range's low edge.</summary>
-    [JsonStringEnumMemberName("min")]
+    [EnumMember(Value = "min"), JsonStringEnumMemberName("min")]
     Min,
 }
 
@@ -160,11 +161,11 @@ internal sealed record ReportField(
 internal enum ReportFlagFactKind
 {
     /// <summary>A figure over the last N days, kept per person, fact and range for up to fifteen minutes.</summary>
-    [JsonStringEnumMemberName("period")]
+    [EnumMember(Value = "period"), JsonStringEnumMemberName("period")]
     Period,
 
     /// <summary>A value as it is now, read on every judgement; it takes no range.</summary>
-    [JsonStringEnumMemberName("live")]
+    [EnumMember(Value = "live"), JsonStringEnumMemberName("live")]
     Live,
 }
 
@@ -173,15 +174,15 @@ internal enum ReportFlagFactKind
 internal enum ReportRangeFamily
 {
     /// <summary>Not a figure against a target range.</summary>
-    [JsonStringEnumMemberName("none")]
+    [EnumMember(Value = "none"), JsonStringEnumMemberName("none")]
     None,
 
     /// <summary>The consensus target range, one range for everyone.</summary>
-    [JsonStringEnumMemberName("consensus")]
+    [EnumMember(Value = "consensus"), JsonStringEnumMemberName("consensus")]
     Consensus,
 
     /// <summary>The person's own target range, whose bound the judgement states.</summary>
-    [JsonStringEnumMemberName("own")]
+    [EnumMember(Value = "own"), JsonStringEnumMemberName("own")]
     Own,
 }
 

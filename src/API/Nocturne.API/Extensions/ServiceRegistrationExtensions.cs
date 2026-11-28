@@ -36,7 +36,6 @@ using Nocturne.API.Services.Demo;
 using Nocturne.API.Services.Devices;
 using Nocturne.API.Services.DeviceStatuses;
 using Nocturne.API.Services.Docs;
-using Nocturne.API.Services.Effects;
 using Nocturne.API.Services.Entries;
 using Nocturne.API.Services.Glucose;
 using Nocturne.API.Services.Sleep;
@@ -271,9 +270,32 @@ public static class ServiceRegistrationExtensions
 
         var who = !string.IsNullOrEmpty(credential)
             ? Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(credential)))
-            : context.Request.RouteValues["id"]?.ToString() ?? AnonymousDraftPartition;
+            : RouteId(context) ?? AnonymousDraftPartition;
         return $"{host}|{who}";
     }
+
+    /// <summary>
+    /// The route's id in one spelling: a <c>{id:guid}</c> route takes every format
+    /// <see cref="Guid.TryParse(string?, out Guid)"/> reads, in either case, so the raw value would
+    /// give one clock a fresh bucket per spelling.
+    /// </summary>
+    private static string? RouteId(HttpContext context) =>
+        context.Request.RouteValues["id"]?.ToString() is { } raw
+            ? Guid.TryParse(raw, out var id) ? id.ToString("N") : raw
+            : null;
+
+    /// <summary>
+    /// Rate-limiting policy for the values and chart a public clock face serves by its id, which
+    /// compute insulin on board, a forecast and time in range on each call.
+    /// </summary>
+    public const string ClockFaceDataRateLimitPolicy = "clock-face-data";
+
+    /// <summary>
+    /// Partition key for <see cref="ClockFaceDataRateLimitPolicy"/>: the request host, lowered, and the
+    /// clock face in the route, so every screen showing one face shares its bucket.
+    /// </summary>
+    internal static string ClockFaceDataPartitionKey(HttpContext context) =>
+        $"{context.Request.Host.Host.ToLowerInvariant()}|{RouteId(context)}";
 
     /// <summary>
     /// Rate-limiting policy for the per-session translation draft store.
@@ -334,6 +356,7 @@ public static class ServiceRegistrationExtensions
             [StatisticsComputeRateLimitPolicy] = StatisticsComputePartitionKey,
             [TranslationDraftsRateLimitPolicy] = TranslationDraftPartitionKey,
             [NoAccountAlertsRateLimitPolicy] = NoAccountAlertsPartitionKey,
+            [ClockFaceDataRateLimitPolicy] = ClockFaceDataPartitionKey,
         };
         foreach (var (policy, _, _) in ClientAddressPolicies)
             keys[policy] = clientRateLimitKey.Resolve;
@@ -558,6 +581,22 @@ public static class ServiceRegistrationExtensions
                     )
             );
 
+            // A clock reads its values every minute and its chart every five from each screen it is
+            // open on, so a face on a few dozen screens fits; the editor's preview is not limited here.
+            options.AddPolicy(
+                ClockFaceDataRateLimitPolicy,
+                context =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: partitionKeys[ClockFaceDataRateLimitPolicy](context),
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 120,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                        }
+                    )
+            );
+
             options.OnRejected = (context, ct) => new ValueTask(RateLimitRejection.WriteAsync(
                 context.HttpContext,
                 context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter : null,
@@ -726,6 +765,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IGlucoseStatusClassifier, GlucoseStatusClassifier>();
         services.AddScoped<IInstanceSetupState, InstanceSetupState>();
         services.AddScoped<DemoTenantService>();
+        services.AddScoped<IDemoPersonaReader>(sp => sp.GetRequiredService<DemoTenantService>());
         services.AddScoped<ScalarAuthProvider>();
 
         // Shared by InstanceKeyHandler (authentication) and TenantSetupMiddleware
@@ -819,7 +859,6 @@ public static class ServiceRegistrationExtensions
                 sinks,
                 sp.GetService<ILogger<CompositeDataEventSink<Treatment>>>());
         });
-        services.AddScoped<IWriteSideEffects, WriteSideEffectsService>();
         services.AddScoped<IEntryService, EntryService>();
         services.AddScoped<IEntryStore, EntryReadService>();
         services.AddScoped<IEntryCache, EntryCacheAdapter>();
@@ -945,6 +984,7 @@ public static class ServiceRegistrationExtensions
             MyFitnessPalMatchingSettingsService
         >();
         services.AddScoped<IClockFaceService, ClockFaceService>();
+        services.AddScoped<ClockFaceDataService>();
         services.AddScoped<IWidgetSummaryService, WidgetSummaryService>();
         // Basal series builder (used by chart data pipeline and reports endpoint)
         services.AddScoped<IBasalSeriesBuilder, BasalSeriesBuilder>();
@@ -1065,6 +1105,7 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<ISyncProgressReporter, SignalRSyncProgressReporter>();
 
         services.AddScoped<IRecordChangeSubscriber, SignalRRecordChangeSubscriber>();
+        services.AddScoped<IRecordChangeSubscriber, LegacyStorageRecordChangeSubscriber>();
         services.AddScoped<IGlucoseReadingBroadcaster, HomeAssistantGlucoseBroadcaster>();
 
         // Push notifications

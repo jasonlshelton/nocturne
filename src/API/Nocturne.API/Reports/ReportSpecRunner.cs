@@ -453,15 +453,15 @@ internal sealed class ReportSpecRunner(IReportDatasetRegistry registry, TimeProv
             }
             var lead = (layer.Bindings.Y ?? []).Concat(layer.Bindings.Edges ?? [])
                 .Select(name => layer.Fields.FirstOrDefault(f => f.Name == name)).OfType<ReportField>().FirstOrDefault();
-            var key = layer.Color is { } own ? ReportWire.Name(own)
-                : lead is null ? "foreground" : lead.GlucoseScale ? "glucose" : lead.Color is { } c ? ReportWire.Name(c) : "foreground";
+            var key = layer.Color is { } own ? EnumWireNames<ChartColor>.Of(own)
+                : lead is null ? "foreground" : lead.GlucoseScale ? "glucose" : lead.Color is { } c ? EnumWireNames<ChartColor>.Of(c) : "foreground";
             if (used.Add(key))
             {
                 hued.Add(layer);
                 continue;
             }
-            var hue = SeriesHues.FirstOrDefault(h => !used.Contains(ReportWire.Name(h)), SeriesHues[used.Count % SeriesHues.Count]);
-            used.Add(ReportWire.Name(hue));
+            var hue = SeriesHues.FirstOrDefault(h => !used.Contains(EnumWireNames<ChartColor>.Of(h)), SeriesHues[used.Count % SeriesHues.Count]);
+            used.Add(EnumWireNames<ChartColor>.Of(hue));
             hued.Add(layer with { Color = hue });
         }
         return hued;
@@ -494,8 +494,8 @@ internal sealed class ReportSpecRunner(IReportDatasetRegistry registry, TimeProv
                 if (at < 0)
                     continue;
                 var field = fields[at];
-                var color = layer.Color is { } hue ? ReportWire.Name(hue)
-                    : field.GlucoseScale ? "glucose" : field.Color is { } own ? ReportWire.Name(own) : "foreground";
+                var color = layer.Color is { } hue ? EnumWireNames<ChartColor>.Of(hue)
+                    : field.GlucoseScale ? "glucose" : field.Color is { } own ? EnumWireNames<ChartColor>.Of(own) : "foreground";
                 if (!worn.TryGetValue((color, layer.Mark), out var textures))
                 {
                     worn[(color, layer.Mark)] = [null];

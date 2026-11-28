@@ -3,6 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 using Nocturne.Connectors.Core.Models;
 using Nocturne.Connectors.Glooko.Configurations;
+using Nocturne.Connectors.Glooko.Services;
+using Nocturne.Core.Models.Services;
 using Nocturne.Tests.Shared.Connectors;
 using Xunit;
 
@@ -63,7 +65,7 @@ public class GlookoConnectorServiceSyncWindowTests
             new SyncRequest { DataTypes = [SyncDataType.TempBasals] }, config, CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        var expectedFrom = now.UtcDateTime.AddMonths(-GlookoConstants.FullWalkMonths).AddHours(deviceOffsetHours).AddDays(-1);
+        var expectedFrom = GlookoSyncHarness.DeclaredFullWalkStart(now.UtcDateTime).AddHours(deviceOffsetHours).AddDays(-1);
         var expectedTo = now.UtcDateTime.AddHours(deviceOffsetHours).AddDays(1);
         Parse(handler.Windows[0].Start).Should().Be(expectedFrom);
         Parse(handler.Windows[^1].End).Should().Be(expectedTo);
@@ -84,7 +86,28 @@ public class GlookoConnectorServiceSyncWindowTests
 
         result.Success.Should().BeTrue();
         Parse(handler.Windows[0].Start).Should().Be(
-            now.UtcDateTime.AddMonths(-GlookoConstants.FullWalkMonths).AddDays(-1));
+            GlookoSyncHarness.DeclaredFullWalkStart(now.UtcDateTime).AddDays(-1));
+    }
+
+    [Fact]
+    public void FullWalkStart_IsTheDeclaredHistoryReach()
+    {
+        var now = new DateTime(2026, 8, 31, 12, 0, 0, DateTimeKind.Utc);
+
+        GlookoConnectorService.FullWalkStart(now).Should().Be(GlookoSyncHarness.DeclaredFullWalkStart(now));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void HistoryReach_IsTheWholeHistoryOnSsv2AndSixMonthsOnTheWindowedPath(bool useV3Api)
+    {
+        var windowed = GlookoSyncHarness.Config(useV3Api);
+        var ssv2 = GlookoSyncHarness.Config(useV3Api);
+        ssv2.UseSsv2Sync = true;
+
+        windowed.HistoryReach().Should().Be(new ConnectorHistoryReach(HistoryReachUnit.Months, 6));
+        ssv2.HistoryReach().Should().Be(ConnectorHistoryReach.Whole);
     }
 
     private static DateTime Parse(string timestamp) =>

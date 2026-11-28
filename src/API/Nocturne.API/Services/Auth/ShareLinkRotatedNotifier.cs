@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Nocturne.Core.Contracts.Identity;
 using Nocturne.Core.Contracts.Multitenancy;
 using Nocturne.Core.Contracts.Notifications;
+using Nocturne.Core.Models;
 using Nocturne.Infrastructure.Data.Services;
 
 namespace Nocturne.API.Services.Auth;
@@ -26,9 +27,6 @@ public interface IShareLinkRotatedNotifier
 /// <inheritdoc />
 public sealed class ShareLinkRotatedNotifier : IShareLinkRotatedNotifier
 {
-    /// <summary>Notification type for a share link that no longer resolves.</summary>
-    public const string NotificationType = "sharing.link_rotated";
-
     private const string AuditEndpoint = "service:share-link-notifier";
 
     private readonly IServiceProvider _services;
@@ -73,9 +71,9 @@ public sealed class ShareLinkRotatedNotifier : IShareLinkRotatedNotifier
             await tenantScope.ServiceProvider.GetRequiredService<IInAppNotificationService>()
                 .CreateNotificationAsync(
                     userId: ownerSubjectId,
-                    type: NotificationType,
-                    title: "share_link_rotated",
-                    subtitle: "share_link_rotated_subtitle",
+                    type: InAppNotificationType.SharingLinkRotated.ToWireString(),
+                    title: NotificationLabel.ShareLinkRotated.ToWireString(),
+                    subtitle: NotificationLabel.ShareLinkRotatedSubtitle.ToWireString(),
                     sourceId: tenantId.ToString(),
                     cancellationToken: cancellationToken);
         }

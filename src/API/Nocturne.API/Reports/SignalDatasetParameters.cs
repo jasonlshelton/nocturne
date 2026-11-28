@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 
 namespace Nocturne.API.Reports;
@@ -9,15 +10,15 @@ namespace Nocturne.API.Reports;
 internal enum ReportDeviceEventGroup
 {
     [Description("Sensor starts, changes and stops")]
-    [JsonStringEnumMemberName("sensor")]
+    [EnumMember(Value = "sensor"), JsonStringEnumMemberName("sensor")]
     Sensor,
 
     [Description("Site, cannula, pod, reservoir and insulin changes, and priming")]
-    [JsonStringEnumMemberName("site")]
+    [EnumMember(Value = "site"), JsonStringEnumMemberName("site")]
     Site,
 
     [Description("Pump suspends and resumes, battery changes, and pump clock and limit changes")]
-    [JsonStringEnumMemberName("pump")]
+    [EnumMember(Value = "pump"), JsonStringEnumMemberName("pump")]
     Pump,
 }
 

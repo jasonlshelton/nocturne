@@ -18,6 +18,7 @@
     type TenantOverviewResponse,
     type TenantReviewResponse,
   } from "@nocturne/api-client";
+  import { demoSubjectAccess } from "#lib/authorization/demo-subject.js";
   import { Button } from "#lib/components/ui/button/index.js";
   import * as Dialog from "#lib/components/ui/dialog/index.js";
   import { Input } from "#lib/components/ui/input/index.js";
@@ -76,7 +77,7 @@
   import { VIEW_NAME_MAX_LENGTH, isNameTaken, viewProblemMessages } from "./people-views.svelte.js";
   import { setReadState } from "./read-state.js";
   import PersonPanel from "./PersonPanel.svelte";
-  import { PERSON_PANEL_HEADING_ID } from "./person.js";
+  import { PERSON_PANEL_HEADING_ID, keepUnchanged } from "./person.js";
   import {
     DEFAULT_REVIEW_DAYS,
     REVIEW_DAYS,
@@ -155,7 +156,7 @@
   // Each query is a read of its own, with no value until it answers. The tab's last answer stays on
   // screen meanwhile, so a change of search, filter or sort keeps the list and the control in use.
   const freshData = $derived(overviewQuery?.current);
-  let lastData = $state<{ tab: string; response: TenantOverviewResponse } | null>(null);
+  let lastData = $state.raw<{ tab: string; response: TenantOverviewResponse } | null>(null);
   $effect.pre(() => {
     const current = freshData;
     if (current) lastData = { tab: tabValue(untrack(() => tab)), response: current };
@@ -163,7 +164,11 @@
   const data = $derived(
     freshData ?? (lastData?.tab === tabValue(tab) ? lastData.response : undefined)
   );
-  const people = $derived(data?.tenants ?? []);
+  let heldPeople: TenantOverviewItem[] = [];
+  const people = $derived.by(() => {
+    heldPeople = keepUnchanged(heldPeople, data?.tenants ?? []);
+    return heldPeople;
+  });
   const hiddenCount = $derived(data?.hiddenCount ?? 0);
 
   const baseDomain = $derived(page.data.baseDomain ?? null);
@@ -171,6 +176,7 @@
   let personSlug = $state(address().get("person"));
   let contentWidth = $state(0);
   let heading = $state<HTMLElement>();
+  const headingId = $props.id();
   let lastOpen: string | null = null;
   let roster = $state<ReturnType<typeof PeopleRoster>>();
 
@@ -342,7 +348,7 @@
   const freshReview = $derived(reviewQuery?.current);
   // One period's figures never show under another, so the review is kept only within a tab and period.
   const reviewPlace = $derived(`${tabValue(tab)} ${days}`);
-  let lastReview = $state<{ place: string; response: TenantReviewResponse } | null>(null);
+  let lastReview = $state.raw<{ place: string; response: TenantReviewResponse } | null>(null);
   $effect.pre(() => {
     const current = freshReview;
     if (current) lastReview = { place: untrack(() => reviewPlace), response: current };
@@ -379,7 +385,7 @@
           ? inReviewOrder(people, freshReview)
           : null
   );
-  let lastRows = $state<TenantOverviewItem[] | null>(null);
+  let lastRows = $state.raw<TenantOverviewItem[] | null>(null);
   $effect.pre(() => {
     const current = freshRows;
     if (current) lastRows = current;
@@ -429,6 +435,7 @@
     });
   });
 
+  const canKeepViews = $derived(demoSubjectAccess(page.data).canWriteStaffRecords);
   const canSaveView = $derived(!!openView && hasUnsaved(changes));
   const worthKeeping = $derived(!!shown && isWorthKeeping(shown));
   let managing = $state(false);
@@ -509,7 +516,7 @@
       <Users class="size-6 text-primary" aria-hidden="true" />
     </div>
     <div class="min-w-0 flex-1">
-      <h1 bind:this={heading} tabindex="-1" class="text-2xl font-bold outline-none">
+      <h1 id={headingId} bind:this={heading} tabindex="-1" class="text-2xl font-bold outline-none">
           People
         </h1>
       <p class="text-sm text-muted-foreground">
@@ -611,13 +618,13 @@
                 <span class="text-sm text-muted-foreground" data-testid="people-view-unsaved">
                   You changed this view. The changes are not saved.
                 </span>
-                <Button size="sm" disabled={saving} onclick={saveView}>Save view</Button>
+                <Button size="sm" disabled={saving || !canKeepViews} onclick={saveView}>Save view</Button>
               {/if}
               {#if worthKeeping}
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={atViewLimit || saving}
+                  disabled={atViewLimit || saving || !canKeepViews}
                   onclick={startNaming}
                 >
                   Save as new view
@@ -626,6 +633,11 @@
             </div>
           {/if}
         </div>
+        {#if (canSaveView || worthKeeping) && !canKeepViews}
+          <p class="text-sm text-muted-foreground" data-testid="people-views-demo">
+            You cannot save views in the demo.
+          </p>
+        {/if}
         {#if worthKeeping && atViewLimit}
           <p class="text-sm text-muted-foreground" data-testid="people-views-limit">
             You have {viewLimit} views, the maximum. Delete a view to save a new view.
@@ -721,6 +733,7 @@
             <div class={["min-w-0 flex-1 transition-opacity", stale && "opacity-60"]} data-testid="people-rows">
               <PeopleRoster
                 bind:this={roster}
+                labelledby={headingId}
                 people={rows}
                 {review}
                 sort={query.sort}
@@ -771,7 +784,7 @@
     <PeopleTabs {groups} {views} {tab} onChange={choose}>
       {#snippet actions()}
         {#if views.length > 0}
-          <Button variant="ghost" size="sm" onclick={() => (managing = true)}>
+          <Button variant="ghost" size="sm" disabled={!canKeepViews} onclick={() => (managing = true)}>
             <Settings2 class="size-4" aria-hidden="true" />
             Manage views
           </Button>

@@ -488,7 +488,7 @@ public class EversenseConnectorServiceTests
         var now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
         var from = now.AddHours(-50);
 
-        var windows = EversenseConnectorService.HistoryWindows(from, to: null, now);
+        var windows = EversenseConnectorService.HistoryWindows(from, to: null, now, historyStart: null);
 
         windows.Should().HaveCount(3);
         windows[0].Start.Should().Be(from);
@@ -497,13 +497,14 @@ public class EversenseConnectorServiceTests
     }
 
     [Fact]
-    public void HistoryWindows_ClampsToMaxHistoryDays()
+    public void HistoryWindows_ClampsToTheHistoryStart()
     {
         var now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
+        var historyStart = now.AddDays(-30);
 
-        var windows = EversenseConnectorService.HistoryWindows(now.AddDays(-180), to: null, now);
+        var windows = EversenseConnectorService.HistoryWindows(now.AddDays(-180), to: null, now, historyStart);
 
-        windows[0].Start.Should().Be(now.AddDays(-EversenseConnectorConfiguration.MaxHistoryDays));
+        windows[0].Start.Should().Be(historyStart);
     }
 
     [Fact]
@@ -548,9 +549,36 @@ public class EversenseConnectorServiceTests
         histories[^1].Query.Should().Contain("endDate=2026-10-16T12%3A05%3A00");
     }
 
+    [Fact]
+    public async Task SyncDataAsync_ARangeOlderThanTheSourceServes_AsksFromTheHistoryReach()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
+        var fixture = new ServiceFixture(
+            httpResponses: new Dictionary<string, HttpResponseMessage>
+            {
+                [EversenseConstants.Endpoints.GetFollowingPatientList] =
+                    CreateJsonResponse(new List<EversensePatientDatum>
+                    {
+                        CreateFollowedPatient(userId: 42, glucose: 125, cgTime: "2026-10-16T11:58:00Z")
+                    }),
+                [EversenseConstants.Endpoints.GetFollowingUserSensorGlucose] =
+                    CreateJsonResponse(new List<EversenseUserEvent>())
+            },
+            publisher: CreatePublisher().Object,
+            clock: clock);
+        var now = clock.GetUtcNow().UtcDateTime;
+
+        await fixture.Service.SyncDataAsync(
+            new SyncRequest { From = now.AddDays(-180), To = now, DataTypes = [SyncDataType.Glucose] },
+            fixture.Config, CancellationToken.None);
+
+        fixture.RequestedUris.First(u => u.AbsolutePath == EversenseConstants.Endpoints.GetFollowingUserSensorGlucose)
+            .Query.Should().Contain("startDate=2026-09-16T12%3A00%3A00");
+    }
+
     [Theory]
     [MemberData(nameof(NoLowerBound.Shapes), MemberType = typeof(NoLowerBound))]
-    public async Task SyncDataAsync_AWindowWithNoLowerBound_AsksFromMaxHistoryDaysBeforeTheClock(string shape)
+    public async Task SyncDataAsync_AWindowWithNoLowerBound_AsksFromTheDeclaredHistoryReachBeforeTheClock(string shape)
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
         var fixture = new ServiceFixture(

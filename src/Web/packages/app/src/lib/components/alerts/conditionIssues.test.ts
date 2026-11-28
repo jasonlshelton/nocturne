@@ -63,7 +63,8 @@ describe("conditionIssuesMessage", () => {
 			["unknown_field", undefined],
 			["field_missing", "value"],
 			["field_missing", "operator"],
-			["field_missing", "direction"],
+			["unsupported_schema", "schema_version"],
+			["invalid_field", "minutes"],
 			["field_missing", "state"],
 			["field_missing", "child"],
 			["unknown_value", "bucket"],
@@ -152,6 +153,21 @@ describe("conditionIssuesMessage", () => {
 		);
 	});
 
+	it("tells the person to save again a condition stored in an old format", () => {
+		expect(conditionIssuesMessage(rejected(400, [issue("unsupported_schema", "schema_version")]))).toBe(
+			"This rule's conditions were saved in an old format. Check the conditions and save the rule again."
+		);
+		expect(storedConditionIssuesMessage([issue("unsupported_schema", "schema_version")])).toBe(
+			"This rule's conditions were saved in an old format. Check the conditions and save the rule again."
+		);
+	});
+
+	it("says a condition's time must be whole minutes", () => {
+		expect(conditionIssuesMessage(rejected(400, [issue("invalid_field", "minutes")]))).toBe(
+			"A time in a condition must be a whole number of minutes, 0 or more."
+		);
+	});
+
 	it("leaves other rejections to the caller", () => {
 		expect(
 			conditionIssuesMessage(rejected(400, [issue("Unknown tracker definition")]))
@@ -177,6 +193,30 @@ describe("storedConditionIssuesMessage", () => {
 			storedConditionIssuesMessage([issue("field_missing", "value"), issue("constructor")])
 		).toBe(
 			"A condition is missing a setting it needs. Fill it in and save again. Part of this rule's conditions is malformed, so the rule cannot run as set. Edit its conditions and save it."
+		);
+	});
+
+	it("names the auto-resolve or smart snooze conditions when they were saved in an old format", () => {
+		expect(
+			storedConditionIssuesMessage([
+				{ scope: "auto_resolve", path: "auto_resolve", reason: "unsupported_schema", field: "schema_version" },
+			])
+		).toBe("The auto-resolve conditions of this rule were saved in an old format. Check them and save the rule again.");
+		expect(
+			storedConditionIssuesMessage([
+				{ scope: "snooze", path: "snooze[0]", reason: "unsupported_schema", field: "schema_version" },
+			])
+		).toBe("The smart snooze conditions of this rule were saved in an old format. Check them and save the rule again.");
+	});
+
+	it("names the part before what is wrong in it", () => {
+		expect(
+			storedConditionIssuesMessage([
+				{ scope: "auto_resolve", path: "auto_resolve", reason: "field_missing", field: "value" },
+				{ scope: "snooze", path: "snooze[0]", reason: "constructor" },
+			])
+		).toBe(
+			"The auto-resolve conditions of this rule cannot run as set. A condition is missing a setting it needs. Fill it in and save again. The smart snooze conditions of this rule cannot run as set. Edit the smart snooze conditions and save the rule."
 		);
 	});
 });

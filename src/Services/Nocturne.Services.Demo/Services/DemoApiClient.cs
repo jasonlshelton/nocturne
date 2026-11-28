@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Models;
+using Nocturne.Core.Models.Demo;
 using Nocturne.Core.Models.V4;
 
 namespace Nocturne.Services.Demo.Services;
@@ -283,12 +284,29 @@ public sealed class DemoApiClient
     }
 
     /// <summary>
-    /// Updates the demo tenant status (next reset time, last reset time, active state).
+    /// Returns the clinic persona's saved views and flag rules to their seeds via the admin endpoint. The persona's
+    /// sessions keep working.
     /// </summary>
-    public async Task UpdateStatusAsync(DateTime? nextResetAt = null, DateTime? lastResetAt = null, bool? isActive = null, CancellationToken ct = default)
+    public async Task ResetVisitorStateAsync(CancellationToken ct)
     {
         var client = _httpClientFactory.CreateClient("DemoAdmin");
-        var payload = new { nextResetAt, lastResetAt, isActive };
+        var response = await client.PostAsync("api/v4/admin/demo/visitor-reset", null, ct);
+        response.EnsureSuccessStatusCode();
+        _logger.LogInformation("Reset the clinic persona's views and rules via API");
+    }
+
+    /// <summary>
+    /// Updates the demo tenant status (next reset time, last reset time, active state, next visitor reset time).
+    /// </summary>
+    public async Task UpdateStatusAsync(
+        DateTime? nextResetAt = null,
+        DateTime? lastResetAt = null,
+        bool? isActive = null,
+        DateTime? nextVisitorResetAt = null,
+        CancellationToken ct = default)
+    {
+        var client = _httpClientFactory.CreateClient("DemoAdmin");
+        var payload = new DemoStatusPatchDto(nextResetAt, lastResetAt, isActive, nextVisitorResetAt);
         var response = await client.PatchAsJsonAsync("api/v4/admin/demo/status", payload, ct);
         response.EnsureSuccessStatusCode();
     }
@@ -305,6 +323,20 @@ public sealed class DemoApiClient
             "api/v4/admin/demo/seed-extras", new { days, includeGlucose = true }, SerializerOptions, ct);
         response.EnsureSuccessStatusCode();
         _logger.LogInformation("Seeded full demo sample set via API");
+    }
+
+    /// <summary>
+    /// Seeds one person of the demo clinic from their archetype, through the same admin endpoint. The API
+    /// leaves a person who is already seeded as they are.
+    /// </summary>
+    /// <param name="person">The <see cref="Nocturne.Core.Models.Demo.DemoClinicPerson.Key"/> of the person.</param>
+    public async Task SeedPersonAsync(string person, int days, CancellationToken ct)
+    {
+        var client = _httpClientFactory.CreateClient("DemoAdmin");
+        var response = await client.PostAsJsonAsync(
+            "api/v4/admin/demo/seed-extras", new { days, includeGlucose = true, person }, SerializerOptions, ct);
+        response.EnsureSuccessStatusCode();
+        _logger.LogInformation("Seeded demo clinic person {Person} via API", person);
     }
 
     private static string? Serialize<T>(T? value) =>
@@ -344,4 +376,5 @@ public sealed class DemoTenantState
     public bool IsActive { get; set; }
     public DateTime? NextResetAt { get; set; }
     public DateTime? LastResetAt { get; set; }
+    public DateTime? NextVisitorResetAt { get; set; }
 }

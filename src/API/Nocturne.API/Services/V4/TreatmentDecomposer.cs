@@ -587,7 +587,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     private static string SpanSource(Treatment treatment) =>
         treatment.DataSource
         ?? treatment.EnteredBy
-        ?? UploadedString(treatment, "app")
+        ?? UploadedAppFields.AppOf(treatment)
         ?? "nightscout";
 
     #endregion
@@ -636,7 +636,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             EndTimestamp = (treatment.Mills + Math.Max(durationMs, 0)).ToUtcDateTime(),
             UtcOffset = treatment.UtcOffset,
             Device = UploadedDevice(treatment),
-            App = treatment.EnteredBy,
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             CorrelationId = correlationId,
             Rate = percent is null ? treatment.Absolute ?? 0 : treatment.Rate,
@@ -671,7 +671,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         if (treatment.BolusType is "PUMP_SUSPEND" or "EMULATED_PUMP_SUSPEND")
             return (V4Models.TempBasalOrigin.Suspended, reported);
 
-        return (V4Models.TempBasalOriginProvenance.UploaderDefault(treatment.EnteredBy, UploadedString(treatment, "app")),
+        return (V4Models.TempBasalOriginProvenance.UploaderDefault(treatment.EnteredBy, UploadedAppFields.AppOf(treatment)),
             V4Models.TempBasalOriginEvidence.Uploader);
     }
 
@@ -761,7 +761,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             Automatic = treatment.Automatic ?? false,
             Duration = treatment.Duration,
             Device = UploadedDevice(treatment),
-            App = UploadedString(treatment, "app"),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -781,12 +781,15 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             LegacyId = treatment.Id,
             AdditionalProperties = PreBolusSplit.AddMealId(
                 UploadedEventType(
-                    TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                    UploadedAppFields.KeepAll(
+                        TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                        treatment),
                     treatment, keepEventType, TreatmentTypes.CarbCorrection),
                 treatment),
             Timestamp = treatment.Mills.ToUtcDateTime(),
             Carbs = treatment.Carbs ?? 0,
             Device = UploadedDevice(treatment),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -810,12 +813,15 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         return new V4Models.BGCheck
         {
             LegacyId = treatment.Id,
-            AdditionalProperties = TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+            AdditionalProperties = UploadedAppFields.KeepAll(
+                TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                treatment),
             Timestamp = treatment.Mills.ToUtcDateTime(),
             Glucose = treatment.Glucose ?? 0,
             GlucoseType = ParseGlucoseType(treatment.GlucoseType),
             Units = V4Models.GlucoseUnits.Parse(treatment.Units),
             Device = UploadedDevice(treatment),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -828,12 +834,15 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         return new V4Models.Note
         {
             LegacyId = treatment.Id,
-            AdditionalProperties = TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+            AdditionalProperties = UploadedAppFields.KeepAll(
+                TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                treatment),
             Timestamp = treatment.Mills.ToUtcDateTime(),
             Text = treatment.Notes ?? string.Empty,
             EventType = treatment.EventType,
             IsAnnouncement = isAnnouncement || (treatment.IsAnnouncement ?? false),
             Device = UploadedDevice(treatment),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -846,11 +855,14 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         return new V4Models.DeviceEvent
         {
             LegacyId = treatment.Id,
-            AdditionalProperties = TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+            AdditionalProperties = UploadedAppFields.KeepAll(
+                TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                treatment),
             Timestamp = treatment.Mills.ToUtcDateTime(),
             EventType = deviceEventType,
             Notes = treatment.Notes,
             Device = UploadedDevice(treatment),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -863,7 +875,9 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         return new V4Models.BolusCalculation
         {
             LegacyId = treatment.Id,
-            AdditionalProperties = TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+            AdditionalProperties = UploadedAppFields.KeepAll(
+                TreatmentUploadedTimestamp.AddTo(TreatmentClientId.ToRecord(treatment), treatment),
+                treatment),
             Timestamp = treatment.Mills.ToUtcDateTime(),
             BloodGlucoseInput = treatment.BloodGlucoseInput,
             BloodGlucoseInputSource = treatment.BloodGlucoseInputSource,
@@ -873,6 +887,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
             CarbRatio = treatment.CR,
             CalculationType = MapCalculationType(treatment.CalculationType),
             Device = UploadedDevice(treatment),
+            App = UploadedAppFields.AppOf(treatment),
             DataSource = treatment.DataSource,
             UtcOffset = treatment.UtcOffset,
             CorrelationId = correlationId,
@@ -939,18 +954,14 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     /// AAPS sets "app": "AAPS" on all treatment uploads (NSAndroidClientImpl.kt:296).
     /// </summary>
     internal static bool IsAapsUpload(Treatment treatment) =>
-        string.Equals(UploadedString(treatment, "app"), "AAPS", StringComparison.OrdinalIgnoreCase);
+        string.Equals(UploadedAppFields.AppOf(treatment), "AAPS", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The device a record names: its uploader, else the <c>device</c> the upload sent. The uploader
     /// comes first because it is the key a temp basal is matched to its loop's snapshots by.
     /// </summary>
     private static string? UploadedDevice(Treatment treatment) =>
-        treatment.EnteredBy ?? UploadedString(treatment, "device");
-
-    /// <summary>An uploaded field the treatment has no property for, when it is a string.</summary>
-    private static string? UploadedString(Treatment treatment, string key) =>
-        KeptField.String(treatment.AdditionalProperties, key);
+        treatment.EnteredBy ?? UploadedAppFields.DeviceOf(treatment);
 
     /// <summary>
     /// Extracts AAPS v4 insulin configuration from the <c>icfg</c> JSON field in
@@ -1177,7 +1188,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         if (treatment.Timeshift is { } timeshift)
         {
             var unit = ProfileSpanMetadata.UnitOfUploadedTimeshift(
-                timeshift, treatment.EnteredBy, UploadedString(treatment, ProfileSpanMetadata.AppKey),
+                timeshift, treatment.EnteredBy, UploadedAppFields.AppOf(treatment),
                 treatment.OriginalProfileName);
             metadata[ProfileSpanMetadata.TimeshiftKey] = ProfileSpanMetadata.ToHours(timeshift, unit);
             metadata[ProfileSpanMetadata.UploadedTimeshiftKey] = timeshift;
@@ -1199,7 +1210,6 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         if (treatment.DurationInMilliseconds is { } durationMs)
             metadata[ProfileSpanMetadata.DurationInMillisecondsKey] = durationMs;
 
-        AddUploadedApp(metadata, treatment);
         AddServedTreatmentFields(metadata, treatment);
         AddInsulinContext(metadata, treatment);
 
@@ -1209,16 +1219,9 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     private static Dictionary<string, object> BuildEffectiveProfileMetadata(Treatment treatment)
     {
         var metadata = EffectiveProfileSwitch.Metadata(treatment);
-        AddUploadedApp(metadata, treatment);
         AddServedTreatmentFields(metadata, treatment);
         AddInsulinContext(metadata, treatment);
         return metadata;
-    }
-
-    private static void AddUploadedApp(Dictionary<string, object> metadata, Treatment treatment)
-    {
-        if (UploadedString(treatment, ProfileSpanMetadata.AppKey) is { Length: > 0 } app)
-            metadata[ProfileSpanMetadata.AppKey] = app;
     }
 
     private static void AddInsulinContext(Dictionary<string, object> metadata, Treatment treatment)
@@ -1310,8 +1313,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     /// </summary>
     private static void AddServedTreatmentFields(Dictionary<string, object> metadata, Treatment treatment)
     {
-        if (!string.IsNullOrEmpty(treatment.EnteredBy))
-            metadata["enteredBy"] = treatment.EnteredBy;
+        UploadedAppFields.KeepInMetadata(metadata, treatment);
 
         if (!string.IsNullOrEmpty(treatment.Notes))
             metadata[LegacyTreatmentTables.NotesKey] = treatment.Notes;
@@ -1325,7 +1327,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         if (TreatmentUploadedTimestamp.Uploaded(treatment) is { } timestamp)
             metadata[LegacyTreatmentTables.UploadedTimestampKey] = timestamp;
 
-        SpanUploadedFields.Keep(metadata, treatment);
+        UploadedPumpFields.KeepInMetadata(metadata, treatment);
         TreatmentClientId.KeepInMetadata(metadata, treatment);
 
         metadata[StateSpanMetadataExtensions.UtcOffsetKey] = treatment.UtcOffset ?? 0;
@@ -1338,10 +1340,10 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
     /// <inheritdoc />
     /// <remarks>
     /// Four phases, each a fixed number of queries whatever the batch's size: the preload (the rows
-    /// stored under the batch's legacy ids, its pumps and their patient-device links, the meal carbs
-    /// paired with its stored boluses, and the pump-mode spans around its window), the models built in
-    /// memory, one bulk upsert per table (profile activations settled in memory first), then the pump
-    /// suspension fold over the preloaded spans and the span writes in bulk. A legacy id the batch sends
+    /// stored under the batch's legacy ids, its pumps and their patient-device links, and the meal carbs
+    /// paired with its stored boluses), the models built in memory, one bulk upsert per table (profile
+    /// activations settled in memory first), then the pump-mode spans around the stored suspend and resume
+    /// events, the pump suspension fold over them and the span writes in bulk. A legacy id the batch sends
     /// more than once is written as its last version that writes anything, which is what one at a time
     /// leaves.
     /// </remarks>
@@ -1372,7 +1374,6 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         var devices = await ResolvePumpsAsync(writing, ct);
         var links = await _deviceService.GetPatientDeviceLinksAsync(devices.Values, ct);
         var mealCarbs = await LoadMealCarbsAsync(writing.Select(w => w.Treatment.Id), stored, storedCorrelations, ct);
-        var spans = await PreloadSpansAsync(writing, ct);
 
         var models = new BatchModels();
         var upstreamEdits = new List<BatchTreatment>();
@@ -1450,8 +1451,10 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
                 if (TreatmentOf(deviceEvent) is { } index)
                     arrivals[index] = deviceEvent.CreatedAt;
             }
-            FoldPumpSuspensions(
-                [.. models.Suspensions.Where(s => !result.Rejected.ContainsKey(s.Treatment.Index))], arrivals, spans, sources);
+            List<(BatchTreatment Treatment, DeviceEventType Type)> suspensions =
+                [.. models.Suspensions.Where(s => !result.Rejected.ContainsKey(s.Treatment.Index))];
+            var spans = await PreloadSpansAsync(suspensions, arrivals, ct);
+            FoldPumpSuspensions(suspensions, arrivals, spans, sources);
             foreach (var (treatment, span) in models.Spans.Where(s => !result.Rejected.ContainsKey(s.Treatment.Index)))
             {
                 spans.Open(span);
@@ -1870,13 +1873,17 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
 
     /// <summary>
     /// The pump-mode spans the suspension fold reads, in one query when the batch carries a pump suspend
-    /// or resume: every open one, those overlapping the batch's window, and the first after it.
+    /// or resume: every open one, those overlapping the batch's window, and the first after it. The window
+    /// covers each event's <see cref="PumpModeSpanClock.Transition.ReadAt"/>, so the spans are read once the
+    /// device events are stored and their arrivals known.
     /// </summary>
-    private async Task<SpanState> PreloadSpansAsync(IReadOnlyList<BatchTreatment> writing, CancellationToken ct)
+    /// <param name="arrivals">When the server stored each event's device event, by treatment index.</param>
+    private async Task<SpanState> PreloadSpansAsync(
+        List<(BatchTreatment Treatment, DeviceEventType Type)> events,
+        IReadOnlyDictionary<int, DateTime> arrivals,
+        CancellationToken ct)
     {
-        var at = writing.Where(w => w.Classification is { ProduceDeviceEvent: true, ParsedDeviceEventType: DeviceEventType.PumpSuspend or DeviceEventType.PumpResume })
-            .Select(w => w.Start)
-            .ToList();
+        var at = events.SelectMany(e => TransitionOf(e.Treatment, arrivals).ReadAt).ToList();
         return new SpanState(at.Count == 0
             ? []
             : await _stateSpanService.GetStateSpansAroundAsync(
@@ -1885,6 +1892,11 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
 
     /// <summary>How many pump-mode spans after the batch's window the suspension fold reads.</summary>
     private const int SuspensionSuccessorReach = 10;
+
+    /// <summary>A suspend or resume event's transition, judged against when its device event was stored.</summary>
+    private static PumpModeSpanClock.Transition TransitionOf(
+        BatchTreatment batched, IReadOnlyDictionary<int, DateTime> arrivals) =>
+        new(batched.Start, arrivals.TryGetValue(batched.Index, out var arrival) ? arrival : null);
 
     /// <summary>
     /// Builds every model one treatment decomposes into, adding them to <paramref name="models"/> only
@@ -2271,8 +2283,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
         foreach (var (batched, type) in events.OrderBy(e => e.Treatment.Treatment.Mills).ThenBy(e => e.Treatment.Index))
         {
             var treatment = batched.Treatment;
-            var arrivedAt = arrivals.TryGetValue(batched.Index, out var arrival) ? arrival : (DateTime?)null;
-            var transition = new PumpModeSpanClock.Transition(batched.Start, arrivedAt);
+            var transition = TransitionOf(batched, arrivals);
             var at = transition.At;
             if (type == DeviceEventType.PumpSuspend)
             {
@@ -2291,7 +2302,7 @@ internal class TreatmentDecomposer : DecomposerBase, ITreatmentDecomposer
                     EndTimestamp = null,
                     Source = SpanSource(treatment),
                     OriginalId = key,
-                    CreatedAt = arrivedAt,
+                    CreatedAt = transition.ArrivedAt,
                 };
 
                 if (keyed is null)

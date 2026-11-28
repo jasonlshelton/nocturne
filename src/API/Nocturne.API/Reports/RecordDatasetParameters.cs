@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 
 namespace Nocturne.API.Reports;
@@ -12,25 +13,25 @@ namespace Nocturne.API.Reports;
 [JsonConverter(typeof(JsonStringEnumConverter<ReportTreatmentType>))]
 internal enum ReportTreatmentType
 {
-    [JsonStringEnumMemberName("bolus")]
+    [EnumMember(Value = "bolus"), JsonStringEnumMemberName("bolus")]
     Bolus,
 
-    [JsonStringEnumMemberName("carbs")]
+    [EnumMember(Value = "carbs"), JsonStringEnumMemberName("carbs")]
     Carbs,
 
-    [JsonStringEnumMemberName("temp_basal")]
+    [EnumMember(Value = "temp_basal"), JsonStringEnumMemberName("temp_basal")]
     TempBasal,
 
-    [JsonStringEnumMemberName("note")]
+    [EnumMember(Value = "note"), JsonStringEnumMemberName("note")]
     Note,
 
-    [JsonStringEnumMemberName("override")]
+    [EnumMember(Value = "override"), JsonStringEnumMemberName("override")]
     Override,
 
-    [JsonStringEnumMemberName("basal_injection")]
+    [EnumMember(Value = "basal_injection"), JsonStringEnumMemberName("basal_injection")]
     BasalInjection,
 
-    [JsonStringEnumMemberName("bg_check")]
+    [EnumMember(Value = "bg_check"), JsonStringEnumMemberName("bg_check")]
     BgCheck,
 }
 
@@ -64,39 +65,39 @@ internal sealed record TreatmentsParameters : ReportDatasetParameters
 internal enum ReportSpanKind
 {
     [Description("Pump modes")]
-    [JsonStringEnumMemberName("pump_mode")]
+    [EnumMember(Value = "pump_mode"), JsonStringEnumMemberName("pump_mode")]
     PumpMode,
 
     [Description("Profiles")]
-    [JsonStringEnumMemberName("profile")]
+    [EnumMember(Value = "profile"), JsonStringEnumMemberName("profile")]
     Profile,
 
     [Description("Overrides")]
-    [JsonStringEnumMemberName("override")]
+    [EnumMember(Value = "override"), JsonStringEnumMemberName("override")]
     Override,
 
     [Description("Activities")]
-    [JsonStringEnumMemberName("activity")]
+    [EnumMember(Value = "activity"), JsonStringEnumMemberName("activity")]
     Activity,
 
     [Description("Temp basals")]
-    [JsonStringEnumMemberName("temp_basal")]
+    [EnumMember(Value = "temp_basal"), JsonStringEnumMemberName("temp_basal")]
     TempBasal,
 
     [Description("Temporary targets")]
-    [JsonStringEnumMemberName("temporary_target")]
+    [EnumMember(Value = "temporary_target"), JsonStringEnumMemberName("temporary_target")]
     TemporaryTarget,
 
     [Description("Pump connection")]
-    [JsonStringEnumMemberName("pump_connectivity")]
+    [EnumMember(Value = "pump_connectivity"), JsonStringEnumMemberName("pump_connectivity")]
     PumpConnectivity,
 
     [Description("Data left out")]
-    [JsonStringEnumMemberName("data_exclusion")]
+    [EnumMember(Value = "data_exclusion"), JsonStringEnumMemberName("data_exclusion")]
     DataExclusion,
 
     [Description("Motion")]
-    [JsonStringEnumMemberName("motion")]
+    [EnumMember(Value = "motion"), JsonStringEnumMemberName("motion")]
     Motion,
 }
 
@@ -195,19 +196,19 @@ internal sealed record SleepParameters : ReportDatasetParameters
 internal enum ReportComparisonPreset
 {
     [Description("Last 7 days and the 7 days before")]
-    [JsonStringEnumMemberName("last7-prior7")]
+    [EnumMember(Value = "last7-prior7"), JsonStringEnumMemberName("last7-prior7")]
     Last7Prior7,
 
     [Description("Last 14 days and the 14 days before")]
-    [JsonStringEnumMemberName("last14-prior14")]
+    [EnumMember(Value = "last14-prior14"), JsonStringEnumMemberName("last14-prior14")]
     Last14Prior14,
 
     [Description("Last 30 days and the 30 days before")]
-    [JsonStringEnumMemberName("last30-prior30")]
+    [EnumMember(Value = "last30-prior30"), JsonStringEnumMemberName("last30-prior30")]
     Last30Prior30,
 
     [Description("This month and last month")]
-    [JsonStringEnumMemberName("thisMonth-lastMonth")]
+    [EnumMember(Value = "thisMonth-lastMonth"), JsonStringEnumMemberName("thisMonth-lastMonth")]
     ThisMonthLastMonth,
 }
 

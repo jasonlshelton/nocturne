@@ -23,22 +23,13 @@ const ALLOWED_FILTERS: Record<string, { lines: string[]; reason: string }> = {
     ],
     reason: "the therapy types a filter being written names",
   },
-  "lib/components/people/PeopleRoster.svelte": {
-    lines: [
-      "const flagged = $derived(people.filter(isFlagged));",
-      "const others = $derived(people.filter((person) => !isFlagged(person)));",
-    ],
-    reason: "splits the API's list into Flagged and the others by the reasons the API gave, each in the API's order",
-  },
   "lib/components/people/PeopleWall.svelte": {
     lines: [
-      "const flagged = $derived(people.filter(isFlagged));",
       "const count = [...list.children].filter(",
       "const rest = $derived(people.filter((person) => !band.includes(person)));",
       "const hidden = $derived(rest.filter((person) => !shown.has(person)));",
-      "const hiddenFlagged = $derived(hidden.filter(isFlagged).length);",
     ],
-    reason: "places the API's list on the screen: the flagged band, the columns and what does not fit",
+    reason: "places the API's list on the screen: the columns and what does not fit",
   },
   "lib/components/people/PersonEntries.svelte": {
     lines: ["(entries ?? []).filter("],
@@ -46,15 +37,20 @@ const ALLOWED_FILTERS: Record<string, { lines: string[]; reason: string }> = {
   },
   "lib/components/people/wall-groups.ts": {
     lines: [
-      "const others = people.filter((person) => !isFlagged(person));",
       "...(groups ?? []).filter((group) => group.id).map((group) => ({",
       "people: others.filter((person) => person.firstGroupId === group.id),",
       "{ heading: { group: null }, people: others.filter((person) => !person.firstGroupId) },",
       "].filter((run) => run.people.length > 0);",
-      "{ heading: null, people: people.filter(isFlagged) },",
       "].filter((section) => section.people.length > 0);",
     ],
     reason: "puts the API's list under the group heading the API named for each person, in the API's order",
+  },
+  "lib/components/people/person.ts": {
+    lines: [
+      "flagged: people.filter(isFlagged),",
+      "others: people.filter((person) => !isFlagged(person)),",
+    ],
+    reason: "splitFlagged: the API's list into Flagged and the others by the reasons the API gave, each in the API's order",
   },
   "lib/components/people/wall-layout.ts": {
     lines: ["const done = () => ({ columns: laid.filter((column) => column.length > 0), placed });"],
@@ -84,8 +80,11 @@ const ALLOWED_FLAT_MAPS: Record<string, { lines: string[]; reason: string }> = {
     reason: "the ids of the viewer's views, in their order, for a move",
   },
   "lib/components/people/PeopleWall.svelte": {
-    lines: ['new Set(columns.flat().flatMap((slot) => (slot.kind === "person" ? [slot.person] : [])))'],
-    reason: "the people the wall's columns placed, to count what does not fit",
+    lines: [
+      "laid.flat().flatMap((slot) =>",
+      'new Set(columns.flat().flatMap((slot) => (slot.kind === "person" ? [slot.person] : [])))',
+    ],
+    reason: "the wall's person slots, held as the same objects across polls, and the people they placed, to count what does not fit",
   },
   "lib/components/people/person-trace.ts": {
     lines: ["return (points ?? []).flatMap((point) =>"],

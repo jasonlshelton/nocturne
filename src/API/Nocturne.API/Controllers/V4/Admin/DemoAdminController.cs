@@ -7,8 +7,10 @@ using Nocturne.API.Services.Seeding;
 using Nocturne.Core.Constants;
 using Nocturne.Core.Contracts.Connectors;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models.Demo;
 using Nocturne.Core.Models.Identity;
 using Nocturne.Infrastructure.Data.Repositories;
+using Nocturne.Services.Demo.Services;
 
 namespace Nocturne.API.Controllers.V4.Admin;
 
@@ -49,7 +51,8 @@ public class DemoAdminController : ControllerBase
     }
 
     /// <summary>
-    /// Idempotent provisioning: creates the demo tenant if it doesn't exist, otherwise returns current state.
+    /// Idempotent provisioning: creates the demo host if it doesn't exist, then provisions its access and the demo clinic
+    /// beside it (<see cref="DemoTenantService.ProvisionAsync"/>), and returns the host's state.
     /// </summary>
     [HttpPost("provision")]
     [ProducesResponseType(typeof(DemoStateDto), StatusCodes.Status200OK)]
@@ -61,11 +64,9 @@ public class DemoAdminController : ControllerBase
 
         if (existing is not null)
         {
-            // Re-apply the tenant defaults and the access grants: this runs on every demo
-            // service start, so it repairs a tenant left without roles or a demo member by a
-            // reset that failed between wiping and re-seeding.
-            await _tenants.UpdateAsync(existing.Id, _demoTenantService.TenantDefaults(existing), ct);
-            await _demoTenantService.ConfigureAccessAsync(existing.Id, ct);
+            // Runs on every demo service start, so it repairs a demo left without roles, members or its
+            // clinic by a reset that failed between wiping and re-seeding.
+            await _demoTenantService.ProvisionAsync(existing.Id, ct);
             TenantCacheEviction.Evict(cache, existing.Slug, existing.ShareTokenHash);
             return Ok(ToDto((await _tenants.GetAsync(existing.Id, ct))!, alreadyExisted: true));
         }
@@ -76,12 +77,16 @@ public class DemoAdminController : ControllerBase
         var createdTenant = (await _tenants.GetAsync(created.Id, ct))!;
         await _tenants.UpdateAsync(
             created.Id,
-            _demoTenantService.TenantDefaults(createdTenant) with { IsDemo = true, DemoConfig = new DemoConfigEdit() },
+            _demoTenantService.TenantDefaults(createdTenant) with
+            {
+                IsDemo = true,
+                DemoConfig = new DemoConfigEdit(Kind: DemoTenantKind.Host),
+            },
             ct);
 
-        // Open the Public subject's share grant and create the demo member visitors are
-        // signed in as.
-        await _demoTenantService.ConfigureAccessAsync(created.Id, ct);
+        // Open the Public subject's share grant, create the demo member visitors are signed in
+        // as, and provision the clinic.
+        await _demoTenantService.ProvisionAsync(created.Id, ct);
 
         // TenantResolutionMiddleware caches the resolved context, IsDemo included, and
         // CreateWithoutOwnerAsync may already have populated it. IsDemo gates the demo sign-in
@@ -112,7 +117,9 @@ public class DemoAdminController : ControllerBase
 
         await _tenants.UpdateAsync(
             tenant.Id,
-            new TenantEdit(IsActive: patch.IsActive, DemoConfig: new DemoConfigEdit(patch.NextResetAt, patch.LastResetAt)),
+            new TenantEdit(
+                IsActive: patch.IsActive,
+                DemoConfig: new DemoConfigEdit(patch.NextResetAt, patch.LastResetAt, NextVisitorResetAt: patch.NextVisitorResetAt)),
             ct);
 
         tenant = (await _tenants.GetAsync(tenant.Id, ct))!;
@@ -174,11 +181,8 @@ public class DemoAdminController : ControllerBase
     }
 
     /// <summary>
-    /// Resets the demo tenant to a freshly provisioned state, discarding both the
-    /// generated data and every configuration change a visitor made — settings, roles,
-    /// members, connectors, alert rules, trackers and audit history. The tenant keeps
-    /// its id, slug and share token. Called by the demo background service before each
-    /// regenerate.
+    /// Resets the whole demo to a freshly provisioned state (<see cref="DemoTenantService.ResetAsync"/>). Called by the
+    /// demo background service before each regenerate.
     /// </summary>
     [HttpPost("reset")]
     [ProducesResponseType(typeof(DemoResetResultDto), StatusCodes.Status200OK)]
@@ -193,6 +197,17 @@ public class DemoAdminController : ControllerBase
     }
 
     /// <summary>
+    /// Returns the clinic persona's saved views and flag rules to their seeds
+    /// (<see cref="DemoTenantService.ResetVisitorStateAsync"/>). Called by the demo background service on its visitor
+    /// reset schedule.
+    /// </summary>
+    [HttpPost("visitor-reset")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetVisitorState(CancellationToken ct) =>
+        await _demoTenantService.ResetVisitorStateAsync(ct) ? NoContent() : NotFound();
+
+    /// <summary>
     /// Seeds the demo tenant with the full sample set — glucose, treatments,
     /// device status, therapy profile, device changes, sleep, activity,
     /// trackers, alert rules with alarm history and notifications, foods,
@@ -201,7 +216,9 @@ public class DemoAdminController : ControllerBase
     /// each reset. Idempotent — every type upserts or rebuilds rather than
     /// duplicates, except entries/treatments which append (the demo resets
     /// before seeding). Per-user types are owned by the demo tenant's Public
-    /// subject, which anonymous visitors browse as.
+    /// subject, which anonymous visitors browse as. With <see cref="DemoSeedExtrasDto.Person"/>,
+    /// seeds that person of the demo clinic from their archetype instead, once: a person who
+    /// already holds a sample timeline is left as the live feed has carried it on.
     /// </summary>
     [HttpPost("seed-extras")]
     [ProducesResponseType(typeof(SampleDataSeedResult), StatusCodes.Status200OK)]
@@ -214,6 +231,19 @@ public class DemoAdminController : ControllerBase
         if (tenant is null)
             return NotFound();
 
+        DemoArchetype? archetype = null;
+        if (request?.Person is { } key)
+        {
+            var person = DemoClinic.People.FirstOrDefault(p => p.Key == key);
+            archetype = person is null ? null : DemoArchetypes.Find(person.Key);
+            if (person is null || archetype is null)
+                return NotFound();
+
+            tenant = await _tenants.FindBySlugAsync(DemoClinic.SlugOf(tenant.Slug, person), ct);
+            if (tenant is not { IsDemo: true, DemoConfig.Kind: DemoTenantKind.Person })
+                return NotFound();
+        }
+
         var publicSubjectId = (await _members.FindPublicMemberAsync(tenant.Id, ct))?.SubjectId;
 
         var seeded = await SampleDataSeeder.SeedInTenantScopeAsync(
@@ -223,7 +253,8 @@ public class DemoAdminController : ControllerBase
             publicSubjectId,
             DataSources.DemoService,
             includeGlucose: request?.IncludeGlucose ?? true,
-            ct);
+            archetype: archetype,
+            ct: ct);
 
         return Ok(seeded);
     }
@@ -243,6 +274,7 @@ public class DemoAdminController : ControllerBase
         BackfillDays: tenant.DemoConfig?.BackfillDays ?? 90,
         IntervalMinutes: tenant.DemoConfig?.IntervalMinutes ?? 5,
         ResetIntervalMinutes: tenant.DemoConfig?.ResetIntervalMinutes ?? 0,
+        NextVisitorResetAt: tenant.DemoConfig?.NextVisitorResetAt,
         AlreadyExisted: alreadyExisted);
 }
 
@@ -256,15 +288,14 @@ public record DemoStateDto(
     int BackfillDays,
     int IntervalMinutes,
     int ResetIntervalMinutes,
+    DateTime? NextVisitorResetAt,
     bool AlreadyExisted);
-
-public record DemoStatusPatchDto(
-    DateTime? NextResetAt = null,
-    DateTime? LastResetAt = null,
-    bool? IsActive = null);
 
 public record DemoDeleteResultDto(long DeletedCount);
 
 public record DemoResetResultDto(Guid TenantId);
 
-public record DemoSeedExtrasDto(int Days = 7, bool IncludeGlucose = true);
+/// <param name="Days">The days of history to seed.</param>
+/// <param name="IncludeGlucose">Whether to generate glucose, treatments and device status, or to take them as stored.</param>
+/// <param name="Person">The <see cref="DemoClinicPerson.Key"/> of the demo clinic person to seed; null for the demo host.</param>
+public record DemoSeedExtrasDto(int Days = 7, bool IncludeGlucose = true, string? Person = null);

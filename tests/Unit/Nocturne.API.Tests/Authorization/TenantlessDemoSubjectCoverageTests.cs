@@ -70,6 +70,7 @@ public class TenantlessDemoSubjectCoverageTests
             ["PlatformController.GetTenants"] = "lists the caller's own memberships, which for the demo subject is the demo tenant",
             ["MyTenantsController.GetOverview"] = "aggregates over the caller's own memberships, which for the demo subject is the demo tenant",
             ["MyTenantsController.GetReview"] = "aggregates over the caller's own memberships, which for the demo subject is the demo tenant",
+            ["MyTenantsController.GetGroups"] = "lists the groups the caller is in as staff, which for the demo subject are the synthetic demo clinic's, tabbed on the people list it already reads",
             ["MyTenantsController.GetPerson"] = "reads one of the caller's own memberships, which for the demo subject is the demo tenant",
             ["OverviewAdmissionController.GetOverviewAdmission"] = "lists the ids of the caller's own memberships, which for the demo subject is the demo tenant",
             ["MyTenantsController.GetMyTenants"] = "lists the caller's own memberships, which for the demo subject is the demo tenant",
@@ -77,7 +78,30 @@ public class TenantlessDemoSubjectCoverageTests
             ["PlatformController.GetTransitionStatus"] = "reports the deployment's multitenancy configuration, not subject state",
 
             ["UserPreferencesController.GetPreferences"] = "returns the caller's own units and formats, which for the demo subject are the demo account's public display defaults",
+
+            ["TeamsController.GetMyTeams"] = DemoClinicRead,
+            ["TeamsController.GetTeam"] = DemoClinicRead,
+            ["PeopleViewsController.GetPeopleViews"] = DemoClinicRead,
+            ["FlagRulesController.GetFlagRules"] = DemoClinicRead,
+            ["FlagRulesController.GetTeamFlagRules"] = DemoClinicRead,
+            ["FlagRulesController.GetFlagRuleFacts"] = "returns the reports engine's static list of facts and suggested rules; it reads no subject",
+
+            ["PeopleViewsController.CreatePeopleView"] = DemoClinicStaffWrite,
+            ["PeopleViewsController.UpdatePeopleView"] = DemoClinicStaffWrite,
+            ["PeopleViewsController.DeletePeopleView"] = DemoClinicStaffWrite,
+            ["PeopleViewsController.ReorderPeopleViews"] = DemoClinicStaffWrite,
+            ["FlagRulesController.CreateFlagRule"] = DemoClinicStaffWrite,
+            ["FlagRulesController.UpdateFlagRule"] = DemoClinicStaffWrite,
+            ["FlagRulesController.DeleteFlagRule"] = DemoClinicStaffWrite,
         };
+
+    private const string DemoClinicRead =
+        "opened as a read (DemoSubjectTeamSurfaceTests): a demo subject is in no team but the synthetic demo clinic, "
+        + "so it reads that clinic, its own views and its own rules, all synthetic";
+
+    private const string DemoClinicStaffWrite =
+        "opened as a staff write (DemoSubjectTeamSurfaceTests): refused unless the demo subject is staff of a team, and "
+        + "then it changes only the caller's own views or rules";
 
     private const string DevOnly =
         "lives in the .DevOnly namespace, which DevOnlyExcludingControllerFeatureProvider drops "

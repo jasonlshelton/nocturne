@@ -348,7 +348,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
                 TenantId = tenant,
                 Name = "Urgent Low",
                 ConditionType = AlertConditionType.Threshold,
-                ConditionParams = """{"direction":"below","value":55}""",
+                ConditionParams = """{"schema_version":2,"operator":"<","value":55}""",
                 Severity = severity,
                 ScopeClass = RuleScopeClass.Low,
                 IsEnabled = true,
@@ -368,7 +368,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
         }
 
         var snapshot = new AlertRuleSnapshot(
-            rule, tenant, "Urgent Low", AlertConditionType.Threshold, """{"direction":"below","value":55}""",
+            rule, tenant, "Urgent Low", AlertConditionType.Threshold, """{"schema_version":2,"operator":"<","value":55}""",
             severity, "{}", 0, false, null, ScopeClass: RuleScopeClass.Low);
         var seeded = new Tenant
         {
@@ -641,7 +641,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
             db.AlertRules.Add(new AlertRuleEntity
             {
                 Id = high, TenantId = tenant.Id, Name = "High", ConditionType = AlertConditionType.Threshold,
-                ConditionParams = """{"direction":"above","value":250}""", Severity = AlertRuleSeverity.Warning,
+                ConditionParams = """{"schema_version":2,"operator":">","value":250}""", Severity = AlertRuleSeverity.Warning,
                 IsEnabled = true, CreatedAt = Opened, UpdatedAt = Opened,
             });
             db.AlertExcursions.Add(new AlertExcursionEntity
@@ -902,7 +902,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
     /// </summary>
     /// <param name="afterNotification">Runs once the notification is made, inside its send.</param>
     private static async Task<ConcurrentQueue<string>> RecordAlarmsAndNotificationsAsync(
-        Tenant tenant, string notificationType = InAppProvider.NotificationType, Action? afterNotification = null)
+        Tenant tenant, InAppNotificationType notificationType = InAppNotificationType.AlertFiring, Action? afterNotification = null)
     {
         var member = Guid.CreateVersion7();
         var inApp = new AlertRuleChannelSnapshot(
@@ -942,7 +942,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
             .Returns(Task.CompletedTask);
         tenant.Notifications
             .Setup(n => n.CreateNotificationAsync(
-                member.ToString(), notificationType, It.IsAny<string>(), It.IsAny<NotificationCategory?>(),
+                member.ToString(), notificationType.ToWireString(), It.IsAny<string>(), It.IsAny<NotificationCategory?>(),
                 It.IsAny<NotificationUrgency?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<List<NotificationActionDto>?>(), It.IsAny<ResolutionConditions?>(),
                 It.IsAny<Dictionary<string, object>?>(), It.IsAny<CancellationToken>()))
@@ -954,7 +954,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
             .ReturnsAsync(new InAppNotificationDto());
         tenant.Notifications
             .Setup(n => n.ArchiveBySourceAsync(
-                member.ToString(), notificationType, It.IsAny<string>(),
+                member.ToString(), notificationType.ToWireString(), It.IsAny<string>(),
                 It.IsAny<NotificationArchiveReason>(), It.IsAny<CancellationToken>()))
             .Callback(() => events.Enqueue("archived"))
             .ReturnsAsync(true);
@@ -1357,7 +1357,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
     public async Task A_notice_whose_retirement_dies_after_its_resolve_is_archived_by_the_sweep()
     {
         var tenant = await SeedAsync();
-        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppProvider.UnevaluableNotificationType);
+        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppNotificationType.AlertUnevaluable);
         await UnevaluableNotice(tenant, tenant.Process())
             .CheckAsync(new EnabledAlertRules([tenant.Rule], []), CancellationToken.None);
         var notice = await NoticeOfAsync(tenant);
@@ -1435,7 +1435,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
         var tenant = await SeedAsync();
         using var shutdown = new CancellationTokenSource();
         var events = await RecordAlarmsAndNotificationsAsync(
-            tenant, InAppProvider.UnevaluableNotificationType, ShutDown(shutdown));
+            tenant, InAppNotificationType.AlertUnevaluable, ShutDown(shutdown));
         var process = tenant.Process();
         RetireAtTheSend(tenant, process);
 
@@ -1472,7 +1472,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
         }
         using var shutdown = new CancellationTokenSource();
         var events = await RecordAlarmsAndNotificationsAsync(
-            tenant, InAppProvider.HeldNotificationType, ShutDown(shutdown));
+            tenant, InAppNotificationType.AlertHeld, ShutDown(shutdown));
         var process = tenant.Process();
         RetireAtTheSend(tenant, process);
 
@@ -1494,7 +1494,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
     public async Task A_notice_retired_during_its_send_by_a_run_that_completes_leaves_nothing_standing()
     {
         var tenant = await SeedAsync();
-        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppProvider.UnevaluableNotificationType);
+        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppNotificationType.AlertUnevaluable);
         var process = tenant.Process();
         RetireAtTheSend(tenant, process);
 
@@ -1515,7 +1515,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
     public async Task A_rerun_that_lands_between_a_notice_ending_and_its_resolve_keeps_the_resolve_reason()
     {
         var tenant = await SeedAsync();
-        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppProvider.UnevaluableNotificationType);
+        var events = await RecordAlarmsAndNotificationsAsync(tenant, InAppNotificationType.AlertUnevaluable);
         var process = tenant.Process();
         await UnevaluableNotice(tenant, process).CheckAsync(new EnabledAlertRules([tenant.Rule], []), CancellationToken.None);
         var notice = await NoticeOfAsync(tenant);
@@ -1547,7 +1547,7 @@ public class OwedTransitionPostgresTests(OwedTransitionPostgresTests.Database da
         var tenant = await SeedAsync();
         using var shutdown = new CancellationTokenSource();
         var events = await RecordAlarmsAndNotificationsAsync(
-            tenant, InAppProvider.UnevaluableNotificationType, ShutDown(shutdown));
+            tenant, InAppNotificationType.AlertUnevaluable, ShutDown(shutdown));
         var process = tenant.Process();
         var dying = tenant.Hooked();
         dying.AfterEndNotice = () => throw new NpgsqlException("the retiring process dies once the notice is ended");

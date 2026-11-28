@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using OpenApi.Remote.Attributes;
 using Nocturne.API.Authorization;
 using Nocturne.API.Extensions;
+using Nocturne.API.Services.Demo;
 using Nocturne.Core.Contracts.Multitenancy;
+using Nocturne.Core.Models.Demo;
 
 namespace Nocturne.API.Controllers.V4.Identity;
 
@@ -72,12 +75,27 @@ public class MyPermissionsController : ControllerBase
 
     private static async Task<MyPermissionsResponse> BuildAsync(
         HttpContext httpContext,
-        ICategoryReadContext categoryReadContext) => new()
+        ICategoryReadContext categoryReadContext)
     {
-        Scopes = httpContext.GetGrantedScopes().ToList(),
-        LimitTo24Hours = categoryReadContext.IsHistoryClamped,
-        RefusedAsDemoSubject = await DenyDemoSubjectAttribute.RefusesAsync(httpContext),
-    };
+        var refused = await DenyDemoSubjectAttribute.RefusesAsync(httpContext);
+        return new()
+        {
+            Scopes = httpContext.GetGrantedScopes().ToList(),
+            LimitTo24Hours = categoryReadContext.IsHistoryClamped,
+            RefusedAsDemoSubject = refused,
+            RefusedStaffWritesAsDemoSubject = refused && !await DenyDemoSubjectAttribute.AdmitsStaffWriteAsync(httpContext),
+            DemoPersona = await DemoPersonaOfAsync(httpContext, refused),
+        };
+    }
+
+    private static async Task<string?> DemoPersonaOfAsync(HttpContext httpContext, bool refusedAsDemoSubject)
+    {
+        if (!refusedAsDemoSubject || httpContext.GetAuthContext() is not { EffectiveSubjectId: { } subjectId })
+            return null;
+
+        var demo = httpContext.RequestServices.GetRequiredService<IDemoPersonaReader>();
+        return await demo.IsClinicPersonaAsync(subjectId, httpContext.RequestAborted) ? DemoClinic.SessionPersona : null;
+    }
 }
 
 /// <summary>
@@ -99,4 +117,17 @@ public class MyPermissionsResponse
     /// <see cref="DenyDemoSubjectAttribute"/> endpoint refuses whatever <see cref="Scopes"/> grants.
     /// </summary>
     public bool RefusedAsDemoSubject { get; set; }
+
+    /// <summary>
+    /// True when the caller is a demo subject the gate also refuses the <see cref="DemoSubjectOpening.StaffWrite"/>
+    /// writes: their saved views and their own flag rules.
+    /// </summary>
+    public bool RefusedStaffWritesAsDemoSubject { get; set; }
+
+    /// <summary>
+    /// The demo persona the caller was signed in as, a <see cref="DemoClinic.SessionPersona"/> value, or null for any other
+    /// caller, the demo's personal member included.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DemoPersona { get; set; }
 }

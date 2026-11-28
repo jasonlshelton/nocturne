@@ -156,13 +156,13 @@ public class ReadEndpointScopeEnforcementTests
             ["TrackersController.GetDeviceEventTypes"] = V4Reason.StaticReference,
             ["ServicesController.GetUploaderApps"] = V4Reason.StaticReference,
             ["ServicesController.GetUploaderSetup"] = V4Reason.StaticReference,
-            ["ServicesController.GetConnectorCapabilities"] = V4Reason.StaticReference,
             ["ServicesController.GetApiInfo"] = V4Reason.StaticReference,
             ["SupportController.GetFallbackUrl"] = V4Reason.StaticReference,
 
             ["DatabaseCapacityController.Get"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["JobLedgerController.List"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["PageCountsAdminController.GetPageCounts"] = V4ScopeGuardExemptions.PlatformAdminRole,
+            ["PageCountsAdminController.GetPageRoutes"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["TenantCreationInviteAdminController.GetOverview"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["PlatformPolicyController.GetPolicy"] = V4ScopeGuardExemptions.PlatformAdminRole,
             ["TenantUsageController.Get"] = V4ScopeGuardExemptions.PlatformAdminRole,
@@ -171,6 +171,9 @@ public class ReadEndpointScopeEnforcementTests
 
             // Drops the sections whose UISettingsSection.ReadScope the caller does not hold.
             ["UISettingsController.GetUISettings"] = V4Reason.CallerNarrowedAnswer,
+
+            // The history reach follows the tenant's connector configuration only for a caller holding connectors.read.
+            ["ServicesController.GetConnectorCapabilities"] = V4Reason.CallerNarrowedAnswer,
         };
 
     [Fact]

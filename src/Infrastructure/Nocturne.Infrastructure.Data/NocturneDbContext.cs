@@ -124,6 +124,9 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     /// </summary>
     public Guid SubjectId { get; internal set; }
 
+    /// <summary>False for a context running on a <see cref="Services.ScopeConnection"/> another context opened.</summary>
+    internal bool OwnsConnection { get; set; } = true;
+
     /// <summary>
     /// The audit actor <see cref="Interceptors.MutationAuditInterceptor"/> attributes this context's
     /// writes to: the scope's <see cref="IAuditContext"/>, or none for a context with no scope.
@@ -604,29 +607,16 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
     internal static readonly Type[] V4LegacyIdRecordEntities = Implementing<IV4Entity>();
 
     /// <summary>
-    /// V4 record tables keyed on <see cref="IObservationTimestamped.Timestamp"/>: the
-    /// <see cref="V4LegacyIdRecordEntities"/> but the span-shaped <see cref="TempBasalEntity"/> and
-    /// <see cref="ProfileActivationEntity"/>, whose span-start indexes are named for the start.
+    /// The record tables that get the newest-first <c>ix_&lt;table&gt;_timestamp</c> index: every
+    /// <see cref="V4RecordTables.All"/> table with an <see cref="IObservationTimestamped.Timestamp"/>
+    /// but <see cref="TempBasalEntity"/> and <see cref="ProfileActivationEntity"/>, whose span-start
+    /// indexes are named for the start. <see cref="StateSpanEntity"/> and <see cref="BodyWeightEntity"/>
+    /// carry no such timestamp and stay out by it.
     /// </summary>
-    internal static readonly Type[] V4TimeSeriesRecordEntities =
-    [
-        typeof(SensorGlucoseEntity),
-        typeof(MeterGlucoseEntity),
-        typeof(CalibrationEntity),
-        typeof(BolusEntity),
-        typeof(BasalInjectionEntity),
-        typeof(CarbIntakeEntity),
-        typeof(BGCheckEntity),
-        typeof(NoteEntity),
-        typeof(DeviceEventEntity),
-        typeof(BolusCalculationEntity),
-        typeof(TherapySettingsEntity),
-        typeof(BasalScheduleEntity),
-        typeof(CarbRatioScheduleEntity),
-        typeof(SensitivityScheduleEntity),
-        typeof(TargetRangeScheduleEntity),
-        .. V4SnapshotEntities,
-    ];
+    internal static readonly Type[] TimestampIndexedEntities =
+    [.. V4RecordTables.All.Select(t => t.Entity)
+        .Where(t => typeof(IObservationTimestamped).IsAssignableFrom(t))
+        .Except([typeof(TempBasalEntity), typeof(ProfileActivationEntity)])];
 
     /// <summary>
     /// The record tables that get the <c>(tenant_id, data_source, timestamp)</c> index: every source-owned
@@ -656,6 +646,45 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
         typeof(MeterGlucoseEntity),
         typeof(CalibrationEntity),
         .. V4SnapshotEntities,
+    ];
+
+    /// <summary>
+    /// The timestamped record tables that carry no unfiltered <c>(tenant_id, timestamp)</c> index, each
+    /// with the reason.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<Type, string> TenantTimestampUnindexed = new Dictionary<Type, string>
+    {
+        [typeof(BasalInjectionEntity)] = "shipped without the index, and adding it is a migration",
+        [typeof(BasalScheduleEntity)] = "read by profile name, off ix_basal_schedules_tenant_profile_timestamp",
+        [typeof(CarbRatioScheduleEntity)] = "read by profile name, off ix_carb_ratio_schedules_tenant_profile_timestamp",
+        [typeof(SensitivityScheduleEntity)] = "read by profile name, off ix_sensitivity_schedules_tenant_profile_timestamp",
+        [typeof(TargetRangeScheduleEntity)] = "read by profile name, off ix_target_range_schedules_tenant_profile_timestamp",
+    };
+
+    /// <summary>
+    /// The tables whose <see cref="TenantTimestampIndexedEntities"/> index sorts timestamp ascending,
+    /// each with the reason.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<Type, string> TenantTimestampAscending = new Dictionary<Type, string>
+    {
+        [typeof(HeartRateEntity)] = "the index shipped ascending, and sorting it descending is a migration",
+        [typeof(StepCountEntity)] = "the index shipped ascending, and sorting it descending is a migration",
+    };
+
+    /// <summary>
+    /// The tables that get the unfiltered <c>(tenant_id, timestamp)</c> index, which serves a tenant's
+    /// range reads by timestamp, live or with the deleted rows: every <see cref="V4RecordTables.All"/> table with an
+    /// <see cref="IObservationTimestamped.Timestamp"/> but those in <see cref="TenantTimestampUnindexed"/>
+    /// and the <see cref="V4SortedListEntities"/>, which take the list index's columns instead
+    /// (<c>_id_any</c>); and <see cref="DeviceStatusExtrasEntity"/>, which is no record table.
+    /// </summary>
+    internal static readonly Type[] TenantTimestampIndexedEntities =
+    [
+        .. V4RecordTables.All.Select(t => t.Entity)
+            .Where(t => typeof(IObservationTimestamped).IsAssignableFrom(t))
+            .Except(V4SortedListEntities)
+            .Except(TenantTimestampUnindexed.Keys),
+        typeof(DeviceStatusExtrasEntity),
     ];
 
     /// <summary>
@@ -1040,6 +1069,7 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
 
             EnforceTenantOwnership(entry, isAdded);
             StripNulCharacters(entry, isAdded, isRelational, ReportTruncation);
+            TruncateRecordTimes(entry);
             ApplyUpstreamFingerprint(entry);
             ApplyWrittenLive(entry);
             if (isAdded && entry.Entity is IWriterStamped { WriterGrantId: null } written)
@@ -1095,6 +1125,13 @@ public class NocturneDbContext : DbContext, IDataProtectionKeyContext
             return;
 
         entry.Property(nameof(IUpstreamFingerprinted.UpstreamFingerprint)).CurrentValue = fingerprint;
+    }
+
+    /// <summary>Cuts the record times of a row a save inserts or modifies (<see cref="V4RecordTables.CutRecordTimes"/>).</summary>
+    private static void TruncateRecordTimes(EntityEntry entry)
+    {
+        if (entry.State is EntityState.Added or EntityState.Modified)
+            V4RecordTables.CutRecordTimes(entry);
     }
 
     /// <summary>Marks a row a live write inserts or modifies, per <see cref="LiveWriteScope"/>.</summary>

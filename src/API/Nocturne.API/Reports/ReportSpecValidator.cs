@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Nocturne.Core.Models;
 
 namespace Nocturne.API.Reports;
 
@@ -164,16 +165,11 @@ internal sealed partial class ReportSpecValidator(IReportDatasetRegistry registr
             var t when t == typeof(string) => "text",
             var t when t == typeof(Guid) => "a food id",
             var t when t == typeof(DateOnly) => "a date, yyyy-MM-dd",
-            var t when t.IsEnum => "one of: " + string.Join(", ", EnumNames(t)),
+            var t when t.IsEnum => "one of: " + string.Join(", ", EnumWireNames.Names(t)),
             var t when t != typeof(string) && ElementType(t) is { } element => $"a list, each item {Expected(element)}",
             var t when t.IsClass => "an object with this parameter's keys",
             _ => "a value of the kind this parameter takes",
         };
-
-    /// <summary>An enum's values as they are sent: their <see cref="JsonStringEnumMemberNameAttribute"/>, else their names.</summary>
-    private static IEnumerable<string> EnumNames(Type type) =>
-        type.GetFields(BindingFlags.Public | BindingFlags.Static)
-            .Select(f => f.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name ?? f.Name);
 
     /// <summary>The object without <paramref name="skip"/>, written property by property so a repeated key cannot throw.</summary>
     private static byte[] WithoutName(JsonElement element, params string[] skip)
